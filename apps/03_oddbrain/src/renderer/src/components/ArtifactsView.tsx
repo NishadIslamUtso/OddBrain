@@ -15,9 +15,6 @@ import type { ArtifactSummary } from '../../../main/artifacts/store'
 import { bridge } from '@/platform/bridge'
 import { createZip, downloadBytes, slugify, staticSiteEntries } from '@shared/lib/zip'
 import useDismiss from '@/hooks/useDismiss'
-import usePersistentState from '../hooks/usePersistentState'
-import type { TrashItem } from '../../../main/artifacts/store'
-import { trapDialogFocus } from '../ui/focus'
 import ArtifactThumb from './ArtifactThumb'
 
 /**
@@ -34,10 +31,6 @@ import ArtifactThumb from './ArtifactThumb'
 export type LibraryAnswer = { ok: boolean; error?: string; movedTo?: string; canceled?: boolean }
 
 type Props = {
-  onLibraryChanged?: () => void
-  onQueryChange?: (query: string) => void
-  onAskChange?: (title: string, source: string) => void
-  focusId?: string
   items: ArtifactSummary[]
   loading: boolean
   error: string
@@ -84,31 +77,24 @@ export default function ArtifactsView({
   onImport,
   onOpenInChat,
   note = '',
-  focusId = '',
-  onLibraryChanged,
-  onQueryChange,
-  onAskChange,
 }: Props) {
-  const [selectedId, setSelectedId] = useState(focusId)
-  useEffect(() => { if (focusId) { setSelectedId(focusId); setVersion(null) } }, [focusId])
+  const [selectedId, setSelectedId] = useState('')
   const [version, setVersion] = useState<number | null>(null)
   const [shown, setShown] = useState<Shown>({ id: '', version: 0, content: '', error: '' })
   const [said, setSaid] = useState('')
   const [menuFor, setMenuFor] = useState('')
-  const [typeFilter, setTypeFilter] = usePersistentState<'all' | 'html' | 'svg'>('oddbrain.artifactFilter', 'all', value => value === 'html' || value === 'svg' ? value : 'all')
-  const [sort, setSort] = usePersistentState<'recent' | 'name'>('oddbrain.artifactSort', 'recent', value => value === 'name' ? 'name' : 'recent')
-  const [trash, setTrash] = useState<TrashItem[] | null>(null)
-  const [trashError, setTrashError] = useState('')
-  const [restoring, setRestoring] = useState('')
   const [renaming, setRenaming] = useState<{ id: string; text: string } | null>(null)
 
   const matching = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    return items.filter(item => (typeFilter === 'all' || item.type === typeFilter) && (!needle || item.title.toLowerCase().includes(needle) || item.type.includes(needle) || (item.origin === 'import' && 'imported'.includes(needle))))
-      .sort((a, b) => sort === 'name' ? a.title.localeCompare(b.title) || a.id.localeCompare(b.id) : b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
-  }, [items, query, typeFilter, sort])
-  const openTrash = async (): Promise<void> => { setTrashError(''); try { const reply = await bridge.artifacts.trashList(); if (!reply.ok) throw Error(reply.error || 'Trash could not be read.'); setTrash(reply.items) } catch (error) { setSaid(String((error as Error).message)) } }
-  const recover = async (key: string): Promise<void> => { setRestoring(key); try { const reply = await bridge.artifacts.trashRestore(key); if (!reply.ok) throw Error(reply.error); setTrash(old => old?.filter(item => item.key !== key) || []); setSelectedId(reply.item.id); onLibraryChanged?.(); setSaid('Recovered with all stored versions. Existing active artifacts were not overwritten.') } catch (error) { setTrashError(String((error as Error).message)) } finally { setRestoring('') } }
+    if (!needle) return items
+    return items.filter(
+      item =>
+        item.title.toLowerCase().includes(needle) ||
+        item.type.includes(needle) ||
+        (item.origin === 'import' ? 'imported'.includes(needle) : false)
+    )
+  }, [items, query])
 
   const selected = useMemo(
     () => matching.find(item => item.id === selectedId) || matching[0] || null,
@@ -212,11 +198,6 @@ export default function ArtifactsView({
     }
   }
 
-  const askChange = (): void => {
-    if (!selected || !shown.content || !onAskChange) return
-    onAskChange(selected.title, shown.content)
-  }
-
   const bring = async (): Promise<void> => {
     const answer = await onImport()
     if (answer.canceled) return
@@ -225,7 +206,6 @@ export default function ArtifactsView({
 
   return (
     <section className="relative flex min-w-0 flex-1">
-      {trash ? <div className="ob-modal-backdrop"><section className="ob-journal" role="dialog" aria-modal="true" aria-label="Artifact trash" onKeyDown={e => { trapDialogFocus(e); if (e.key === 'Escape') { e.stopPropagation(); setTrash(null) } }}><header><h2>Trash</h2><button type="button" className="ob-small-button" autoFocus onClick={() => setTrash(null)}>Close trash</button></header>{trash.length ? trash.map(item => <div key={item.key} className="ob-kept-row"><div><strong>{item.title}</strong><small>{item.type.toUpperCase()} · {item.versionCount} version{item.versionCount === 1 ? '' : 's'} · {day(item.removedAt)}{item.recoveredMetadata ? ' · title recovered from file id' : ''}</small></div><button type="button" className="ob-small-button" disabled={!!restoring} onClick={() => void recover(item.key)}>{restoring === item.key ? 'Recovering…' : 'Recover'}</button></div>) : <p>Trash is empty.</p>}{trashError ? <p role="alert">{trashError}</p> : null}</section></div> : null}
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="flex items-end justify-between gap-4 px-6 pb-4 pt-5">
           <div className="min-w-[180px] flex-1">
@@ -242,8 +222,6 @@ export default function ArtifactsView({
           </button>
         </header>
 
-        <div className="ob-artifact-controls">{onQueryChange ? <input aria-label="Search artifact library" placeholder="Search artifacts" value={query} onChange={e => onQueryChange(e.target.value)} /> : null}<div className="ob-choices" role="group" aria-label="Artifact type">{(['all', 'html', 'svg'] as const).map(type => <button type="button" className="ob-choice" key={type} aria-pressed={typeFilter === type} onClick={() => setTypeFilter(type)}>{type === 'all' ? 'Everything' : type.toUpperCase()}</button>)}</div><select aria-label="Artifact sort" value={sort} onChange={e => setSort(e.target.value as 'recent' | 'name')}><option value="recent">Newest first</option><option value="name">By name</option></select><button type="button" className="ob-text-button" onClick={() => void openTrash()}>View trash</button></div>
-        {selected && onAskChange ? <div className="px-6 pb-3"><button type="button" className="ob-small-button" disabled={!shown.content} onClick={askChange}>Ask for a change</button></div> : null}
         {said ? (
           <p className="mx-6 mb-3 rounded-lg border border-line bg-card px-3 py-2 text-[12px] leading-relaxed text-muted">
             {said}

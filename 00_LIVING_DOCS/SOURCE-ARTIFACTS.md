@@ -47,18 +47,13 @@ The patch's baseline is `2f05dac`; it applies cleanly to that tree. It touches
 The full previous work tree is `ctx/archive/previous-work-2026-10-18.tar.gz`
 (74,607,919 bytes, 87 MB unpacked context).
 
-## What was applied
+## Where the ported work went
 
-The current app tree contains all 94 patch paths. 76 of them are byte-identical
-to the patch's after-state. The other 18 are the files that the merge with
-`main` `a6c7807` and this pass's fixes changed on purpose:
+An earlier set of commits on this branch (`479d2b2`, `b6373e3`, `2da3914`,
+`ba90a78`) merged the session renderer onto `a6c7807` and added media,
+read-aloud and marketplace code. That work is still in this branch's history
+and can be inspected with `git show <commit>` or `git diff a6c7807 ba90a78`.
 
-`src/main/engine/claudeCode.ts`, `src/main/engine/socket.ts`,
-`src/main/index.ts`, `src/preload/index.ts`, `src/renderer/src/App.tsx`,
-`src/renderer/src/components/ChatView.tsx`, `Composer.tsx`, `EnginePanel.tsx`,
-`MessageRow.tsx`, `SettingsView.tsx`, `src/renderer/src/main.tsx`,
-`src/renderer/src/platform/bridge.ts`, `src/renderer/src/state/appearance.ts`,
-`src/renderer/src/styles/desktop.css`, `src/renderer/src/ui/AppearancePanel.tsx`,
-and the tests `appearance.test.ts`, `desktop-look.test.ts`, `engine.test.ts`.
-
-No file from the patch is missing.
+The branch tip is now a scanner branch: the tree was restored to `a6c7807` so
+that it touches no product code and collides with no other lane. Nothing was
+deleted from the repository; the commits remain ancestors of the tip.

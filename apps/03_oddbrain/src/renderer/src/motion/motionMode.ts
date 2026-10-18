@@ -16,16 +16,15 @@ import type { MotionModeName } from '@shared/lib/motionKit'
 
 let mode: MotionModeName = 'system'
 let osReduced = false
-let paused = false
-let snapshot: { mode: MotionModeName; osReduced: boolean; paused: boolean } = { mode, osReduced, paused }
+let snapshot: { mode: MotionModeName; osReduced: boolean } = { mode, osReduced }
 const subscribers = new Set<() => void>()
 
 function rebuild(): void {
-  snapshot = { mode, osReduced, paused }
+  snapshot = { mode, osReduced }
   for (const notify of subscribers) notify()
 }
 
-export function getMotionMode(): { mode: MotionModeName; osReduced: boolean; paused: boolean } {
+export function getMotionMode(): { mode: MotionModeName; osReduced: boolean } {
   return snapshot
 }
 
@@ -46,6 +45,3 @@ export function subscribeMotionMode(notify: () => void): () => void {
   subscribers.add(notify)
   return () => subscribers.delete(notify)
 }
-
-/** Pause is global, including miniature and gallery instances. */
-export function setMascotPause(next: boolean): void { if (next === paused) return; paused = next; rebuild() }

@@ -1,7 +1,6 @@
 import { toPosix } from '../vault/files'
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, lstatSync, realpathSync, writeFileSync } from 'node:fs'
-import { join, sep } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 /**
  * The artifact library on disk.
@@ -475,7 +474,6 @@ export function remove(root: string, id: unknown): RemoveAnswer {
   const destination = toPosix(join(TRASH_DIR, `${id}-${stamp}`))
   try {
     mkdirSync(join(root, TRASH_DIR), { recursive: true })
-    writeFileSync(join(itemDir(root, id), '.oddbrain-trash.json'), JSON.stringify(record), 'utf8')
     renameSync(itemDir(root, id), join(root, destination))
   } catch (error) {
     return { ok: false, error: `The files could not be moved aside: ${(error as Error).message}` }
@@ -495,7 +493,7 @@ export function remove(root: string, id: unknown): RemoveAnswer {
  */
 export function adopt(root: string, records: unknown): { ok: true; adopted: number; skipped: number; refused: number } {
   const { index } = readIndex(root)
-  const known = new Set([...index.items.map(item => item.id), ...listTrash(root).items.map(item => item.originalId)])
+  const known = new Set(index.items.map(item => item.id))
   let adopted = 0
   let skipped = 0
   let refused = 0
@@ -556,62 +554,4 @@ export function ensureRoot(root: string): void {
 /** Only used by tests and repair scripts: drop the folder entirely. */
 export function discardAll(root: string): void {
   rmSync(root, { recursive: true, force: true })
-}
-
-
-export type TrashItem = { key: string; originalId: string; title: string; type: ArtifactKind; removedAt: string; versionCount: number; recoveredMetadata: boolean }
-const TRASH_KEY = /^[A-Za-z0-9_-]{1,180}$/
-function checkedTrashFolder(root: string, key: unknown): string {
-  if (typeof key !== 'string' || !TRASH_KEY.test(key)) throw Error('That is not a trash entry.')
-  const base = join(root, TRASH_DIR), full = join(base, key)
-  if (lstatSync(base).isSymbolicLink() || lstatSync(full).isSymbolicLink() || !lstatSync(full).isDirectory()) throw Error('Trash links are not followed.')
-  if (!realpathSync(full).startsWith(realpathSync(base) + sep)) throw Error('The trash entry is outside the library.')
-  return full
-}
-function trashRecord(folder: string, key: string): { record: ArtifactRecord; recovered: boolean } {
-  let record: ArtifactRecord | null = null
-  try { if (!lstatSync(join(folder, '.oddbrain-trash.json')).isSymbolicLink()) record = normalizeRecord(JSON.parse(readFileSync(join(folder, '.oddbrain-trash.json'), 'utf8'))) } catch {}
-  let recovered = false
-  if (!record) {
-    recovered = true
-    const files = readdirSync(folder).filter(f => VERSION_FILE_PATTERN.test(f)).sort((a, b) => Number(a.slice(1).split('.')[0]) - Number(b.slice(1).split('.')[0]))
-    const id = /^(.*)-\d{4}-\d\d-\d\dT/.exec(key)?.[1] || ''
-    if (!files.length || !validId(id)) throw Error('The old trash metadata could not be recovered.')
-    const versions = files.map(file => ({ file, savedAt: statSync(join(folder, file)).mtime.toISOString() }))
-    record = { id, title: id, type: files.at(-1)!.endsWith('.svg') ? 'svg' : 'html', createdAt: versions[0].savedAt, updatedAt: versions.at(-1)!.savedAt, origin: 'import', current: versions.length - 1, versions }
-  }
-  for (const version of record.versions) {
-    const file = join(folder, version.file), info = lstatSync(file)
-    if (!info.isFile() || info.isSymbolicLink() || !realpathSync(file).startsWith(realpathSync(folder) + sep)) throw Error('A trash version is not a real file inside its entry.')
-  }
-  return { record, recovered }
-}
-export function listTrash(root: string): { ok: boolean; items: TrashItem[]; error?: string } {
-  const items: TrashItem[] = []
-  if (!existsSync(join(root, TRASH_DIR))) return { ok: true, items }
-  try {
-    if (lstatSync(join(root, TRASH_DIR)).isSymbolicLink()) throw Error('Trash links are not followed.')
-    for (const key of readdirSync(join(root, TRASH_DIR))) try {
-      const folder = checkedTrashFolder(root, key), { record, recovered } = trashRecord(folder, key)
-      items.push({ key, originalId: record.id, title: record.title, type: record.type, removedAt: statSync(folder).mtime.toISOString(), versionCount: record.versions.length, recoveredMetadata: recovered })
-    } catch { /* Malformed/symlink entries never become usable paths. */ }
-    items.sort((a, b) => b.removedAt.localeCompare(a.removedAt))
-    return { ok: true, items }
-  } catch { return { ok: false, items, error: 'The trash folder could not be read.' } }
-}
-export function restoreTrash(root: string, key: unknown): ItemAnswer {
-  let folder = '', destination = ''
-  try {
-    folder = checkedTrashFolder(root, key)
-    const { record } = trashRecord(folder, String(key)), { index } = readIndex(root)
-    // Never overwrite a newer active artifact with the same id.
-    if (index.items.some(item => item.id === record.id) || existsSync(itemDir(root, record.id))) record.id = randomUUID()
-    record.updatedAt = nextStamp(index.items)
-    if (existsSync(join(root, ITEMS_DIR)) && lstatSync(join(root, ITEMS_DIR)).isSymbolicLink()) throw Error('The active library is a symbolic link.')
-    destination = itemDir(root, record.id); mkdirSync(join(root, ITEMS_DIR), { recursive: true })
-    renameSync(folder, destination)
-    index.items.push(record)
-    try { writeIndex(root, index) } catch (error) { renameSync(destination, folder); throw error }
-    return { ok: true, item: summarize(root, record) }
-  } catch (error) { return { ok: false, error: `The artifact could not be recovered: ${(error as Error).message}` } }
 }

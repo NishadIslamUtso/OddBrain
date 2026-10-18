@@ -138,17 +138,10 @@ export default function ModsSection({
   }
 
   if (isDemo) {
-    // The source picker still renders in the preview: it is where a person
-    // learns what will be asked, and the engine's own answer is what is
-    // missing here, not the explanation.
     return (
-      <div className="flex flex-col gap-3">
-        <EngineMarketplaces />
-        <p className="text-[12px] leading-relaxed text-muted">
-          Installing a pack needs the desktop app. This window has no machine behind it, so nothing here claims a pack is
-          installed.
-        </p>
-      </div>
+      <p className="text-[12px] leading-relaxed text-muted">
+        Mods are installed by the desktop app, this preview has no machine behind it.
+      </p>
     )
   }
 
@@ -159,8 +152,6 @@ export default function ModsSection({
         prompt library, a theme for the app. Nothing here comes from a server: you pick the folder, the app reads it in front of
         you, and every installed pack stays visible below with its real path.
       </p>
-
-      <EngineMarketplaces />
 
       <button
         type="button"
@@ -676,126 +667,6 @@ function CommunityPacks({ installed, onInstalled }: {
           )
         })
       )}
-    </section>
-  )
-}
-
-/**
- * Engine marketplaces, as their own labelled source.
- *
- * The app does not keep a catalog of another product's plugins. It asks the
- * engine what its own build documents, shows that answer word for word, and
- * runs the engine's own command only after the person has seen it.
- */
-function EngineMarketplaces() {
-  const [probes, setProbes] = useState<Record<string, { state: string; answer: string; commands: string[]; checkedAt: string }>>({})
-  const [checking, setChecking] = useState('')
-  const [locator, setLocator] = useState('')
-  const [confirming, setConfirming] = useState<{ id: 'claude-code' | 'agy'; command: string } | null>(null)
-  const [note, setNote] = useState('')
-
-  const check = (id: 'claude-code' | 'agy'): void => {
-    if (isDemo) {
-      setProbes(current => ({ ...current, [id]: { state: 'no-answer', answer: 'The engine lives on the installed app; this preview cannot ask it.', commands: [], checkedAt: new Date().toISOString() } }))
-      return
-    }
-    setChecking(id)
-    setNote('')
-    void bridge.mods
-      .marketplaceProbe?.(id)
-      .then((reply: { ok: boolean; probe?: unknown; answer?: string } | undefined) => {
-        if (reply?.ok && reply.probe) setProbes(current => ({ ...current, [id]: reply.probe as never }))
-        else setNote(reply?.answer || 'The engine could not be asked.')
-      })
-      .catch(() => setNote('The engine could not be asked.'))
-      .finally(() => setChecking(''))
-  }
-
-  const stages = [
-    { id: 'claude-code' as const, label: 'Claude Code marketplace' },
-    { id: 'agy' as const, label: 'agy extensions' },
-  ]
-
-  return (
-    <section className="ob-marketplaces" aria-label="Engine marketplaces">
-      <header>
-        <h3>Engine marketplaces</h3>
-        <p>
-          Each engine installs its own plugins with its own command. This app asks what your installed build documents,
-          shows the answer unchanged, and keeps no copy of anyone else&apos;s catalog.
-        </p>
-      </header>
-      {stages.map(stage => {
-        const probe = probes[stage.id]
-        return (
-          <div className="ob-marketplace-source" key={stage.id}>
-            <div className="ob-marketplace-head">
-              <span className="ob-source-badge">{stage.label}</span>
-              <button type="button" className="ob-text-button" disabled={checking === stage.id} onClick={() => check(stage.id)}>
-                {checking === stage.id ? 'Asking…' : probe ? 'Ask again' : 'Check this build'}
-              </button>
-            </div>
-            {probe ? (
-              <>
-                <p className="ob-marketplace-state" data-state={probe.state}>
-                  {probe.state === 'supported'
-                    ? `This build documents: ${probe.commands.join(', ')}.`
-                    : probe.state === 'not-installed'
-                      ? 'The engine is not installed on this machine.'
-                      : probe.state === 'unsupported'
-                        ? 'This build does not document that command, so nothing is offered here.'
-                        : 'The engine did not answer in time.'}
-                </p>
-                <details className="ob-marketplace-words">
-                  <summary>The engine&apos;s own words</summary>
-                  <pre>{probe.answer}</pre>
-                </details>
-                {probe.state === 'supported' && probe.commands.includes('add') ? (
-                  <div className="ob-form-line">
-                    <input
-                      aria-label={`Repository or marketplace name for ${stage.label}`}
-                      placeholder="owner/repo or marketplace name"
-                      value={locator}
-                      onChange={event => setLocator(event.target.value)}
-                    />
-                    <button
-                      type="button"
-                      className="ob-small-button"
-                      disabled={!locator.trim()}
-                      onClick={() => setConfirming({ id: stage.id, command: `${stage.id === 'agy' ? 'agy' : 'claude'} plugin marketplace add ${locator.trim()}` })}
-                    >
-                      Review the command
-                    </button>
-                  </div>
-                ) : null}
-              </>
-            ) : (
-              <p className="ob-marketplace-state">Not asked yet. Checking runs one read-only command, once.</p>
-            )}
-          </div>
-        )
-      })}
-      {note ? <p role="status" className="ob-inline-note">{note}</p> : null}
-      {confirming ? (
-        <div className="ob-marketplace-confirm" role="group" aria-label="Confirm marketplace command">
-          <p>This runs exactly one command, and the engine does the installing:</p>
-          <pre>{confirming.command}</pre>
-          <div className="ob-inline-actions">
-            <button
-              type="button"
-              className="ob-small-button is-primary"
-              onClick={() => {
-                const request = confirming
-                setConfirming(null)
-                void bridge.mods.marketplaceAdd?.(request.id, locator.trim(), true).then((reply: { ok: boolean; answer: string } | undefined) => setNote(reply?.answer || 'The command did not finish.')).catch(() => setNote('The command did not finish.'))
-              }}
-            >
-              Run it
-            </button>
-            <button type="button" className="ob-text-button" onClick={() => setConfirming(null)}>Cancel</button>
-          </div>
-        </div>
-      ) : null}
     </section>
   )
 }

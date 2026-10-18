@@ -1,7 +1,6 @@
 import { Eye, EyeOff } from 'lucide-react'
 import { startWatching, stopWatching, useWatch } from '@/state/watch'
 import { WATCH_NOTE } from '@shared/lib/watchMode'
-import { engineStore } from '../state/engine'
 import { getEngineApi } from '@/platform/bridge'
 import { useState } from 'react'
 
@@ -14,7 +13,6 @@ export default function WatchSection() {
   const watch = useWatch()
   const [order, setOrder] = useState('')
   const [starting, setStarting] = useState(false)
-  const [manual, setManual] = useState('')
 
   const start = async (): Promise<void> => {
     setStarting(true)
@@ -73,7 +71,6 @@ export default function WatchSection() {
           </div>
         </>
       )}
-      {watch.active ? <button type="button" className="ob-text-button" onClick={() => { void engineStore().send(watch.order + '\n\nManual run requested by the owner; no file-change event is being claimed.').then(result => setManual(result.ok ? 'The saved order was sent through the normal engine path.' : result.answer)) }}>Run saved order once</button> : null}{manual ? <p role="status" className="ob-control-scope">{manual}</p> : null}
       {watch.error ? <p className="mt-2 text-[11.5px] text-warn">{watch.error}</p> : null}
     </section>
   )

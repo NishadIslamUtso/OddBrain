@@ -20,8 +20,8 @@ export const BLOCK_START = '<!-- oddbrain:house-rules:start -->'
 export const BLOCK_END = '<!-- oddbrain:house-rules:end -->'
 
 /** The full block as it lands in a file: markers, rules, brain footnote. */
-export function houseRulesBlock(engineId: EngineId, model: string, rules?: Partial<HouseRules>, memoryFolder = ''): string {
-  return `${BLOCK_START}\n${instructionBlock(engineId, model, mergedRules(rules), memoryFolder)}\n${BLOCK_END}`
+export function houseRulesBlock(engineId: EngineId, model: string, rules?: Partial<HouseRules>): string {
+  return `${BLOCK_START}\n${instructionBlock(engineId, model, mergedRules(rules))}\n${BLOCK_END}`
 }
 
 /** The rules with any blank field filled from the defaults — never an empty rule. */
@@ -70,8 +70,8 @@ export function houseRulesFile(engineId: 'claude-code' | 'agy', home: string): s
  * rules — the chosen engine decides who works today, not what the house
  * believes. Returns the files written.
  */
-export function deployHouseRules(engineId: EngineId, model: string, home: string, rules?: Partial<HouseRules>, memoryFolder = ''): string[] {
-  const block = houseRulesBlock(engineId, model, rules, memoryFolder)
+export function deployHouseRules(engineId: EngineId, model: string, home: string, rules?: Partial<HouseRules>): string[] {
+  const block = houseRulesBlock(engineId, model, rules)
   const written: string[] = []
   for (const target of ['claude-code', 'agy'] as const) {
     const file = houseRulesFile(target, home)

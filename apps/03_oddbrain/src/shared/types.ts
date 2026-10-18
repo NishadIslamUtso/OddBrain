@@ -51,8 +51,6 @@ export type Attachment = {
   seenBy?: string
   /** Plain text of a text/code attachment, already read. */
   text?: string
-  /** How it was read and what was left out — shown with the attachment. */
-  note?: string
 }
 
 /** An attachment as it is kept in a message: the bytes are stored separately. */

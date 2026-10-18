@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Brain, Trash2 } from 'lucide-react'
 import { buildMemoryOrder } from '@shared/lib/memory'
-import { chooseMemoryFolder, clearMemoryNotice, loadMemory, removeMemory, runMemoryPass, useMemory } from '@/state/memory'
+import { clearMemoryNotice, loadMemory, removeMemory, runMemoryPass, useMemory } from '@/state/memory'
 
 /**
  * The Memory pane: what the engine has remembered, in his vault, every line
@@ -26,13 +26,13 @@ export default function MemorySection() {
         </h2>
         <p className="mt-1 text-[12.5px] leading-relaxed text-muted">
           What the engine remembers between sessions, kept as plain markdown at{' '}
-          <code className="text-ink">{memory.folder || '06 Review/Memory'}</code> — at the location shown above. By default it follows the working folder; an explicit folder can be selected independently. A pass asks the
+          <code className="text-ink">{memory.folder ? memory.folder.split(/[\\/]/).slice(-3).join('/') : '06 Review/Memory'}</code> — inside the
+          engine's own working folder (your vault, unless you pointed its workspace elsewhere). A pass asks the
           engine to note decisions, preferences, facts and open work — and its writes ride the same permission cards as every edit: you see the
           diff before it lands. Everything here is yours to read, edit, or delete.
         </p>
       </header>
 
-      <div className="ob-form-line" style={{ marginTop: 14 }}><button type="button" className="ob-small-button" onClick={() => void chooseMemoryFolder()}>Change memory folder</button><button type="button" className="ob-small-button" onClick={() => void chooseMemoryFolder(true)}>Use working-folder default</button><button type="button" className="ob-text-button" onClick={() => window.dispatchEvent(new Event('app:show-journal'))}>View in turn journal</button></div><p className="ob-control-scope">Choosing a different folder changes where new memory is read/written. Existing notes are not moved or overwritten.</p>
       {memory.status ? (
         <p role="status" className="mt-3 rounded-lg border border-line bg-bg px-3 py-2 text-[12px] text-ink">
           {memory.status}
@@ -45,7 +45,7 @@ export default function MemorySection() {
         <p className="text-[12px] font-medium text-ink">Run a pass now</p>
         <p className="mt-1 text-[11.5px] leading-relaxed text-muted">It sends this work order, as a normal turn in the chat:</p>
         <pre className="mt-1.5 max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-bg p-2.5 text-[11.5px] leading-relaxed text-muted">
-          {buildMemoryOrder(memory.folder)}
+          {buildMemoryOrder()}
         </pre>
         <button
           type="button"

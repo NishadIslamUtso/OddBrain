@@ -60,7 +60,6 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
   let sessionEngine: string | null = null
   let busy = false
   let currentCwd = ''
-  let generation = 0
   // What the live session was STARTED with. The engine's launch flags fix its
   // model and approval gear for the life of the process, so a changed setting
   // must mean a relaunch — reusing the process would silently run under the
@@ -93,12 +92,10 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
   }
 
   const start = (input: EngineStartInput & { spawnProcess?: typeof import('node:child_process').spawn }): EngineSession => {
-    const ownGeneration = ++generation
     const spawnArgs = {
       ...input,
-      onEvent: (event: EngineEvent) => { if (ownGeneration === generation) onEvent(input, event) },
+      onEvent: (event: EngineEvent) => onEvent(input, event),
       onClose: (code: number | null) => {
-        if (ownGeneration !== generation) return
         busy = false
         input.onClose?.(code)
       },
@@ -111,7 +108,6 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
 
   return {
     send(prompt: string, input: EngineStartInput & { images?: Array<{ mime: string; data: string }> }): EngineAnswer {
-      if (busy) return { ok: false, answer: 'An engine is already working. Stop it first, or wait for it to finish.' }
       // Both engines are wired: claude-code on its stream-json wire, agy on
       // its own (verified against the real v1.4.0 binary). An engine that is
       // missing from the machine says so honestly at spawn time — the branch
@@ -119,7 +115,6 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       // A different engine was picked: the old process is not asked to speak
       // the other's wire — it is set aside and the chosen engine starts fresh.
       if (session && sessionEngine && input.settings.id !== sessionEngine) {
-        generation += 1
         session.stop()
         session = null
         sessionEngine = null
@@ -149,7 +144,6 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       if (session?.isRunning()) {
         // The gear changed under a living process: set it aside and start the
         // engine anew so the launch flags match what the UI promises.
-        generation += 1
         session.stop()
         session = null
         busy = false
@@ -183,7 +177,6 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
     running: () => session?.isRunning() === true,
     stop: () => session?.stop(),
     fresh: () => {
-      generation += 1
       session?.stop()
       session = null
       busy = false

@@ -5,9 +5,9 @@
  * One file, one copy, honest names: the epoch the copy was taken, the file it
  * was taken FROM. Restore puts that copy back exactly where it came from.
  */
-import { copyFile, mkdir, readFile, readdir, rm, writeFile, lstat, realpath, open } from 'node:fs/promises'
+import { copyFile, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { createHash } from 'node:crypto'
-import { join, basename, sep } from 'node:path'
+import { join, basename } from 'node:path'
 
 export type Checkpoint = {
   /** Where the file lives in the workspace. */
@@ -169,16 +169,4 @@ export async function rememberCheckpoint(dir: string, record: Checkpoint): Promi
     records.push(record)
     await writeIndex(dir, records)
   })
-}
-
-/** Only an indexed, real snapshot inside this app's checkpoint directory may
- * be inspected. Never turn the viewer into a general filesystem reader. */
-export async function inspectCheckpoint(dir: string, copy: string): Promise<{ ok: boolean; content?: string; clipped?: boolean; answer?: string }> {
-  try {
-    if (!(await readIndex(dir)).some(item => item.copy === copy && !!copy)) return { ok: false, answer: 'That copy is not in the checkpoint index.' }
-    const info = await lstat(copy), base = await realpath(dir), file = await realpath(copy)
-    if (!info.isFile() || info.isSymbolicLink() || !file.startsWith(base + sep)) return { ok: false, answer: 'Snapshot links or paths outside the checkpoint directory are refused.' }
-    const handle = await open(file, 'r')
-    try { const bytes = Buffer.alloc(20001), result = await handle.read(bytes, 0, bytes.length, 0), body = bytes.subarray(0, Math.min(result.bytesRead, 20000)); if (body.includes(0)) return { ok: false, answer: 'This snapshot is binary. Its restore is still available.' }; return { ok: true, content: body.toString('utf8'), clipped: info.size > 20000 } } finally { await handle.close() }
-  } catch { return { ok: false, answer: 'The snapshot could not be read.' } }
 }

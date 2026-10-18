@@ -1,6 +1,6 @@
 import { useSyncExternalStore } from 'react'
 import { getEngineApi } from '@/platform/bridge'
-import { engineStore, subscribeEngine } from './engine'
+import { engineStore } from './engine'
 import { buildMemoryOrder, MEMORY_DIR, type MemoryFile } from '@shared/lib/memory'
 
 /**
@@ -43,7 +43,8 @@ const patch = (part: Partial<MemoryState>): void => {
 }
 
 export async function loadMemory(): Promise<void> {
-  try { const answer = await getEngineApi().memory.list(); if (!answer.ok) throw Error(answer.answer || 'Memory could not be read.'); patch({ files: answer.files ?? [], folder: answer.folder ?? '', loaded: true, error: '' }) } catch (failure) { patch({ error: String((failure as Error).message || failure), loaded: true }) }
+  const answer = await getEngineApi().memory.list()
+  patch({ files: answer.files ?? [], folder: answer.folder ?? '', loaded: true })
 }
 
 /**
@@ -58,27 +59,20 @@ export async function runMemoryPass(): Promise<boolean> {
     return false
   }
   patch({ running: true, error: '' })
-  const sent = await store.send(buildMemoryOrder(state.folder))
+  const sent = await store.send(buildMemoryOrder())
   if (!sent.ok) {
     patch({ running: false, error: sent.answer })
     return false
   }
-  const owned = store.turn
-  let off: (() => void) | undefined
-  const finished = (): void => {
-    if (store.turn !== owned) { off?.(); off = undefined; patch({ running: false, status: 'The displayed task changed; refresh memory to see the files.' }); return }
-    if (owned?.state === 'running') return
-    off?.(); off = undefined
-    void loadMemory().then(() => patch({ running: false, status: 'The memory pass finished; the actual files were refreshed.' }))
-  }
-  off = subscribeEngine(finished)
-  patch({ status: 'The pass was sent. Writes still use the normal approval policy.' })
-  finished()
+  // The pass is the turn; the card shows it like any other work. Refresh
+  // the listing after a beat so new lines are on screen without a reopen.
+  setTimeout(() => void loadMemory(), 2_500)
+  patch({ running: false, status: 'The pass was sent. Its writes ride the permission cards, like every edit.' })
   return true
 }
 
 export async function removeMemory(name: string): Promise<boolean> {
-  const answer = await getEngineApi().memory.remove(name, state.folder)
+  const answer = await getEngineApi().memory.remove(name)
   if (!answer.ok) {
     patch({ error: answer.answer })
     return false
@@ -104,12 +98,3 @@ export function useMemory(): MemoryState {
 }
 
 export { MEMORY_DIR }
-
-export async function chooseMemoryFolder(useDefault = false): Promise<boolean> {
-  const api = getEngineApi().memory
-  const method = useDefault ? api.defaultFolder : api.chooseFolder
-  if (!method) { patch({ error: 'This build has no memory-folder picker.' }); return false }
-  const result = await method()
-  if (!result.ok) { if (!('canceled' in result && result.canceled)) patch({ error: result.answer }); return false }
-  await loadMemory(); patch({ status: result.answer, error: '' }); return true
-}

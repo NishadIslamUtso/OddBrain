@@ -653,10 +653,6 @@ test('the socket: agy routes to its own adapter and an engine switch starts fres
   assert.deepEqual(started[0].args.slice(0, 4), ['--input-format', 'stream-json', '--output-format', 'stream-json'])
   assert.ok(started[0].args.includes('gemini-3-pro'))
 
-  // A busy worker must not be killed by another sender changing gear.
-  const refused = socket.send('not yet', { cwd: '.', platform: 'linux', settings: { ...DEFAULT_ENGINE, id: 'claude-code', model: 'm' }, onEvent: rec.on, spawnProcess: fake })
-  assert.equal(refused.ok, false); assert.equal(started.length, 1); assert.equal(children[0].killed, false)
-  children[0].stdout.emit('data', Buffer.from(JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: 'finished' } }) + '\n'))
   // an engine switch sets the old process aside and starts the chosen engine
   socket.send('y', {
     cwd: '.',

@@ -1,10 +1,3 @@
-import { inferenceAllowed } from './automation/inferencePolicy'
-import { CLOUD_PROVIDERS } from '../shared/lib/providers'
-import { createAutomationService, type AutomationService } from './automation/service'
-import { createTextReviewer } from './automation/reviewer'
-import type { AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
-import { readUiPreview } from './uiPreview'
-import { createLaunchGate } from './uiLaunch'
 import { app, BrowserWindow, dialog, Menu, safeStorage, shell, globalShortcut } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
@@ -13,7 +6,7 @@ import { userInfo } from 'node:os'
 import { registerStagingRoot, setBinaryOverride, binaryOverride } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins } from './ipcGuard'
 import { dirname, join, resolve } from 'node:path'
-import { existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
 import { createVaultService, resolveVaultRoot } from './vault/service'
@@ -34,7 +27,7 @@ import { createEngineSocket, type EngineSocket } from './engine/socket'
 import { normalizeEngine } from '../shared/lib/engine'
 import { APPROVAL_MODES, type ApprovalMode, type EngineAvailability, type EngineEvent, type EngineId, type EngineModelEntry } from '../shared/lib/engine'
 import { ENGINE_IMAGE_MIMES, MAX_ENGINE_IMAGE_CHARS as ENGINE_IMAGE_CHARS, MAX_ENGINE_ATTACHMENTS as ENGINE_IMAGE_LIMIT } from '../shared/lib/media'
-import { listCheckpoints, restoreCheckpoint, inspectCheckpoint } from './engine/checkpoints'
+import { listCheckpoints, restoreCheckpoint } from './engine/checkpoints'
 import { createRecipeManager } from './recipes'
 import { createCompactManager } from './compact'
 import { buildRepoMap } from './repoMap'
@@ -52,7 +45,6 @@ import { installCatalogSkill } from './engine/skillCatalogInstall'
 import { installPackFromFolder, listPacks, removePack } from './engine/packs'
 import { exportPack } from './engine/exportPack'
 import { installFromIndex, readIndex } from './engine/storeIndex'
-import { marketplaceAddCommand, probeMarketplace, runMarketplaceAdd } from './engine/marketplaces'
 import { starterPackFiles } from './engine/vaultSkills'
 import { deployBuiltInSkills } from './engine/vaultSkills'
 import { applyConflictAction, brainFileContents, classifyBrainRoot, defaultVaultPath, planBrainApply, planBrainRefresh } from '../shared/lib/brainStructure'
@@ -245,35 +237,8 @@ function pushEngineEvent(event: EngineEvent): void {
   }
 
 
-function inferencePermissions() {
-  if (automation?.preferences().allowCloudInference !== false) return settings.permissions
-  return { ...settings.permissions, cloud: Object.fromEntries(CLOUD_PROVIDERS.map(p => [p.id, false])) }
-}
-
 function registerBridges(): void {
   handle('settings:read', () => settings)
-  handle('automation:read', () => { if (!automation) throw Error('Automation is still starting.'); return automation.view() })
-  handle('automation:update', (_event, input: Partial<AutomationPreferences>) => {
-    if (!automation) throw Error('Automation is still starting.')
-    const patch: Partial<AutomationPreferences> = {}
-    for (const key of ['autoKeep', 'autoReview', 'allowExternalReview', 'allowCloudInference'] as const) if (typeof input?.[key] === 'boolean') patch[key] = input[key]
-    if (typeof input?.reviewModel === 'string') patch.reviewModel = input.reviewModel
-    const wasCloud = automation.preferences().allowCloudInference
-    const result = automation.update(patch)
-    if (result.ok && wasCloud !== result.view.preferences.allowCloudInference) { workDispatchGeneration++; automation.stopWork(); engine?.stop() }
-    return result
-  })
-  handle('automation:models', async () => {
-    try { if (!automation || !reviewer) throw Error('The reviewer is still starting.'); return { ok: true, models: await reviewer.models(automation.preferences()) } }
-    catch (error) { return { ok: false, models: [], error: (error as Error).message } }
-  })
-  handle('automation:review', async (_event, input: ReviewInput) => {
-    if (!automation) return { ok: false, error: 'The reviewer is still starting.' }
-    if (engine?.turnBusy()) return { ok: false, error: 'Wait for normal work to finish before reviewing it.' }
-    return automation.review(input)
-  })
-  handle('automation:cancel', async () => { await automation?.cancel(); return { ok: true } })
-
 
   handle(
     'settings:update',
@@ -301,13 +266,10 @@ function registerBridges(): void {
       // What an agent may do. Sanitised on the way in — the window asks, the main
       // process decides — and the app's own settings file is the record.
       if (patch?.permissions && typeof patch.permissions === 'object') {
-        const previousAccess = settings.permissions
         settings = writeSettings(settingsFile, {
           ...settings,
           permissions: normalizePermissions(patch.permissions),
         })
-        void automation?.cancel()
-        if (previousAccess.local !== settings.permissions.local || JSON.stringify(previousAccess.cloud) !== JSON.stringify(settings.permissions.cloud)) { workDispatchGeneration++; automation?.stopWork(); engine?.stop() }
       }
       // No vault path in the patch means the caller is not moving the vault, so
       // there is nothing to check and nothing to reconsider.
@@ -347,7 +309,6 @@ function registerBridges(): void {
   })
 
   handle('cloud:save-key', (_event, id: string, key: string) => {
-    void automation?.cancel()
     const provider = providerById(String(id || ''))
     if (!provider || !keyStore) return { ok: false, error: 'That is not a provider this app knows.' }
     if (!String(key || '').trim()) return { ok: false, error: 'Paste a key first.' }
@@ -356,7 +317,6 @@ function registerBridges(): void {
   })
 
   handle('cloud:clear-key', (_event, id: string) => {
-    void automation?.cancel()
     keyStore?.clear(String(id || ''))
     // A cleared key must not keep speaking — but only ITS engine: the app has
     // one engine process, and stopping it because some OTHER provider's key
@@ -553,7 +513,7 @@ function registerBridges(): void {
 
   handle(
     'engine:send',
-    async (_event, prompt: string, cwd: string, pictures: unknown = []): Promise<{ ok: boolean; answer: string }> => {
+    (_event, prompt: string, cwd: string, pictures: unknown = []): { ok: boolean; answer: string } => {
       const text = typeof prompt === 'string' ? prompt.trim().slice(0, 20000) : ''
       if (!text) return { ok: false, answer: 'Write what the engine should do first.' }
       // Pictures: only what the wire can carry, only a few, only small. A bad
@@ -577,50 +537,31 @@ function registerBridges(): void {
       // folder the owner picked in the engine bay, or the vault when none.
       // The renderer's value is deliberately not consulted (review finding).
       void cwd
-      if (dispatchingWork || engine.turnBusy()) return { ok: false, answer: 'An engine is already working. Stop it first, or wait for it to finish.' }
-      dispatchingWork = true
-      try {
-      const ownDispatch = workDispatchGeneration
-      await automation?.beginWork(text, settings.engine)
-      if (ownDispatch !== workDispatchGeneration) { automation?.rejectWork(); return { ok: false, answer: 'The task was canceled before it started.' } }
-      const usedEngine = { ...settings.engine }
-      const access = await inferenceAllowed(usedEngine, settings.permissions.local, automation?.preferences().allowCloudInference !== false)
-      if (!access.ok || ownDispatch !== workDispatchGeneration || JSON.stringify(usedEngine) !== JSON.stringify(settings.engine)) {
-        automation?.rejectWork(); return { ok: false, answer: access.answer || 'The task was canceled or its model changed before dispatch. Send again when ready.' }
-      }
-      automation?.retargetWork(usedEngine)
       deployRulesNow()
       // A provider brain rides the ENGINE: the key from Models goes into the
       // engine's own environment for this launch. The app itself never calls
       // the provider — and a missing key refuses honestly instead of falling
       // back to a different brain than the one that was chosen.
       let auth: { provider: 'anthropic'; apiKey: string } | undefined
-      if (usedEngine.cloudProvider === 'anthropic') {
-        if (!cloudEnabled(inferencePermissions(), 'anthropic', keyStore?.has('anthropic') === true)) { automation?.rejectWork(); return { ok: false, answer: 'Anthropic inference is not enabled in Agent access or has no key. Nothing was sent.' } }
+      if (settings.engine.cloudProvider === 'anthropic') {
         const key = keyStore?.get('anthropic') || ''
         if (!key) {
-          automation?.rejectWork()
           return { ok: false, answer: 'The Anthropic brain needs its key: add it in Settings > Models (it is held for this run). Nothing was sent.' }
         }
         auth = { provider: 'anthropic', apiKey: key }
       }
-      const sent = engine.send(text, {
-        cwd: usedEngine.workspace || vaultRoot(),
-        settings: usedEngine,
+      return engine.send(text, {
+        cwd: settings.engine.workspace || vaultRoot(),
+        settings: settings.engine,
         auth, images,
         checkpointDir: join(app.getPath('userData'), 'checkpoints'),
-        shouldCheckpoint: () => automation?.preferences().autoKeep !== false,
         onEvent: (event: EngineEvent) => {
-          automation?.ingest(event)
           pushEngineEvent(event)
           if (event.kind === 'done') void hookRunner.run('turn-done').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
           if (event.kind === 'error') void hookRunner.run('turn-error').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
           if (event.kind === 'permission') void hookRunner.run('permission').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
         },
       })
-      if (!sent.ok) automation?.rejectWork()
-      return sent
-      } finally { dispatchingWork = false }
     },
   )
 
@@ -653,8 +594,6 @@ function registerBridges(): void {
 
   // The two "keep it running" switches, in their own file (see appFlags.ts).
   const appFlagsFile = (): string => join(app.getPath('userData'), 'app-flags.json')
-  handle('app:preview-html', () => readUiPreview(app.getAppPath(), process.resourcesPath, app.isPackaged))
-  handle('app:claim-launch', () => claimUiLaunch())
   handle('app:flags:get', () => loadAppFlags(appFlagsFile()))
   // The machine's own name for this person, offered as a suggestion on first
   // run. The real machine lesson: the app asked for a name and detected
@@ -769,7 +708,6 @@ function registerBridges(): void {
   const briefs = createCompactManager(join(app.getPath('userData'), 'handoffs'))
   handle('compact:save', (_event, input: { brief?: string; workspace?: string; at?: string }) => briefs.save(input ?? {}))
   handle('engine:fresh', (): { ok: boolean; answer: string } => {
-    workDispatchGeneration++; automation?.stopWork()
     if (!engine) return { ok: false, answer: 'The engine door is not open on this machine yet.' }
     engine.fresh()
     return { ok: true, answer: 'Session ended and its resume id forgotten. The next task starts fresh.' }
@@ -822,12 +760,11 @@ function registerBridges(): void {
   // the way back. Read from the folder the engine was handed at send time.
   handle('engine:checkpoints:list', async () => {
     try {
-      return { ok: true, checkpoints: await listCheckpoints(join(app.getPath('userData'), 'checkpoints'), Number.MAX_SAFE_INTEGER) }
+      return { ok: true, checkpoints: await listCheckpoints(join(app.getPath('userData'), 'checkpoints')) }
     } catch {
       return { ok: true, checkpoints: [] }
     }
   })
-  handle('engine:checkpoint:inspect', (_event, copy: string) => inspectCheckpoint(join(app.getPath('userData'), 'checkpoints'), typeof copy === 'string' ? copy : ''))
   handle('engine:checkpoint:restore', (_event, copy: string, original: string): Promise<{ ok: boolean; answer: string }> =>
     restoreCheckpoint(join(app.getPath('userData'), 'checkpoints'), typeof copy === 'string' ? copy : '', typeof original === 'string' ? original : ''))
 
@@ -863,7 +800,7 @@ function registerBridges(): void {
   const deployRulesNow = (): void => {
     try {
       const home = process.env['USERPROFILE'] || process.env['HOME'] || ''
-      deployHouseRules(settings.engine.id, settings.engine.model, home, readHouseRules(), settings.memoryFolder || '')
+      deployHouseRules(settings.engine.id, settings.engine.model, home, readHouseRules())
     } catch {
       // A failed rules deploy must never block the work itself.
     }
@@ -936,8 +873,6 @@ function registerBridges(): void {
   })
 
   handle('engine:stop', () => {
-    workDispatchGeneration++
-    automation?.stopWork()
     engine?.stop()
     return { ok: true }
   })
@@ -1204,39 +1139,6 @@ function registerBridges(): void {
     const source = toSource(String(payload?.kind ?? ''), String(payload?.locator ?? ''))
     if (!source) return { ok: false as const, answer: 'That is not a folder path or an https URL.' }
     return installFromIndex(source, String(payload?.id ?? ''), { storeRoot: join(app.getPath('userData'), 'extensions'), ...skillTargets() })
-  })
-
-  // Engine marketplaces (phase 2). Reading is a probe of the engine's OWN
-  // help text — one process, read-only, no catalog of our own. Installing is
-  // a separate act the person asks for by name, and it runs the engine's own
-  // documented command so the engine stays the thing that installs its things.
-  // Engine marketplaces (phase 2). Reading is a probe of the engine's OWN
-  // help text — one process, read-only, no catalog of our own. Adding one is
-  // a separate act the person asks for by name, and it runs the engine's own
-  // documented command so the engine stays the thing that installs its things.
-  const engineBinary = async (id: EngineId): Promise<string | null> => {
-    const found = await detectEngine(id)
-    return found.found && found.path ? found.path : null
-  }
-  handle('marketplace:probe', async (_event, id: EngineId) => {
-    if (id !== 'claude-code' && id !== 'agy') return { ok: false as const, answer: 'Unknown engine.' }
-    const binary = await engineBinary(id)
-    return { ok: true as const, probe: await probeMarketplace(id, binary) }
-  })
-  handle('marketplace:add', async (_event, payload: { id?: string; locator?: string; confirmed?: boolean }) => {
-    const id = payload?.id === 'agy' ? 'agy' : 'claude-code'
-    const binary = await engineBinary(id)
-    if (!binary) return { ok: false as const, answer: `${id} is not installed, so it cannot add a marketplace.` }
-    // The card comes first: without an explicit confirmation the exact command
-    // is returned for display, and nothing runs.
-    if (payload?.confirmed !== true) {
-      const args = marketplaceAddCommand(id, String(payload?.locator ?? ''))
-      return args
-        ? { ok: false as const, answer: `Not run. The command is: ${id} ${args.join(' ')}` }
-        : { ok: false as const, answer: 'That entry cannot be turned into a command this app will run.' }
-    }
-    const result = await runMarketplaceAdd(id, binary, String(payload?.locator ?? ''))
-    return { ok: result.ok, answer: result.answer }
   })
 
   // Mods (Phase 3): publish. Export turns the engine's real skills and the
@@ -1517,27 +1419,9 @@ function registerBridges(): void {
   // The memory home is the ENGINE's own working folder — the same root it
   // spawns in — so what the pane lists is always what the engine wrote,
   // even when the workspace is not the vault.
-  const memoryFiles = createMemoryManager(() => settings.engine.workspace || vaultRoot(), () => settings.memoryFolder || '')
+  const memoryFiles = createMemoryManager(() => settings.engine.workspace || vaultRoot())
   handle('memory:list', () => memoryFiles.list())
-  handle('memory:remove', (_event, name: string, expectedFolder?: string) => memoryFiles.remove(typeof name === 'string' ? name : '', typeof expectedFolder === 'string' ? expectedFolder : undefined))
-
-  handle('memory:choose-folder', async () => {
-    const chosen = await dialog.showOpenDialog({ title: 'Choose a dedicated memory folder (existing notes are not moved)', properties: ['openDirectory'] })
-    if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, canceled: true, answer: '' }
-    const problem = folderProblem(chosen.filePaths[0]); if (problem) return { ok: false, answer: problem }
-    try {
-      const folder = realpathSync(chosen.filePaths[0])
-      if (/[\r\n]/.test(folder) || folder.length > 4096) return { ok: false, answer: 'That folder name cannot be used in an engine instruction.' }
-      settings = writeSettings(settingsFile, { ...settings, memoryFolder: folder })
-      deployRulesNow(); return { ok: true, answer: 'Memory folder selected. Existing notes were not moved.', folder }
-    } catch { return { ok: false, answer: 'The memory folder could not be saved.' } }
-  })
-  handle('memory:default-folder', () => {
-    const next = { ...settings }; delete next.memoryFolder
-    try { settings = writeSettings(settingsFile, next); deployRulesNow(); return { ok: true, answer: 'Memory uses the working-folder default again.' } }
-    catch { return { ok: false, answer: 'The memory preference could not be saved.' } }
-  })
-
+  handle('memory:remove', (_event, name: string) => memoryFiles.remove(typeof name === 'string' ? name : ''))
 
   handle('engine:thinking', (_event, thinking: string): { ok: boolean; answer: string } => {
     const mode = thinking === 'extended' ? 'extended' : 'default'
@@ -1702,10 +1586,6 @@ let keyStore: KeyStore | null = null
 let cloud: CloudClient | null = null
 /** The engine plug and the last events it produced, for windows opened mid-turn. */
 let engine: EngineSocket | null = null
-let automation: AutomationService | null = null
-let reviewer: ReturnType<typeof createTextReviewer> | null = null
-let dispatchingWork = false
-let workDispatchGeneration = 0
 const engineHistory: EngineEvent[] = []
 
 /**
@@ -2032,17 +1912,9 @@ app.whenReady().then(async () => {
       keys: keyStore,
       config: () => ({ custom: settings.cloud }),
       // Read fresh on every call, so a switch in Settings takes effect at once.
-      permissions: () => inferencePermissions(),
+      permissions: () => settings.permissions,
       env: process.env,
     })
-    const reviewCloud = createCloudClient({ keys: keyStore, config: () => ({ custom: settings.cloud }), permissions: () => inferencePermissions(), env: process.env,
-      fetchImpl: (input, init) => fetch(input, { ...init, redirect: 'error' }) })
-    reviewer = createTextReviewer({ permissions: () => inferencePermissions(), cloudAllowed: () => automation?.preferences().allowCloudInference !== false, cloud: () => reviewCloud, engine: () => settings.engine })
-    automation = createAutomationService({ file: join(app.getPath('userData'), 'automation.json'), engine: () => settings.engine,
-      runText: (task, preferences, signal) => reviewer!.run(task, preferences, signal),
-      onChanged: (view: AutomationView) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('automation:changed', view) } })
-    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) try { window.webContents.send('automation:changed', automation.view()) } catch {}
-    app.on('before-quit', () => { void automation?.dispose() })
     const enabled = keyStore.ids().length
     console.log(
       `[cloud] keys ${keyStore.encryption === 'os' ? 'sealed by this machine' : 'held for this run only'}; ` +
@@ -2128,6 +2000,3 @@ app.whenReady().then(async () => {
     if (process.platform !== 'darwin') app.quit()
   })
 }
-
-// Module scope: registration/window recreation cannot reset the launch ticket.
-const claimUiLaunch = createLaunchGate()

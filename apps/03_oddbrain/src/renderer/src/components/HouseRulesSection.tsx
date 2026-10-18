@@ -67,7 +67,7 @@ export default function HouseRulesSection() {
           />
         </label>
       ))}
-      <div className="flex items-center gap-2"><button type="button" className="ob-small-button" disabled={saving} onClick={() => { void bridge.houseRules.read().then(answer => { setRules(answer.defaults); setStatus('Defaults loaded. Save and deliver to apply them.') }).catch(() => setStatus('Defaults could not be read.')) }}>Restore defaults</button>
+      <div className="flex items-center gap-2">
         <button
           type="button"
           onClick={() => void save()}

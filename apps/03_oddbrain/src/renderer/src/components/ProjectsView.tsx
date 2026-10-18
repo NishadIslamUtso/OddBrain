@@ -20,16 +20,12 @@ const leaf = (folder: string): string => folder.split(/[\\/]/).filter(Boolean).a
 
 export default function ProjectsView({
   chats,
-  focusId = '',
-  onClearFocus,
   onOpenChat,
   onNewChatInProject,
   onWorkHere,
   onViewBoard,
 }: {
   chats: Chat[]
-  focusId?: string
-  onClearFocus?: () => void
   onOpenChat: (chatId: string) => void
   onNewChatInProject: (projectId: string) => void
   onWorkHere: (folder: string) => void
@@ -59,18 +55,16 @@ export default function ProjectsView({
   const [name, setName] = useState('')
   const [editing, setEditing] = useState<string | null>(null)
   const [draftInstruction, setDraftInstruction] = useState('')
-  const [editName, setEditName] = useState('')
   const [draftFolder, setDraftFolder] = useState('')
 
   const startEdit = (id: string, instruction: string, folder: string): void => {
     setEditing(id)
-    setEditName(projects.find(p => p.id === id)?.name || '')
     setDraftInstruction(instruction)
     setDraftFolder(folder)
   }
 
   const saveEdit = (id: string): void => {
-    update(id, { name: editName.trim() || projects.find(p => p.id === id)?.name || 'Project', instruction: draftInstruction, folder: draftFolder.trim() })
+    update(id, { instruction: draftInstruction, folder: draftFolder.trim() })
     setEditing(null)
   }
 
@@ -89,7 +83,6 @@ export default function ProjectsView({
           </button>
         </header>
 
-        {focusId && onClearFocus ? <button type="button" className="ob-text-button" onClick={onClearFocus}>All projects</button> : null}
         {creating ? (
           <form
             className="mt-4 flex items-center gap-2 rounded-xl border border-line bg-card p-2.5"
@@ -137,7 +130,7 @@ export default function ProjectsView({
           </p>
         ) : (
           <ul className="mt-5 flex flex-col gap-3">
-            {projects.filter(p => !focusId || !projects.some(x => x.id === focusId) || p.id === focusId).map((project) => {
+            {projects.map((project) => {
               const projectChats = chatsOf(chats, project.id)
               const editingThis = editing === project.id
               return (
@@ -198,7 +191,6 @@ export default function ProjectsView({
 
                   {editingThis ? (
                     <div className="mt-3 flex flex-col gap-2">
-                      <input aria-label="Project name" value={editName} maxLength={80} onChange={e => setEditName(e.target.value)} className="h-8 rounded-lg border border-line bg-bg px-2.5 text-[12.5px]" />
                       <textarea
                         value={draftInstruction}
                         onChange={(event) => setDraftInstruction(event.target.value)}

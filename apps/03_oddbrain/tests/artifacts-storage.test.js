@@ -55,11 +55,8 @@ test('corrupt storage is preserved and a recovery copy is made before an edit', 
 test('text files are decoded honestly; unsupported or oversized files are refused', async () => {
   const file = (name, text, size = text.length) => ({ name, size, type: 'text/plain', text: async () => text })
   assert.equal((await readAttachment(file('notes.md', 'Source notes'), {})).text, 'Source notes')
-  // A PDF is read for its text layer now. A scan has none, and saying so is
-  // the honest answer — different from the old blanket refusal.
-  const scan = { name: 'book.pdf', size: 40, type: 'application/pdf', arrayBuffer: async () => new Uint8Array(Buffer.from('%PDF-1.4\n1 0 obj<</Type/Page>>stream\nq Q\nendstream\nendobj\n%%EOF', 'latin1')).buffer }
-  await assert.rejects(readAttachment(scan, {}), /no text layer/)
-  await assert.rejects(readAttachment(file('huge.txt', 'a'.repeat(12001)), {}), /12,001 characters; the limit is 12,000\. Nothing was silently cut/)
+  await assert.rejects(readAttachment({ ...file('book.pdf', 'PDF'), type: 'application/pdf' }, {}), /not implemented/)
+  await assert.rejects(readAttachment(file('huge.txt', 'a'.repeat(12001)), {}), /No content has been silently truncated/)
   await assert.rejects(readAttachment(file('binary.txt', 'bad\0data'), {}), /not a readable/)
   await assert.rejects(readAttachment({ name: 'photo.png', type: 'image/png', size: 20 }, {}), /verified vision/)
 })

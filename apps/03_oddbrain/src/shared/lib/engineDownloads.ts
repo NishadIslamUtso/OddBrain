@@ -92,8 +92,6 @@ export function isOfficialDownloadHost(engine: string, url: string): boolean {
  * 400 MB cap, so the app refused the official download forever with a
  * sentence that blamed the publisher. 2.5 GB is still a hard ceiling — the
  * point of the cap is a hostile offer, not a big honest one. */
-// The official 1.47 GB runtime plus room for a larger future release.
-// The unpack caps live beside it in the main process (RUNTIME_ZIP_LIMITS).
 export const MAX_DOWNLOAD_BYTES = 2_500 * 1024 * 1024
 
 /** Bytes as a human reads them, for the refusals and progress lines. */
