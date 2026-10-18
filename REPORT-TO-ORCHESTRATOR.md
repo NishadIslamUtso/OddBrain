@@ -36,3 +36,17 @@ Successful built-driver run; read back its JSON/screenshots; compare actual §2 
 Pulled this branch with `--ff-only`; already current at 086e352. Re-read THE CHANNEL and latest ruling (#4). The requested Linux deadline/file-evidence changes are committed in 086e352; that implementation milestone is filed, not a successful QA execution milestone.
 
 Live check: run 39127701506 for 086e352 is still `in_progress`. Linux was in Renderer checks; Windows was in Types. No conclusion or new test counts are claimed. Full built-screen/section/IPC evidence remains pending. No additional tests executed during this handoff. Await orchestrator continuation via branch commits; no application changes or out-of-lane work performed.
+
+## Next handoff — diagnostic milestone, application blocker found
+
+Fast-forwarded to 541c462 and read the fleet notice. No test counts are printed here: no local test suite was executed in this handoff.
+
+Queried completed CI run 39127781435 at 541c462. Windows standard gate succeeded. Linux Types, Tests, Build, renderer checks and Smoke succeeded; built-app QA failed. Read its failure commit comment, including direct-file breadcrumbs and report JSON. The ordered instrumentation is now proven useful: apt update/install finished in seconds; the driver reached report-write/close, then external timeout returned 124. Earlier attribution to a setup stall is superseded by this evidence.
+
+The driver visited every configured main view and settings section and completed pointed-binary persistence/detection assertions. However, its success summary is NOT accepted: Agent access emitted a real React boundary error, the boundary selector missed it, and serve ownership was skipped because the port already answered. The app's boot auto-start may own that responder; it has not been established as unrelated. No full built-driver pass is claimed.
+
+`FIXLIST.md` now records QA-004 through QA-008: Agent access crash (application owner), false-negative boundary selector, post-report shutdown stall, ambiguous boot-fixture ownership, and incorrect geometry measurement targets. Matching observed §2 defaults are recorded narrowly; textarea/container zero values are not reported as visual defects.
+
+Application blocker: Settings Agent access throws `Cannot read properties of undefined (reading 'get')`, with `AgentAccessCard` in the stack; source calls `bridge.extensionPair.get()`. Reported only; no security, pairing, bridge or visual application changes. Exact responsible fleet branch unknown.
+
+Next QA work when continued: correct actual-boundary detection and measurement selectors; establish boot-fixture PID ownership safely; bound and diagnose cleanup without hiding assertions; rerun CI. The current failure demonstrates neither lane completion nor a green tip. No app code or session-v2 code ported in this handoff.
