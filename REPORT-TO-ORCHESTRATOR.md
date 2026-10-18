@@ -1,6 +1,6 @@
 # REPORT TO ORCHESTRATOR — core lane
 
-**Status: BLOCKED pending new CI smoke; not a completed milestone.** Branch `arena/9781cd95-oddbrain`; main comparison point `a6c7807`. The prior broad commit `9f0772b` remains in ancestry. This follow-up changes the core smoke harness, a cross-platform switch test, and (under ruling #3) exactly the two shared date-label files plus tests. It does not undo the frozen non-core files in that earlier commit. No merge was attempted.
+**Status: core follow-up green on CI; ready for orchestrator judgment, not merged.** Branch `arena/9781cd95-oddbrain`; main comparison point `a6c7807`. The prior broad commit `9f0772b` remains in ancestry. This follow-up changes the core smoke harness, a cross-platform switch test, and (under ruling #3) exactly the two shared date-label files plus tests. It does not undo the frozen non-core files in that earlier commit. No merge was attempted.
 
 ## Gate on this worktree (app directory)
 
@@ -11,8 +11,8 @@
 | `npx tsc --noEmit` | Exited 0, no diagnostics. |
 | `npx vitest run` | **117 test files passed; 813 tests passed; zero failed.** From the current full run, not the reference snapshot. |
 | `npm run build` | Exited 0; both renderer builds each logged two CSS-optimizer warnings for `::highlight(...)` (find highlights). |
-| `npm run smoke` | **Not run locally:** Electron postinstall and its one prescribed mirror retry failed again. No local `SMOKE OK SCROLL OK errors=0 warnings=0` claim. CI's native smoke is the available proof under ruling #3. |
-| CI | Run `39126226627` on `245684f` failed Windows Tests and Linux Smoke. **CI on this follow-up is pending**, not claimed green. |
+| `npm run smoke` | **Not run locally:** Electron postinstall and its one prescribed mirror retry failed again. No local `SMOKE OK SCROLL OK errors=0 warnings=0` claim. CI's successful native smoke steps are the available proof under ruling #3. |
+| CI | Run `39126226627` on `245684f` failed Windows Tests and Linux Smoke. Run [`39127459326`](https://github.com/NishadIslamUtso/OddBrain/actions/runs/39127459326) on follow-up `bd36e2c` **succeeded on Linux and Windows**, including Tests and native Smoke on both. `gh run view --job ... --log` returned EOF from the log-download host, so I cannot quote either runner's literal `SMOKE OK SCROLL OK ... errors=0 warnings=0` line. Both Smoke steps exited successfully under the nonempty-screenshot, console-clean, scroll-OK gate (scroll-probe exceptions now also fail). |
 
 Current-run evidence: `/tmp/oddbrain-core-fix-{install,electron,mirror,tsc,vitest,build}.log` (sandbox-local, not Git deliverables).
 
@@ -28,14 +28,14 @@ Current-run evidence: `/tmp/oddbrain-core-fix-{install,electron,mirror,tsc,vites
 
 ## Ruling #3: CI failures on `245684f`
 
-- **Windows Tests:** `tests/core-engine-switch.test.ts` had counted the Windows `taskkill` helper as a third engine session. The fixture now separates helpers from engine children, simulates the helper killing its target pid, and runs the same two-session/stale-event assertions with explicit `linux` and `win32` adapters on either host. No sleep or weaker session-count assertion. The full local suite passes; Windows CI is pending.
-- **Linux Smoke:** the previous run reported `SMOKE BLANK SCROLL OK` (empty Electron capture, despite a working DOM scroller). The exact cause was not observable from the available CI annotations; do not equate an empty capture with a proven renderer exception. `src/main/index.ts` now shows the actual smoke window, waits for its scroller and two animation frames, and retries an empty real capture only while the compositor has up to 10 seconds to paint. It still exits nonzero on a blank capture, any console error/warning, or any non-OK scroll result (including probe exceptions); the output now includes capture dimensions and visibility for diagnosis. **This is not smoke proof until CI passes.**
+- **Windows Tests:** `tests/core-engine-switch.test.ts` had counted the Windows `taskkill` helper as a third engine session. The fixture now separates helpers from engine children, simulates the helper killing its target pid, and runs the same two-session/stale-event assertions with explicit `linux` and `win32` adapters on either host. No sleep or weaker session-count assertion. The full local suite and Windows CI Tests passed on `bd36e2c`.
+- **Linux Smoke:** run `39126226627` reported `SMOKE BLANK SCROLL OK` (empty Electron capture, despite a working DOM scroller). Ruling commit `b6e4e1d` passed Linux smoke with no code change to the capture path; that suggests timing or visibility, not a proven renderer exception. `src/main/index.ts` now shows the actual smoke window, waits for its scroller and two animation frames, and retries an empty real capture only while the compositor has up to 10 seconds to paint. It still exits nonzero on a blank capture, any console error/warning, or any non-OK scroll result (including probe exceptions); the output now includes capture dimensions and visibility for diagnosis. **CI's Linux and Windows native Smoke steps passed on `bd36e2c`; literal log lines were unavailable through `gh` (download EOF).**
 
-**Unproven:** installed local Electron smoke; real signed-in claude-code/agy turns, permission-card protection on the owner's Windows machine, real Ollama/remote review service, Windows folder/symlink behavior, and CI on this follow-up. Do not merge or call this lane done on the basis of TypeScript/tests/build alone.
+**Unproven:** local Electron smoke (binary fetch blocked); real signed-in claude-code/agy turns, permission-card protection on the owner's Windows machine, real Ollama/remote review service, and Windows folder/symlink behavior. CI's successful native smoke is runner proof, not a signed-in owner-machine run. No merge requested.
 
 ## Frozen, awaiting merge — pre-brief `9f0772b` out-of-lane paths
 
-The exact paths below were changed by the earlier broad commit and were **not edited in this follow-up**. The two shared date-label files are excluded here because ruling #3 expressly authorized this fix; all other shared-library glue stays frozen. Non-core media/visual sections already present in mixed files `src/main/index.ts`, `src/preload/index.ts`, `src/renderer/src/{App.tsx,platform/bridge.ts,components/{ChatView,Composer,EnginePanel,MessageRow,SettingsView}.tsx}` were likewise left intact; only core-specific hunks in those files changed. The preload/bridge type changes are necessary IPC glue but exceed the strict `src/main/` path list; please adjudicate that collision.
+The exact paths below were changed by the earlier broad commit and were **not edited in this follow-up**. The two shared date-label files are excluded here because ruling #3 expressly authorized this fix; all other shared-library glue stays frozen. Non-core media/visual sections already present in mixed files `src/main/index.ts`, `src/preload/index.ts`, `src/renderer/src/{App.tsx,platform/bridge.ts,components/{ChatView,Composer,EnginePanel,MessageRow,SettingsView}.tsx}` were likewise left intact; only core-specific hunks in those files changed. The preload/bridge type changes are necessary IPC glue and were granted under ruling #3.
 
 - `WHAT-EXISTS.md`
 - `apps/03_oddbrain/.gitignore`
