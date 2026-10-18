@@ -73,7 +73,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
         }
         setSelected({ path, content: String(reply.content || ''), truncated: reply.truncated === true })
       })
-      .catch(() => { if (mounted.current && ticket === fileTicket.current) setProblem('The file could not be read.') })
+      .catch((reason) => { if (mounted.current && ticket === fileTicket.current) setProblem(reason instanceof Error && reason.message ? reason.message : 'The file could not be read.') })
   }
 
   const searchContents = (): void => {
