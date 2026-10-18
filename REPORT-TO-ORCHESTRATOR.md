@@ -1,13 +1,13 @@
 # Report to orchestrator — AV intake and renderer UI port
 
-**Status: AV intake preserved; renderer/UI port IN PROGRESS.** The active task now ports selected renderer/UI slices from `origin/arena/cc83a507-oddbrain` onto the fixed branch, while preserving backend/security contracts and AV behavior. Ruling #4 still governs AV ownership and the shared intake door. The first shell/navigation slice is implemented and locally verified; it has not yet been pushed, so there is no CI result for that slice. The earlier local Electron install/smoke failure remains unpassed, not a CI failure.
+**Status: AV intake preserved; renderer/UI port IN PROGRESS.** The active task ports selected renderer/UI slices from `origin/arena/cc83a507-oddbrain` onto the fixed branch, while preserving backend/security contracts and AV behavior. Ruling #4 still governs AV ownership and the shared intake door. The first shell/navigation slice is pushed in `a56a486`; GitHub Actions run `39133043196` passed Linux and Windows, including smoke. The earlier local Electron install/smoke failure remains unpassed, not a CI failure.
 
 ## Renderer UI port — 2026-10-18
 
 - Reference: read-only `origin/arena/cc83a507-oddbrain` at `df4226a`. The reference branch has broad non-UI changes; only selected renderer files are being ported, not merged wholesale.
 - First slice adds `src/renderer/src/styles/desktop.css`, imports it from renderer `main.tsx`, and connects the shell/content/title-bar/sidebar/chat/composer class hooks. It ports the reference `AppNav` horizontal mode and approval-count badge, and exposes destinations in the collapsed sidebar. Added `tests/app-nav.test.ts` for these UI states.
 - Changes to `App.tsx` and `Composer.tsx` are structural/presentation-only; the shared intake `App.addFiles` path, send path, AV disclosure/processing, and bridge behavior were not changed. No main, preload, shared backend, security, AV decoder, dependency, or lockfile files were changed.
-- Current worktree gate in `apps/03_oddbrain`: `npm test` passed **105 files / 755 tests**; `npm run build` passed, including typecheck; `npm run build:web` passed. Both builds show existing CSS optimizer warnings for `::highlight(ob-find)` and `::highlight(ob-find-current)`; web build also shows the existing large-chunk advisory. A browser preview is running on port 5174.
+- Current worktree gate in `apps/03_oddbrain`: `npm test` passed **105 files / 755 tests**; `npm run build` passed, including typecheck; `npm run build:web` passed. Both builds show existing CSS optimizer warnings for `::highlight(ob-find)` and `::highlight(ob-find-current)`; web build also shows the existing large-chunk advisory. GitHub Actions run `39133043196` passed Linux and Windows, including the smoke steps, for code commit `a56a486`. A browser preview is running on port 5174.
 - Next renderer slices: look/appearance state and selectable shell layouts, then chat/home/composer and graph presentation. Keep every shared file hunk-compatible with current bridge, AV and security contracts.
 
 ## What exists
@@ -53,7 +53,7 @@ Commands were run in `apps/03_oddbrain`:
 3. `npm run build:web`: passed; the same CSS warnings and the existing >500 kB chunk advisory were reported.
 4. `npm run smoke` was not run during this UI slice. In the earlier sandbox attempt, `npm ci --ignore-scripts && node node_modules/electron/install.js` installed 483 packages, reported 14 audit vulnerabilities (11 moderate, 1 high, 2 critical), then failed to fetch Electron with `TypeError: fetch failed`; the subsequent smoke failed before launch. Do not count local smoke as passed.
 
-GitHub Actions run `39128942052` succeeded for base commit `3bfba4e`. This renderer UI slice has not yet been pushed and has no CI result yet.
+GitHub Actions run `39128942052` succeeded for base commit `3bfba4e`. The renderer shell/navigation slice was pushed as `a56a486`; run `39133043196` passed on both Linux and Windows, including Electron smoke.
 
 ## Remaining / unproven
 
