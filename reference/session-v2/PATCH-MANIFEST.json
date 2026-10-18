@@ -1,0 +1,2082 @@
+{
+  "format": "oddbrain-app-source-patch",
+  "version": 1,
+  "packageRevision": 2,
+  "date": "2026-10-18",
+  "baseline": "2f05dac9a5f7a191104377ef940f81e76b9ebd74",
+  "appVersion": "0.9.0",
+  "appPath": "apps/03_oddbrain",
+  "acceptedUpgrade": "Exact previous UI code package only; any unrelated edits are refused.",
+  "files": [
+    {
+      "path": "apps/03_oddbrain/.gitignore",
+      "beforeSha256": "0a8f66c0cd5511007f03c46e1719a9981211aa03394eedb14f2ee4f588ab6705",
+      "beforeTextSha256": "0a8f66c0cd5511007f03c46e1719a9981211aa03394eedb14f2ee4f588ab6705",
+      "afterSha256": "c74380460bd9dc2d0d42395182b0b956d278f6dfca267bc33f6b7e6ae8a82f92",
+      "afterTextSha256": "c74380460bd9dc2d0d42395182b0b956d278f6dfca267bc33f6b7e6ae8a82f92",
+      "acceptedBefore": [
+        {
+          "sha256": "c74380460bd9dc2d0d42395182b0b956d278f6dfca267bc33f6b7e6ae8a82f92",
+          "textSha256": "c74380460bd9dc2d0d42395182b0b956d278f6dfca267bc33f6b7e6ae8a82f92"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/electron-builder.yml",
+      "beforeSha256": "758c4efd36e6084f29ffcad64ca4aec1201a39800e632407580d7926f11eb7ed",
+      "beforeTextSha256": "758c4efd36e6084f29ffcad64ca4aec1201a39800e632407580d7926f11eb7ed",
+      "afterSha256": "06494d90bade5ece7acf2051bae597a9f07e16d88312a1ab6ea440f49036dfc8",
+      "afterTextSha256": "06494d90bade5ece7acf2051bae597a9f07e16d88312a1ab6ea440f49036dfc8",
+      "acceptedBefore": [
+        {
+          "sha256": "06494d90bade5ece7acf2051bae597a9f07e16d88312a1ab6ea440f49036dfc8",
+          "textSha256": "06494d90bade5ece7acf2051bae597a9f07e16d88312a1ab6ea440f49036dfc8"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/package.json",
+      "beforeSha256": "455bec05b4d5f0475919b8a3e670940c319c32f434e1aa58e567a38ef0714372",
+      "beforeTextSha256": "455bec05b4d5f0475919b8a3e670940c319c32f434e1aa58e567a38ef0714372",
+      "afterSha256": "4a0f0a7a2de6c744c9ff6e2ad8a65d8e7c13aad4ab6229dbcf0753e58cdb4977",
+      "afterTextSha256": "4a0f0a7a2de6c744c9ff6e2ad8a65d8e7c13aad4ab6229dbcf0753e58cdb4977",
+      "acceptedBefore": [
+        {
+          "sha256": "4a0f0a7a2de6c744c9ff6e2ad8a65d8e7c13aad4ab6229dbcf0753e58cdb4977",
+          "textSha256": "4a0f0a7a2de6c744c9ff6e2ad8a65d8e7c13aad4ab6229dbcf0753e58cdb4977"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/scripts/build-ui-preview.mjs",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "68289a0b95b408b35b0d07581706328b59f431f3cc4588890a3bb945f3cfa9ef",
+      "afterTextSha256": "68289a0b95b408b35b0d07581706328b59f431f3cc4588890a3bb945f3cfa9ef",
+      "acceptedBefore": [
+        {
+          "sha256": "77cf7f9a45fb8f43b5d087029fe6944b1b9580a69a6a0185ffa9f95856c11706",
+          "textSha256": "77cf7f9a45fb8f43b5d087029fe6944b1b9580a69a6a0185ffa9f95856c11706"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/scripts/check-electron-automation.cjs",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "b971f4f79ae56c1a704623196d77265eaf51ea175ce4040eb9c632300ed3554c",
+      "afterTextSha256": "b971f4f79ae56c1a704623196d77265eaf51ea175ce4040eb9c632300ed3554c"
+    },
+    {
+      "path": "apps/03_oddbrain/scripts/check-ui-motion.cjs",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "9e63d673a174ceeb6429c53f3f4ca01cd61b4209b7a4a5a1550e3c1eeb90613e",
+      "afterTextSha256": "9e63d673a174ceeb6429c53f3f4ca01cd61b4209b7a4a5a1550e3c1eeb90613e",
+      "acceptedBefore": [
+        {
+          "sha256": "9e63d673a174ceeb6429c53f3f4ca01cd61b4209b7a4a5a1550e3c1eeb90613e",
+          "textSha256": "9e63d673a174ceeb6429c53f3f4ca01cd61b4209b7a4a5a1550e3c1eeb90613e"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/scripts/check-ui-standalone.cjs",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "abd43d80dc61bdb08b491c50b2a57dd6071e15cd6cafb3e01f9d716266ca40ae",
+      "afterTextSha256": "abd43d80dc61bdb08b491c50b2a57dd6071e15cd6cafb3e01f9d716266ca40ae",
+      "acceptedBefore": [
+        {
+          "sha256": "abd43d80dc61bdb08b491c50b2a57dd6071e15cd6cafb3e01f9d716266ca40ae",
+          "textSha256": "abd43d80dc61bdb08b491c50b2a57dd6071e15cd6cafb3e01f9d716266ca40ae"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/scripts/check-ui-turns.cjs",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "c860a6c7d788473f34e87777460fb5a73b32cf1b26082aeccfbd6f48ca196239",
+      "afterTextSha256": "c860a6c7d788473f34e87777460fb5a73b32cf1b26082aeccfbd6f48ca196239",
+      "acceptedBefore": [
+        {
+          "sha256": "c860a6c7d788473f34e87777460fb5a73b32cf1b26082aeccfbd6f48ca196239",
+          "textSha256": "c860a6c7d788473f34e87777460fb5a73b32cf1b26082aeccfbd6f48ca196239"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/scripts/check-ui.cjs",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "2436713f75dd9d67f97978f321c211c8e1d6692776d952e9bcef81a49208282e",
+      "afterTextSha256": "2436713f75dd9d67f97978f321c211c8e1d6692776d952e9bcef81a49208282e",
+      "acceptedBefore": [
+        {
+          "sha256": "2436713f75dd9d67f97978f321c211c8e1d6692776d952e9bcef81a49208282e",
+          "textSha256": "2436713f75dd9d67f97978f321c211c8e1d6692776d952e9bcef81a49208282e"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/artifacts/ipc.ts",
+      "beforeSha256": "141aacf3604d8130cccb195f2b158feaff0f956822bb70f0986d73b55221bee4",
+      "beforeTextSha256": "141aacf3604d8130cccb195f2b158feaff0f956822bb70f0986d73b55221bee4",
+      "afterSha256": "386f103e52bdae82ee95c36523453396cf1a878a0441243f9781bef1dd9913f2",
+      "afterTextSha256": "386f103e52bdae82ee95c36523453396cf1a878a0441243f9781bef1dd9913f2"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/artifacts/store.ts",
+      "beforeSha256": "370bfbaaeb06733e12b1253cf30a3ea0aeac6b681d5372efb2d2011b29b96ccf",
+      "beforeTextSha256": "370bfbaaeb06733e12b1253cf30a3ea0aeac6b681d5372efb2d2011b29b96ccf",
+      "afterSha256": "d67700d565f8f94615fcd234aad25019e71c62f517ab7381b77485d1615e056c",
+      "afterTextSha256": "d67700d565f8f94615fcd234aad25019e71c62f517ab7381b77485d1615e056c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/automation/inferencePolicy.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "b2b82ad6516e73ac5f98e552469cc34b863d7c2bd4627a91d349874c4d218717",
+      "afterTextSha256": "b2b82ad6516e73ac5f98e552469cc34b863d7c2bd4627a91d349874c4d218717"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/automation/reviewer.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "934b651a1320319dd54b014dc526b443693d81aef896f530c13ca0727b539135",
+      "afterTextSha256": "934b651a1320319dd54b014dc526b443693d81aef896f530c13ca0727b539135"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/automation/service.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "b4936caec20c1174b49875c8024f00dd13d09648560fc276171e147d725c5a7b",
+      "afterTextSha256": "b4936caec20c1174b49875c8024f00dd13d09648560fc276171e147d725c5a7b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/checkpoints.ts",
+      "beforeSha256": "d5ab605ffc1fdde64570764ab341c2275a47ef3f01bffccf2eb07856f8727f76",
+      "beforeTextSha256": "d5ab605ffc1fdde64570764ab341c2275a47ef3f01bffccf2eb07856f8727f76",
+      "afterSha256": "d95585df3e286ee6e60aea036669e9799477b1816614f0db5b098bfc1daa65ec",
+      "afterTextSha256": "d95585df3e286ee6e60aea036669e9799477b1816614f0db5b098bfc1daa65ec"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/claudeCode.ts",
+      "beforeSha256": "a963b9b38505552712bfdafb68dafbd81a32f4283be0c935591457bc54535653",
+      "beforeTextSha256": "a963b9b38505552712bfdafb68dafbd81a32f4283be0c935591457bc54535653",
+      "afterSha256": "a8eea684e2b17f82110cda8728f2d79189d1191f02c7b5aca7df577a30ac693d",
+      "afterTextSha256": "a8eea684e2b17f82110cda8728f2d79189d1191f02c7b5aca7df577a30ac693d"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/houseRulesDeploy.ts",
+      "beforeSha256": "b90c7950b9c42d363351c6c1eaf4a063dfb04235a7a6a43756f57a7c2d5bd38d",
+      "beforeTextSha256": "b90c7950b9c42d363351c6c1eaf4a063dfb04235a7a6a43756f57a7c2d5bd38d",
+      "afterSha256": "b126e1a594ce47c121b8fb66a35b3ff415cc459b2f38d23a1cb933ddc8ae9dbd",
+      "afterTextSha256": "b126e1a594ce47c121b8fb66a35b3ff415cc459b2f38d23a1cb933ddc8ae9dbd"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/socket.ts",
+      "beforeSha256": "7bfa0f1c38e7d954f629890bf89c2e9fb60efa798ef8a1ebbe0980afca509c71",
+      "beforeTextSha256": "7bfa0f1c38e7d954f629890bf89c2e9fb60efa798ef8a1ebbe0980afca509c71",
+      "afterSha256": "293f38c33314d1c2669dc4f2df7802f52618c2544b7a8f00386fa34d42344e22",
+      "afterTextSha256": "293f38c33314d1c2669dc4f2df7802f52618c2544b7a8f00386fa34d42344e22"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/index.ts",
+      "beforeSha256": "c19c89f2541721c3a072b1ea4eea0fd8217c8193f1c34e912d0049b9b9623114",
+      "beforeTextSha256": "c19c89f2541721c3a072b1ea4eea0fd8217c8193f1c34e912d0049b9b9623114",
+      "afterSha256": "dbdee7d21854ac569380c7582c1af415576c6c038aaff8993f8753ddeeda2946",
+      "afterTextSha256": "dbdee7d21854ac569380c7582c1af415576c6c038aaff8993f8753ddeeda2946",
+      "acceptedBefore": [
+        {
+          "sha256": "dffd9270abfa9fbb0f12026a1d6365410e8f47f91670cd8dac32c8090bbdbf56",
+          "textSha256": "dffd9270abfa9fbb0f12026a1d6365410e8f47f91670cd8dac32c8090bbdbf56"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/memoryFiles.ts",
+      "beforeSha256": "f07a6cadb807e8ba4d208eb2a9637580bcb9a7c9c741222fe93125dadd55be8c",
+      "beforeTextSha256": "f07a6cadb807e8ba4d208eb2a9637580bcb9a7c9c741222fe93125dadd55be8c",
+      "afterSha256": "27e788f610ea4eb7f18f1464ce6004a891d2406fbd598644c2e8da8b92bd6290",
+      "afterTextSha256": "27e788f610ea4eb7f18f1464ce6004a891d2406fbd598644c2e8da8b92bd6290"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/settings.ts",
+      "beforeSha256": "ca60bba95b3acdcb802e45435231c9d5002ac54092ab76e6a43806d8e66e47d0",
+      "beforeTextSha256": "ca60bba95b3acdcb802e45435231c9d5002ac54092ab76e6a43806d8e66e47d0",
+      "afterSha256": "a728b7eb66389d9a47d3aaf8ed5c3908053137c53c4cbe9529d8f4adb18f123d",
+      "afterTextSha256": "a728b7eb66389d9a47d3aaf8ed5c3908053137c53c4cbe9529d8f4adb18f123d"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/uiLaunch.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "69ca29a882c4d8fa6c15a26073b8195c09da2e99364e4d552b87ce0c63878d6d",
+      "afterTextSha256": "69ca29a882c4d8fa6c15a26073b8195c09da2e99364e4d552b87ce0c63878d6d",
+      "acceptedBefore": [
+        {
+          "sha256": "69ca29a882c4d8fa6c15a26073b8195c09da2e99364e4d552b87ce0c63878d6d",
+          "textSha256": "69ca29a882c4d8fa6c15a26073b8195c09da2e99364e4d552b87ce0c63878d6d"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/uiPreview.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "ba705f854bc622a8cdc3b8a5eef8820f61c26c3c3779ee5ac8889bcf3fc6f369",
+      "afterTextSha256": "ba705f854bc622a8cdc3b8a5eef8820f61c26c3c3779ee5ac8889bcf3fc6f369",
+      "acceptedBefore": [
+        {
+          "sha256": "ba705f854bc622a8cdc3b8a5eef8820f61c26c3c3779ee5ac8889bcf3fc6f369",
+          "textSha256": "ba705f854bc622a8cdc3b8a5eef8820f61c26c3c3779ee5ac8889bcf3fc6f369"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/preload/index.ts",
+      "beforeSha256": "44979ab5c9c0376be63f650210fe4419db8e7969c420ebe254db0c83f69d6874",
+      "beforeTextSha256": "44979ab5c9c0376be63f650210fe4419db8e7969c420ebe254db0c83f69d6874",
+      "afterSha256": "387d9ff7343336cc14e0219e27288f421418c76eb556e43dc77cb67a5b890837",
+      "afterTextSha256": "387d9ff7343336cc14e0219e27288f421418c76eb556e43dc77cb67a5b890837",
+      "acceptedBefore": [
+        {
+          "sha256": "7202ffe6094acaa922cbea9a7c2361a231acdba4a28489000286a2fbc08de960",
+          "textSha256": "7202ffe6094acaa922cbea9a7c2361a231acdba4a28489000286a2fbc08de960"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/App.tsx",
+      "beforeSha256": "8d4c8263b1926157b82b529bf052ec92f402ed022da5d3a45915ba3a732ae973",
+      "beforeTextSha256": "8d4c8263b1926157b82b529bf052ec92f402ed022da5d3a45915ba3a732ae973",
+      "afterSha256": "30f021ee0fa27643634e3ce96603d5689fcecc091ce1b2e162900bca3b10fc10",
+      "afterTextSha256": "30f021ee0fa27643634e3ce96603d5689fcecc091ce1b2e162900bca3b10fc10",
+      "acceptedBefore": [
+        {
+          "sha256": "3c06231bd01eed439321b9a1e0acb282007ad4f75960e4e3877c4743e7224bcc",
+          "textSha256": "3c06231bd01eed439321b9a1e0acb282007ad4f75960e4e3877c4743e7224bcc"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/wordmark.svg",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "5bb51d260257ee66c8486f597a94ad3313dea44ea1ed3a00c021dfdc4ecfccad",
+      "afterTextSha256": "5bb51d260257ee66c8486f597a94ad3313dea44ea1ed3a00c021dfdc4ecfccad",
+      "acceptedBefore": [
+        {
+          "sha256": "5bb51d260257ee66c8486f597a94ad3313dea44ea1ed3a00c021dfdc4ecfccad",
+          "textSha256": "5bb51d260257ee66c8486f597a94ad3313dea44ea1ed3a00c021dfdc4ecfccad"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/AppNav.tsx",
+      "beforeSha256": "73bfba18f2dae865e4f5a5e9583dd026933782fc12a268465407669f3ea70b00",
+      "beforeTextSha256": "73bfba18f2dae865e4f5a5e9583dd026933782fc12a268465407669f3ea70b00",
+      "afterSha256": "4cb2be166251fd49933c005890692a2d60bf85e0adb0ee2717461a2d8a078ff4",
+      "afterTextSha256": "4cb2be166251fd49933c005890692a2d60bf85e0adb0ee2717461a2d8a078ff4",
+      "acceptedBefore": [
+        {
+          "sha256": "4cb2be166251fd49933c005890692a2d60bf85e0adb0ee2717461a2d8a078ff4",
+          "textSha256": "4cb2be166251fd49933c005890692a2d60bf85e0adb0ee2717461a2d8a078ff4"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/ArtifactsView.tsx",
+      "beforeSha256": "22c093aa96c30afcc30bf425709c908d6745150d797dfb3458be18dea7c12f6a",
+      "beforeTextSha256": "22c093aa96c30afcc30bf425709c908d6745150d797dfb3458be18dea7c12f6a",
+      "afterSha256": "86058e33978ee0c168b3e9916faafa6e9c313b6eca8d69286f79607300f39cff",
+      "afterTextSha256": "86058e33978ee0c168b3e9916faafa6e9c313b6eca8d69286f79607300f39cff",
+      "acceptedBefore": [
+        {
+          "sha256": "f1e8a8d0b96c82ea649f401a253cc377a75b9363250b5126cfcc2c687ef7528c",
+          "textSha256": "f1e8a8d0b96c82ea649f401a253cc377a75b9363250b5126cfcc2c687ef7528c"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/ChatView.tsx",
+      "beforeSha256": "d0aeb901ddf0ebe08fd95e3da3c537df171f71287ee8dcc39cef41fe365f1581",
+      "beforeTextSha256": "d0aeb901ddf0ebe08fd95e3da3c537df171f71287ee8dcc39cef41fe365f1581",
+      "afterSha256": "99a48b7e7543173adb4b9a6dc54a74a07cf2402221820771e55383eb9166a216",
+      "afterTextSha256": "99a48b7e7543173adb4b9a6dc54a74a07cf2402221820771e55383eb9166a216",
+      "acceptedBefore": [
+        {
+          "sha256": "d218115a4cdc8ed8560df12e2c1710c5cf35ba18b194d16f5dbaa85176f8aa97",
+          "textSha256": "d218115a4cdc8ed8560df12e2c1710c5cf35ba18b194d16f5dbaa85176f8aa97"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/Composer.tsx",
+      "beforeSha256": "5ee753abb5ceb90eb51ab5f9d2e87c450986b5e5ce944736a57ab02ce9d49fc5",
+      "beforeTextSha256": "5ee753abb5ceb90eb51ab5f9d2e87c450986b5e5ce944736a57ab02ce9d49fc5",
+      "afterSha256": "4a4967759fef946faa693068258329b6493584e4514ef5d405aafdf54d4a4337",
+      "afterTextSha256": "4a4967759fef946faa693068258329b6493584e4514ef5d405aafdf54d4a4337",
+      "acceptedBefore": [
+        {
+          "sha256": "33171bd624af2cadbd1ce1a9a9d268f92420db3ff6497b66f5d0f99f48efb7b0",
+          "textSha256": "33171bd624af2cadbd1ce1a9a9d268f92420db3ff6497b66f5d0f99f48efb7b0"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/EnginePanel.tsx",
+      "beforeSha256": "f20e89da1b44ec10986439335db32149a3d9c34b98f395f9ec0e9b0f39908dce",
+      "beforeTextSha256": "f20e89da1b44ec10986439335db32149a3d9c34b98f395f9ec0e9b0f39908dce",
+      "afterSha256": "a91b443d9040edff4ca06be635c61724996636b4e2775e3318346e5e24996f76",
+      "afterTextSha256": "a91b443d9040edff4ca06be635c61724996636b4e2775e3318346e5e24996f76",
+      "acceptedBefore": [
+        {
+          "sha256": "eab23407a31a2a863ec7451ae51f31b9c09c39938f44548a38293cd72c59a5bb",
+          "textSha256": "eab23407a31a2a863ec7451ae51f31b9c09c39938f44548a38293cd72c59a5bb"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/HouseRulesSection.tsx",
+      "beforeSha256": "02f9c4383546c5561ed91f429209efe2b30389712cab1ba5b573e2baba96abd1",
+      "beforeTextSha256": "02f9c4383546c5561ed91f429209efe2b30389712cab1ba5b573e2baba96abd1",
+      "afterSha256": "9aab5fb5a97094d1bce2e528f9c24ac9a404e7fb66f4b6603dc07a237886d371",
+      "afterTextSha256": "9aab5fb5a97094d1bce2e528f9c24ac9a404e7fb66f4b6603dc07a237886d371"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/MemoryMap.tsx",
+      "beforeSha256": "354e919391fad6d1514ebcf96448917e7f66c87d7029b961716ea0be6f51be04",
+      "beforeTextSha256": "354e919391fad6d1514ebcf96448917e7f66c87d7029b961716ea0be6f51be04",
+      "afterSha256": "56dcb8b9b5e22ab35b68c4d8b064255462d2f760d87cd2d78a3f5753f68cc9cb",
+      "afterTextSha256": "56dcb8b9b5e22ab35b68c4d8b064255462d2f760d87cd2d78a3f5753f68cc9cb",
+      "acceptedBefore": [
+        {
+          "sha256": "59c27f6fb4c9cb4705fcdc9758786080f4d1c48c197e62cf646799b9565cb5b3",
+          "textSha256": "59c27f6fb4c9cb4705fcdc9758786080f4d1c48c197e62cf646799b9565cb5b3"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/MemorySection.tsx",
+      "beforeSha256": "30c65c427e23008cec7a2674851e5526dbab5c6edae74c4792687f946d517f00",
+      "beforeTextSha256": "30c65c427e23008cec7a2674851e5526dbab5c6edae74c4792687f946d517f00",
+      "afterSha256": "9ef1f6b99298b4bb3236727cf54c1b31f1c942371069c5e17169b7338dbef083",
+      "afterTextSha256": "9ef1f6b99298b4bb3236727cf54c1b31f1c942371069c5e17169b7338dbef083"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/MessageRow.tsx",
+      "beforeSha256": "5c1c577b56624b3a4b392f3f209d99e7d79e26c23267b39871829597138a1c0e",
+      "beforeTextSha256": "5c1c577b56624b3a4b392f3f209d99e7d79e26c23267b39871829597138a1c0e",
+      "afterSha256": "1b22107f2577bc1bd12b21d5e2cdcec02a687c2c6982447f437fdaba4dde0e12",
+      "afterTextSha256": "1b22107f2577bc1bd12b21d5e2cdcec02a687c2c6982447f437fdaba4dde0e12",
+      "acceptedBefore": [
+        {
+          "sha256": "35d850c6cb4bd0d80829142a675604dd2fbeb9fb5c50c366a910c858186526d6",
+          "textSha256": "35d850c6cb4bd0d80829142a675604dd2fbeb9fb5c50c366a910c858186526d6"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/ProjectsView.tsx",
+      "beforeSha256": "daeaa54dc7fb30eb1685109f19f1201e440d5b4441a22eb2a393899f872e2861",
+      "beforeTextSha256": "daeaa54dc7fb30eb1685109f19f1201e440d5b4441a22eb2a393899f872e2861",
+      "afterSha256": "96180dfce1711743787157e2bc62c635f6e239cadbadfa84d8388d16544a8bd6",
+      "afterTextSha256": "96180dfce1711743787157e2bc62c635f6e239cadbadfa84d8388d16544a8bd6",
+      "acceptedBefore": [
+        {
+          "sha256": "18d61753f76e8687822fde7de9f04e28e3161bfd7d8f6d41ce0a26ca596da148",
+          "textSha256": "18d61753f76e8687822fde7de9f04e28e3161bfd7d8f6d41ce0a26ca596da148"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/SettingsView.tsx",
+      "beforeSha256": "0c4e9e1bd27f1a9579bfc98dde0acc249770906ed46745856752bd8430893cd9",
+      "beforeTextSha256": "0c4e9e1bd27f1a9579bfc98dde0acc249770906ed46745856752bd8430893cd9",
+      "afterSha256": "0d2f224b22ff342b45a803e2f0db095917fd63f57e802bd0dcbed61e804d238e",
+      "afterTextSha256": "0d2f224b22ff342b45a803e2f0db095917fd63f57e802bd0dcbed61e804d238e",
+      "acceptedBefore": [
+        {
+          "sha256": "a3f19bbc7a9afa51f4eac0664daeeb831f14f46388399bbe01451eb477a1444b",
+          "textSha256": "a3f19bbc7a9afa51f4eac0664daeeb831f14f46388399bbe01451eb477a1444b"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/Sidebar.tsx",
+      "beforeSha256": "e10bc014725844fc892c9a90bd0a38142b2044ab9c783e02f5d7a36d34d0f84c",
+      "beforeTextSha256": "e10bc014725844fc892c9a90bd0a38142b2044ab9c783e02f5d7a36d34d0f84c",
+      "afterSha256": "e5d4d59f7e186465ca35b6273e43dcd608a839c5ec95c63d8df6be2e269a81f6",
+      "afterTextSha256": "e5d4d59f7e186465ca35b6273e43dcd608a839c5ec95c63d8df6be2e269a81f6",
+      "acceptedBefore": [
+        {
+          "sha256": "e5d4d59f7e186465ca35b6273e43dcd608a839c5ec95c63d8df6be2e269a81f6",
+          "textSha256": "e5d4d59f7e186465ca35b6273e43dcd608a839c5ec95c63d8df6be2e269a81f6"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/TitleBar.tsx",
+      "beforeSha256": "5da47e4c506e83da48faece77f66a498eaf068189d7aafc91eb4a50ac19472ed",
+      "beforeTextSha256": "5da47e4c506e83da48faece77f66a498eaf068189d7aafc91eb4a50ac19472ed",
+      "afterSha256": "ac1b799fe69b720b35086d93250c16ff6c78c8c4c2317b049fb5d4f0780bfa79",
+      "afterTextSha256": "ac1b799fe69b720b35086d93250c16ff6c78c8c4c2317b049fb5d4f0780bfa79",
+      "acceptedBefore": [
+        {
+          "sha256": "ac1b799fe69b720b35086d93250c16ff6c78c8c4c2317b049fb5d4f0780bfa79",
+          "textSha256": "ac1b799fe69b720b35086d93250c16ff6c78c8c4c2317b049fb5d4f0780bfa79"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/TodayView.tsx",
+      "beforeSha256": "d261bdcef2838da279e2c2295328bb0cb943d42a6b3b3cb29e670a8f39a9f4e2",
+      "beforeTextSha256": "d261bdcef2838da279e2c2295328bb0cb943d42a6b3b3cb29e670a8f39a9f4e2",
+      "afterSha256": "3eb07aa174bd5c494a18bee95d6e17d0750f95cbcf370ca26efa682372f55a20",
+      "afterTextSha256": "3eb07aa174bd5c494a18bee95d6e17d0750f95cbcf370ca26efa682372f55a20",
+      "acceptedBefore": [
+        {
+          "sha256": "3eb07aa174bd5c494a18bee95d6e17d0750f95cbcf370ca26efa682372f55a20",
+          "textSha256": "3eb07aa174bd5c494a18bee95d6e17d0750f95cbcf370ca26efa682372f55a20"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/WatchSection.tsx",
+      "beforeSha256": "cea7afadae7c90d633ebb650784ecfc08c1b17240c64696d9ceae91acf45f669",
+      "beforeTextSha256": "cea7afadae7c90d633ebb650784ecfc08c1b17240c64696d9ceae91acf45f669",
+      "afterSha256": "dc6629e3a9ef1d49f25f204fbaa6167a2ded4276d18538563d69a5c7be38692b",
+      "afterTextSha256": "dc6629e3a9ef1d49f25f204fbaa6167a2ded4276d18538563d69a5c7be38692b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/main.tsx",
+      "beforeSha256": "9512c0a5a40fcf9a25e03b9099c7816655559e85a53be858fb36abb7181b2bdd",
+      "beforeTextSha256": "9512c0a5a40fcf9a25e03b9099c7816655559e85a53be858fb36abb7181b2bdd",
+      "afterSha256": "3c0d31c881ad212a3ee79b1465dd5736c241cc38ff6aa374b016e0903966ebb7",
+      "afterTextSha256": "3c0d31c881ad212a3ee79b1465dd5736c241cc38ff6aa374b016e0903966ebb7",
+      "acceptedBefore": [
+        {
+          "sha256": "3c0d31c881ad212a3ee79b1465dd5736c241cc38ff6aa374b016e0903966ebb7",
+          "textSha256": "3c0d31c881ad212a3ee79b1465dd5736c241cc38ff6aa374b016e0903966ebb7"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/motion/Mascot.tsx",
+      "beforeSha256": "c7c0e4f2b69ed437e67dabb5a27feb65e1d0984f5811bcab8bc4e058625e9b0c",
+      "beforeTextSha256": "c7c0e4f2b69ed437e67dabb5a27feb65e1d0984f5811bcab8bc4e058625e9b0c",
+      "afterSha256": "ef9833c5f9dbb4a4217a30f30f8c2ae11e4a7948626f89e799f4d0e49c1f9247",
+      "afterTextSha256": "ef9833c5f9dbb4a4217a30f30f8c2ae11e4a7948626f89e799f4d0e49c1f9247",
+      "acceptedBefore": [
+        {
+          "sha256": "ef9833c5f9dbb4a4217a30f30f8c2ae11e4a7948626f89e799f4d0e49c1f9247",
+          "textSha256": "ef9833c5f9dbb4a4217a30f30f8c2ae11e4a7948626f89e799f4d0e49c1f9247"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/motion/motionMode.ts",
+      "beforeSha256": "815f6fe7b4380b2b629c32770fc079d10c231af5cc110de70b2622d6f77e1374",
+      "beforeTextSha256": "815f6fe7b4380b2b629c32770fc079d10c231af5cc110de70b2622d6f77e1374",
+      "afterSha256": "4b049d38b11ff7dd1c0e852494d40f09670138726e0240ec25d3a012a0f3eac5",
+      "afterTextSha256": "4b049d38b11ff7dd1c0e852494d40f09670138726e0240ec25d3a012a0f3eac5",
+      "acceptedBefore": [
+        {
+          "sha256": "4b049d38b11ff7dd1c0e852494d40f09670138726e0240ec25d3a012a0f3eac5",
+          "textSha256": "4b049d38b11ff7dd1c0e852494d40f09670138726e0240ec25d3a012a0f3eac5"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/platform/bridge.ts",
+      "beforeSha256": "9a39b6b4545aaa1ce13053bad054647530abc0e3f68facf23f76723e1f10dbc3",
+      "beforeTextSha256": "9a39b6b4545aaa1ce13053bad054647530abc0e3f68facf23f76723e1f10dbc3",
+      "afterSha256": "881e088bea8b28e13c051261ec6107f8b11dcb3d209b62c33e00b5265fc87078",
+      "afterTextSha256": "881e088bea8b28e13c051261ec6107f8b11dcb3d209b62c33e00b5265fc87078",
+      "acceptedBefore": [
+        {
+          "sha256": "7c591401b1d649b0fe71a2db92c65bc36f333294e63a3920c1d86c0f689c624a",
+          "textSha256": "7c591401b1d649b0fe71a2db92c65bc36f333294e63a3920c1d86c0f689c624a"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/appearance.ts",
+      "beforeSha256": "c4a14d71383dd0f4f72b768ab15c990105cc83523975b301aa3966c9ab7c9936",
+      "beforeTextSha256": "c4a14d71383dd0f4f72b768ab15c990105cc83523975b301aa3966c9ab7c9936",
+      "afterSha256": "ef333582cab29044ad1d0de342d0e1d33e69ac63138138a9c300be6485b5af45",
+      "afterTextSha256": "ef333582cab29044ad1d0de342d0e1d33e69ac63138138a9c300be6485b5af45",
+      "acceptedBefore": [
+        {
+          "sha256": "ef333582cab29044ad1d0de342d0e1d33e69ac63138138a9c300be6485b5af45",
+          "textSha256": "ef333582cab29044ad1d0de342d0e1d33e69ac63138138a9c300be6485b5af45"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/automation.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "b5b3a60a5e151ee95337b5ecc5efa0823d5681965ffa52b0a8970d9b67358577",
+      "afterTextSha256": "b5b3a60a5e151ee95337b5ecc5efa0823d5681965ffa52b0a8970d9b67358577"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/compact.ts",
+      "beforeSha256": "a86cfcf62c34694fbd9fdb51cc7af8a46d297ca1388b6f72d1b411569b153351",
+      "beforeTextSha256": "a86cfcf62c34694fbd9fdb51cc7af8a46d297ca1388b6f72d1b411569b153351",
+      "afterSha256": "45950d32db1aa44e8ccbdd02475a3bbf157db3423c1dd3db6021917d59ffef0b",
+      "afterTextSha256": "45950d32db1aa44e8ccbdd02475a3bbf157db3423c1dd3db6021917d59ffef0b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/look.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "b43e56d2eae81aed761d974ab30123ee4747aac8d19553cdd99bed68440ffc84",
+      "afterTextSha256": "b43e56d2eae81aed761d974ab30123ee4747aac8d19553cdd99bed68440ffc84",
+      "acceptedBefore": [
+        {
+          "sha256": "aa093d8efde838af9217b467ca8b328f02efe3631ec3825902f08ca74ce3669f",
+          "textSha256": "aa093d8efde838af9217b467ca8b328f02efe3631ec3825902f08ca74ce3669f"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/lookLab.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "3cf87c676148c4e5bac0ee16f889f67324537180ab178bd14584bc9ae7ec6c83",
+      "afterTextSha256": "3cf87c676148c4e5bac0ee16f889f67324537180ab178bd14584bc9ae7ec6c83",
+      "acceptedBefore": [
+        {
+          "sha256": "3cf87c676148c4e5bac0ee16f889f67324537180ab178bd14584bc9ae7ec6c83",
+          "textSha256": "3cf87c676148c4e5bac0ee16f889f67324537180ab178bd14584bc9ae7ec6c83"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/memory.ts",
+      "beforeSha256": "91af746f0afa5dc7df00188799e0d4185b0f0e50719c677ffc9d55319fa4b256",
+      "beforeTextSha256": "91af746f0afa5dc7df00188799e0d4185b0f0e50719c677ffc9d55319fa4b256",
+      "afterSha256": "c4c0cd6c49426ff9cd76a022a4e2b403a70e9dcef09eb122b60c747d0c3f837f",
+      "afterTextSha256": "c4c0cd6c49426ff9cd76a022a4e2b403a70e9dcef09eb122b60c747d0c3f837f"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/quickPreference.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "27f8e4c215b79cd7e8596d9481b4b8ea4784e4951aefdec0f8d7fcdcd4ca3679",
+      "afterTextSha256": "27f8e4c215b79cd7e8596d9481b4b8ea4784e4951aefdec0f8d7fcdcd4ca3679",
+      "acceptedBefore": [
+        {
+          "sha256": "27f8e4c215b79cd7e8596d9481b4b8ea4784e4951aefdec0f8d7fcdcd4ca3679",
+          "textSha256": "27f8e4c215b79cd7e8596d9481b4b8ea4784e4951aefdec0f8d7fcdcd4ca3679"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/review.ts",
+      "beforeSha256": "fc27b7a9da9ae29371a668b8e1fc4256a3cfe25339b44587804c7ca092e718fa",
+      "beforeTextSha256": "fc27b7a9da9ae29371a668b8e1fc4256a3cfe25339b44587804c7ca092e718fa",
+      "afterSha256": "35ada8578695e621509de76e6bd519d26634dd395a893b2eadade90c6d7b80cf",
+      "afterTextSha256": "35ada8578695e621509de76e6bd519d26634dd395a893b2eadade90c6d7b80cf"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/watch.ts",
+      "beforeSha256": "51e3a23f9c8b994dcb6ab429d7363a439a9a9d4e2dae8aba0a780b9c755bf27e",
+      "beforeTextSha256": "51e3a23f9c8b994dcb6ab429d7363a439a9a9d4e2dae8aba0a780b9c755bf27e",
+      "afterSha256": "ec2f4aab88be75e8adac37dc02bb919b706d930547bd3b57ddf8efe5d5bd73b3",
+      "afterTextSha256": "ec2f4aab88be75e8adac37dc02bb919b706d930547bd3b57ddf8efe5d5bd73b3",
+      "acceptedBefore": [
+        {
+          "sha256": "ec2f4aab88be75e8adac37dc02bb919b706d930547bd3b57ddf8efe5d5bd73b3",
+          "textSha256": "ec2f4aab88be75e8adac37dc02bb919b706d930547bd3b57ddf8efe5d5bd73b3"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/styles/desktop.css",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "4a17898935d91d03de537238023609814698bb466d4527653489cb39e714342c",
+      "afterTextSha256": "4a17898935d91d03de537238023609814698bb466d4527653489cb39e714342c",
+      "acceptedBefore": [
+        {
+          "sha256": "52a8767b998986a567e2d01190de1a036f0385ac0a8e8b8fce84d73d46603524",
+          "textSha256": "52a8767b998986a567e2d01190de1a036f0385ac0a8e8b8fce84d73d46603524"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/AppBoundary.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "9a064c6ff20dd0df698dc36eabb22f2920209f2c72883cdb316b0943f9fa4f4e",
+      "afterTextSha256": "9a064c6ff20dd0df698dc36eabb22f2920209f2c72883cdb316b0943f9fa4f4e",
+      "acceptedBefore": [
+        {
+          "sha256": "9a064c6ff20dd0df698dc36eabb22f2920209f2c72883cdb316b0943f9fa4f4e",
+          "textSha256": "9a064c6ff20dd0df698dc36eabb22f2920209f2c72883cdb316b0943f9fa4f4e"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/AppearancePanel.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "af4b3cb12d0b01a7d61332d1e0f5cd0cedffdc9474d8a7fb9fd84fc95efc86c5",
+      "afterTextSha256": "af4b3cb12d0b01a7d61332d1e0f5cd0cedffdc9474d8a7fb9fd84fc95efc86c5",
+      "acceptedBefore": [
+        {
+          "sha256": "2618241a6797462a69e4c826ccc1659009bf4a15c2ddd9d5516c758ece5e7e6f",
+          "textSha256": "2618241a6797462a69e4c826ccc1659009bf4a15c2ddd9d5516c758ece5e7e6f"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/AppearancePreview.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "c3fd3bce52145b53bea4867741677c77ffdc45c3a210190aa9d68f3b4f2498c4",
+      "afterTextSha256": "c3fd3bce52145b53bea4867741677c77ffdc45c3a210190aa9d68f3b4f2498c4",
+      "acceptedBefore": [
+        {
+          "sha256": "c3fd3bce52145b53bea4867741677c77ffdc45c3a210190aa9d68f3b4f2498c4",
+          "textSha256": "c3fd3bce52145b53bea4867741677c77ffdc45c3a210190aa9d68f3b4f2498c4"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/AutomationControls.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "738e183ab613a6a13875e3035232925ce08c098e3659e83bc5d2cecc7cf2ad18",
+      "afterTextSha256": "738e183ab613a6a13875e3035232925ce08c098e3659e83bc5d2cecc7cf2ad18"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/BriefContext.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "367211111eefe62a737a80a839040dd01e69f26920d2338e9505a9a3ef90a71a",
+      "afterTextSha256": "367211111eefe62a737a80a839040dd01e69f26920d2338e9505a9a3ef90a71a"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/ChatHome.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "077d37600d66b7ba98236461ead869191d90f600efacc75ed3d8b3dfab64ac51",
+      "afterTextSha256": "077d37600d66b7ba98236461ead869191d90f600efacc75ed3d8b3dfab64ac51",
+      "acceptedBefore": [
+        {
+          "sha256": "077d37600d66b7ba98236461ead869191d90f600efacc75ed3d8b3dfab64ac51",
+          "textSha256": "077d37600d66b7ba98236461ead869191d90f600efacc75ed3d8b3dfab64ac51"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/ComposerSurface.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "a023b2ef16ea7007a51f9e2ca9e15f52e7ba438e6367f07db4f9fd4088854674",
+      "afterTextSha256": "a023b2ef16ea7007a51f9e2ca9e15f52e7ba438e6367f07db4f9fd4088854674",
+      "acceptedBefore": [
+        {
+          "sha256": "a023b2ef16ea7007a51f9e2ca9e15f52e7ba438e6367f07db4f9fd4088854674",
+          "textSha256": "a023b2ef16ea7007a51f9e2ca9e15f52e7ba438e6367f07db4f9fd4088854674"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/CopyText.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "04752011335c4d3db60dc93d70c1a11436c4dfd1a81e910ec96d34f15943c27d",
+      "afterTextSha256": "04752011335c4d3db60dc93d70c1a11436c4dfd1a81e910ec96d34f15943c27d"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/DesktopShell.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "5956be49667c491ea2ea5226dfb8cc9de5b63b5add940b2f7efc0e030a6d2b0f",
+      "afterTextSha256": "5956be49667c491ea2ea5226dfb8cc9de5b63b5add940b2f7efc0e030a6d2b0f",
+      "acceptedBefore": [
+        {
+          "sha256": "5956be49667c491ea2ea5226dfb8cc9de5b63b5add940b2f7efc0e030a6d2b0f",
+          "textSha256": "5956be49667c491ea2ea5226dfb8cc9de5b63b5add940b2f7efc0e030a6d2b0f"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/EngineActivity.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "bde01b51f2de6b75a76d8eaefcca3546482c7590f5f1b5cd7c3dea60071e9440",
+      "afterTextSha256": "bde01b51f2de6b75a76d8eaefcca3546482c7590f5f1b5cd7c3dea60071e9440",
+      "acceptedBefore": [
+        {
+          "sha256": "bde01b51f2de6b75a76d8eaefcca3546482c7590f5f1b5cd7c3dea60071e9440",
+          "textSha256": "bde01b51f2de6b75a76d8eaefcca3546482c7590f5f1b5cd7c3dea60071e9440"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/InteractiveBrain.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "0e74591fe96f1b8e5bc5e35db4e5e33215bd077f95ca54e0d1c78a542f483a42",
+      "afterTextSha256": "0e74591fe96f1b8e5bc5e35db4e5e33215bd077f95ca54e0d1c78a542f483a42",
+      "acceptedBefore": [
+        {
+          "sha256": "0e74591fe96f1b8e5bc5e35db4e5e33215bd077f95ca54e0d1c78a542f483a42",
+          "textSha256": "0e74591fe96f1b8e5bc5e35db4e5e33215bd077f95ca54e0d1c78a542f483a42"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/LaunchOverlay.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "f6afb6c6d21c28c133d78f7431d1dbd62fb2a53da17d9bb98b8d3e4e03a0dab8",
+      "afterTextSha256": "f6afb6c6d21c28c133d78f7431d1dbd62fb2a53da17d9bb98b8d3e4e03a0dab8",
+      "acceptedBefore": [
+        {
+          "sha256": "f6afb6c6d21c28c133d78f7431d1dbd62fb2a53da17d9bb98b8d3e4e03a0dab8",
+          "textSha256": "f6afb6c6d21c28c133d78f7431d1dbd62fb2a53da17d9bb98b8d3e4e03a0dab8"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/LookContext.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "21e0f79767af0e997a88f9a69bd8adfa1da5adf80805feec5fdd8bfa3bfa6378",
+      "afterTextSha256": "21e0f79767af0e997a88f9a69bd8adfa1da5adf80805feec5fdd8bfa3bfa6378",
+      "acceptedBefore": [
+        {
+          "sha256": "21e0f79767af0e997a88f9a69bd8adfa1da5adf80805feec5fdd8bfa3bfa6378",
+          "textSha256": "21e0f79767af0e997a88f9a69bd8adfa1da5adf80805feec5fdd8bfa3bfa6378"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/MotionContext.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "adc27711bbf98dae8943526c1ac1ec9e7bdfc5feac0298091bb7433c5d6bcbd5",
+      "afterTextSha256": "adc27711bbf98dae8943526c1ac1ec9e7bdfc5feac0298091bb7433c5d6bcbd5",
+      "acceptedBefore": [
+        {
+          "sha256": "adc27711bbf98dae8943526c1ac1ec9e7bdfc5feac0298091bb7433c5d6bcbd5",
+          "textSha256": "adc27711bbf98dae8943526c1ac1ec9e7bdfc5feac0298091bb7433c5d6bcbd5"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/ProfileButton.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "8c01b4f4e98dad94008ef82ea1669ab4672e0135acce5e8dd2387c725e383303",
+      "afterTextSha256": "8c01b4f4e98dad94008ef82ea1669ab4672e0135acce5e8dd2387c725e383303",
+      "acceptedBefore": [
+        {
+          "sha256": "8c01b4f4e98dad94008ef82ea1669ab4672e0135acce5e8dd2387c725e383303",
+          "textSha256": "8c01b4f4e98dad94008ef82ea1669ab4672e0135acce5e8dd2387c725e383303"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/TurnJournal.tsx",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "4d8ec9a3d87c988248597bdd8c86ae2874ac9b0b778c8d8ea91df91bd3438135",
+      "afterTextSha256": "4d8ec9a3d87c988248597bdd8c86ae2874ac9b0b778c8d8ea91df91bd3438135",
+      "acceptedBefore": [
+        {
+          "sha256": "ef7402f192f1a3a78958d508e1000bb33bd2b731fff4d729b75baabe9178a216",
+          "textSha256": "ef7402f192f1a3a78958d508e1000bb33bd2b731fff4d729b75baabe9178a216"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/exportPreview.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "732a03c47d1438b5681b5b189921c7ece0701fea315d19575aeb1df01274afbf",
+      "afterTextSha256": "732a03c47d1438b5681b5b189921c7ece0701fea315d19575aeb1df01274afbf",
+      "acceptedBefore": [
+        {
+          "sha256": "732a03c47d1438b5681b5b189921c7ece0701fea315d19575aeb1df01274afbf",
+          "textSha256": "732a03c47d1438b5681b5b189921c7ece0701fea315d19575aeb1df01274afbf"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/focus.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "8b8bbdc483858c523f1a55113c107f039c2cf88ef34a2f1d7a089145fa75622d",
+      "afterTextSha256": "8b8bbdc483858c523f1a55113c107f039c2cf88ef34a2f1d7a089145fa75622d",
+      "acceptedBefore": [
+        {
+          "sha256": "5681fa3778efd26237f08895669193d42a3fbcfd733bcc4c5238e6cd318009cb",
+          "textSha256": "5681fa3778efd26237f08895669193d42a3fbcfd733bcc4c5238e6cd318009cb"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/lookCatalog.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "099f62ee6553728171a979163871ae00f04ad526aa2bfe40c8bbe41dfeb05bbe",
+      "afterTextSha256": "099f62ee6553728171a979163871ae00f04ad526aa2bfe40c8bbe41dfeb05bbe",
+      "acceptedBefore": [
+        {
+          "sha256": "099f62ee6553728171a979163871ae00f04ad526aa2bfe40c8bbe41dfeb05bbe",
+          "textSha256": "099f62ee6553728171a979163871ae00f04ad526aa2bfe40c8bbe41dfeb05bbe"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/ui/sceneCatalog.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "a111a98cbe3668af17d68fa58eb04d6dc733a5e10938d4033f97e9973c86352b",
+      "afterTextSha256": "a111a98cbe3668af17d68fa58eb04d6dc733a5e10938d4033f97e9973c86352b",
+      "acceptedBefore": [
+        {
+          "sha256": "a111a98cbe3668af17d68fa58eb04d6dc733a5e10938d4033f97e9973c86352b",
+          "textSha256": "a111a98cbe3668af17d68fa58eb04d6dc733a5e10938d4033f97e9973c86352b"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/automation.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "56e67ab44ddc085f3b8ccded9e177649a9afefcb5580604e29a49c90b314ef97",
+      "afterTextSha256": "56e67ab44ddc085f3b8ccded9e177649a9afefcb5580604e29a49c90b314ef97"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/houseRules.ts",
+      "beforeSha256": "fb87deb57be87f6bc7c245f3e17aa291cbdd5da02b1f9bbd36b2971cca8898c2",
+      "beforeTextSha256": "fb87deb57be87f6bc7c245f3e17aa291cbdd5da02b1f9bbd36b2971cca8898c2",
+      "afterSha256": "9557f38149341041b4f7e5e598e3aa5091c8f18becd7993e9d5cb4c4735ed124",
+      "afterTextSha256": "9557f38149341041b4f7e5e598e3aa5091c8f18becd7993e9d5cb4c4735ed124"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/memory.ts",
+      "beforeSha256": "1d431cee814456d200de4fb614da2c53c242337fe589dded859fde02a2daae93",
+      "beforeTextSha256": "1d431cee814456d200de4fb614da2c53c242337fe589dded859fde02a2daae93",
+      "afterSha256": "ea9567f02ab4dbce02eb1dfc1e3577476292137380c12233dd3b4bb33cae176d",
+      "afterTextSha256": "ea9567f02ab4dbce02eb1dfc1e3577476292137380c12233dd3b4bb33cae176d"
+    },
+    {
+      "path": "apps/03_oddbrain/tests/accent-contrast.test.ts",
+      "beforeSha256": "a841bea96fe67c49b0b8061eb1770189dfdb91055d47468080cdc19d10a0af41",
+      "beforeTextSha256": "a841bea96fe67c49b0b8061eb1770189dfdb91055d47468080cdc19d10a0af41",
+      "afterSha256": "4f4e6aeb9ff1100660eafa32d1563633a0ab3d032875c3c3b879872d71cf974f",
+      "afterTextSha256": "4f4e6aeb9ff1100660eafa32d1563633a0ab3d032875c3c3b879872d71cf974f",
+      "acceptedBefore": [
+        {
+          "sha256": "4f4e6aeb9ff1100660eafa32d1563633a0ab3d032875c3c3b879872d71cf974f",
+          "textSha256": "4f4e6aeb9ff1100660eafa32d1563633a0ab3d032875c3c3b879872d71cf974f"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/tests/appearance.test.ts",
+      "beforeSha256": "da137f6214efa44546d58b67c4a5ffd756b19855726b4f45ecf1a37982940cf6",
+      "beforeTextSha256": "da137f6214efa44546d58b67c4a5ffd756b19855726b4f45ecf1a37982940cf6",
+      "afterSha256": "fa95bb244c4b5b154ba9716222d84e68d152503cd4efbb970410f175fb0776e9",
+      "afterTextSha256": "fa95bb244c4b5b154ba9716222d84e68d152503cd4efbb970410f175fb0776e9",
+      "acceptedBefore": [
+        {
+          "sha256": "fa95bb244c4b5b154ba9716222d84e68d152503cd4efbb970410f175fb0776e9",
+          "textSha256": "fa95bb244c4b5b154ba9716222d84e68d152503cd4efbb970410f175fb0776e9"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/tests/auto-keep-toggle.test.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "b3ac0d36f29307a19258ca0f2215afd5ce2f666de2469a65c5cd0a870ab9c08d",
+      "afterTextSha256": "b3ac0d36f29307a19258ca0f2215afd5ce2f666de2469a65c5cd0a870ab9c08d"
+    },
+    {
+      "path": "apps/03_oddbrain/tests/automation.test.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "e87b90976bbd97332c11097dc039f55a0352dd8c9a572d12669f26020dddd069",
+      "afterTextSha256": "e87b90976bbd97332c11097dc039f55a0352dd8c9a572d12669f26020dddd069"
+    },
+    {
+      "path": "apps/03_oddbrain/tests/desktop-launch-export.test.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "a81d8c156b83b83bf513518be858bb1761ea8e6c121370fa6afc1dcaa49106a5",
+      "afterTextSha256": "a81d8c156b83b83bf513518be858bb1761ea8e6c121370fa6afc1dcaa49106a5",
+      "acceptedBefore": [
+        {
+          "sha256": "a81d8c156b83b83bf513518be858bb1761ea8e6c121370fa6afc1dcaa49106a5",
+          "textSha256": "a81d8c156b83b83bf513518be858bb1761ea8e6c121370fa6afc1dcaa49106a5"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/tests/desktop-look.test.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "04f453680c6b4f8dc7896ca6579b95f97505c320495ffc18eda19b553e7ccce2",
+      "afterTextSha256": "04f453680c6b4f8dc7896ca6579b95f97505c320495ffc18eda19b553e7ccce2",
+      "acceptedBefore": [
+        {
+          "sha256": "04f453680c6b4f8dc7896ca6579b95f97505c320495ffc18eda19b553e7ccce2",
+          "textSha256": "04f453680c6b4f8dc7896ca6579b95f97505c320495ffc18eda19b553e7ccce2"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/tests/desktop-motion.test.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "e0a60471961d3ff90582cd79dc66e70ee5feb4082eea49a45b1bdf40a55dc4b3",
+      "afterTextSha256": "e0a60471961d3ff90582cd79dc66e70ee5feb4082eea49a45b1bdf40a55dc4b3",
+      "acceptedBefore": [
+        {
+          "sha256": "e0a60471961d3ff90582cd79dc66e70ee5feb4082eea49a45b1bdf40a55dc4b3",
+          "textSha256": "e0a60471961d3ff90582cd79dc66e70ee5feb4082eea49a45b1bdf40a55dc4b3"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/tests/engine-review.test.ts",
+      "beforeSha256": "961bb619165fc4b6f7ad18b3d958a2946b0a1284047d1835179fb50b778b805a",
+      "beforeTextSha256": "961bb619165fc4b6f7ad18b3d958a2946b0a1284047d1835179fb50b778b805a",
+      "afterSha256": "6044047d5a147986361209fbc3819f09ea1f700a822a694ace06f3cce403bb0a",
+      "afterTextSha256": "6044047d5a147986361209fbc3819f09ea1f700a822a694ace06f3cce403bb0a"
+    },
+    {
+      "path": "apps/03_oddbrain/tests/engine.test.ts",
+      "beforeSha256": "20a4fce2f3a433169f56eaf87eab531362ccd41be7d63b030f8579e4ca9fa702",
+      "beforeTextSha256": "20a4fce2f3a433169f56eaf87eab531362ccd41be7d63b030f8579e4ca9fa702",
+      "afterSha256": "e2413a492f37f69d42ed3e93b306afd8dd3d70bae0d7ae9444e1f7cef47a1658",
+      "afterTextSha256": "e2413a492f37f69d42ed3e93b306afd8dd3d70bae0d7ae9444e1f7cef47a1658"
+    },
+    {
+      "path": "apps/03_oddbrain/tests/feature-retention-fixes.test.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "47b9e17ab0eb25d6618e1d2370b6623fa5d7f0478b830e13e05cd002468701c9",
+      "afterTextSha256": "47b9e17ab0eb25d6618e1d2370b6623fa5d7f0478b830e13e05cd002468701c9"
+    },
+    {
+      "path": "apps/03_oddbrain/tests/fixtures/ui-retention.json",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "aecc8e2475ee6746abf5e94bdd5891698f7c47ef6d5b2a137bbbac1f134aa3a9",
+      "afterTextSha256": "aecc8e2475ee6746abf5e94bdd5891698f7c47ef6d5b2a137bbbac1f134aa3a9"
+    },
+    {
+      "path": "apps/03_oddbrain/tests/inference-switch.test.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "aaa21c7739963b5e91d2dcd51ae51544b57130117e72e41d287cb9f24cb7bb8f",
+      "afterTextSha256": "aaa21c7739963b5e91d2dcd51ae51544b57130117e72e41d287cb9f24cb7bb8f"
+    },
+    {
+      "path": "apps/03_oddbrain/tests/retention-inventory.test.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "da4d0e184fa77f81b70cf94b92bca79844a6c22394c2097ea57ae6fb42ab85cb",
+      "afterTextSha256": "da4d0e184fa77f81b70cf94b92bca79844a6c22394c2097ea57ae6fb42ab85cb"
+    },
+    {
+      "path": "apps/03_oddbrain/tests/reviewer-readonly.test.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "7f5262b0a0bb38f30d3df430b640b4609259524b2f77a047b8a941863efecff6",
+      "afterTextSha256": "7f5262b0a0bb38f30d3df430b640b4609259524b2f77a047b8a941863efecff6"
+    },
+    {
+      "path": "apps/03_oddbrain/tests/takes.test.ts",
+      "beforeSha256": "86ffe0588be33560a8e225d2d3627931870ed448aa653b12ada14c4c9a508eac",
+      "beforeTextSha256": "86ffe0588be33560a8e225d2d3627931870ed448aa653b12ada14c4c9a508eac",
+      "afterSha256": "7d4888bc9771841fc12965b7bedb75a44c17d7bc983e209b307bbfadb7427e5c",
+      "afterTextSha256": "7d4888bc9771841fc12965b7bedb75a44c17d7bc983e209b307bbfadb7427e5c",
+      "acceptedBefore": [
+        {
+          "sha256": "7d4888bc9771841fc12965b7bedb75a44c17d7bc983e209b307bbfadb7427e5c",
+          "textSha256": "7d4888bc9771841fc12965b7bedb75a44c17d7bc983e209b307bbfadb7427e5c"
+        }
+      ]
+    },
+    {
+      "path": "apps/03_oddbrain/tests/watch-boundary.test.ts",
+      "beforeSha256": null,
+      "beforeTextSha256": null,
+      "afterSha256": "4ec139efd39f57c47ba56323c56fdee77eeedbf9655ef4620cd757df198b93f1",
+      "afterTextSha256": "4ec139efd39f57c47ba56323c56fdee77eeedbf9655ef4620cd757df198b93f1",
+      "acceptedBefore": [
+        {
+          "sha256": "4ec139efd39f57c47ba56323c56fdee77eeedbf9655ef4620cd757df198b93f1",
+          "textSha256": "4ec139efd39f57c47ba56323c56fdee77eeedbf9655ef4620cd757df198b93f1"
+        }
+      ]
+    }
+  ],
+  "compatibility": [
+    {
+      "path": "apps/03_oddbrain/electron.vite.config.ts",
+      "sha256": "e4fd33e3c327f9c327bd76c671499cd2a83d598c9729e2303c618834d738ebf8",
+      "textSha256": "e4fd33e3c327f9c327bd76c671499cd2a83d598c9729e2303c618834d738ebf8"
+    },
+    {
+      "path": "apps/03_oddbrain/package-lock.json",
+      "sha256": "9521e0825b0164c6e64c87f0efc04c6777ccfc38390f69cd7b519315d09c03f1",
+      "textSha256": "9521e0825b0164c6e64c87f0efc04c6777ccfc38390f69cd7b519315d09c03f1"
+    },
+    {
+      "path": "apps/03_oddbrain/resources/icon.svg",
+      "sha256": "bde15dc3db2beb27ad58c6257b0d0f94e023305509db1e667d14e97c1b6dea29",
+      "textSha256": "bde15dc3db2beb27ad58c6257b0d0f94e023305509db1e667d14e97c1b6dea29"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/api/body.ts",
+      "sha256": "31423d7cc1350740eeb9bab9ee4892d7ee4a56eb8d4407597342bd6a6062a9e8",
+      "textSha256": "31423d7cc1350740eeb9bab9ee4892d7ee4a56eb8d4407597342bd6a6062a9e8"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/api/guard.ts",
+      "sha256": "113922e57f376c52d098dc6b992e5e229b6c8af3b6f3d46d0f9d18ea56daa0fa",
+      "textSha256": "113922e57f376c52d098dc6b992e5e229b6c8af3b6f3d46d0f9d18ea56daa0fa"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/api/server.ts",
+      "sha256": "66a3e4ba040c7ecdc4b428e674cda1f1ff60ff816e020f9623e7a97e8276e449",
+      "textSha256": "66a3e4ba040c7ecdc4b428e674cda1f1ff60ff816e020f9623e7a97e8276e449"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/appFlags.ts",
+      "sha256": "2ddc4345842e081cff50e99f1ba0fa9a618727f63b3d597dc02a7dcb64fb305b",
+      "textSha256": "2ddc4345842e081cff50e99f1ba0fa9a618727f63b3d597dc02a7dcb64fb305b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/cloud/client.ts",
+      "sha256": "32af50c18859871f20b89353d29495fb6bcc61f119e2eaf6dd45a1078c7136af",
+      "textSha256": "32af50c18859871f20b89353d29495fb6bcc61f119e2eaf6dd45a1078c7136af"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/cloud/keys.ts",
+      "sha256": "9e005d6c742e9a2731358dc7b4958a72372a5e25908e0e0c3513156417573d4c",
+      "textSha256": "9e005d6c742e9a2731358dc7b4958a72372a5e25908e0e0c3513156417573d4c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/compact.ts",
+      "sha256": "3ce0ee1bcb17437698338a2ff49f00323978cd6be32c7955730cbb403e662252",
+      "textSha256": "3ce0ee1bcb17437698338a2ff49f00323978cd6be32c7955730cbb403e662252"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/agy.ts",
+      "sha256": "d596032b694915e2837cda7ab399e3628484eeb810f38813ae657b109d40004f",
+      "textSha256": "d596032b694915e2837cda7ab399e3628484eeb810f38813ae657b109d40004f"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/availability.ts",
+      "sha256": "b6b213322bc20cdd8525261b9a5822c3bc382495d037f97c98f8b02186674b98",
+      "textSha256": "b6b213322bc20cdd8525261b9a5822c3bc382495d037f97c98f8b02186674b98"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/deploy.ts",
+      "sha256": "3109e5622c132a7d4813bc27ab3c80ae269a0f2d0cb44e2e2176b1ac00084a7a",
+      "textSha256": "3109e5622c132a7d4813bc27ab3c80ae269a0f2d0cb44e2e2176b1ac00084a7a"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/downloads.ts",
+      "sha256": "d02317c0b1eeeeaebe5c54ab34478db00b202a5786825e8410ecdcc10eeea3ea",
+      "textSha256": "d02317c0b1eeeeaebe5c54ab34478db00b202a5786825e8410ecdcc10eeea3ea"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/enginePath.ts",
+      "sha256": "b2095684474515c8ed9d0bbead7897e78cb32cb91157d2ccf7c3624744e8ca2f",
+      "textSha256": "b2095684474515c8ed9d0bbead7897e78cb32cb91157d2ccf7c3624744e8ca2f"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/exportPack.ts",
+      "sha256": "9ce9f27fb4441539a066ee01b1b54fbf3272cebc026c26a991bb77e030327348",
+      "textSha256": "9ce9f27fb4441539a066ee01b1b54fbf3272cebc026c26a991bb77e030327348"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/packs.ts",
+      "sha256": "1a022ac12ec80f9afb5b1c4eb106582b140947836e27069e9d52bc07b216288d",
+      "textSha256": "1a022ac12ec80f9afb5b1c4eb106582b140947836e27069e9d52bc07b216288d"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/pull.ts",
+      "sha256": "0ba352b9d54fac3243ed42c28cd3b86bd17ebbebcbf444e882b35a7c6a87bb0f",
+      "textSha256": "0ba352b9d54fac3243ed42c28cd3b86bd17ebbebcbf444e882b35a7c6a87bb0f"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/skillCatalogInstall.ts",
+      "sha256": "a39b208ab1093746b68190ef1d20d9eb43275be597a3ba61723d748a2f83e1c6",
+      "textSha256": "a39b208ab1093746b68190ef1d20d9eb43275be597a3ba61723d748a2f83e1c6"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/storeIndex.ts",
+      "sha256": "762bd699828dcba0e2ed928af24d93a35f6ae71a297f61d77ef2923a34a4bb6d",
+      "textSha256": "762bd699828dcba0e2ed928af24d93a35f6ae71a297f61d77ef2923a34a4bb6d"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/stream.ts",
+      "sha256": "ee0ac450fcb3f1749ff17b3326af8a8fbb480d9adf5479dc0aec7b00212745b3",
+      "textSha256": "ee0ac450fcb3f1749ff17b3326af8a8fbb480d9adf5479dc0aec7b00212745b3"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/vaultSkills.ts",
+      "sha256": "637ef6bf19f07379a055e0e59844549bdc3cadfc3ec0a4c79b64c306b110a542",
+      "textSha256": "637ef6bf19f07379a055e0e59844549bdc3cadfc3ec0a4c79b64c306b110a542"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/extension/server.ts",
+      "sha256": "e483e39b8876fb99f81dc674277a270f97ef618e2771b6b98d9fac6bc6285338",
+      "textSha256": "e483e39b8876fb99f81dc674277a270f97ef618e2771b6b98d9fac6bc6285338"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/hooks.ts",
+      "sha256": "5806fdc9ee9a72e4d47bd49ffd51538edf3a495c97c6d567030ca1b55cc97088",
+      "textSha256": "5806fdc9ee9a72e4d47bd49ffd51538edf3a495c97c6d567030ca1b55cc97088"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/ipcGuard.ts",
+      "sha256": "1670e89f597b37aa2f1675efeea89c1a21fe0cadb1bc88fad25648bc6a2f8722",
+      "textSha256": "1670e89f597b37aa2f1675efeea89c1a21fe0cadb1bc88fad25648bc6a2f8722"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/journal.ts",
+      "sha256": "f1af3b1e254f5fdc806247a9d43a7e4287e4652b74d02c9aefa686aec65a6f12",
+      "textSha256": "f1af3b1e254f5fdc806247a9d43a7e4287e4652b74d02c9aefa686aec65a6f12"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/recipes.ts",
+      "sha256": "bc65e3081de99b9c2be845124f1e9440cc106f96b18bfdead4194115a87e1c47",
+      "textSha256": "bc65e3081de99b9c2be845124f1e9440cc106f96b18bfdead4194115a87e1c47"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/repoMap.ts",
+      "sha256": "b26768eb142943cb62806fc3fcfda9325e795c44e21a5100c2701b8e28032831",
+      "textSha256": "b26768eb142943cb62806fc3fcfda9325e795c44e21a5100c2701b8e28032831"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/watcher.ts",
+      "sha256": "888c42853768f692d6b5c03dd6daf4d84254f742db6ba3cdb15193a632178ae5",
+      "textSha256": "888c42853768f692d6b5c03dd6daf4d84254f742db6ba3cdb15193a632178ae5"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/index.html",
+      "sha256": "205559516c82c9dd76a4db8d4d75d8501da5cb63a08f698505db200d34837051",
+      "textSha256": "205559516c82c9dd76a4db8d4d75d8501da5cb63a08f698505db200d34837051"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/public/favicon.svg",
+      "sha256": "bde15dc3db2beb27ad58c6257b0d0f94e023305509db1e667d14e97c1b6dea29",
+      "textSha256": "bde15dc3db2beb27ad58c6257b0d0f94e023305509db1e667d14e97c1b6dea29"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/accordion.svg",
+      "sha256": "809f33d20b30bfd975b15ca86d376d0955ee2c41ddd724c3cd2ed6e164016a53",
+      "textSha256": "809f33d20b30bfd975b15ca86d376d0955ee2c41ddd724c3cd2ed6e164016a53"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/architect.svg",
+      "sha256": "408fff0d238b8d554440bb833cb8a533055a6fe3eff678ca53ee3c867f16c6cd",
+      "textSha256": "408fff0d238b8d554440bb833cb8a533055a6fe3eff678ca53ee3c867f16c6cd"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/assemble.svg",
+      "sha256": "e93cc30337d3475edd15f33cb4dbcb19b5c2b0a2be0fc8b2c7cd3f2bae199a82",
+      "textSha256": "e93cc30337d3475edd15f33cb4dbcb19b5c2b0a2be0fc8b2c7cd3f2bae199a82"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/bake.svg",
+      "sha256": "fd91ea16ca82949739142731db0673c5b77c9def85d89b130006657cfc05c52f",
+      "textSha256": "fd91ea16ca82949739142731db0673c5b77c9def85d89b130006657cfc05c52f"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/balloon-brain.svg",
+      "sha256": "c27f05d1b52cc985d4bc41762b895f5137c61b424c56134cf354fd47e678b559",
+      "textSha256": "c27f05d1b52cc985d4bc41762b895f5137c61b424c56134cf354fd47e678b559"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/bee-bloom.svg",
+      "sha256": "61936dc155bbe8e8356653701cd03b99af13a2891992141660b7e128ac848f35",
+      "textSha256": "61936dc155bbe8e8356653701cd03b99af13a2891992141660b7e128ac848f35"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/belly-laugh.svg",
+      "sha256": "16437d2c50e5ed037f1fa87277324fce342ba7e7099bb0c5b9a03a0cd54e568d",
+      "textSha256": "16437d2c50e5ed037f1fa87277324fce342ba7e7099bb0c5b9a03a0cd54e568d"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/boop.svg",
+      "sha256": "32475b0d4bc5470d4a611ab43f8e0f88fcd289a0b6603b3972d29ad5772d79ae",
+      "textSha256": "32475b0d4bc5470d4a611ab43f8e0f88fcd289a0b6603b3972d29ad5772d79ae"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/brain-kickflip.svg",
+      "sha256": "dea4f2678e30578d78d45ffbc15268227a29245892057b9a932a5503b520af13",
+      "textSha256": "dea4f2678e30578d78d45ffbc15268227a29245892057b9a932a5503b520af13"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/branch-merge.svg",
+      "sha256": "57d076b030b54e82f629d60475a12e9a1f707072db66889c6255ca41d06fce7f",
+      "textSha256": "57d076b030b54e82f629d60475a12e9a1f707072db66889c6255ca41d06fce7f"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/bubbles.svg",
+      "sha256": "101bc04d79328d0022367c20218c2238e4ccce846aabb0cb6dc46c3f05f67f8f",
+      "textSha256": "101bc04d79328d0022367c20218c2238e4ccce846aabb0cb6dc46c3f05f67f8f"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/cancan.svg",
+      "sha256": "58402e9e2f1ac448eca710607d1da681cd93f05704da14433dafcbb92439af51",
+      "textSha256": "58402e9e2f1ac448eca710607d1da681cd93f05704da14433dafcbb92439af51"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/chaos.svg",
+      "sha256": "6aa36ac2929f01f5aba76c34b088451c21cb8aadd1ce79d6ec23b046ebee130a",
+      "textSha256": "6aa36ac2929f01f5aba76c34b088451c21cb8aadd1ce79d6ec23b046ebee130a"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/cheek-drums.svg",
+      "sha256": "14157e96fbf920d8525ac2b3c010216eac995b726efaca939623c87840a375c1",
+      "textSha256": "14157e96fbf920d8525ac2b3c010216eac995b726efaca939623c87840a375c1"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/compute.svg",
+      "sha256": "9104bbf31bf7fc0bca84bbddeb420368fb09e7da9cc9b27fc2883a3d3182a48c",
+      "textSha256": "9104bbf31bf7fc0bca84bbddeb420368fb09e7da9cc9b27fc2883a3d3182a48c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/confetti.svg",
+      "sha256": "4b7756d9ac9e79c5f0ac2e5af2df144f85112276bd4e865bcebf291574132d4a",
+      "textSha256": "4b7756d9ac9e79c5f0ac2e5af2df144f85112276bd4e865bcebf291574132d4a"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/dissolve.svg",
+      "sha256": "55faf98b2de129e54ba414a46bfc8c4f0e755563d9e0d0f5f49f36ea7def5c96",
+      "textSha256": "55faf98b2de129e54ba414a46bfc8c4f0e755563d9e0d0f5f49f36ea7def5c96"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/eye-roll.svg",
+      "sha256": "f22dde11ab01775165ad7f0f231ccf8513e972e0be01f2fba96fd3c8364c1e72",
+      "textSha256": "f22dde11ab01775165ad7f0f231ccf8513e972e0be01f2fba96fd3c8364c1e72"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/flashlight-search.svg",
+      "sha256": "29883d95439712770dcdb5899709eaea8a5bde9f030ad7f9c51c33a5713c2ac1",
+      "textSha256": "29883d95439712770dcdb5899709eaea8a5bde9f030ad7f9c51c33a5713c2ac1"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/float.svg",
+      "sha256": "79cabea3b6376b13afb2d8ca77021dd4c7e4e50239bd138c3a4ad322ca63503a",
+      "textSha256": "79cabea3b6376b13afb2d8ca77021dd4c7e4e50239bd138c3a4ad322ca63503a"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/forge.svg",
+      "sha256": "4a831b14faa0ab32496d2992204bc498f1455df0db741f04eadc12b314c49906",
+      "textSha256": "4a831b14faa0ab32496d2992204bc498f1455df0db741f04eadc12b314c49906"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/glasses-clean.svg",
+      "sha256": "5e1c2126ced3da64824fb1cd25a9d70904229ad8cbe38351f3a0ef31737efa63",
+      "textSha256": "5e1c2126ced3da64824fb1cd25a9d70904229ad8cbe38351f3a0ef31737efa63"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/grow.svg",
+      "sha256": "bb166df18923c6631937f9f9a95f48b8ff65d5d2260d93af5ee4e3f2168b6acc",
+      "textSha256": "bb166df18923c6631937f9f9a95f48b8ff65d5d2260d93af5ee4e3f2168b6acc"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/gust.svg",
+      "sha256": "0a9b3a9cb9729d1756c6946d3af543ee4fb6fa7cffff5e58dccad5e7e1fd67b3",
+      "textSha256": "0a9b3a9cb9729d1756c6946d3af543ee4fb6fa7cffff5e58dccad5e7e1fd67b3"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/hammock.svg",
+      "sha256": "c68224bb63f5b310b058dd69a3cbc3ddbda3985ddb38cc2a8c872ce5d7ff9b90",
+      "textSha256": "c68224bb63f5b310b058dd69a3cbc3ddbda3985ddb38cc2a8c872ce5d7ff9b90"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/hinge-tune.svg",
+      "sha256": "47932ff7bd0c1f59eb310e2feb2d35a9f065c6d37954b9f951e0ec3020f2f643",
+      "textSha256": "47932ff7bd0c1f59eb310e2feb2d35a9f065c6d37954b9f951e0ec3020f2f643"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/hula-hoop.svg",
+      "sha256": "9662d0d2b9096ff34193dd7369038b6e896a3af7e5ae9ebb133ec57d432d2bae",
+      "textSha256": "9662d0d2b9096ff34193dd7369038b6e896a3af7e5ae9ebb133ec57d432d2bae"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/idea.svg",
+      "sha256": "d96691eeba1d1d2b9ea1918179307a74cdec9678111c9a5bffdbad89a728aca5",
+      "textSha256": "d96691eeba1d1d2b9ea1918179307a74cdec9678111c9a5bffdbad89a728aca5"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/idle.svg",
+      "sha256": "2c80feddadca1d004675fe932095b8f372db563912060116145a2a4de1c240bb",
+      "textSha256": "2c80feddadca1d004675fe932095b8f372db563912060116145a2a4de1c240bb"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/juggle-body.svg",
+      "sha256": "7dc7da72fc2b195a83f575e611190da95ff750ff11ea644e0c35dac20eacb996",
+      "textSha256": "7dc7da72fc2b195a83f575e611190da95ff750ff11ea644e0c35dac20eacb996"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/juggle-glasses.svg",
+      "sha256": "91b647fac6cb33915e93de846e070438cdd0f84f233466c055f72eb47f849a07",
+      "textSha256": "91b647fac6cb33915e93de846e070438cdd0f84f233466c055f72eb47f849a07"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/juggle-shoes.svg",
+      "sha256": "75ae6a1ef42348ee870d6c6817f3b778ae0fca895036798ff7288167a6a75fe3",
+      "textSha256": "75ae6a1ef42348ee870d6c6817f3b778ae0fca895036798ff7288167a6a75fe3"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/lens-inspector.svg",
+      "sha256": "270e7fb0de728d228ec336811907c80c62acc98cd2285ad74b9282670739ecd2",
+      "textSha256": "270e7fb0de728d228ec336811907c80c62acc98cd2285ad74b9282670739ecd2"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/loader-eye-roll.svg",
+      "sha256": "2ba7cc3cb4ed73889258d5d00d2ea31fa232d88e87c002d19de9cccca61934c0",
+      "textSha256": "2ba7cc3cb4ed73889258d5d00d2ea31fa232d88e87c002d19de9cccca61934c0"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/lotus-float.svg",
+      "sha256": "e6e0719471e33d2041e4a576cc9caf96e610bccc5efe37ffd90cf46c63cea9d4",
+      "textSha256": "e6e0719471e33d2041e4a576cc9caf96e610bccc5efe37ffd90cf46c63cea9d4"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/maestro.svg",
+      "sha256": "e25de34ca6e1b7f8888df21c446b3468df1b2e26bce89413f1fd7c0391caf21c",
+      "textSha256": "e25de34ca6e1b7f8888df21c446b3468df1b2e26bce89413f1fd7c0391caf21c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/magnet.svg",
+      "sha256": "21cb730019165cd56750d0cf783402f2f512a9f5df133adfd9e079d18429f2ac",
+      "textSha256": "21cb730019165cd56750d0cf783402f2f512a9f5df133adfd9e079d18429f2ac"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/megaphone.svg",
+      "sha256": "4f3fe1e29788083b79d03de3b8e8af73319833297ed240a49a802ff6f0d303e8",
+      "textSha256": "4f3fe1e29788083b79d03de3b8e8af73319833297ed240a49a802ff6f0d303e8"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/mochi-melt.svg",
+      "sha256": "0eb727bec5d7f1616223b0741b619e8b173b301028916a60736a8aa4d6dd5778",
+      "textSha256": "0eb727bec5d7f1616223b0741b619e8b173b301028916a60736a8aa4d6dd5778"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/moonwalk.svg",
+      "sha256": "99df6b1dde0bd124353c93b5bc1c4d338b93b9601fc677c9fc345a52263858fc",
+      "textSha256": "99df6b1dde0bd124353c93b5bc1c4d338b93b9601fc677c9fc345a52263858fc"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/nap.svg",
+      "sha256": "26ff848c249a11433b3aabc9cd98d6ac1fd7594ae73de36aa8bebcf7f0c590b3",
+      "textSha256": "26ff848c249a11433b3aabc9cd98d6ac1fd7594ae73de36aa8bebcf7f0c590b3"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/noodle-slurp.svg",
+      "sha256": "f2b07fbb70cff2e8dda8d786bed0bb7e0ab903d4d72f79c5bcebc151e17741b7",
+      "textSha256": "f2b07fbb70cff2e8dda8d786bed0bb7e0ab903d4d72f79c5bcebc151e17741b7"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/pan-flip.svg",
+      "sha256": "39687b9add5799140736c5b2798f05d53d55d8c445fd5f8f3ab529b1ba0ec294",
+      "textSha256": "39687b9add5799140736c5b2798f05d53d55d8c445fd5f8f3ab529b1ba0ec294"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/peekaboo.svg",
+      "sha256": "fbfeab83a15013c266c3bf0b425758c443bb6ff4078c331f8ef82371b87e8849",
+      "textSha256": "fbfeab83a15013c266c3bf0b425758c443bb6ff4078c331f8ef82371b87e8849"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/pocket-panic.svg",
+      "sha256": "5dbeb35fa88a36f2abcb17352b3b87816eb231c04347e0cd8df2574bd235234c",
+      "textSha256": "5dbeb35fa88a36f2abcb17352b3b87816eb231c04347e0cd8df2574bd235234c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/rain-check.svg",
+      "sha256": "571d1e1e4817724708c28489c84b210c5e69d3e2444b2ff690432340246338e9",
+      "textSha256": "571d1e1e4817724708c28489c84b210c5e69d3e2444b2ff690432340246338e9"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/read.svg",
+      "sha256": "f5da032eb472f0a7e859140b877d17b0cd32b38f4701067f3a106191889c295e",
+      "textSha256": "f5da032eb472f0a7e859140b877d17b0cd32b38f4701067f3a106191889c295e"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/ribbon.svg",
+      "sha256": "4936dd52bdb15bbeb9bf10058e850dd9042433029cf6614c1e90f230650bc89c",
+      "textSha256": "4936dd52bdb15bbeb9bf10058e850dd9042433029cf6614c1e90f230650bc89c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/run.svg",
+      "sha256": "133037057d335658d04167f0be85042fa46bc0f2a2e23758edd8302d824b1a2b",
+      "textSha256": "133037057d335658d04167f0be85042fa46bc0f2a2e23758edd8302d824b1a2b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/self-hug.svg",
+      "sha256": "69e81ed3e01a98c12c8094b68317e4c759daa8f91801a8997d44a6bafb6f22c6",
+      "textSha256": "69e81ed3e01a98c12c8094b68317e4c759daa8f91801a8997d44a6bafb6f22c6"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/shades-drop.svg",
+      "sha256": "940733c259df70839202e158c5fd01778dc578b91d36f1f3d6b5ec0da84679fa",
+      "textSha256": "940733c259df70839202e158c5fd01778dc578b91d36f1f3d6b5ec0da84679fa"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/shimmy.svg",
+      "sha256": "8bc0eb02906af19fc525012e40c42aa96a39fb118d9489fb050bb9215f107079",
+      "textSha256": "8bc0eb02906af19fc525012e40c42aa96a39fb118d9489fb050bb9215f107079"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/shoe-lasso.svg",
+      "sha256": "668f45c9c5ec017887f04bfbab7332c2e3985d94d9dad6cd3293d7d6f24b6ee4",
+      "textSha256": "668f45c9c5ec017887f04bfbab7332c2e3985d94d9dad6cd3293d7d6f24b6ee4"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/shoe-phone.svg",
+      "sha256": "e93f042622b3fb6547e45a644a753c395f872de512aba51465b80b1ca90d5c6a",
+      "textSha256": "e93f042622b3fb6547e45a644a753c395f872de512aba51465b80b1ca90d5c6a"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/shoe-skateboard.svg",
+      "sha256": "bc91b2a2ab73c556d258b744c8f0652cc4ec3a342fd39bfbc5396e5b0800e47a",
+      "textSha256": "bc91b2a2ab73c556d258b744c8f0652cc4ec3a342fd39bfbc5396e5b0800e47a"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/shoe-vortex.svg",
+      "sha256": "856101ad3533a39aed19daee72743c0b920106c10750769fd8215cffac80d8e2",
+      "textSha256": "856101ad3533a39aed19daee72743c0b920106c10750769fd8215cffac80d8e2"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/sketch.svg",
+      "sha256": "71736e7608bd93640b40e7d9a4433892c005dbcfc30501e1956e022b54c87775",
+      "textSha256": "71736e7608bd93640b40e7d9a4433892c005dbcfc30501e1956e022b54c87775"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/sneak.svg",
+      "sha256": "ebbe696edddf37eed0ecb706cb488c5e2de96bbd8abf75d2331e0e4b0290fbf6",
+      "textSha256": "ebbe696edddf37eed0ecb706cb488c5e2de96bbd8abf75d2331e0e4b0290fbf6"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/sneeze.svg",
+      "sha256": "8a0d8b0a18c33756b177379e0a5737db696bfa868cb931667ca36a746c2523cc",
+      "textSha256": "8a0d8b0a18c33756b177379e0a5737db696bfa868cb931667ca36a746c2523cc"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/snow-shiver.svg",
+      "sha256": "15d16306afff5bf91823f86db795323cbfa5f28dbbe82ee312028f6d873b91a9",
+      "textSha256": "15d16306afff5bf91823f86db795323cbfa5f28dbbe82ee312028f6d873b91a9"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/sparkle.svg",
+      "sha256": "f71f5db3a74b984c95d896c547d7a23786b887e2e4397fe9fcac61ead4596deb",
+      "textSha256": "f71f5db3a74b984c95d896c547d7a23786b887e2e4397fe9fcac61ead4596deb"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/spin.svg",
+      "sha256": "ea55aa6b03e8a976a23c3ded68998af0c8e5c07691f601fe93cf393b3e6de6cc",
+      "textSha256": "ea55aa6b03e8a976a23c3ded68998af0c8e5c07691f601fe93cf393b3e6de6cc"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/stir.svg",
+      "sha256": "9843c9ebe3ba438e71db55a9cfa54ef90bd4b9da2e06f4bfc2efdbb8deb722b2",
+      "textSha256": "9843c9ebe3ba438e71db55a9cfa54ef90bd4b9da2e06f4bfc2efdbb8deb722b2"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/stretch.svg",
+      "sha256": "43fbf0250f9858e62a77307e2022ba341851457442c542f7a575d78053ccd7b7",
+      "textSha256": "43fbf0250f9858e62a77307e2022ba341851457442c542f7a575d78053ccd7b7"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/talk.svg",
+      "sha256": "0b9afe92c814c5f73cfdfe0939c9813bcc4898c3342fbdfa0f010d8244489f92",
+      "textSha256": "0b9afe92c814c5f73cfdfe0939c9813bcc4898c3342fbdfa0f010d8244489f92"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/tap-dance.svg",
+      "sha256": "05e1b39980e7b87f702208cc47a20e0fba15de2743e38239c5d2f7037fc56e9d",
+      "textSha256": "05e1b39980e7b87f702208cc47a20e0fba15de2743e38239c5d2f7037fc56e9d"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/think.svg",
+      "sha256": "dc89dfd1bf36ade7dcabcf718ecbf0431ba8863ca1cf6cb4a6164ba7bd26b70c",
+      "textSha256": "dc89dfd1bf36ade7dcabcf718ecbf0431ba8863ca1cf6cb4a6164ba7bd26b70c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/topsy.svg",
+      "sha256": "5fead3f6a1216ffbea32a49712468c175017cc08a10c39c34dd23d14cfb77dee",
+      "textSha256": "5fead3f6a1216ffbea32a49712468c175017cc08a10c39c34dd23d14cfb77dee"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/transform.svg",
+      "sha256": "24b8901cdec9e02a0acdc243a7d25d9a4665479ce4f8824c50686a054812c6dc",
+      "textSha256": "24b8901cdec9e02a0acdc243a7d25d9a4665479ce4f8824c50686a054812c6dc"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/tunnel.svg",
+      "sha256": "22b82e9419ab2dcbf36cdec39a85ae527ffc937afd3a3ca6ef00fd3bd5ce2af9",
+      "textSha256": "22b82e9419ab2dcbf36cdec39a85ae527ffc937afd3a3ca6ef00fd3bd5ce2af9"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/type.svg",
+      "sha256": "d9dec2f7d7168fe9862fbf328fa24c4639e3e4791214782f1418877f457ea9cc",
+      "textSha256": "d9dec2f7d7168fe9862fbf328fa24c4639e3e4791214782f1418877f457ea9cc"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/unwind.svg",
+      "sha256": "20d77ef49ff2d76b36ca60484f4b20952bed8560484e1e7111f8f618e0a28baf",
+      "textSha256": "20d77ef49ff2d76b36ca60484f4b20952bed8560484e1e7111f8f618e0a28baf"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/waddle.svg",
+      "sha256": "2528b96979b449c74b19923012b2575c4f0e4bebfeabe69d3de45a990bc46743",
+      "textSha256": "2528b96979b449c74b19923012b2575c4f0e4bebfeabe69d3de45a990bc46743"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/warp.svg",
+      "sha256": "4f203b0e96a166ce340135204171ee78d9cc6e9d878df297db2049c348852a05",
+      "textSha256": "4f203b0e96a166ce340135204171ee78d9cc6e9d878df297db2049c348852a05"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/whisk.svg",
+      "sha256": "77576d3d8fd44592cbf4d1d03ab4c08f107fcde0b8c0ca886b7a791c9b544b90",
+      "textSha256": "77576d3d8fd44592cbf4d1d03ab4c08f107fcde0b8c0ca886b7a791c9b544b90"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/wiggle.svg",
+      "sha256": "69c9b11f1f4a56bd3b95502c0f96861cb0f9056f4b2a4c6e19a5503cc04c6a8c",
+      "textSha256": "69c9b11f1f4a56bd3b95502c0f96861cb0f9056f4b2a4c6e19a5503cc04c6a8c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/assets/motion/wind-up.svg",
+      "sha256": "494452d69f54b6d14f48de4f53acc16ba7952f968fb859249fa9fbf3afe346c4",
+      "textSha256": "494452d69f54b6d14f48de4f53acc16ba7952f968fb859249fa9fbf3afe346c4"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/ArtifactCard.tsx",
+      "sha256": "7a383e26fdcd9e3a745b35a264eb3bcc58a31179a69e104db0c2d3e9f28489ff",
+      "textSha256": "7a383e26fdcd9e3a745b35a264eb3bcc58a31179a69e104db0c2d3e9f28489ff"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/ArtifactPreview.tsx",
+      "sha256": "5202f3ac0bd7ad762c9fbc0e779d82cf9b0523d4bd225e9b5aee8886b880017b",
+      "textSha256": "5202f3ac0bd7ad762c9fbc0e779d82cf9b0523d4bd225e9b5aee8886b880017b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/ArtifactThumb.tsx",
+      "sha256": "26930644a3d65bf5fc64b35531c597334bea9259034d96be3d5e8810b8e4b971",
+      "textSha256": "26930644a3d65bf5fc64b35531c597334bea9259034d96be3d5e8810b8e4b971"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/ArtifactsRail.tsx",
+      "sha256": "beb8f2e0d1d6d46c1bb7da0b6431057332637ea6479447e784e47103de351a13",
+      "textSha256": "beb8f2e0d1d6d46c1bb7da0b6431057332637ea6479447e784e47103de351a13"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/BattleSection.tsx",
+      "sha256": "e14d3fb60b0532387e78b1c984334e8ab60ab8dff960dec323463cd8807ad63b",
+      "textSha256": "e14d3fb60b0532387e78b1c984334e8ab60ab8dff960dec323463cd8807ad63b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/BrainMark.tsx",
+      "sha256": "9c13fb7429429dcd2652614179b10d670ef790d389aac7e7de24c4e6a2ed9d49",
+      "textSha256": "9c13fb7429429dcd2652614179b10d670ef790d389aac7e7de24c4e6a2ed9d49"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/BrainStructureSection.tsx",
+      "sha256": "38a079bafa32247d81a79a38e47861529eb294690fc78ffb1581b11e73578173",
+      "textSha256": "38a079bafa32247d81a79a38e47861529eb294690fc78ffb1581b11e73578173"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/BrainView.tsx",
+      "sha256": "8291d5ed55e10da2c6d20caa4e0b6a38bb92c685ea46a1682a461ba4a33ab386",
+      "textSha256": "8291d5ed55e10da2c6d20caa4e0b6a38bb92c685ea46a1682a461ba4a33ab386"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/BrowserControlSection.tsx",
+      "sha256": "ad15774f62bc34fbb5ead076a7eb21d9d71ed94698bdf13f1249887025147038",
+      "textSha256": "ad15774f62bc34fbb5ead076a7eb21d9d71ed94698bdf13f1249887025147038"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/CodeView.tsx",
+      "sha256": "0043a97506d57697ceb57c43d8f3356db999c97c47f6c9a95359101d774c37b3",
+      "textSha256": "0043a97506d57697ceb57c43d8f3356db999c97c47f6c9a95359101d774c37b3"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/ConnectionGraph.tsx",
+      "sha256": "285d33439b014506e7313e6497614dea338364fe288f2d1e0b9cc68a2dc51a33",
+      "textSha256": "285d33439b014506e7313e6497614dea338364fe288f2d1e0b9cc68a2dc51a33"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/EngineBay.tsx",
+      "sha256": "740d8299aa6bea1919fdd61c0f3e01e0d7bf13a031fbf7d4068c426f77d41f30",
+      "textSha256": "740d8299aa6bea1919fdd61c0f3e01e0d7bf13a031fbf7d4068c426f77d41f30"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/EngineDownloadsSection.tsx",
+      "sha256": "d744e017d0fbc20ca86a825147e5086434d08f54dc3a708ac9dbc1fbe76fc4b7",
+      "textSha256": "d744e017d0fbc20ca86a825147e5086434d08f54dc3a708ac9dbc1fbe76fc4b7"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/FindBar.tsx",
+      "sha256": "e347a6221681b95ad6fc459607c4334bf599fc9563383498d1e1b34c4c629725",
+      "textSha256": "e347a6221681b95ad6fc459607c4334bf599fc9563383498d1e1b34c4c629725"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/FirstRunView.tsx",
+      "sha256": "d9269c302ff6c4ab77c5befed420fd23dcc6767111e8e349d94b544a8a5e0a6a",
+      "textSha256": "d9269c302ff6c4ab77c5befed420fd23dcc6767111e8e349d94b544a8a5e0a6a"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/HooksSection.tsx",
+      "sha256": "90a5d8cc73f44155b40fd62f4a407e7a016105cbb768d50a1a43072b0964a708",
+      "textSha256": "90a5d8cc73f44155b40fd62f4a407e7a016105cbb768d50a1a43072b0964a708"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/ModsSection.tsx",
+      "sha256": "d89f397c2dd5a24afac29da9ce5bedcc93131aed8c5bfe0e042e7cbe82233ed0",
+      "textSha256": "d89f397c2dd5a24afac29da9ce5bedcc93131aed8c5bfe0e042e7cbe82233ed0"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/RecipesSection.tsx",
+      "sha256": "402357ea669ec3b1cf784dc3ef9bf25587ba7661bf1f3d4b2535c47d8ac5f43f",
+      "textSha256": "402357ea669ec3b1cf784dc3ef9bf25587ba7661bf1f3d4b2535c47d8ac5f43f"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/SkillsCatalogSection.tsx",
+      "sha256": "d6c99fe1c328603ef3b8b8da9587d7bec69e0fb363d498722eb8ab6aa9b6e434",
+      "textSha256": "d6c99fe1c328603ef3b8b8da9587d7bec69e0fb363d498722eb8ab6aa9b6e434"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/SplitSection.tsx",
+      "sha256": "7efcea28508ecacdf466b9a2d303656e098af6025876e217df3bb8b4ba677548",
+      "textSha256": "7efcea28508ecacdf466b9a2d303656e098af6025876e217df3bb8b4ba677548"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/components/VaultView.tsx",
+      "sha256": "622850114943da632112dce758d2e1fb33a2187836a7f9b2fe8a771ef4ff285e",
+      "textSha256": "622850114943da632112dce758d2e1fb33a2187836a7f9b2fe8a771ef4ff285e"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/hooks/useArtifactRewrite.ts",
+      "sha256": "ad49db1b9651ddfbd475ae51363abb80693eb975cfa1b355fddec4db99947b6b",
+      "textSha256": "ad49db1b9651ddfbd475ae51363abb80693eb975cfa1b355fddec4db99947b6b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/hooks/useChat.ts",
+      "sha256": "0e6aee1ddac51d285768d96c22f60771aeceabf7ff724ed04096c07b351f628b",
+      "textSha256": "0e6aee1ddac51d285768d96c22f60771aeceabf7ff724ed04096c07b351f628b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/hooks/useDesignTokens.ts",
+      "sha256": "5def84503eff4ae64fffb27709cb5c54fd4e44e38a950cba332cac6b170ce227",
+      "textSha256": "5def84503eff4ae64fffb27709cb5c54fd4e44e38a950cba332cac6b170ce227"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/hooks/useDismiss.ts",
+      "sha256": "5a388684cea144e35e4b01708197d694eabe4aa9fb2b0fbc09545e6ea1c81b27",
+      "textSha256": "5a388684cea144e35e4b01708197d694eabe4aa9fb2b0fbc09545e6ea1c81b27"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/hooks/useModels.ts",
+      "sha256": "3a2ecd3df767ee00820d6f135867010071f2ef4a37690f4748bfe9c47967f66c",
+      "textSha256": "3a2ecd3df767ee00820d6f135867010071f2ef4a37690f4748bfe9c47967f66c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/hooks/usePersistentState.ts",
+      "sha256": "cd2bb4da9ca207c03ca9c4074db920e2b18f896fcdc8c0319491e743f506360b",
+      "textSha256": "cd2bb4da9ca207c03ca9c4074db920e2b18f896fcdc8c0319491e743f506360b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/hooks/useVault.ts",
+      "sha256": "72f0d8175d9872e8524123721a84032c4c18d9d7d7f14a829950f9f59bd36894",
+      "textSha256": "72f0d8175d9872e8524123721a84032c4c18d9d7d7f14a829950f9f59bd36894"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/lib/videoFrames.ts",
+      "sha256": "cba34ade9061b300071632d98d5d4e85f0556848ace06ba24d8c8a80c76e523d",
+      "textSha256": "cba34ade9061b300071632d98d5d4e85f0556848ace06ba24d8c8a80c76e523d"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/artifactEdits.ts",
+      "sha256": "779cc09de545f4f19fc143071a6330ce85fdc52654a458f2c22cbfa8d1c667c4",
+      "textSha256": "779cc09de545f4f19fc143071a6330ce85fdc52654a458f2c22cbfa8d1c667c4"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/artifactLibrary.ts",
+      "sha256": "c0bee5f8e8e1bf522cbaa1f0fd846cef1af9c2781a2d2e96ddb226870271426c",
+      "textSha256": "c0bee5f8e8e1bf522cbaa1f0fd846cef1af9c2781a2d2e96ddb226870271426c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/artifactView.ts",
+      "sha256": "304c73979a1bb8cb8327b75a5d3630d752dbcec73fe8929eb29bf96d16bef3da",
+      "textSha256": "304c73979a1bb8cb8327b75a5d3630d752dbcec73fe8929eb29bf96d16bef3da"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/battle.ts",
+      "sha256": "cafee86fba4891bd7ab820b804991e2a45e848a1b07ea87d05952a10b5e04d21",
+      "textSha256": "cafee86fba4891bd7ab820b804991e2a45e848a1b07ea87d05952a10b5e04d21"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/engine.ts",
+      "sha256": "2f407abd0b0c86d72ab7016e573231b1afd4becfeca44141bc12dbc3d479c167",
+      "textSha256": "2f407abd0b0c86d72ab7016e573231b1afd4becfeca44141bc12dbc3d479c167"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/performance.ts",
+      "sha256": "e9006bca117fae3125fd7d10d7d0194a1622fa72c0edcdbfb8b1ecccff452c1f",
+      "textSha256": "e9006bca117fae3125fd7d10d7d0194a1622fa72c0edcdbfb8b1ecccff452c1f"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/projects.ts",
+      "sha256": "ea0d352424717011803f2cd02812ba4ef56dc0c21a446f62f92dcbff77a5de82",
+      "textSha256": "ea0d352424717011803f2cd02812ba4ef56dc0c21a446f62f92dcbff77a5de82"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/recipes.ts",
+      "sha256": "1051aa4ce3f18a9d30f4b7c19e9581fb995c41301c10c40d46423ebba5fdf402",
+      "textSha256": "1051aa4ce3f18a9d30f4b7c19e9581fb995c41301c10c40d46423ebba5fdf402"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/split.ts",
+      "sha256": "9de6f203bb6d25b283da2b83e2ef58f5d73d89fb143201ec0587de93929d8522",
+      "textSha256": "9de6f203bb6d25b283da2b83e2ef58f5d73d89fb143201ec0587de93929d8522"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/state/useChats.ts",
+      "sha256": "9d12f54f7659efff6cbba687904b9fe8e4b0f362fe7cf518019a80ace1b0aaac",
+      "textSha256": "9d12f54f7659efff6cbba687904b9fe8e4b0f362fe7cf518019a80ace1b0aaac"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/styles/globals.css",
+      "sha256": "c63a997bdcfa4dbd41dcfa2a746b97927983144d53d9e3bc0ad0431308bb56c9",
+      "textSha256": "c63a997bdcfa4dbd41dcfa2a746b97927983144d53d9e3bc0ad0431308bb56c9"
+    },
+    {
+      "path": "apps/03_oddbrain/src/renderer/src/vite-env.d.ts",
+      "sha256": "ad2c5d1966fb3ca866917384cd804d6069e9206d172a63783d6a0cf283b8b88c",
+      "textSha256": "ad2c5d1966fb3ca866917384cd804d6069e9206d172a63783d6a0cf283b8b88c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/artifacts.ts",
+      "sha256": "c1cc65d346481846e092d7bfdf3466e39e82ea2e44fb34f034e25ad02c8fbfce",
+      "textSha256": "c1cc65d346481846e092d7bfdf3466e39e82ea2e44fb34f034e25ad02c8fbfce"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/ask.ts",
+      "sha256": "6000cf2adc6335356c9cb12b8b5fe17e58333918df8cb19549918eca799a6568",
+      "textSha256": "6000cf2adc6335356c9cb12b8b5fe17e58333918df8cb19549918eca799a6568"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/attachments.ts",
+      "sha256": "708341c6a80d76e9c3775e70f9851377692732e4127e3a784fb82ef678aad6f0",
+      "textSha256": "708341c6a80d76e9c3775e70f9851377692732e4127e3a784fb82ef678aad6f0"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/brainStructure.ts",
+      "sha256": "b9b831ab452295ea7c8fcb669d3df12e652220743cc7ae87770abfb2c63e2c26",
+      "textSha256": "b9b831ab452295ea7c8fcb669d3df12e652220743cc7ae87770abfb2c63e2c26"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/capture.ts",
+      "sha256": "0972ce569026234461d1896b5e2909a6009b560063fedc02e729a66509546f4b",
+      "textSha256": "0972ce569026234461d1896b5e2909a6009b560063fedc02e729a66509546f4b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/chart.ts",
+      "sha256": "6c8b0d418b21c879f308dc411c11447e2ad7ad377fcfe4ddc4c862c6b04bdb28",
+      "textSha256": "6c8b0d418b21c879f308dc411c11447e2ad7ad377fcfe4ddc4c862c6b04bdb28"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/citations.ts",
+      "sha256": "cf35e8a78948a39fe7d9ae37a8d617df4eff1e122a5f13ef6f5dc66e59406de7",
+      "textSha256": "cf35e8a78948a39fe7d9ae37a8d617df4eff1e122a5f13ef6f5dc66e59406de7"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/compact.ts",
+      "sha256": "93e0311ba21396a2625e3e45305dd0b7ba1713f730c378db165ceef29d222353",
+      "textSha256": "93e0311ba21396a2625e3e45305dd0b7ba1713f730c378db165ceef29d222353"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/airbnb.ts",
+      "sha256": "e0570aef56a48eec6c397658e5311b750ba00c523bc49257841e0fae86e0f699",
+      "textSha256": "e0570aef56a48eec6c397658e5311b750ba00c523bc49257841e0fae86e0f699"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/apple.ts",
+      "sha256": "caac2a331be392055587d4ee4327386baa5848fd3c688936b766ecfa5b6614c1",
+      "textSha256": "caac2a331be392055587d4ee4327386baa5848fd3c688936b766ecfa5b6614c1"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/claude.ts",
+      "sha256": "ee79098fff3b59d9c5a13af6083c7491fbc7f26cb70b89138c08577765c94565",
+      "textSha256": "ee79098fff3b59d9c5a13af6083c7491fbc7f26cb70b89138c08577765c94565"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/dashboard.ts",
+      "sha256": "b6e1ebf69dcbebf458f3bcb5580abc5db4f8ca92daaf1448973d52726279bd18",
+      "textSha256": "b6e1ebf69dcbebf458f3bcb5580abc5db4f8ca92daaf1448973d52726279bd18"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/default.ts",
+      "sha256": "c945ebfa2ea04c8c5d60a9a4652feb1ba09eb45653722fc8c8d0e239e1a2421c",
+      "textSha256": "c945ebfa2ea04c8c5d60a9a4652feb1ba09eb45653722fc8c8d0e239e1a2421c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/editorial.ts",
+      "sha256": "03d8b84941ef418f93e0bd18a154faee290486b04b8277fb5b017ed843c69bf2",
+      "textSha256": "03d8b84941ef418f93e0bd18a154faee290486b04b8277fb5b017ed843c69bf2"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/glassmorphism.ts",
+      "sha256": "410fea844890a3e78b787ad06434e4b62f7c27d66e3e69680f00314f202c6c25",
+      "textSha256": "410fea844890a3e78b787ad06434e4b62f7c27d66e3e69680f00314f202c6c25"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/index.ts",
+      "sha256": "80944aafb42616b7449e09b0502a6dbc96fd7a5bc8915eee0b89cfff4a94828c",
+      "textSha256": "80944aafb42616b7449e09b0502a6dbc96fd7a5bc8915eee0b89cfff4a94828c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/linear-app.ts",
+      "sha256": "88f79afe256b972bfea73732d766b63e2e2c5b5d8708368bd45124117c594d09",
+      "textSha256": "88f79afe256b972bfea73732d766b63e2e2c5b5d8708368bd45124117c594d09"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/minimal.ts",
+      "sha256": "7302e60d5e6fad000aa13f27d744b663dd2ae969bd010f9bf9022448b4957ad6",
+      "textSha256": "7302e60d5e6fad000aa13f27d744b663dd2ae969bd010f9bf9022448b4957ad6"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/modern.ts",
+      "sha256": "2f7a552a52ab83a46b7d5220a172b676d5d9b5ad26723564388abc9b547bf996",
+      "textSha256": "2f7a552a52ab83a46b7d5220a172b676d5d9b5ad26723564388abc9b547bf996"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/neobrutalism.ts",
+      "sha256": "14ccbbeb7954277777665687b248a74ebd137b009a0e0ba4d4f249c5c1b49084",
+      "textSha256": "14ccbbeb7954277777665687b248a74ebd137b009a0e0ba4d4f249c5c1b49084"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/notion.ts",
+      "sha256": "ad3cd0a6f5939a092817ad2b7c206b0e91b0ccfdccfcc5c2e7b47ad0910d5aa1",
+      "textSha256": "ad3cd0a6f5939a092817ad2b7c206b0e91b0ccfdccfcc5c2e7b47ad0910d5aa1"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/retro.ts",
+      "sha256": "7046b6ded070c5c48522c658ddf4e518a3ff70f162e6cb503116e01903c5828c",
+      "textSha256": "7046b6ded070c5c48522c658ddf4e518a3ff70f162e6cb503116e01903c5828c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/shadcn.ts",
+      "sha256": "3638ae07d8a54958aa8d065f2349d33a348a42268f30cbd1a2749522c5841522",
+      "textSha256": "3638ae07d8a54958aa8d065f2349d33a348a42268f30cbd1a2749522c5841522"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/stripe.ts",
+      "sha256": "c7ddf3405ae537813a900d5131842d6268cc0eed746afb35b28f2297370fc0a0",
+      "textSha256": "c7ddf3405ae537813a900d5131842d6268cc0eed746afb35b28f2297370fc0a0"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/design-systems/vercel.ts",
+      "sha256": "9767be5b2a147e947335921bcb196c18695b75e955620c084ca95e0f0e7baa16",
+      "textSha256": "9767be5b2a147e947335921bcb196c18695b75e955620c084ca95e0f0e7baa16"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/engine.ts",
+      "sha256": "2defff531c51aaa2e267b0dd9c71cd81487cf73f162d932947ea019b2fe471a6",
+      "textSha256": "2defff531c51aaa2e267b0dd9c71cd81487cf73f162d932947ea019b2fe471a6"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/engineDownloads.ts",
+      "sha256": "c53e1f78964d6894971d85a16e0803c79fc267fff39880a1d2f34f9c82adf0e5",
+      "textSha256": "c53e1f78964d6894971d85a16e0803c79fc267fff39880a1d2f34f9c82adf0e5"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/gerunds.ts",
+      "sha256": "d48bdec2ba210f6836130cc5406e0c6624a83a4f1a3e7b79066ce05df8a4a5b1",
+      "textSha256": "d48bdec2ba210f6836130cc5406e0c6624a83a4f1a3e7b79066ce05df8a4a5b1"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/handoff.ts",
+      "sha256": "d785daa87aaf16ccecc038a110347cafe576b9dfefd11ef8491cf4274e35ff30",
+      "textSha256": "d785daa87aaf16ccecc038a110347cafe576b9dfefd11ef8491cf4274e35ff30"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/hooks.ts",
+      "sha256": "1f34ae4ea44467f3bb00dd987f06913ae83378df97555145788515034c7a1adc",
+      "textSha256": "1f34ae4ea44467f3bb00dd987f06913ae83378df97555145788515034c7a1adc"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/inference.ts",
+      "sha256": "e02272c4f60f78b1286ac3ad279e8938a7193890d57c44551baec8f9f9c36ea0",
+      "textSha256": "e02272c4f60f78b1286ac3ad279e8938a7193890d57c44551baec8f9f9c36ea0"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/inlineBlocks.ts",
+      "sha256": "0413e0fbd6a22fba40c8ac60f62b7f2b3ee40d5b4e6085773ccc8bf634ef9c2b",
+      "textSha256": "0413e0fbd6a22fba40c8ac60f62b7f2b3ee40d5b4e6085773ccc8bf634ef9c2b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/media.ts",
+      "sha256": "1c57b1830320b354692fd6de6dfdf5e3187cf258280fedb50966c270c60a5221",
+      "textSha256": "1c57b1830320b354692fd6de6dfdf5e3187cf258280fedb50966c270c60a5221"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/motionKit.ts",
+      "sha256": "d2e1347656f8fc4aea6b45135432e5a7e6edce5f9d20efe8fce2e601b47b231b",
+      "textSha256": "d2e1347656f8fc4aea6b45135432e5a7e6edce5f9d20efe8fce2e601b47b231b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/motionKitData.ts",
+      "sha256": "0b9e4a99fda9add6efa9d942f423f9634d80001e3d386892ecddab44f3f5a73e",
+      "textSha256": "0b9e4a99fda9add6efa9d942f423f9634d80001e3d386892ecddab44f3f5a73e"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/motionSvg.ts",
+      "sha256": "bad064b643883bb448d5c746328236909ee6780d85fb3090d1cbc21568bb9464",
+      "textSha256": "bad064b643883bb448d5c746328236909ee6780d85fb3090d1cbc21568bb9464"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/ollama.ts",
+      "sha256": "7779d72f75cb85d4a69f31aa63593f82a045be3a722d6e330a0f7efaa53121c8",
+      "textSha256": "7779d72f75cb85d4a69f31aa63593f82a045be3a722d6e330a0f7efaa53121c8"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/packs.ts",
+      "sha256": "873a523155ed2b8e1d46a800b2a28e2fb6428932976d9fb5b9cf2d8646c2a1df",
+      "textSha256": "873a523155ed2b8e1d46a800b2a28e2fb6428932976d9fb5b9cf2d8646c2a1df"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/permissions.ts",
+      "sha256": "d6bd08a845937ff246e56dfd28c93ea0384dd5d4ef97a6115cde85031dd257a9",
+      "textSha256": "d6bd08a845937ff246e56dfd28c93ea0384dd5d4ef97a6115cde85031dd257a9"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/profile.ts",
+      "sha256": "204ce1e469bd7b9ae277e023d697cbe6e76312cd9f8a7c9132bdd0ac99ba7d7d",
+      "textSha256": "204ce1e469bd7b9ae277e023d697cbe6e76312cd9f8a7c9132bdd0ac99ba7d7d"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/projects.ts",
+      "sha256": "17bd20d906c4f9d62f8f6f82664b558d80085479890bff437d30ef2463822a99",
+      "textSha256": "17bd20d906c4f9d62f8f6f82664b558d80085479890bff437d30ef2463822a99"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/prompts.ts",
+      "sha256": "04c80ea175146431e6f6b51deae79818137adbb39b54754468e696b0946dc1b5",
+      "textSha256": "04c80ea175146431e6f6b51deae79818137adbb39b54754468e696b0946dc1b5"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/providers.ts",
+      "sha256": "241d83d4570011c2ba8b3fe158349ae509817347186979033e4596bd10c55b31",
+      "textSha256": "241d83d4570011c2ba8b3fe158349ae509817347186979033e4596bd10c55b31"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/recipes.ts",
+      "sha256": "dd63295fb34bac96ca9c65d806eb6b0b9815e3ebc62069aef9c4262a2c033ff8",
+      "textSha256": "dd63295fb34bac96ca9c65d806eb6b0b9815e3ebc62069aef9c4262a2c033ff8"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/repoMap.ts",
+      "sha256": "034f7f694b00ac6e77bd91c018f0e6e3827a74d55b67c36500ed3bfec6055448",
+      "textSha256": "034f7f694b00ac6e77bd91c018f0e6e3827a74d55b67c36500ed3bfec6055448"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/review.ts",
+      "sha256": "13593c2c32424e34d97cf0354c1a9df1504cb710d637a190d8190899dc73b0e1",
+      "textSha256": "13593c2c32424e34d97cf0354c1a9df1504cb710d637a190d8190899dc73b0e1"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/search.ts",
+      "sha256": "96bb302157bd68c18e5e6a3d2304dffc83ae081ec8ace7847e6506a1fbaef5d0",
+      "textSha256": "96bb302157bd68c18e5e6a3d2304dffc83ae081ec8ace7847e6506a1fbaef5d0"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/sessionsBoard.ts",
+      "sha256": "4630c89356eca62e0ae2c857e2174f56f26a9f25cf9fe9a778a2ae1f85170f00",
+      "textSha256": "4630c89356eca62e0ae2c857e2174f56f26a9f25cf9fe9a778a2ae1f85170f00"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/skillCatalog.ts",
+      "sha256": "67d20d03b57506584c286619877afab4b978798d84f5e35b26b4fd37e50c6015",
+      "textSha256": "67d20d03b57506584c286619877afab4b978798d84f5e35b26b4fd37e50c6015"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/skills.ts",
+      "sha256": "e620bc5b72bd61a83e4a0e01fcd2733f5f14d179219a176580ab34afceccf44f",
+      "textSha256": "e620bc5b72bd61a83e4a0e01fcd2733f5f14d179219a176580ab34afceccf44f"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/split.ts",
+      "sha256": "26ea972d5261d83528a9f5acdba87d0a9ca6b8524a1d000090ddf8dc7eb0178c",
+      "textSha256": "26ea972d5261d83528a9f5acdba87d0a9ca6b8524a1d000090ddf8dc7eb0178c"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/storage.ts",
+      "sha256": "75302316db1be870d38df1d1feebede3ce9e72ea38fcb138e0d704086a15589b",
+      "textSha256": "75302316db1be870d38df1d1feebede3ce9e72ea38fcb138e0d704086a15589b"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/today.ts",
+      "sha256": "f55f29fa4e5044098105b450009f735e074e01e63d91a07caac336710c8c64a7",
+      "textSha256": "f55f29fa4e5044098105b450009f735e074e01e63d91a07caac336710c8c64a7"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/turnCopy.ts",
+      "sha256": "ce98f370a0bc8aee2d49b17633f606d6aff476b861ac91456c4c0115eb0b2cd3",
+      "textSha256": "ce98f370a0bc8aee2d49b17633f606d6aff476b861ac91456c4c0115eb0b2cd3"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/vault.ts",
+      "sha256": "5cd4a5349e8992155d54bcdecdfde01dfd94f452d746eace53cc40b8d11a62a6",
+      "textSha256": "5cd4a5349e8992155d54bcdecdfde01dfd94f452d746eace53cc40b8d11a62a6"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/vision.ts",
+      "sha256": "d897d8bccf89aafe058016c042e91b56995fcf5818e90cdac2364b0daca303cf",
+      "textSha256": "d897d8bccf89aafe058016c042e91b56995fcf5818e90cdac2364b0daca303cf"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/watchMode.ts",
+      "sha256": "c9b7352060d03a2678ff6a99f0223d0f2b24ab809a1f0a3718ccb33d1a7325a9",
+      "textSha256": "c9b7352060d03a2678ff6a99f0223d0f2b24ab809a1f0a3718ccb33d1a7325a9"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/zip.ts",
+      "sha256": "252f8300fa92d0149729a4a30e42b81dbd86e75a99921cca49785b7dc6dde32a",
+      "textSha256": "252f8300fa92d0149729a4a30e42b81dbd86e75a99921cca49785b7dc6dde32a"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/types.ts",
+      "sha256": "2d751ef3ee1504529b365d5607fcde2b3e257595debf97f902db5db094510d43",
+      "textSha256": "2d751ef3ee1504529b365d5607fcde2b3e257595debf97f902db5db094510d43"
+    },
+    {
+      "path": "apps/03_oddbrain/tsconfig.json",
+      "sha256": "3c510fc9838a6413fe98dc6cdaa525c9686c19af4ba457446d5fd43cc65cd8a3",
+      "textSha256": "3c510fc9838a6413fe98dc6cdaa525c9686c19af4ba457446d5fd43cc65cd8a3"
+    },
+    {
+      "path": "apps/03_oddbrain/vite.web.config.ts",
+      "sha256": "c14425c4844c0a62aa155334bc732a7220fcbe88535a6e59abfd6aa045e35e62",
+      "textSha256": "c14425c4844c0a62aa155334bc732a7220fcbe88535a6e59abfd6aa045e35e62"
+    }
+  ]
+}

@@ -1,0 +1,34 @@
+{
+  "date": "2026-10-18",
+  "repo": "NishadIslamUtso/OddBrain",
+  "mainBaseline": "a6c780768b77e50870bc297c928b7d84709a0697",
+  "targetDisplay": {
+    "physical": "1920x1080",
+    "windowsScale": "125%",
+    "logicalDesktop": "1536x864",
+    "window": "Clamp bounds to the reported usable work area; account for native frame/taskbar."
+  },
+  "uiAuthority": "Our session version, preserving real main functionality and newer fixes. Do not bulk-overwrite main with old files.",
+  "implementationFreedom": "Full replacement allowed where needed; preserve features, security boundaries and saved data.",
+  "plannedScope": "Include all approved planned features and repair documented/newly found broken features. Do not invent unsupported engine catalogs or command surfaces.",
+  "voice": {
+    "jarvisWakeword": "parked",
+    "features": [
+      "Read aloud",
+      "Dictation"
+    ],
+    "continuousVoice": "not requested"
+  },
+  "media": {
+    "goal": "Broad audio/video/image/document/file ingestion and decoding",
+    "providerPolicy": "Use explicitly selected and enabled provider/model. No silent provider switch.",
+    "limits": "Explain unsupported, encrypted, DRM-protected, corrupt or oversized files and missing decoders. Never claim to have read undecoded content."
+  },
+  "skill": {
+    "repo": "petergyang/no-ai-slop",
+    "localPath": "skills/no-ai-slop",
+    "appliesTo": "App copy and documentation; use the owner's prior visual rules for design."
+  },
+  "remoteWrites": "No push/merge/deploy authorized.",
+  "priorEvidence": "Archived. Preserve uploads."
+}

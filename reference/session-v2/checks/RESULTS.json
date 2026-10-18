@@ -1,0 +1,568 @@
+{
+  "date": "2026-10-18",
+  "revision": 2,
+  "baseline": "2f05dac9a5f7a191104377ef940f81e76b9ebd74",
+  "sourceFiles": 94,
+  "typecheck": "pass",
+  "unitTests": {
+    "files": 96,
+    "tests": 718,
+    "status": "pass"
+  },
+  "productionBuilds": {
+    "electronMain": "pass",
+    "electronPreload": "pass",
+    "electronRenderer": "pass",
+    "web": "pass",
+    "offlineActualRenderer": "pass"
+  },
+  "originalActionsTraced": 221,
+  "unmappedActions": 0,
+  "originalSVGsByteExact": 77,
+  "fixedKnownOmissions": [
+    "Auto-keep On/Off with actual pre-approval snapshot gate and retained restore/inspection",
+    "Automatic and manual second-pass review through isolated tool-free text transport",
+    "Artifact type/sort/search and recoverable disk Trash",
+    "Project renaming, final-only/streamed output, message/source copy and blocked-clipboard fallback",
+    "Independent memory picker/default, compiler instructions, completion refresh and journal access",
+    "Rule defaults, manual saved-watch-order execution, real journal/report refresh",
+    "Inspect/discard queued brief, no seed loss on refused/oversized sends, text attachments not discarded",
+    "v2 and original concept look imports and token export",
+    "Global cloud inference control with actual pre-prompt metadata/access gate"
+  ],
+  "rendererChecks": {
+    "app-acceptance": {
+      "errors": [],
+      "consoleErrors": [],
+      "checks": [
+        "Actual React renderer loads, correct footer, no ornamental top statuses",
+        "Poke, head/shoes, double click, tickle, hold, keyboard drag/flick/reset; no draft side effects",
+        "Real composer preserves recipe/map/project tools and adds the quiet More menu",
+        "All 18 Settings destinations and former profile actions present",
+        "All eight preset bundles apply and the miniature uses the actual selected shell",
+        "59 individually exposed preference values; all 77 artworks assignable to all eight roles",
+        "Computed SVG animation state confirms global Pause and Still, not just toggle labels",
+        "Full look, native reading choices, mappings and saved named looks survive reload",
+        "Native gallery search/categories/New 16/paging and all-SVG ZIP export work",
+        "Compare and five-question taste quiz remain functional, not dead links",
+        "All eight real layouts × seven native screens at 940×620, no detected horizontal overflow/clipped send"
+      ],
+      "geometry": [
+        {
+          "layout": "classic",
+          "root": 940,
+          "main": 680,
+          "scroll": 680,
+          "viewport": 940,
+          "view": "chat"
+        },
+        {
+          "layout": "classic",
+          "root": 940,
+          "main": 680,
+          "scroll": 680,
+          "viewport": 940,
+          "view": "artifacts"
+        },
+        {
+          "layout": "classic",
+          "root": 940,
+          "main": 680,
+          "scroll": 680,
+          "viewport": 940,
+          "view": "today"
+        },
+        {
+          "layout": "classic",
+          "root": 940,
+          "main": 680,
+          "scroll": 680,
+          "viewport": 940,
+          "view": "projects"
+        },
+        {
+          "layout": "classic",
+          "root": 940,
+          "main": 680,
+          "scroll": 680,
+          "viewport": 940,
+          "view": "vault"
+        },
+        {
+          "layout": "classic",
+          "root": 940,
+          "main": 680,
+          "scroll": 680,
+          "viewport": 940,
+          "view": "brain"
+        },
+        {
+          "layout": "classic",
+          "root": 940,
+          "main": 680,
+          "scroll": 680,
+          "viewport": 940,
+          "view": "code"
+        },
+        {
+          "layout": "topbar",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "chat"
+        },
+        {
+          "layout": "topbar",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "artifacts"
+        },
+        {
+          "layout": "topbar",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "today"
+        },
+        {
+          "layout": "topbar",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "projects"
+        },
+        {
+          "layout": "topbar",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "vault"
+        },
+        {
+          "layout": "topbar",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "brain"
+        },
+        {
+          "layout": "topbar",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "code"
+        },
+        {
+          "layout": "rail",
+          "root": 940,
+          "main": 704,
+          "scroll": 704,
+          "viewport": 940,
+          "view": "chat"
+        },
+        {
+          "layout": "rail",
+          "root": 940,
+          "main": 704,
+          "scroll": 704,
+          "viewport": 940,
+          "view": "artifacts"
+        },
+        {
+          "layout": "rail",
+          "root": 940,
+          "main": 704,
+          "scroll": 704,
+          "viewport": 940,
+          "view": "today"
+        },
+        {
+          "layout": "rail",
+          "root": 940,
+          "main": 704,
+          "scroll": 704,
+          "viewport": 940,
+          "view": "projects"
+        },
+        {
+          "layout": "rail",
+          "root": 940,
+          "main": 704,
+          "scroll": 704,
+          "viewport": 940,
+          "view": "vault"
+        },
+        {
+          "layout": "rail",
+          "root": 940,
+          "main": 704,
+          "scroll": 704,
+          "viewport": 940,
+          "view": "brain"
+        },
+        {
+          "layout": "rail",
+          "root": 940,
+          "main": 704,
+          "scroll": 704,
+          "viewport": 940,
+          "view": "code"
+        },
+        {
+          "layout": "command",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "chat"
+        },
+        {
+          "layout": "command",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "artifacts"
+        },
+        {
+          "layout": "command",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "today"
+        },
+        {
+          "layout": "command",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "projects"
+        },
+        {
+          "layout": "command",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "vault"
+        },
+        {
+          "layout": "command",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "brain"
+        },
+        {
+          "layout": "command",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "code"
+        },
+        {
+          "layout": "twopane",
+          "root": 940,
+          "main": 720,
+          "scroll": 720,
+          "viewport": 940,
+          "view": "chat"
+        },
+        {
+          "layout": "twopane",
+          "root": 940,
+          "main": 720,
+          "scroll": 720,
+          "viewport": 940,
+          "view": "artifacts"
+        },
+        {
+          "layout": "twopane",
+          "root": 940,
+          "main": 720,
+          "scroll": 720,
+          "viewport": 940,
+          "view": "today"
+        },
+        {
+          "layout": "twopane",
+          "root": 940,
+          "main": 720,
+          "scroll": 720,
+          "viewport": 940,
+          "view": "projects"
+        },
+        {
+          "layout": "twopane",
+          "root": 940,
+          "main": 720,
+          "scroll": 720,
+          "viewport": 940,
+          "view": "vault"
+        },
+        {
+          "layout": "twopane",
+          "root": 940,
+          "main": 720,
+          "scroll": 720,
+          "viewport": 940,
+          "view": "brain"
+        },
+        {
+          "layout": "twopane",
+          "root": 940,
+          "main": 720,
+          "scroll": 720,
+          "viewport": 940,
+          "view": "code"
+        },
+        {
+          "layout": "bento",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "chat"
+        },
+        {
+          "layout": "bento",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "artifacts"
+        },
+        {
+          "layout": "bento",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "today"
+        },
+        {
+          "layout": "bento",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "projects"
+        },
+        {
+          "layout": "bento",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "vault"
+        },
+        {
+          "layout": "bento",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "brain"
+        },
+        {
+          "layout": "bento",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "code"
+        },
+        {
+          "layout": "console",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "chat"
+        },
+        {
+          "layout": "console",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "artifacts"
+        },
+        {
+          "layout": "console",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "today"
+        },
+        {
+          "layout": "console",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "projects"
+        },
+        {
+          "layout": "console",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "vault"
+        },
+        {
+          "layout": "console",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "brain"
+        },
+        {
+          "layout": "console",
+          "root": 940,
+          "main": 940,
+          "scroll": 940,
+          "viewport": 940,
+          "view": "code"
+        },
+        {
+          "layout": "floating",
+          "root": 940,
+          "main": 910,
+          "scroll": 910,
+          "viewport": 940,
+          "view": "chat"
+        },
+        {
+          "layout": "floating",
+          "root": 940,
+          "main": 910,
+          "scroll": 910,
+          "viewport": 940,
+          "view": "artifacts"
+        },
+        {
+          "layout": "floating",
+          "root": 940,
+          "main": 910,
+          "scroll": 910,
+          "viewport": 940,
+          "view": "today"
+        },
+        {
+          "layout": "floating",
+          "root": 940,
+          "main": 910,
+          "scroll": 910,
+          "viewport": 940,
+          "view": "projects"
+        },
+        {
+          "layout": "floating",
+          "root": 940,
+          "main": 910,
+          "scroll": 910,
+          "viewport": 940,
+          "view": "vault"
+        },
+        {
+          "layout": "floating",
+          "root": 940,
+          "main": 910,
+          "scroll": 910,
+          "viewport": 940,
+          "view": "brain"
+        },
+        {
+          "layout": "floating",
+          "root": 940,
+          "main": 910,
+          "scroll": 910,
+          "viewport": 940,
+          "view": "code"
+        }
+      ],
+      "unexpectedRequests": []
+    },
+    "turn-wiring": {
+      "errors": [],
+      "checks": [
+        "The real composer calls the existing engine send path once; actual tool events drive the strip",
+        "Existing permission queue, native request IDs, Allow/Deny callbacks and reasoning disclosure remain intact",
+        "Completion reaction ends; existing handoff, compact, journal/review actions remain in the real panel"
+      ]
+    },
+    "standalone": {
+      "errors": [],
+      "checks": [
+        "Re-exported renderer HTML reopens through the formerly failing viewer wrapper, retaining selected look",
+        "file: actual React app renders, 8 presets, palette switch, shared preview and no raw template or startup error",
+        "viewer-wrapper: actual React app renders, 8 presets, palette switch, shared preview and no raw template or startup error",
+        "opaque-sandbox: actual React app renders, 8 presets, palette switch, shared preview and no raw template or startup error"
+      ],
+      "requests": []
+    },
+    "motion-quick": {
+      "errors": [],
+      "checks": [
+        "OS reduced motion wins over Playful, opening letters and physical transforms",
+        "Quick mode skips the opening and retains the draft on native-bridge refusal",
+        "Native assembly/lettering settles at minimum desktop height; manual replay and skip work"
+      ]
+    },
+    "electron-automation": {
+      "errors": [],
+      "checks": [
+        "The actual Settings switches and reviewer selector write the real main-process preferences",
+        "Real guarded IPC: approved file write keeps old bytes before Allow, then automatic text-only HTTP review runs once",
+        "Turning both switches Off takes effect in the same living CLI session: no new backup or model request",
+        "Remote model metadata is blocked before task text is posted unless external review is explicitly allowed",
+        "Real artifact IPC removes to disk Trash and restores content/metadata without losing versions",
+        "Real native folder-choice callback updates memory reads and the actual marker-bounded engine instructions"
+      ],
+      "modelCalls": 1,
+      "native": {
+        "userData": "/home/user/oddbrain-app-code/apps/03_oddbrain/qa-ui/electron-integration-BmcWGl/config/oddbrain",
+        "version": "0.9.0"
+      }
+    }
+  },
+  "previewSha256": "138b0cd3b273db80e45f3acdebb3b93dc32ce6ee6fb59b1b921cdd62e2039c0c",
+  "environment": {
+    "node": "22.23.3",
+    "chromium": "156",
+    "electron": "41.10.7",
+    "os": "Linux sandbox with Xvfb"
+  },
+  "limitations": [
+    "The 221-action audit is source traceability, not 221 independent runtime feature tests. Aliases and cosmetic dialogs are consolidated; mobile UI is intentionally excluded under the owner's Windows-PC requirement.",
+    "Real Electron IPC/filesystem/HTTP behavior was tested with a deterministic CLI and model server fixture, not authenticated production models.",
+    "Human-opened Windows installation, Windows startup/warm runtime/global hotkey, OS dialogs, real provider authentication and extension capture still need installed-Windows acceptance.",
+    "Auto-keep protects changes approved through app permission cards, not actions bypassing those cards.",
+    "agy agent mode is not called report-only. Choose an explicit safe text reviewer for agy.",
+    "Reviews evaluate bounded text evidence, not independent filesystem/test execution. External reviews require consent and provider permissions."
+  ],
+  "codeIntegrity": "Every source byte in files/ matches the built/tested working tree.",
+  "patchApplication": {
+    "originalBaseline": "pass",
+    "exactV1Upgrade": "pass (52 replacements, 42 already-current files)",
+    "automaticBackups": "pass",
+    "idempotency": "pass",
+    "combinedGitPatch": "pass"
+  }
+}

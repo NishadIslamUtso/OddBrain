@@ -1,0 +1,1462 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Butt-Brain Animation Engine — 187 words, 79 loops</title>
+<style>
+/* ============ page shell ============ */
+*{box-sizing:border-box}
+:root{
+  --pink:#FF98A5; --pink2:#FFAFB8; --rose:#EF7F8C; --ink:#2E2B2B;
+  --plum:#3A2F45; --purple:#8C6AA7; --paper:#FFF7F5; --card:#FFFFFF;
+  --line:#EFE2E6; --muted:#857A8E; --accent:#6C4E9E; --accent2:#B4577F;
+  --shadow:0 1px 2px rgba(58,47,69,.05), 0 10px 30px -18px rgba(58,47,69,.35);
+  --r:18px;
+}
+html,body{margin:0;padding:0}
+body{
+  background:
+    radial-gradient(1100px 520px at 12% -10%, #FFE7EC 0%, rgba(255,231,236,0) 60%),
+    radial-gradient(900px 480px at 100% 0%, #EFE6FF 0%, rgba(239,230,255,0) 55%),
+    var(--paper);
+  color:var(--plum);
+  font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  -webkit-font-smoothing:antialiased; min-height:100vh;
+}
+.wrap{max-width:1240px;margin:0 auto;padding:0 20px 90px}
+header.top{position:sticky;top:0;z-index:20;backdrop-filter:blur(14px);background:rgba(255,247,245,.82);border-bottom:1px solid var(--line)}
+.top .row{max-width:1240px;margin:0 auto;padding:14px 20px;display:flex;gap:18px;align-items:center;flex-wrap:wrap}
+.brand{display:flex;align-items:center;gap:12px;font-weight:800;letter-spacing:-.02em;font-size:17px}
+.brand .dot{width:34px;height:34px;border-radius:12px;background:linear-gradient(150deg,var(--pink),#FFD9E0);box-shadow:var(--shadow);display:grid;place-items:center;font-size:17px}
+.brand small{display:block;font-weight:500;color:var(--muted);letter-spacing:0;font-size:12px}
+.spacer{flex:1}
+.ctl{display:flex;align-items:center;gap:9px;background:#fff;border:1px solid var(--line);border-radius:999px;padding:6px 12px;box-shadow:var(--shadow)}
+.ctl label{font-size:12px;color:var(--muted);font-weight:600}
+.ctl output{font-size:12px;font-weight:700;color:var(--accent);min-width:30px;text-align:right}
+input[type=range]{-webkit-appearance:none;appearance:none;width:104px;height:18px;background:transparent;cursor:pointer}
+input[type=range]::-webkit-slider-runnable-track{height:5px;border-radius:9px;background:linear-gradient(90deg,var(--pink),var(--purple))}
+input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:15px;height:15px;border-radius:50%;background:#fff;border:2px solid var(--accent);margin-top:-5px}
+input[type=range]::-moz-range-track{height:5px;border-radius:9px;background:linear-gradient(90deg,var(--pink),var(--purple))}
+input[type=range]::-moz-range-thumb{width:14px;height:14px;border-radius:50%;background:#fff;border:2px solid var(--accent)}
+button{font:inherit}
+.btn{border:1px solid var(--line);background:#fff;color:var(--plum);padding:8px 13px;border-radius:11px;cursor:pointer;font-weight:600;font-size:13px;box-shadow:var(--shadow);transition:transform .12s ease,background .15s}
+.btn:hover{background:#FFF3F6}
+.btn:active{transform:translateY(1px)}
+.btn.pri{background:linear-gradient(150deg,var(--accent),#8E5FB0);color:#fff;border-color:transparent}
+.btn.pink{background:linear-gradient(150deg,#FFB3BE,#FFD3DA);border-color:transparent}
+.btn.sm{padding:6px 10px;font-size:12px;border-radius:9px}
+.btn[aria-pressed=true]{background:linear-gradient(150deg,var(--accent),#8E5FB0);color:#fff;border-color:transparent}
+h1{font-size:clamp(24px,3.4vw,38px);letter-spacing:-.03em;margin:26px 0 6px;line-height:1.08}
+h2{font-size:19px;letter-spacing:-.02em;margin:34px 0 10px}
+h3{font-size:14px;margin:0 0 6px;letter-spacing:-.01em}
+p.lede{color:var(--muted);max-width:76ch;margin:0 0 18px}
+.tabs{display:flex;gap:8px;flex-wrap:wrap;margin:20px 0 16px;position:sticky;top:64px;z-index:15;padding:6px 0}
+.tab{border:1px solid var(--line);background:rgba(255,255,255,.85);padding:9px 15px;border-radius:999px;cursor:pointer;font-weight:700;font-size:13px;box-shadow:var(--shadow);color:var(--muted)}
+.tab[aria-selected=true]{color:#fff;background:linear-gradient(150deg,var(--plum),#5C4A6E);border-color:transparent}
+.view{display:none}
+.view.on{display:block}
+.card{background:var(--card);border:1px solid var(--line);border-radius:var(--r);box-shadow:var(--shadow);padding:18px}
+.grid{display:grid;gap:16px}
+.muted{color:var(--muted)}
+.tag{display:inline-block;font-size:11px;font-weight:800;letter-spacing:.04em;text-transform:uppercase;color:var(--accent);background:#F3ECFF;border-radius:999px;padding:3px 9px}
+.tag.p{color:var(--accent2);background:#FFECF1}
+code,kbd{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px}
+pre{background:#2A2432;color:#F4EEF7;border-radius:14px;padding:14px 16px;overflow:auto;font-size:12.5px;line-height:1.55;margin:10px 0}
+pre .k{color:#FFB3C6} pre .s{color:#BEE3C4} pre .c{color:#9C90AC}
+pre.dim{background:#F7F3F8;color:#4A3F55;border:1px solid var(--line)}
+
+/* ============ stage ============ */
+.stage{display:grid;grid-template-columns:minmax(280px,1fr) minmax(300px,1fr);gap:22px;align-items:center}
+@media (max-width:820px){.stage{grid-template-columns:1fr}}
+.stagebox{position:relative;background:
+   radial-gradient(320px 240px at 50% 78%, #FFF0F3 0%, rgba(255,240,243,0) 70%),
+   linear-gradient(180deg,#FFFFFF,#FFFAFB);
+   border:1px solid var(--line);border-radius:22px;aspect-ratio:1/1;overflow:hidden;box-shadow:var(--shadow)}
+.stagebox .bbhost{position:absolute;inset:6%}
+.wordbig{font-size:clamp(30px,5vw,54px);font-weight:800;letter-spacing:-.035em;line-height:1;margin:2px 0 8px;background:linear-gradient(100deg,var(--plum),var(--accent2) 70%);-webkit-background-clip:text;background-clip:text;color:transparent}
+.meta{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:14px}
+.transport{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}
+.samples{display:flex;gap:6px;flex-wrap:wrap;margin-top:6px}
+.chip{border:1px solid var(--line);background:#fff;border-radius:999px;padding:5px 11px;font-size:12.5px;cursor:pointer;color:var(--plum);font-weight:600}
+.chip:hover{border-color:var(--pink);background:#FFF4F7}
+.chip.on{background:linear-gradient(150deg,var(--plum),#5C4A6E);color:#fff;border-color:transparent}
+.kv{font-size:12.5px;color:var(--muted)}
+.bar{height:6px;border-radius:99px;background:#F1EAEE;overflow:hidden;margin-top:14px}
+.bar i{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--pink),var(--purple));transition:width .25s linear}
+
+/* ============ gallery tiles ============ */
+.tiles{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:14px}
+.tile{background:#fff;border:1px solid var(--line);border-radius:16px;overflow:hidden;box-shadow:var(--shadow);cursor:pointer;transition:transform .14s ease,border-color .14s}
+.tile:hover{transform:translateY(-2px);border-color:var(--pink)}
+.tile .box{position:relative;aspect-ratio:1/1;background:linear-gradient(180deg,#FFFDFE,#FFF4F7);overflow:hidden}
+.tile .box .bbhost{position:absolute;inset:4%}
+.tile .cap{padding:9px 11px 11px;border-top:1px solid var(--line)}
+.tile .cap b{display:block;font-size:13.5px;letter-spacing:-.01em}
+.tile .cap span{font-size:11.5px;color:var(--muted);display:block;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.badge{position:absolute;top:8px;left:8px;font-size:10px;font-weight:800;letter-spacing:.05em;text-transform:uppercase;background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:99px;padding:3px 8px;color:var(--muted)}
+.words-grid{display:flex;flex-wrap:wrap;gap:7px}
+.toolbar{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:12px 0 16px}
+input[type=search],input[type=text]{font:inherit;padding:9px 13px;border-radius:11px;border:1px solid var(--line);background:#fff;min-width:210px;box-shadow:var(--shadow)}
+.note{font-size:12.5px;color:var(--muted);background:#FFF6F8;border:1px dashed #F3D3DA;border-radius:12px;padding:10px 12px}
+table{border-collapse:collapse;width:100%;font-size:12.5px}
+th,td{text-align:left;padding:7px 9px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted)}
+tr:hover td{background:#FFFAFB}
+
+/* ============ thinking / loader widgets ============ */
+.thinkrow{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.ring{position:relative;display:grid;place-items:center}
+.ring::after{content:"";position:absolute;inset:-6%;border-radius:50%;border:2.5px dashed #E5C9D6;animation:spinSlow 9s linear infinite}
+@keyframes spinSlow{to{transform:rotate(360deg)}}
+.thinktext{font-weight:700;letter-spacing:-.02em}
+.shimmerlike{background:linear-gradient(90deg,#B9AEC6 0%,#6C4E9E 45%,#B9AEC6 90%);background-size:220% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:shim 2.1s linear infinite}
+@keyframes shim{0%{background-position:120% 0}100%{background-position:-120% 0}}
+.dots i{display:inline-block;width:5px;height:5px;border-radius:50%;background:var(--purple);margin-left:4px;animation:dotp 1.05s ease-in-out infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}
+@keyframes dotp{0%,100%{transform:translateY(0);opacity:.45}50%{transform:translateY(-5px);opacity:1}}
+.loader-demo{display:flex;gap:26px;align-items:flex-end;flex-wrap:wrap}
+.loader-demo figure{margin:0;text-align:center}
+.loader-demo figcaption{font-size:11px;color:var(--muted);margin-top:6px}
+@media (prefers-reduced-motion: reduce){ .ring::after{animation-duration:22s} }
+
+/* ============ misc ============ */
+.split{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media (max-width:900px){.split{grid-template-columns:1fr}}
+.kbd{border:1px solid var(--line);border-radius:7px;padding:1px 6px;font-size:11.5px;background:#FBF7F9;color:var(--plum)}
+footer{margin-top:44px;color:var(--muted);font-size:12.5px;text-align:center}
+.hidden{display:none!important}
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="row">
+    <div class="brand">
+      <span class="dot">🍑</span>
+      <span>Butt-Brain Animation Engine
+        <small>one SVG rig · 79 loops · 187 words mapped</small>
+      </span>
+    </div>
+    <span class="spacer"></span>
+    <div class="ctl" title="Global playback rate for every loop">
+      <label for="speed">Speed</label>
+      <input id="speed" type="range" min="0.35" max="2.2" step="0.05" value="1">
+      <output id="speedOut">1.0×</output>
+    </div>
+    <div class="ctl" title="How cartoony the squash &amp; stretch gets">
+      <label for="amp">Exaggeration</label>
+      <input id="amp" type="range" min="0.5" max="1.9" step="0.05" value="1">
+      <output id="ampOut">1.0</output>
+    </div>
+    <button class="btn" id="btnTiles" aria-pressed="true" title="Animate the gallery thumbnails">Tiles: on</button>
+  </div>
+</header>
+
+<div class="wrap">
+  <h1>Shin-Chan-flavoured motion for a butt-shaped brain.</h1>
+  <p class="lede">One rig, a vocabulary of 133 keyframes, and 79 named loops. Every word in your list resolves to a loop — most words share loops on purpose, so the set stays tiny and consistent. Special states (assembly splash, eye-rolling loader, juggling) live in the <b>Specials</b> tab and can be exported as standalone animated SVG.</p>
+
+  <div class="tabs" role="tablist">
+    <button class="tab" role="tab" aria-selected="true" data-view="stage">Stage</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="gallery">Loop gallery</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="special">Specials &amp; loader</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="words">All 187 words</button>
+    <button class="tab" role="tab" aria-selected="false" data-view="code">Use it</button>
+  </div>
+
+  <!-- ============================ STAGE ============================ -->
+  <section class="view on" id="view-stage">
+    <div class="card stage">
+      <div class="stagebox" id="stageBox"><div class="bbhost" id="stageHost"></div></div>
+      <div>
+        <div class="tag" id="stageTag">group</div>
+        <div class="wordbig" id="stageWord">Accomplishing</div>
+        <div class="meta">
+          <span class="kv">loop <b id="stageAnim">confetti</b></span>
+          <span class="kv">· mouth <b id="stageMouth">grin</b></span>
+          <span class="kv">· eyes <b id="stageEyes">hidden</b></span>
+          <span class="kv">· fx <b id="stageFx">confetti</b></span>
+        </div>
+        <div class="transport">
+          <button class="btn" id="btnPrev">← prev</button>
+          <button class="btn pri" id="btnReplay">↻ replay</button>
+          <button class="btn" id="btnNext">next →</button>
+          <button class="btn pink" id="btnRandom">🎲 random</button>
+          <button class="btn" id="btnPlayAll">▶︎ play all 187</button>
+          <button class="btn" id="btnCopySVG">⧉ copy SVG</button>
+          <button class="btn" id="btnDL">⤓ .svg</button>
+        </div>
+        <div class="bar"><i id="playBar"></i></div>
+        <p class="kv" style="margin:12px 0 4px">Words that use this loop — click to try:</p>
+        <div class="samples" id="stageSamples"></div>
+        <p class="note" style="margin-top:16px">Tip: poke the mascot for a <b>boop</b>. Use the sliders up top — <b>Speed</b> retimes every loop, <b>Exaggeration</b> scales squash, stretch, flops and wobbles (it's a CSS variable the keyframes multiply against, so one number re-tunes the whole character).</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ GALLERY ============================ -->
+  <section class="view" id="view-gallery">
+    <div class="toolbar">
+      <input type="search" id="galSearch" placeholder="Filter loops… (dance, steam, think)">
+      <span class="kv" id="galCount"></span>
+      <span class="spacer"></span>
+      <button class="btn sm" id="btnTiles2" aria-pressed="true">Animate tiles</button>
+      <button class="btn sm" id="btnShuffleTiles">Shuffle</button>
+    </div>
+    <div class="tiles" id="tiles"></div>
+  </section>
+
+  <!-- ============================ SPECIALS ============================ -->
+  <section class="view" id="view-special">
+    <div class="split">
+      <div class="card">
+        <h3>1 · Assembly (splash / first paint)</h3>
+        <p class="kv">Arms, legs, shoes, body and sunglasses are thrown in from off-frame and clack together, then the sunglasses drop on. 2.8s, plays once.</p>
+        <div class="stagebox" style="max-width:420px" id="asmBox"><div class="bbhost" id="asmHost"></div></div>
+        <div class="transport">
+          <button class="btn pri" id="asmReplay">↻ replay assembly</button>
+          <button class="btn" id="asmCopy">⧉ copy SVG</button>
+          <button class="btn" id="asmDL">⤓ .svg</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>2 · Loader (thinking, eyes rolling)</h3>
+        <p class="kv">Sunglasses pushed up on the forehead, eyeballs rolling in a slow circle like a spinner, haze drifting over him, body breathing. Drop-in for “Claude is working”.</p>
+        <div class="stagebox" style="max-width:420px"><div class="bbhost" id="ldHost"></div></div>
+        <div class="thinkrow" style="margin-top:14px">
+          <span class="thinktext"><span class="shimmerlike" id="ldWord">Clauding</span><span class="dots"><i></i><i></i><i></i></span></span>
+        </div>
+        <div class="transport">
+          <button class="btn" id="ldCopy">⧉ copy SVG</button>
+          <button class="btn" id="ldDL">⤓ .svg</button>
+          <button class="btn sm" id="ldCycle">cycle status word</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>3 · Juggling his own shoes &amp; glasses</h3>
+        <p class="kv">Both shoes and the sunglasses leave the body and arc through the air while the arms keep time. Great idle Easter egg.</p>
+        <div class="stagebox" style="max-width:420px"><div class="bbhost" id="jgHost"></div></div>
+        <div class="transport"><button class="btn" id="jgCopy">⧉ copy SVG</button><button class="btn" id="jgDL">⤓ .svg</button></div>
+      </div>
+
+      <div class="card">
+        <h3>4 · Loader at lockup sizes</h3>
+        <p class="kv">Same loop, 200 / 96 / 48 px. It stays legible because the eye-roll is the only motion that reads at tiny sizes.</p>
+        <div class="loader-demo" style="margin-top:10px">
+          <figure><div class="ring" style="width:200px;height:200px"><div class="bbhost" style="position:relative;width:100%;height:100%"></div></div><figcaption>200 px</figcaption></figure>
+          <figure><div class="bbhost" style="width:96px;height:96px" data-special="loader" data-mini="1"></div><figcaption>96 px</figcaption></figure>
+          <figure><div class="bbhost" style="width:48px;height:48px" data-special="loader" data-mini="1"></div><figcaption>48 px</figcaption></figure>
+          <figure><div class="bbhost" style="width:32px;height:32px" data-special="loader" data-mini="1"></div><figcaption>32 px</figcaption></figure>
+        </div>
+      </div>
+
+      <div class="card">
+        <h3>5 · Confused &amp; hazy (befuddling)</h3>
+        <p class="kv">Head wobble, question marks, sweat drop, fog drifting, colour drained a little. This is the non-spinner “something's off” state.</p>
+        <div class="stagebox" style="max-width:420px" id="hzBox"><div class="bbhost" id="hzHost"></div></div>
+        <div class="transport"><button class="btn" id="hzCopy">⧉ copy SVG</button><button class="btn" id="hzDL">⤓ .svg</button></div>
+      </div>
+
+      <div class="card">
+        <h3>6 · Butt dance (the one you'll actually ship)</h3>
+        <p class="kv">The signature: turn around, wiggle what he's named after, spin back, deny everything.</p>
+        <div class="stagebox" style="max-width:420px" id="bdBox"><div class="bbhost" id="bdHost"></div></div>
+        <div class="transport"><button class="btn" id="bdCopy">⧉ copy SVG</button><button class="btn" id="bdDL">⤓ .svg</button></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ============================ WORDS ============================ -->
+  <section class="view" id="view-words">
+    <div class="toolbar">
+      <input type="search" id="wordSearch" placeholder="Search 187 words…">
+      <span class="kv" id="wordCount"></span>
+      <span class="spacer"></span>
+      <button class="btn sm" id="btnWordAll">▶︎ cycle all on stage</button>
+    </div>
+    <div class="card">
+      <div class="words-grid" id="wordChips"></div>
+    </div>
+  </section>
+
+  <!-- ============================ CODE ============================ -->
+  <section class="view" id="view-code">
+    <div class="split">
+      <div class="card">
+        <h3>Minimal drop-in</h3>
+        <p class="kv">Everything you need in your app: the rig markup, the keyframe sheet, and one call per status word.</p>
+<pre id="snipHtml"><span class="c">&lt;!-- 1. one host element per mascot --&gt;</span>
+&lt;div class="bbhost" id="mascot"&gt;&lt;/div&gt;
+
+<span class="c">// 2. build the rig once (mascot() is in this file) and mount it</span>
+host.innerHTML = <span class="k">mascot</span>(<span class="s">'s'</span>);
+<span class="c">// 3. set the loop for the current status word</span>
+<span class="k">play</span>(host.querySelector(<span class="s">'svg'</span>), <span class="k">loopForWord</span>(<span class="s">'Percolating'</span>)); <span class="c">// -&gt; "cook"</span></pre>
+        <button class="btn sm" data-copy="snipHtml">⧉ copy</button>
+      </div>
+
+      <div class="card">
+        <h3>How a loop is defined</h3>
+        <p class="kv">Loops are data, not hand-written CSS. Edit this and you get a new loop everywhere (gallery, stage, exports).</p>
+<pre id="snipAnim">boogie: {
+  n:<span class="s">'Boogie'</span>, g:<span class="s">'Dance floor'</span>,
+  pt:{ rig:<span class="s">'k-bob .62, k-sway 1.24'</span>, torso:<span class="s">'k-wiggle .31'</span>,
+       armNear:<span class="s">'k-armJazz .62'</span>, armFar:<span class="s">'k-armJazzR .62'</span>,
+       legNear:<span class="s">'k-tap .62'</span>, legFar:<span class="s">'k-tapB .62'</span> },
+  m:<span class="s">'grin'</span>, e:<span class="s">'hidden'</span>, fx:<span class="s">'notes'</span>, bl:<span class="s">1</span>
+}</pre>
+        <p class="kv">Part keys: <span class="kbd">rig</span> <span class="kbd">torso</span> <span class="kbd">armNear</span> <span class="kbd">armFar</span> <span class="kbd">legNear</span> <span class="kbd">legFar</span> <span class="kbd">glasses</span> <span class="kbd">pupilL</span> <span class="kbd">pupilR</span>. Fields: <span class="kbd">m</span> mouth, <span class="kbd">e</span> eyes, <span class="kbd">gl</span> glasses <span class="kbd">up</span>, <span class="kbd">fx</span> overlay, <span class="kbd">pr</span> prop, <span class="kbd">bl</span> blush, <span class="kbd">f</span> CSS filter, <span class="kbd">once</span> for one-shots.</p>
+        <button class="btn sm" data-copy="snipAnim">⧉ copy</button>
+      </div>
+
+      <div class="card" style="grid-column:1/-1">
+        <h3>Word → loop map</h3>
+        <p class="kv">187 words out, <span id="mapLoopCount"></span> distinct loops. Unknown words fall through to a keyword guesser (<code>guess()</code>): <code>dance|boogie|shimmy</code> → boogie, <code>bake|cook|brew|simmer</code> → steam, <code>think|ponder|muse</code> → think, and so on.</p>
+        <div class="toolbar" style="margin-top:6px">
+          <button class="btn pri" id="mapCopy">⧉ copy JSON</button>
+          <button class="btn" id="mapDL">⤓ loop-map.json</button>
+          <span class="kv">Also <code>loopForWord(word)</code> and <code>LOOP_MAP</code> are globals — copy the whole page, or take the two script blocks.</span>
+        </div>
+        <div style="max-height:340px;overflow:auto;border:1px solid var(--line);border-radius:14px">
+          <table id="mapTable"><thead><tr><th>Word</th><th>Loop</th><th>Group</th><th>Also used by</th></tr></thead><tbody></tbody></table>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <footer>Built as a single self-contained HTML file — no network, no dependencies. Mascot art: your butt-brain, re-rigged for animation.</footer>
+</div>
+
+<script>
+/* ===================================================================== *
+ *  BUTT-BRAIN ANIMATION ENGINE
+ *  1. KEYFRAMES  (one vocabulary, reused everywhere)
+ *  2. RIG        (mascot() builds one SVG per host; every part is addressable)
+ *  3. DECOR      (fx layers + props, toggled per loop)
+ *  4. LOOPS      (79 named loops = part keyframes + mouth/eyes/fx/prop)
+ *  5. WORD MAP   (187 words -> loop id, plus a keyword guesser)
+ *  6. ENGINE/UI
+ * ===================================================================== */
+
+/* ---------------------------------------------------------------- 1. CSS */
+const KFCSS = `
+/* ---- part origins (user units of the 740x740 viewBox) ---- */
+.bb{width:100%;height:100%;display:block;overflow:visible}
+.bb .i,.bb [data-part],.bb .fxg,.bb .prg{transform-box:view-box}
+.bb .fx .i,.bb .prg .i{transform-box:fill-box;transform-origin:center}
+.bb .p-rig{transform-origin:360px 648px}
+.bb .p-torso{transform-origin:356px 476px}
+.bb .p-armNear{transform-origin:152px 358px}
+.bb .p-armFar{transform-origin:580px 358px}
+.bb .p-legNear{transform-origin:259px 481px}
+.bb .p-legFar{transform-origin:418px 480px}
+.bb .p-glasses-y,.bb .p-glasses-s,.bb .p-glasses-r{transform-box:view-box;transform-origin:379px 264px;transition:transform .45s cubic-bezier(.2,1.7,.45,1)}
+.bb .p-glasses.is-up .p-glasses-y{transform:translateY(-98px)}
+.bb .p-glasses.is-up .p-glasses-s{transform:scale(.62)}
+.bb .p-glasses.is-up .p-glasses-r{transform:rotate(-9deg)}
+.bb .p-eyes{transform-box:view-box;transform-origin:378px 268px;animation:k-eyeBlink 5.4s infinite}
+.bb .p-pupilL,.bb .p-pupilR,.bb .p-rig,.bb .p-torso,.bb .p-armNear,.bb .p-armFar,.bb .p-legNear,.bb .p-legFar,.bb .p-glasses{animation-fill-mode:both}
+.off{display:none!important}
+.bb .fx,.bb .prg{pointer-events:none}
+
+/* ---- generic fx element driver: --i = stagger index ---- */
+.fx .i,.fx .i2,.prg .i,.prg .i2{animation-duration:calc(var(--d,1.4s)/var(--spd,1));animation-timing-function:ease-in-out;animation-iteration-count:infinite;animation-fill-mode:both;animation-delay:calc(var(--i,0)*var(--gap,.22s)/var(--spd,1))}
+
+/* ---- PART MOTION ---- */
+@keyframes k-bob{0%,100%{transform:translateY(0)}50%{transform:translateY(calc(-15px*var(--amp)))}}
+@keyframes k-bobBig{0%,100%{transform:translateY(calc(6px*var(--amp)))}50%{transform:translateY(calc(-56px*var(--amp)))}}
+@keyframes k-squash{0%,100%{transform:scale(1,1)}30%{transform:translateY(calc(12px*var(--amp))) scale(calc(1 + .08*var(--amp)),calc(1 - .12*var(--amp)))}62%{transform:translateY(0) scale(.99,1.02)}}
+@keyframes k-hop{0%{transform:translateY(0) scale(1.03,.94)}10%{transform:translateY(calc(-56px*var(--amp))) scale(.95,1.07)}30%{transform:translateY(calc(-94px*var(--amp))) scale(.98,1.03)}46%{transform:translateY(0) scale(1.08,.9)}58%{transform:translateY(calc(-26px*var(--amp))) scale(.99,1.02)}72%{transform:translateY(0) scale(1.04,.95)}100%{transform:translateY(0) scale(1,1)}}
+@keyframes k-sway{0%,100%{transform:rotate(calc(-5deg*var(--amp)))}50%{transform:rotate(calc(5deg*var(--amp)))}}
+@keyframes k-wiggle{0%,100%{transform:rotate(calc(-6deg*var(--amp)))}50%{transform:rotate(calc(6deg*var(--amp)))}}
+@keyframes k-wiggleFast{0%,100%{transform:rotate(calc(-11deg*var(--amp)))}50%{transform:rotate(calc(11deg*var(--amp)))}}
+@keyframes k-shimmy{0%,100%{transform:translateX(calc(-14px*var(--amp))) rotate(calc(-3deg*var(--amp)))}50%{transform:translateX(calc(14px*var(--amp))) rotate(calc(3deg*var(--amp)))}}
+@keyframes k-shake{0%,100%{transform:translateX(calc(-9px*var(--amp)))}20%{transform:translateX(calc(9px*var(--amp)))}40%{transform:translateX(calc(-7px*var(--amp)))}60%{transform:translateX(calc(7px*var(--amp)))}80%{transform:translateX(calc(-4px*var(--amp)))}}
+@keyframes k-shakeFast{0%,100%{transform:translate(calc(-4px*var(--amp)),0) rotate(-2deg)}50%{transform:translate(calc(4px*var(--amp)),0) rotate(2deg)}}
+@keyframes k-jelly{0%,100%{transform:scale(1,1)}18%{transform:scale(calc(1+.13*var(--amp)),calc(1-.15*var(--amp)))}36%{transform:scale(calc(1-.1*var(--amp)),calc(1+.11*var(--amp)))}54%{transform:scale(calc(1+.07*var(--amp)),calc(1-.06*var(--amp)))}72%{transform:scale(calc(1-.04*var(--amp)),calc(1+.04*var(--amp)))}}
+@keyframes k-spin{to{transform:rotate(360deg)}}
+@keyframes k-spinFast{to{transform:rotate(1080deg)}}
+@keyframes k-flip{0%,30%{transform:scaleX(1)}40%,72%{transform:scaleX(-1)}82%,100%{transform:scaleX(1)}}
+@keyframes k-lean{0%,100%{transform:rotate(calc(-8deg*var(--amp)))}50%{transform:rotate(calc(-13deg*var(--amp)))}}
+@keyframes k-lunge{0%,100%{transform:translate(0,0) rotate(0) scale(1,1)}30%{transform:translate(calc(24px*var(--amp)),calc(-36px*var(--amp))) rotate(calc(10deg*var(--amp))) scale(1.03,.96)}55%{transform:translate(calc(66px*var(--amp)),0) rotate(calc(16deg*var(--amp))) scale(1.06,.94)}76%{transform:translate(calc(8px*var(--amp)),calc(-9px*var(--amp))) rotate(calc(3deg*var(--amp)))}}
+@keyframes k-dangle{0%,100%{transform:rotate(calc(-4deg*var(--amp)))}50%{transform:rotate(calc(4deg*var(--amp)))}}
+@keyframes k-kickA{0%,100%{transform:rotate(0deg)}50%{transform:rotate(calc(-28deg*var(--amp)))}}
+@keyframes k-kickB{0%,100%{transform:rotate(0deg)}50%{transform:rotate(calc(26deg*var(--amp)))}}
+@keyframes k-tap{0%,100%{transform:translateY(0) rotate(0)}50%{transform:translateY(calc(-12px*var(--amp))) rotate(calc(-7deg*var(--amp)))}}
+@keyframes k-tapB{0%,100%{transform:translateY(calc(-12px*var(--amp))) rotate(calc(7deg*var(--amp)))}50%{transform:translateY(0) rotate(0)}}
+@keyframes k-paddle{0%,100%{transform:rotate(calc(-16deg*var(--amp)))}50%{transform:rotate(calc(16deg*var(--amp)))}}
+@keyframes k-slide{0%,100%{transform:translateX(0) rotate(0)}50%{transform:translateX(calc(36px*var(--amp))) rotate(calc(13deg*var(--amp)))}}
+@keyframes k-shuffle{0%,100%{transform:translate(0,0)}25%{transform:translate(calc(-11px*var(--amp)),calc(-7px*var(--amp)))}75%{transform:translate(calc(11px*var(--amp)),0)}}
+@keyframes k-crouch{0%,100%{transform:translateY(calc(16px*var(--amp))) scale(.97,.92) rotate(calc(-3deg*var(--amp)))}50%{transform:translateY(calc(11px*var(--amp))) scale(.95,.94) rotate(calc(3deg*var(--amp)))}}
+@keyframes k-shiftX{0%,100%{transform:translateX(calc(-30px*var(--amp)))}50%{transform:translateX(calc(30px*var(--amp)))}}
+@keyframes k-zig{0%{transform:translate(-40px,0) rotate(-6deg)}25%{transform:translate(46px,calc(-16px*var(--amp))) rotate(7deg)}50%{transform:translate(104px,0) rotate(-5deg)}75%{transform:translate(22px,calc(-16px*var(--amp))) rotate(6deg)}100%{transform:translate(-40px,0) rotate(-6deg)}}
+@keyframes k-sink{0%,12%{transform:translateY(0)}42%,62%{transform:translateY(calc(96px*var(--amp))) scale(1,.93)}92%,100%{transform:translateY(0)}}
+@keyframes k-stretch{0%,100%{transform:scale(1,1)}22%{transform:scale(calc(1-.09*var(--amp)),calc(1+.15*var(--amp)))}62%{transform:scale(1,1.05)}}
+@keyframes k-press{0%,100%{transform:scale(1,1)}34%,66%{transform:scale(calc(1+.14*var(--amp)),calc(1-.22*var(--amp)))}}
+@keyframes k-float{0%,100%{transform:translateY(0)}50%{transform:translateY(calc(-28px*var(--amp)))}}
+@keyframes k-fadeUp{0%{transform:translateY(0);opacity:1}22%{transform:translateY(calc(-34px*var(--amp)));opacity:.2}32%{opacity:0}54%{opacity:0;transform:translateY(calc(-34px*var(--amp)))}68%{opacity:1;transform:translateY(calc(-15px*var(--amp)))}100%{transform:translateY(0);opacity:1}}
+@keyframes k-shiver{0%,100%{transform:translate(calc(-2px*var(--amp)),0)}25%{transform:translate(calc(2px*var(--amp)),calc(1.5px*var(--amp)))}50%{transform:translate(calc(-1.5px*var(--amp)),calc(-1px*var(--amp)))}75%{transform:translate(calc(1.5px*var(--amp)),calc(1px*var(--amp)))}}
+@keyframes k-boop{0%,100%{transform:scale(1,1) translateY(0)}16%{transform:scale(calc(1+.16*var(--amp)),calc(1-.2*var(--amp)))}38%{transform:scale(.95,1.06)}58%{transform:scale(1.03,.98)}78%{transform:scale(.99,1.01)}}
+@keyframes k-purr{0%,100%{transform:rotate(calc(-2deg*var(--amp)))}50%{transform:rotate(calc(2deg*var(--amp)))}}
+
+/* ---- ARMS ---- */
+@keyframes k-armUpL{0%,100%{transform:rotate(6deg)}50%{transform:rotate(calc(66deg*var(--amp)))}}
+@keyframes k-armUpR{0%,100%{transform:rotate(-6deg)}50%{transform:rotate(calc(-66deg*var(--amp)))}}
+@keyframes k-armOverL{0%,100%{transform:rotate(calc(142deg*var(--amp)))}50%{transform:rotate(calc(156deg*var(--amp)))}}
+@keyframes k-armOverR{0%,100%{transform:rotate(calc(-142deg*var(--amp)))}50%{transform:rotate(calc(-156deg*var(--amp)))}}
+@keyframes k-armFlailL{0%{transform:rotate(calc(24deg*var(--amp)))}25%{transform:rotate(calc(-42deg*var(--amp)))}50%{transform:rotate(calc(82deg*var(--amp)))}75%{transform:rotate(calc(-18deg*var(--amp)))}100%{transform:rotate(calc(24deg*var(--amp)))}}
+@keyframes k-armFlailR{0%{transform:rotate(calc(-24deg*var(--amp)))}25%{transform:rotate(calc(42deg*var(--amp)))}50%{transform:rotate(calc(-82deg*var(--amp)))}75%{transform:rotate(calc(18deg*var(--amp)))}100%{transform:rotate(calc(-24deg*var(--amp)))}}
+@keyframes k-armJazz{0%{transform:rotate(calc(14deg*var(--amp)))}25%{transform:rotate(calc(88deg*var(--amp)))}50%{transform:rotate(calc(30deg*var(--amp)))}75%{transform:rotate(calc(100deg*var(--amp)))}100%{transform:rotate(calc(14deg*var(--amp)))}}
+@keyframes k-armJazzR{0%{transform:rotate(calc(-14deg*var(--amp)))}25%{transform:rotate(calc(-88deg*var(--amp)))}50%{transform:rotate(calc(-30deg*var(--amp)))}75%{transform:rotate(calc(-100deg*var(--amp)))}100%{transform:rotate(calc(-14deg*var(--amp)))}}
+@keyframes k-armStir{0%{transform:rotate(calc(20deg*var(--amp)))}25%{transform:rotate(calc(56deg*var(--amp)))}50%{transform:rotate(calc(26deg*var(--amp)))}75%{transform:rotate(calc(2deg*var(--amp)))}100%{transform:rotate(calc(20deg*var(--amp)))}}
+@keyframes k-armTap{0%,100%{transform:rotate(10deg)}50%{transform:rotate(calc(30deg*var(--amp)))}}
+@keyframes k-armHit{0%{transform:rotate(calc(-54deg*var(--amp)))}38%{transform:rotate(calc(30deg*var(--amp)))}52%{transform:rotate(calc(23deg*var(--amp)))}100%{transform:rotate(calc(-54deg*var(--amp)))}}
+@keyframes k-armShake{0%,100%{transform:rotate(calc(8deg*var(--amp)))}25%{transform:rotate(calc(24deg*var(--amp)))}50%{transform:rotate(calc(12deg*var(--amp)))}75%{transform:rotate(calc(26deg*var(--amp)))}}
+@keyframes k-armPoint{0%,100%{transform:rotate(calc(74deg*var(--amp)))}45%{transform:rotate(calc(104deg*var(--amp)))}}
+@keyframes k-armHold{0%,100%{transform:rotate(calc(26deg*var(--amp)))}50%{transform:rotate(calc(34deg*var(--amp)))}}
+@keyframes k-armHoldR{0%,100%{transform:rotate(calc(-26deg*var(--amp)))}50%{transform:rotate(calc(-34deg*var(--amp)))}}
+@keyframes k-armWrap{0%,100%{transform:rotate(calc(-12deg*var(--amp)))}50%{transform:rotate(calc(-38deg*var(--amp)))}}
+@keyframes k-armWrapR{0%,100%{transform:rotate(calc(12deg*var(--amp)))}50%{transform:rotate(calc(38deg*var(--amp)))}}
+@keyframes k-armBack{0%,100%{transform:rotate(calc(36deg*var(--amp))) }50%{transform:rotate(calc(44deg*var(--amp)))}}
+@keyframes k-armBackR{0%,100%{transform:rotate(calc(-36deg*var(--amp)))}50%{transform:rotate(calc(-44deg*var(--amp)))}}
+@keyframes k-flapL{0%,100%{transform:rotate(calc(8deg*var(--amp)))}50%{transform:rotate(calc(30deg*var(--amp)))}}
+@keyframes k-flapR{0%,100%{transform:rotate(calc(-8deg*var(--amp)))}50%{transform:rotate(calc(-30deg*var(--amp)))}}
+
+@keyframes k-armTapR{0%,100%{transform:rotate(-10deg)}50%{transform:rotate(calc(-30deg*var(--amp)))}}
+/* ---- EYEBALLS / FACE BITS ---- */
+@keyframes k-pupilRoll{0%{transform:translate(0,0)}25%{transform:translate(16px,0)}50%{transform:translate(0,16px)}75%{transform:translate(-16px,0)}100%{transform:translate(0,0)}}
+@keyframes k-pupilDizzy{0%{transform:translate(0,0)}25%{transform:translate(10px,4px)}50%{transform:translate(0,10px)}75%{transform:translate(-10px,4px)}100%{transform:translate(0,0)}}
+@keyframes k-pupilShift{0%,100%{transform:translate(0,0)}28%{transform:translate(10px,2px)}62%{transform:translate(-10px,-2px)}}
+@keyframes k-eyeBlink{0%,92%,100%{transform:scaleY(1)}95%{transform:scaleY(.08)}}
+@keyframes k-glassBob{0%,100%{transform:translateY(-98px)}50%{transform:translateY(-105px)}}
+
+/* ---- one-shots: assembly + juggle ---- */
+@keyframes asm-torso{0%{transform:translate(-560px,-340px) rotate(-46deg);opacity:0}7%{opacity:1}30%{transform:translate(0,0) rotate(0)}35%{transform:translate(0,16px) scale(1.07,.9)}41%{transform:translate(0,-7px) scale(.98,1.03)}47%,100%{transform:none}}
+@keyframes asm-legNear{0%,20%{transform:translate(-300px,-460px) rotate(-70deg);opacity:0}28%{opacity:1}46%{transform:none}51%{transform:translate(0,11px) scale(1.05,.93)}57%,100%{transform:none}}
+@keyframes asm-legFar{0%,24%{transform:translate(320px,-500px) rotate(80deg);opacity:0}32%{opacity:1}50%{transform:none}55%{transform:translate(0,11px) scale(1.05,.93)}61%,100%{transform:none}}
+@keyframes asm-armNear{0%,44%{transform:translate(-560px,180px) rotate(-170deg);opacity:0}52%{opacity:1}68%{transform:none}73%{transform:translate(0,8px) rotate(4deg)}79%,100%{transform:none}}
+@keyframes asm-armFar{0%,47%{transform:translate(560px,150px) rotate(160deg);opacity:0}55%{opacity:1}71%{transform:none}76%{transform:translate(0,8px) rotate(-4deg)}82%,100%{transform:none}}
+@keyframes asm-glasses{0%,64%{transform:translate(340px,-520px) rotate(330deg);opacity:0}72%{opacity:1}87%{transform:none}91%{transform:translate(0,10px) rotate(-5deg)}95%,100%{transform:none}}
+@keyframes asm-pop{0%,86%{opacity:0;transform:scale(.25)}91%{opacity:.95;transform:scale(1.05)}100%{opacity:0;transform:scale(1.7)}}
+@keyframes asm-ring{0%,86%{opacity:0;transform:scale(.2)}90%{opacity:.9}100%{opacity:0;transform:scale(2.1)}}
+@keyframes jg-shoeA{0%{transform:translate(0,0) rotate(0)}22%{transform:translate(-180px,-250px) rotate(-150deg)}48%{transform:translate(-30px,-390px) rotate(-280deg)}74%{transform:translate(150px,-240px) rotate(-430deg)}100%{transform:translate(0,0) rotate(-560deg)}}
+@keyframes jg-shoeB{0%{transform:translate(0,0) rotate(0)}22%{transform:translate(150px,-240px) rotate(140deg)}48%{transform:translate(-30px,-390px) rotate(280deg)}74%{transform:translate(-180px,-250px) rotate(420deg)}100%{transform:translate(0,0) rotate(560deg)}}
+@keyframes jg-glass{0%,20%{transform:translate(0,0) rotate(0)}40%{transform:translate(20px,-330px) rotate(120deg)}62%{transform:translate(-40px,-120px) rotate(-160deg)}80%{transform:translate(30px,-300px) rotate(-300deg)}100%{transform:translate(0,0) rotate(-360deg)}}
+@keyframes jg-armL{0%,100%{transform:rotate(96deg)}50%{transform:rotate(126deg)}}
+@keyframes jg-armR{0%,100%{transform:rotate(-96deg)}50%{transform:rotate(-126deg)}}
+
+/* ---- PROP motion ---- */
+@keyframes f-wshk{0%,100%{transform:rotate(0deg)}25%{transform:rotate(14deg)}50%{transform:rotate(0)}75%{transform:rotate(-14deg)}}
+@keyframes f-hammer{0%{transform:rotate(calc(-46deg*var(--amp)))}34%{transform:rotate(calc(26deg*var(--amp)))}48%{transform:rotate(calc(20deg*var(--amp)))}100%{transform:rotate(calc(-46deg*var(--amp)))}}
+@keyframes f-cursor{0%,45%{opacity:1}50%,100%{opacity:0}}
+@keyframes f-blinkLed{0%,100%{opacity:.35}50%{opacity:1}}
+@keyframes f-cardFlip{0%{transform:rotate(-14deg) translateY(0)}50%{transform:rotate(14deg) translateY(-8px)}100%{transform:rotate(-14deg) translateY(0)}}
+@keyframes f-zester{0%{transform:rotate(-16deg)}50%{transform:rotate(16deg)}100%{transform:rotate(-16deg)}}
+@keyframes f-saw{0%,100%{transform:translateY(0) rotate(0)}25%{transform:translateY(-9px) rotate(2deg)}75%{transform:translateY(2px) rotate(-2deg)}}
+@keyframes f-chopper{0%,100%{transform:rotate(-22deg)}40%{transform:rotate(6deg)}55%{transform:rotate(0deg)}}
+
+/* ---- FX motion ---- */
+@keyframes f-sparkle{0%,100%{transform:scale(.2) rotate(0);opacity:0}50%{transform:scale(1) rotate(90deg);opacity:1}}
+@keyframes f-fall{0%{transform:translateY(-60px) rotate(0);opacity:0}8%{opacity:1}100%{transform:translateY(760px) rotate(560deg);opacity:1}}
+@keyframes f-grow{0%{transform:scale(.1,.1);opacity:0}38%{transform:scale(1,1);opacity:1}80%,100%{transform:scale(1.04,1.07);opacity:1}}
+@keyframes f-sunspin{to{transform:rotate(360deg)}}
+@keyframes f-sunop{0%,100%{opacity:0;transform:scale(.86)}50%{opacity:1;transform:scale(1)}}
+@keyframes f-steam{0%{transform:translate(0,24px) scale(.5);opacity:0}28%{opacity:.8}100%{transform:translate(calc(14px*var(--amp)),-176px) scale(1.55);opacity:0}}
+@keyframes f-drop{0%{transform:translateY(-90px);opacity:0}12%{opacity:1}100%{transform:translateY(660px);opacity:1}}
+@keyframes f-snow{0%{transform:translate(0,-50px) rotate(0);opacity:0}14%{opacity:.95}100%{transform:translate(34px,680px) rotate(240deg);opacity:.9}}
+@keyframes f-spark{0%,100%{transform:scale(.3);opacity:0}40%{transform:scale(1.2);opacity:1}}
+@keyframes f-bolt{0%,40%,56%,100%{opacity:0}45%,50%{opacity:1}}
+@keyframes f-flash{0%,40%,64%,100%{opacity:0}50%{opacity:.42}}
+@keyframes f-ring{0%{transform:scale(.25);opacity:.9}100%{transform:scale(2.5);opacity:0}}
+@keyframes f-popring{0%{transform:scale(.25);opacity:0}15%{opacity:.9}100%{transform:scale(2.7);opacity:0}}
+@keyframes f-note{0%{transform:translate(0,12px) rotate(-8deg);opacity:0}24%{opacity:1}100%{transform:translate(calc(66px*var(--amp)),-200px) rotate(16deg);opacity:0}}
+@keyframes f-dust{0%{transform:translate(0,0) scale(.4);opacity:.85}100%{transform:translate(calc(-46px*var(--amp)),calc(-52px*var(--amp))) scale(1.6);opacity:0}}
+@keyframes f-zig{0%{transform:translateX(46px) scale(.7);opacity:0}28%{opacity:.9}100%{transform:translateX(-160px) scale(1.1);opacity:0}}
+@keyframes f-atomspin{to{transform:rotate(360deg)}}
+@keyframes f-halo{0%,100%{transform:translateY(0);opacity:.5}50%{transform:translateY(-16px);opacity:.95}}
+@keyframes f-pop{0%{transform:scale(.2) translateY(18px);opacity:0}28%{transform:scale(1.14);opacity:1}70%{transform:scale(1)}100%{transform:scale(1);opacity:0}}
+@keyframes f-drip{0%{transform:translateY(-10px) scaleY(.6);opacity:0}22%{opacity:1}100%{transform:translateY(96px) scaleY(1.35);opacity:0}}
+@keyframes f-bub{0%{transform:translateY(18px) scale(.5);opacity:0}30%{transform:translateY(0) scale(1);opacity:1}100%{transform:translateY(-14px) scale(1.02);opacity:1}}
+@keyframes f-scribble{0%{stroke-dashoffset:900}100%{stroke-dashoffset:0}}
+@keyframes f-crumb{0%{transform:translate(0,0) scale(.5);opacity:0}28%{opacity:1}100%{transform:translate(calc(-76px*var(--amp)),calc(96px*var(--amp))) scale(.9);opacity:0}}
+@keyframes f-flame{0%,100%{transform:scaleY(.85) scaleX(1);opacity:.85}50%{transform:scaleY(1.25) scaleX(.88);opacity:1}}
+@keyframes f-heart{0%{transform:translate(0,0) scale(.4);opacity:0}20%{opacity:1}100%{transform:translate(calc(56px*var(--amp)),calc(-200px*var(--amp))) scale(1.1);opacity:0}}
+@keyframes f-fly{0%{transform:translate(0,0)}25%{transform:translate(calc(74px*var(--amp)),calc(-44px*var(--amp)))}50%{transform:translate(calc(32px*var(--amp)),calc(44px*var(--amp)))}75%{transform:translate(calc(-64px*var(--amp)),calc(-12px*var(--amp)))}100%{transform:translate(0,0)}}
+@keyframes f-wing{0%,100%{transform:scaleX(1)}50%{transform:scaleX(.4)}}
+@keyframes f-zzz{0%{transform:translate(0,0) scale(.6);opacity:0}28%{opacity:1}100%{transform:translate(calc(76px*var(--amp)),calc(-160px*var(--amp))) scale(1.3);opacity:0}}
+@keyframes f-floaty{0%,100%{transform:translateY(0) rotate(-4deg)}50%{transform:translateY(calc(-28px*var(--amp))) rotate(7deg)}}
+@keyframes f-block{0%{transform:translateY(-70px);opacity:0}10%{opacity:.92}100%{transform:translateY(700px);opacity:0}}
+@keyframes f-thread{0%{stroke-dashoffset:1400}100%{stroke-dashoffset:0}}
+@keyframes f-mist{0%,100%{transform:translate(0,0) scale(1);opacity:.32}50%{transform:translate(calc(28px*var(--amp)),calc(-20px*var(--amp))) scale(1.16);opacity:.6}}
+@keyframes f-fog{0%,100%{transform:translateX(-34px);opacity:.2}50%{transform:translateX(44px);opacity:.36}}
+@keyframes f-wind{0%{transform:translateX(-170px);opacity:0}18%{opacity:.9}100%{transform:translateX(340px);opacity:0}}
+@keyframes f-streak{0%,100%{transform:scaleY(.6);opacity:0}50%{transform:scaleY(1.6);opacity:.85}}
+@keyframes f-vortex{to{transform:rotate(360deg)}}
+@keyframes f-vortexIn{0%,100%{transform:scale(.95);opacity:.45}50%{transform:scale(1.05);opacity:.85}}
+@keyframes f-glow{0%,100%{transform:scale(.92);opacity:.4}50%{transform:scale(1.07);opacity:.75}}
+@keyframes f-sound{0%{transform:scale(.4);opacity:.9}100%{transform:scale(1.95);opacity:0}}
+@keyframes f-mud{0%{transform:translate(0,0) scale(.4);opacity:.9}100%{transform:translate(calc(-66px*var(--amp)),calc(-96px*var(--amp))) scale(1);opacity:0}}
+@keyframes f-gearspin{to{transform:rotate(360deg)}}
+@keyframes f-gearspinR{to{transform:rotate(-360deg)}}
+@keyframes f-shimmer{0%{transform:translateX(-220px);opacity:0}18%{opacity:.85}100%{transform:translateX(780px);opacity:0}}
+@keyframes f-orbit{to{transform:rotate(360deg)}}
+@keyframes f-bulb{0%,100%{transform:translateY(0) scale(1);opacity:.85}50%{transform:translateY(-11px) scale(1.07);opacity:1}}
+@keyframes f-lamp{0%,100%{opacity:.5}50%{opacity:.85}}
+@keyframes f-lasso{to{transform:rotate(360deg)}}
+
+/* ---- per-fx wiring (--d duration, --gap stagger) ---- */
+.fx-stars .i{animation-name:f-sparkle;--d:1.5s;--gap:.26s}
+.fx-confetti .i{animation-name:f-fall;--d:3.4s;--gap:.31s;animation-timing-function:linear}
+.fx-leaves .i{animation-name:f-grow;--d:2.6s;--gap:.36s}
+.fx-sun .i{animation-name:f-sunspin;--d:9s}
+.fx-sun .i2{animation-name:f-sunop;--d:2.4s}
+.fx-steam .i{animation-name:f-steam;--d:2.4s;--gap:.42s}
+.fx-drops .i{animation-name:f-drop;--d:1.5s;--gap:.2s;animation-timing-function:linear}
+.fx-snow .i{animation-name:f-snow;--d:5.4s;--gap:.52s;animation-timing-function:linear}
+.fx-sparks .i{animation-name:f-spark;--d:.9s;--gap:.14s}
+.fx-bolt .i{animation-name:f-bolt;--d:1.7s}
+.fx-flash .i{animation-name:f-flash;--d:1.7s}
+.fx-ring .i{animation-name:f-ring;--d:1.3s}
+.fx-boopring .i{animation-name:f-popring;--d:1.3s}
+.fx-notes .i{animation-name:f-note;--d:2.1s;--gap:.42s}
+.fx-dust .i{animation-name:f-dust;--d:1.3s;--gap:.2s}
+.fx-zig .i{animation-name:f-zig;--d:1.1s;--gap:.18s}
+.fx-atoms .i{animation-name:f-atomspin;--d:6s;--gap:.9s;animation-timing-function:linear}
+.fx-halo .i{animation-name:f-halo;--d:2.6s}
+.fx-questions .i{animation-name:f-pop;--d:1.9s;--gap:.34s}
+.fx-sweat .i{animation-name:f-drip;--d:1.9s;--gap:.5s}
+.fx-bubbles .i{animation-name:f-bub;--d:2.6s;--gap:.3s}
+.fx-scribble .i{animation-name:f-scribble;--d:2.6s;--gap:.3s;animation-timing-function:linear}
+.fx-crumbs .i{animation-name:f-crumb;--d:1.4s;--gap:.16s}
+.fx-flames .i{animation-name:f-flame;--d:.62s;--gap:.12s}
+.fx-hearts .i{animation-name:f-heart;--d:2.4s;--gap:.42s}
+.fx-flies .i{animation-name:f-fly;--d:5.2s;--gap:1.1s}
+.fx-flies .wg{animation-name:f-wing;animation-duration:calc(.34s / var(--spd,1));animation-iteration-count:infinite;transform-box:fill-box}
+.fx-flies .wl{transform-origin:100% 50%}
+.fx-flies .wr{transform-origin:0% 50%}
+.fx-zzz .i{animation-name:f-zzz;--d:2.9s;--gap:.5s}
+.fx-digits .i{animation-name:f-floaty;--d:3.4s;--gap:.34s}
+.fx-blocks .i{animation-name:f-block;--d:2.6s;--gap:.28s;animation-timing-function:linear}
+.fx-thread .i{animation-name:f-thread;--d:3.4s;animation-timing-function:linear}
+.fx-mist .i{animation-name:f-mist;--d:4.6s;--gap:.7s}
+.fx-fog .i{animation-name:f-fog;--d:6.4s;--gap:1.1s}
+.fx-wind .i{animation-name:f-wind;--d:2.1s;--gap:.3s}
+.fx-streaks .i{animation-name:f-streak;--d:.5s;--gap:.09s}
+.fx-vortex .i{animation-name:f-vortex;--d:5.2s;animation-timing-function:linear}
+.fx-vortex .i2{animation-name:f-vortexIn;--d:3.4s}
+.fx-glow .i{animation-name:f-glow;--d:2.8s}
+.fx-sound .i{animation-name:f-sound;--d:1.5s;--gap:.3s}
+.fx-mud .i{animation-name:f-mud;--d:1.2s;--gap:.16s}
+.fx-gears .i{animation-name:f-gearspin;--d:4.4s;animation-timing-function:linear}
+.fx-gears .i2{animation-name:f-gearspinR;--d:3.2s;animation-timing-function:linear}
+.fx-shimmer .i{animation-name:f-shimmer;--d:2.6s;--gap:.34s}
+.fx-idea .i{animation-name:f-bulb;--d:1.7s}
+.fx-orbits .i{animation-name:f-orbit;--d:2.4s;animation-timing-function:linear}
+.fx-lamp .i{animation-name:f-lamp;--d:2.6s}
+.prg-whisk .i{animation-name:f-wshk;--d:.4s}
+.prg-hammer .i{animation-name:f-hammer;--d:1.1s}
+.prg-code .i{animation-name:f-cursor;--d:.9s}
+.prg-keypad .i{animation-name:f-blinkLed;--d:1.3s;--gap:.3s}
+.prg-lasso .i{animation-name:f-lasso;--d:1.6s;animation-timing-function:linear}
+.prg-zest .i{animation-name:f-zester;--d:1.2s}
+.prg-chop .i{animation-name:f-chopper;--d:.7s}
+.prg-knead .i{animation-name:f-saw;--d:1.1s}
+`;
+const styleEl = document.createElement('style');
+styleEl.textContent = KFCSS;
+document.head.appendChild(styleEl);
+/* =================================================================== *
+ * 2. THE RIG — mascot(prefix) returns one fully addressable SVG.
+ *    Addressable parts: .p-rig .p-torso .p-armNear .p-armFar
+ *    .p-legNear .p-legFar .p-glasses .p-pupilL .p-pupilR .p-eyes
+ *    Mouths: [data-mouth]  Face: [data-face]  Fx: [data-fx]  Props: [data-prop]
+ * =================================================================== */
+const BODY_D = "M356 148 C322 120 281 112 242 120 C169 131 107 178 80 246 C40 344 59 438 119 482 C178 526 280 530 330 483 C341 473 351 459 356 447 C362 463 372 479 386 489 C440 531 529 518 580 471 C637 419 649 333 618 252 C593 185 540 137 476 122 C432 112 391 121 356 148Z";
+const LENS_L = "M236 234 C263 230 316 230 342 235 L333 282 C331 296 319 304 303 305 L282 305 C265 304 253 296 248 282Z";
+const LENS_R = "M412 234 C439 230 489 230 521 234 L511 282 C506 296 494 304 478 305 L456 305 C440 304 427 296 423 282Z";
+
+/* ---- small builders for repeated decor bits ---- */
+const NL = (n, f) => Array.from({length:n}, (_, k) => '<g class="i" style="--i:' + k + '">' + f(k) + '</g>').join('');
+const sparkle = (x, y, s, c) => '<g transform="translate(' + x + ' ' + y + ') scale(' + s + ')"><path d="M0 -20 C2.6 -5.4 5.4 -2.6 20 0 C5.4 2.6 2.6 5.4 0 20 C-2.6 5.4 -5.4 2.6 -20 0 C-5.4 -2.6 -2.6 -5.4 0 -20Z" fill="' + c + '"/></g>';
+const noteGlyph = (x, y, s, c) => '<g transform="translate(' + x + ' ' + y + ') scale(' + s + ')"><ellipse cx="-10" cy="24" rx="14" ry="11" fill="' + c + '" transform="rotate(-18 -10 24)"/><path d="M1 21 V-32 C1 -32 24 -30 28 -12" fill="none" stroke="' + c + '" stroke-width="7" stroke-linecap="round"/></g>';
+const heart = (x, y, s, c) => '<g transform="translate(' + x + ' ' + y + ') scale(' + s + ')"><path d="M0 17 C-23 2 -27 -10 -19 -19 C-10 -26 -1 -21 0 -12 C1 -21 10 -26 19 -19 C27 -10 23 2 0 17Z" fill="' + c + '"/></g>';
+const gear = (x, y, s, c) => '<g transform="translate(' + x + ' ' + y + ') scale(' + s + ')"><circle r="30" fill="' + c + '"/><circle r="12" fill="#FFF7F5"/>' + Array.from({length:8}, (_, k) => '<rect x="-6" y="-43" width="12" height="17" rx="4" fill="' + c + '" transform="rotate(' + k * 45 + ')"/>').join('') + '</g>';
+const puff = (x, y, r, o) => '<circle cx="' + x + '" cy="' + y + '" r="' + r + '" fill="#E4DAEA" opacity="' + o + '"/>';
+const flame = (x, y, s, c) => '<g transform="translate(' + x + ' ' + y + ') scale(' + s + ')"><path d="M0 26 C-22 12 -16 -8 0 -30 C16 -8 22 12 0 26Z" fill="' + c + '"/><path d="M0 20 C-11 10 -8 -2 0 -14 C8 -2 11 10 0 20Z" fill="#FFE3A8"/></g>';
+const num = (x, y, t, c, s) => '<text x="' + x + '" y="' + y + '" font-family="ui-monospace,Menlo,monospace" font-size="' + (s || 54) + '" font-weight="800" fill="' + c + '">' + t + '</text>';
+const txt = (x, y, t, c, s) => '<text x="' + x + '" y="' + y + '" font-family="ui-sans-serif,system-ui,sans-serif" font-size="' + (s || 60) + '" font-weight="800" fill="' + c + '">' + t + '</text>';
+const flake = (x, y, s, c) => '<g transform="translate(' + x + ' ' + y + ') scale(' + s + ')" stroke="' + c + '" stroke-width="3.4" stroke-linecap="round"><path d="M0 -12 V12 M-10 -6 L10 6 M-10 6 L10 -6"/></g>';
+const drop = (x, y, s, c) => '<g transform="translate(' + x + ' ' + y + ') scale(' + s + ')"><path d="M0 -18 C10 -4 14 4 14 10 C14 18 8 24 0 24 C-8 24 -14 18 -14 10 C-14 4 -10 -4 0 -18Z" fill="' + c + '"/></g>';
+const clod = (x, y, s, c) => '<g transform="translate(' + x + ' ' + y + ') scale(' + s + ')"><circle r="13" fill="' + c + '"/><circle cx="16" cy="7" r="8" fill="' + c + '"/><circle cx="-15" cy="9" r="7" fill="' + c + '"/></g>';
+const chev = (x, y, s, c) => '<g transform="translate(' + x + ' ' + y + ') scale(' + s + ')"><path d="M14 -22 L-12 0 L14 22" fill="none" stroke="' + c + '" stroke-width="11" stroke-linecap="round" stroke-linejoin="round"/></g>';
+const butt = (x, y, s, c) => '<g transform="translate(' + x + ' ' + y + ') scale(' + s + ')"><path d="M-26 6 C-30 -14 -14 -22 0 -14 C14 -22 30 -14 26 6 C22 20 -22 20 -26 6Z" fill="' + c + '"/></g>';
+
+/* ---------------- FX: behind the body ---------------- */
+const FX_BACK = ''
++ '<g class="fx fx-glow off" data-fx="glow"><g class="i2" style="--d:2.8s"><circle cx="356" cy="330" r="292" fill="#FFD9E2" opacity=".85"/></g></g>'
++ '<g class="fx fx-vortex off" data-fx="vortex">'
++   '<g class="i2" style="--d:3.4s"><circle cx="356" cy="320" r="286" fill="none" stroke="#F0DCEB" stroke-width="30" opacity=".8"/></g>'
++   '<g class="i"><circle cx="356" cy="320" r="238" fill="none" stroke="#D9C2EC" stroke-width="16" stroke-dasharray="56 32"/></g>'
++   '<g class="i" style="--d:7.4s;animation-direction:reverse"><circle cx="356" cy="320" r="182" fill="none" stroke="#FFB9C6" stroke-width="11" stroke-dasharray="34 26"/></g>'
++ '</g>'
++ '<g class="fx fx-atoms off" data-fx="atoms">'
++   '<g class="i" style="--d:7s"><g transform="translate(356 300)"><ellipse rx="300" ry="108" fill="none" stroke="#CDB6E6" stroke-width="6"/><circle cx="300" cy="0" r="15" fill="#8C6AA7"/></g></g>'
++   '<g class="i" style="--d:5.2s;animation-direction:reverse"><g transform="translate(356 300) rotate(58)"><ellipse rx="300" ry="108" fill="none" stroke="#E6B9CC" stroke-width="6"/><circle cx="-300" cy="0" r="13" fill="#FF98A5"/></g></g>'
++   '<g class="i" style="--d:9s"><g transform="translate(356 300) rotate(-58)"><ellipse rx="300" ry="108" fill="none" stroke="#BBD6E6" stroke-width="6"/><circle cx="300" cy="0" r="11" fill="#7FB0C9"/></g></g>'
++ '</g>'
++ '<g class="fx fx-wind off" data-fx="wind">'
++   NL(5, k => { const y = 196 + k * 92; return '<path d="M-90 ' + y + ' h230" stroke="' + (k % 2 ? '#CBB9DC' : '#E3D6EF') + '" stroke-width="11" stroke-linecap="round"/>'; })
++ '</g>'
++ '<g class="fx fx-streaks off" data-fx="streaks">'
++   NL(10, k => { const p = [[58,290],[126,420],[210,250],[300,180],[420,168],[520,232],[620,300],[664,430],[300,646],[430,652]][k]; return '<path d="M' + p[0] + ' ' + p[1] + ' v86" stroke="' + (k % 3 ? '#D8C6E8' : '#FFC3CE') + '" stroke-width="10" stroke-linecap="round"/>'; })
++ '</g>'
++ '<g class="fx fx-blocks off" data-fx="blocks">'
++   NL(9, k => { const x = 96 + (k * 71) % 470; return '<rect x="' + x + '" y="-70" width="' + (74 + (k % 3) * 34) + '" height="22" rx="9" fill="' + ['#C9B8E4','#FFC0CB','#CBD7E8','#E9D6B8'][k % 4] + '"/>'; })
++ '</g>'
++ '<g class="fx fx-thread off" data-fx="thread">'
++   '<g class="i"><path d="M126 436 C56 392 62 308 128 288 C208 264 206 186 118 166 C40 148 34 82 112 64" fill="none" stroke="#8C6AA7" stroke-width="7" stroke-linecap="round" stroke-dasharray="1400"/></g>'
++   '<g class="i" style="--i:1"><circle cx="126" cy="436" r="19" fill="#8C6AA7"/></g>'
++ '</g>'
++ '<g class="fx fx-orbitdots off" data-fx="orbits"><g class="i"><g transform="translate(356 320)">'
++   '<circle r="272" fill="none" stroke="#F1DEE7" stroke-width="3" stroke-dasharray="10 16"/>'
++   '<circle cx="0" cy="-272" r="19" fill="#FF98A5"/><circle cx="236" cy="136" r="19" fill="#8C6AA7"/><circle cx="-236" cy="136" r="19" fill="#7FB0C9"/>'
++   '</g></g></g>';
+
+/* ---------------- FX: in front of the body ---------------- */
+const FX_FRONT = ''
++ '<g class="fx fx-stars off" data-fx="stars">'
++   NL(7, k => { const p = [[142,168],[560,140],[104,320],[612,332],[352,86],[214,470],[520,470]][k]; return sparkle(p[0], p[1], 0.72 + (k % 3) * 0.24, ['#FFC46B','#FF98A5','#B48BD8','#7FB0C9'][k % 4]); })
++ '</g>'
++ '<g class="fx fx-confetti off" data-fx="confetti">'
++   NL(14, k => { const x = 84 + (k * 79) % 560; return '<rect x="' + x + '" y="-70" width="' + (14 + (k % 3) * 4) + '" height="' + (22 + (k % 4) * 6) + '" rx="5" fill="' + ['#FF98A5','#FFC46B','#8C6AA7','#7FB0C9','#B48BD8'][k % 5] + '" transform="rotate(' + (k * 27 % 360) + ' ' + x + ' -60)"/>'; })
++ '</g>'
++ '<g class="fx fx-leaves off" data-fx="leaves">'
++   '<g class="i"><path d="M356 150 C356 108 356 74 356 40" stroke="#7FA86B" stroke-width="9" stroke-linecap="round" fill="none"/></g>'
++   '<g class="i" style="--i:1"><path d="M356 92 C324 92 306 74 302 50 C332 46 352 62 356 84Z" fill="#8FBB79"/></g>'
++   '<g class="i" style="--i:2"><path d="M356 92 C388 92 406 74 410 50 C380 46 360 62 356 84Z" fill="#A6CE8E"/></g>'
++   '<g class="i" style="--i:2"><path d="M356 150 C356 120 350 100 340 84" stroke="#B9D9A6" stroke-width="6" fill="none" stroke-linecap="round"/></g>'
++ '</g>'
++ '<g class="fx fx-sun off" data-fx="sun"><g class="i"><g transform="translate(626 138)">'
++   '<circle r="44" fill="#FFD38A"/><circle r="30" fill="#FFE7B7"/>'
++   '<g stroke="#F2B95E" stroke-width="9" stroke-linecap="round">'
++   '<path d="M0 -70 V-96"/><path d="M0 70 V96"/><path d="M-70 0 H-96"/><path d="M70 0 H96"/>'
++   '<path d="M-50 -50 L-68 -68"/><path d="M50 -50 L68 -68"/><path d="M-50 50 L-68 68"/><path d="M50 50 L68 68"/></g>'
++   '</g></g></g>'
++ '<g class="fx fx-steam off" data-fx="steam">'
++   NL(5, k => { const x = 262 + k * 47; return '<g transform="translate(' + x + ' 118)">' + puff(0, 0, 26 + (k % 3) * 9, 0.62) + puff(14, 14, 18, 0.42) + '</g>'; })
++ '</g>'
++ '<g class="fx fx-drops off" data-fx="drops">'
++   NL(9, k => '<path d="M' + (96 + (k * 83) % 580) + ' 40 v' + (46 + (k % 3) * 22) + '" stroke="#8FB6D9" stroke-width="7" stroke-linecap="round"/>')
++ '</g>'
++ '<g class="fx fx-snow off" data-fx="snow">'
++   NL(8, k => '<g transform="translate(' + (110 + (k * 97) % 540) + ' 30)">' + flake(0, 0, 1 + (k % 3) * .3, '#BBD8EA') + '</g>')
++ '</g>'
++ '<g class="fx fx-sparks off" data-fx="sparks"><g transform="translate(112 462)">'
++   NL(7, k => '<path d="M0 0 L' + (42 + (k % 3) * 16) + ' ' + (-64 + k * 22) + '" stroke="#FFC46B" stroke-width="7" stroke-linecap="round"/>')
++ '</g></g>'
++ '<g class="fx fx-bolt off" data-fx="bolt"><g class="i"><path d="M520 46 L462 214 L520 226 L444 342 L470 232 L414 220Z" fill="#FFD257" stroke="#E9A82C" stroke-width="4" stroke-linejoin="round"/></g></g>'
++ '<g class="fx fx-flash off" data-fx="flash"><g class="i"><rect x="-40" y="-40" width="820" height="820" fill="#FFF6E2"/></g></g>'
++ '<g class="fx fx-ring off" data-fx="ring"><g class="i" style="--d:1.3s"><circle cx="356" cy="360" r="96" fill="none" stroke="#FFC0CB" stroke-width="14"/></g></g>'
++ '<g class="fx fx-boopring off" data-fx="boopring">'
++   '<g class="i" style="--d:1.3s"><circle cx="330" cy="392" r="70" fill="none" stroke="#FF98A5" stroke-width="12"/></g>'
++   '<g class="i" style="--d:1.3s;--i:1">' + txt(486, 214, 'boop!', '#B4577F', 58) + '</g>'
++ '</g>'
++ '<g class="fx fx-notes off" data-fx="notes">'
++   NL(3, k => noteGlyph([520, 604, 556][k], [286, 236, 372][k], 0.9, ['#8C6AA7','#B4577F','#7FB0C9'][k]))
++ '</g>'
++ '<g class="fx fx-dust off" data-fx="dust">'
++   NL(3, k => '<g transform="translate(' + [206, 356, 508][k] + ' 654)">' + puff(0, 0, 24, .7) + puff(24, 6, 16, .5) + '</g>')
++ '</g>'
++ '<g class="fx fx-zig off" data-fx="zig">'
++   NL(3, k => chev(150 - k * 34, 268 + k * 84, 1 - k * .12, '#D8C6E8'))
++ '</g>'
++ '<g class="fx fx-halo off" data-fx="halo"><g class="i"><ellipse cx="356" cy="74" rx="96" ry="24" fill="none" stroke="#F7D98A" stroke-width="12"/></g></g>'
++ '<g class="fx fx-questions off" data-fx="questions">'
++   NL(3, k => '<g transform="translate(' + [150, 606, 496][k] + ' ' + [172, 166, 106][k] + ')">' + txt(0, 0, '?', ['#B4577F','#8C6AA7','#E9A82C'][k], 74) + '</g>')
++ '</g>'
++ '<g class="fx fx-sweat off" data-fx="sweat">'
++   NL(2, k => '<g transform="translate(' + [162, 574][k] + ' 208)">' + drop(0, 0, 1.5, '#8FB6D9') + '</g>')
++ '</g>'
++ '<g class="fx fx-bubbles off" data-fx="bubbles">'
++   '<g class="i" style="--i:0"><circle cx="422" cy="222" r="11" fill="#EDE3F3"/></g>'
++   '<g class="i" style="--i:1"><circle cx="452" cy="186" r="15" fill="#EDE3F3"/></g>'
++   '<g class="i" style="--i:2"><circle cx="492" cy="140" r="20" fill="#EDE3F3"/></g>'
++   '<g class="i" style="--i:2"><rect x="486" y="18" width="182" height="96" rx="26" fill="#FFF" stroke="#E4D6EC" stroke-width="4"/></g>'
++   '<g class="i" style="--i:2"><path d="M534 62 C528 48 540 40 550 48 C560 40 572 48 566 62 C578 60 580 74 568 80 L532 80 C520 74 522 60 534 62Z" fill="#FFC0CB"/></g>'
++ '</g>'
++ '<g class="fx fx-scribble off" data-fx="scribble">'
++   '<g class="i"><path d="M430 430 C470 400 500 452 540 424 C578 398 606 444 640 418 C664 400 672 434 654 452" fill="none" stroke="#8C6AA7" stroke-width="7" stroke-linecap="round" stroke-dasharray="900"/></g>'
++   '<g class="i" style="--i:1"><path d="M446 494 C486 470 520 512 556 490 C588 470 616 502 648 486" fill="none" stroke="#E6B9CC" stroke-width="7" stroke-linecap="round" stroke-dasharray="900"/></g>'
++ '</g>'
++ '<g class="fx fx-crumbs off" data-fx="crumbs">'
++   NL(9, k => '<g transform="translate(' + (140 + (k * 47) % 180) + ' ' + (470 + (k % 4) * 26) + ')"><circle r="7" fill="' + ['#E9C79A','#D9B07C','#F2DCC0'][k % 3] + '"/></g>')
++ '</g>'
++ '<g class="fx fx-flames off" data-fx="flames">'
++   NL(5, k => '<g transform="translate(' + (210 + k * 74) + ' 668)">' + flame(0, 0, 0.9 + (k % 3) * .22, ['#FF9A4D','#FFC46B','#FF7E5C'][k % 3]) + '</g>')
++ '</g>'
++ '<g class="fx fx-hearts off" data-fx="hearts">'
++   NL(4, k => '<g transform="translate(' + [300, 604, 470, 230][k] + ' ' + [452, 470, 400, 392][k] + ')">' + heart(0, 0, 1.1 + (k % 3) * .3, ['#FF8FA0','#FFB3BE','#E68FAE'][k % 3]) + '</g>')
++ '</g>'
++ '<g class="fx fx-flies off" data-fx="flies">'
++   NL(2, k => { const p = [[200, 250], [560, 300]][k]; return '<g transform="translate(' + p[0] + ' ' + p[1] + ')">'
++ '<g class="wg wl"><path d="M0 0 C-30 -26 -60 -20 -62 2 C-44 20 -16 16 0 6Z" fill="#FFC0CB"/></g>'
++ '<g class="wg wr"><path d="M0 0 C30 -26 60 -20 62 2 C44 20 16 16 0 6Z" fill="#FFD6DE"/></g>'
++ '<ellipse rx="6" ry="16" fill="#5C4A6E"/>'
++ '<path d="M-4 -14 C-8 -26 -14 -30 -20 -32" stroke="#5C4A6E" stroke-width="2.4" fill="none"/>'
++ '<path d="M4 -14 C8 -26 14 -30 20 -32" stroke="#5C4A6E" stroke-width="2.4" fill="none"/>'
++ '</g>'; })
++ '</g>'
++ '<g class="fx fx-zzz off" data-fx="zzz">'
++   NL(3, k => '<g transform="translate(' + (470 + k * 12) + ' ' + (200 - k * 10) + ')">' + txt(0, 0, 'z', '#8C6AA7', 44 + k * 16) + '</g>')
++ '</g>'
++ '<g class="fx fx-digits off" data-fx="digits">'
++   NL(6, k => '<g transform="translate(' + [136, 592, 206, 540, 300, 460][k] + ' ' + [214, 250, 400, 428, 122, 496][k] + ')">' + num(0, 0, ['7','3','1','+','0','8'][k], ['#B4577F','#8C6AA7','#E9A82C','#7FB0C9','#FF98A5','#8C6AA7'][k], 44 + (k % 3) * 14) + '</g>')
++ '</g>'
++ '<g class="fx fx-mist off" data-fx="mist">'
++   NL(3, k => '<ellipse cx="' + [206, 358, 512][k] + '" cy="' + [596, 640, 590][k] + '" rx="118" ry="42" fill="#DCE6EE"/>')
++ '</g>'
++ '<g class="fx fx-fog off" data-fx="fog">'
++   NL(2, k => '<g transform="translate(0 ' + [132, 300][k] + ')"><ellipse cx="330" cy="0" rx="240" ry="66" fill="#E7E1EE"/><ellipse cx="440" cy="20" rx="170" ry="50" fill="#F1ECF5"/></g>')
++ '</g>'
++ '<g class="fx fx-mud off" data-fx="mud">'
++   NL(7, k => '<g transform="translate(' + (200 + (k * 63) % 320) + ' 640)">' + clod(0, 0, 0.8 + (k % 3) * .3, ['#9C7A5A','#B08D6A','#8A6B4E'][k % 3]) + '</g>')
++ '</g>'
++ '<g class="fx fx-gears off" data-fx="gears">'
++   '<g class="i" style="--i:0"><g transform="translate(0 0)">' + gear(468, 116, 1, '#D8C6E8') + '</g></g>'
++   '<g class="i2" style="--i:1;--d:3.2s"><g transform="translate(0 0)">' + gear(556, 190, 0.72, '#BEE0D4') + '</g></g>'
++   '<g class="i" style="--i:2;--d:5.6s">' + gear(148, 140, .86, '#F2CBD8') + '</g>'
++ '</g>'
++ '<g class="fx fx-shimmer off" data-fx="shimmer">'
++   NL(5, k => '<rect x="60" y="110" width="26" height="530" rx="13" fill="#FFFFFF" opacity=".55"/>')
++ '</g>'
++ '<g class="fx fx-idea off" data-fx="idea"><g class="i"><g transform="translate(356 62)">'
++   '<path d="M0 34 C-26 20 -20 -8 0 -22 C20 -8 26 20 0 34Z" fill="#FFD257"/><rect x="-11" y="32" width="22" height="14" rx="4" fill="#B9AEC6"/>'
++   '<path d="M-52 -34 L-70 -52 M52 -34 L70 -52 M0 -62 V-86 M-38 -6 H-64 M38 -6 H64" stroke="#F2B95E" stroke-width="8" stroke-linecap="round"/>'
++   '</g></g></g>'
++ '<g class="fx fx-pop off" data-fx="pop">'
++   '<g class="i2" style="animation-name:asm-pop;animation-duration:2.8s;animation-iteration-count:1;animation-fill-mode:both">' + sparkle(300, 208, 1.7, '#FFD257') + sparkle(432, 176, 1.3, '#FF98A5') + sparkle(356, 96, 1.5, '#B48BD8') + '</g>'
++   '<g class="i2" style="animation-name:asm-ring;animation-duration:2.8s;animation-iteration-count:1;animation-fill-mode:both"><circle cx="356" cy="330" r="150" fill="none" stroke="#FFC0CB" stroke-width="14"/></g>'
++ '</g>'
++ '<g class="fx fx-sound off" data-fx="sound">'
++   NL(3, k => '<path d="M' + (560 + k * 6) + ' ' + (312 - k * 22) + ' C' + (614 + k * 10) + ' ' + (352 + k * 20) + ' ' + (614 + k * 10) + ' ' + (446 + k * 20) + ' ' + (560 + k * 6) + ' ' + (486 + k * 22) + '" fill="none" stroke="#B4577F" stroke-width="10" stroke-linecap="round"/>')
++ '</g>';
+
+/* ---------------- PROPS: held / floating ---------------- */
+const PROPS = ''
++ '<g class="prg prg-branch off" data-prop="branch">'
++   '<circle cx="596" cy="150" r="13" fill="#8C6AA7"/><circle cx="662" cy="214" r="13" fill="#FF98A5"/><circle cx="596" cy="278" r="13" fill="#7FB0C9"/>'
++   '<path d="M596 163 V265 M596 216 C630 216 646 220 656 226" fill="none" stroke="#5C4A6E" stroke-width="7" stroke-linecap="round"/>'
++ '</g>'
++ '<g class="prg prg-code off" data-prop="code"><g transform="translate(470 128)">'
++   '<rect width="248" height="152" rx="18" fill="#2A2432"/><rect x="0" y="0" width="248" height="34" rx="18" fill="#3A3145"/>'
++   '<circle cx="26" cy="17" r="6" fill="#FF98A5"/><circle cx="46" cy="17" r="6" fill="#FFD257"/><circle cx="66" cy="17" r="6" fill="#8FBB79"/>'
++   '<g fill="#F0E9F5"><rect x="22" y="56" width="120" height="11" rx="5"/><rect x="40" y="80" width="164" height="11" rx="5"/><rect x="40" y="104" width="92" height="11" rx="5"/></g>'
++   '<g class="i" style="--i:0"><rect x="140" y="104" width="12" height="12" rx="3" fill="#FF98A5"/></g>'
++   '</g></g>'
++ '<g class="prg prg-keypad off" data-prop="keypad"><g transform="translate(486 452)">'
++   '<rect width="214" height="128" rx="18" fill="#3A3145"/>'
++ Array.from({length:12}, (_, k) => '<rect x="' + (16 + (k % 4) * 48) + '" y="' + (18 + Math.floor(k / 4) * 34) + '" width="38" height="26" rx="7" fill="' + ['#F0E9F5','#F0E9F5','#FFC0CB'][k % 3] + '"/>').join('')
++ '<g class="i" style="--i:0"><rect x="170" y="94" width="30" height="9" rx="4" fill="#8FBB79"/></g>'
++ '<g class="i" style="--i:1"><rect x="16" y="94" width="30" height="9" rx="4" fill="#FFD257"/></g>'
++ '</g></g>'
++ '<g class="prg prg-paper off" data-prop="paper"><g transform="translate(506 300)">'
++   '<rect width="196" height="236" rx="14" fill="#FFFDF6" stroke="#E6DFD0" stroke-width="4"/>'
++ Array.from({length:7}, (_, k) => '<rect x="24" y="' + (30 + k * 28) + '" width="' + (148 - (k % 3) * 44) + '" height="10" rx="5" fill="#DAD2C7"/>').join('')
++ '<circle cx="158" cy="200" r="26" fill="none" stroke="#B4577F" stroke-width="7"/><path d="M176 218 L206 248" stroke="#B4577F" stroke-width="11" stroke-linecap="round"/>'
++ '</g></g>'
++ '<g class="prg prg-whisk off" data-prop="whisk"><g transform="translate(104 500)" class="i" style="--i:0">'
++   '<path d="M0 42 L16 -26" stroke="#5C4A6E" stroke-width="11" stroke-linecap="round"/>'
++   '<path d="M16 -26 C-18 -46 -18 -82 2 -92 C22 -82 22 -46 -8 -30" fill="none" stroke="#B9AEC6" stroke-width="7"/>'
++   '<path d="M16 -26 C-8 -52 0 -86 12 -90" fill="none" stroke="#B9AEC6" stroke-width="6"/>'
++   '</g></g>'
++ '<g class="prg prg-pencil off" data-prop="pencil"><g transform="translate(110 496)" class="i" style="--i:0">'
++   '<path d="M0 46 L10 -34" stroke="#E9A82C" stroke-width="13" stroke-linecap="round"/>'
++   '<path d="M10 -34 L12 -56 L20 -50 L14 -30Z" fill="#5C4A6E"/>'
++   '</g></g>'
++ '<g class="prg prg-hammer off" data-prop="hammer"><g transform="translate(120 512)" class="i" style="--i:0">'
++   '<path d="M0 0 L46 -96" stroke="#B08D6A" stroke-width="15" stroke-linecap="round"/>'
++   '<rect x="26" y="-136" width="76" height="40" rx="12" fill="#5C4A6E" transform="rotate(-24 64 -116)"/>'
++   '</g></g>'
++ '<g class="prg prg-wrench off" data-prop="wrench"><g transform="translate(104 470)" class="i" style="--i:0">'
++   '<path d="M18 66 L44 -14" stroke="#9AA3AE" stroke-width="16" stroke-linecap="round"/>'
++   '<path d="M44 -14 C30 -26 30 -48 44 -60 C58 -48 58 -26 44 -14Z" fill="#9AA3AE"/>'
++   '<circle cx="44" cy="-36" r="9" fill="#FFF7F5"/>'
++   '</g></g>'
++ '<g class="prg prg-lasso off" data-prop="lasso">'
++   '<path d="M118 470 C160 330 300 240 356 236" fill="none" stroke="#B08D6A" stroke-width="7" stroke-linecap="round"/>'
++   '<g class="i" style="--i:0"><g transform="translate(366 258)"><ellipse rx="188" ry="62" fill="none" stroke="#B08D6A" stroke-width="9" stroke-dasharray="20 12" transform="rotate(-12)"/></g></g>'
++ '</g>'
++ '<g class="prg prg-mega off" data-prop="mega"><g transform="translate(372 316)">'
++   '<path d="M0 0 L-56 -18 V46 L0 28Z" fill="#FF98A5"/><path d="M0 -26 L66 -54 V82 L0 54Z" fill="#FFB3BE"/><rect x="-6" y="28" width="18" height="34" rx="7" fill="#5C4A6E"/>'
++   '</g></g>'
++ '<g class="prg prg-wand off" data-prop="wand"><g transform="translate(112 486)" class="i" style="--i:0">'
++   '<path d="M0 0 L40 -118" stroke="#5C4A6E" stroke-width="10" stroke-linecap="round"/>'
++ sparkle(46, -136, 1.5, '#FFD257') + '</g></g>'
++ '<g class="prg prg-nest off" data-prop="nest"><g transform="translate(356 656)">'
++   '<path d="M-166 0 C-166 -34 166 -34 166 0 C166 34 -166 34 -166 0Z" fill="#B08D6A"/>'
++   '<path d="M-166 0 C-120 -18 -60 -24 0 -22 C60 -24 120 -18 166 0" fill="none" stroke="#8A6B4E" stroke-width="8"/>'
++   '<ellipse cx="-58" cy="-16" rx="34" ry="26" fill="#FFFDF6"/><ellipse cx="52" cy="-14" rx="30" ry="24" fill="#F4EFE2"/>'
++   '</g></g>'
++ '<g class="prg prg-lamp off" data-prop="lamp">'
++   '<path d="M212 176 H500" stroke="#5C4A6E" stroke-width="12" stroke-linecap="round"/>'
++   '<circle cx="356" cy="152" r="30" fill="#FFE7B7" stroke="#5C4A6E" stroke-width="8"/>'
++   '<path d="M336 176 L170 720 L560 720 L376 176Z" fill="#FFE9A8" opacity=".28"/>'
++   '</g>'
++ '<g class="prg prg-zest off" data-prop="zest"><g transform="translate(134 452)">'
++   '<circle r="46" fill="#FFA84D"/><circle r="34" fill="#FFC98A"/>'
++   '<g stroke="#E3832E" stroke-width="5" fill="none"><path d="M-30 -12 C-6 -30 22 -22 30 4"/><path d="M-24 16 C2 30 24 20 26 -2"/></g>'
++   '<g class="i" style="--i:0"><path d="M30 -30 C64 -46 84 -22 70 6 C56 30 30 24 28 -2" fill="none" stroke="#FFC98A" stroke-width="9" stroke-linecap="round"/></g>'
++   '</g></g>'
++ '<g class="prg prg-chop off" data-prop="chop">'
++   '<rect x="196" y="500" width="330" height="30" rx="12" fill="#D9B98E"/>'
++   '<g class="i" style="--i:0"><g transform="translate(360 496)"><path d="M0 0 L-118 -34 L-6 -58 L14 -14Z" fill="#C9D2DC"/><rect x="10" y="-22" width="72" height="18" rx="8" fill="#3A3145" transform="rotate(12 46 -13)"/></g></g>'
++ '</g>'
++ '<g class="prg prg-knead off" data-prop="knead">'
++   '<rect x="196" y="556" width="330" height="30" rx="12" fill="#D9B98E"/>'
++   '<ellipse cx="360" cy="548" rx="96" ry="30" fill="#F2DCC0"/>'
++   '<g class="i" style="--i:0"><g transform="translate(360 500)"><rect x="-108" y="-14" width="216" height="28" rx="14" fill="#B08D6A"/><rect x="-124" y="-20" width="34" height="40" rx="10" fill="#8A6B4E"/><rect x="90" y="-20" width="34" height="40" rx="10" fill="#8A6B4E"/></g></g>'
++ '</g>'
++ '<g class="prg prg-umbrella off" data-prop="umbrella">'
++   '<g transform="translate(0 -96)"><path d="M196 214 C196 96 516 96 516 214 C480 176 440 176 424 214 C404 172 372 172 356 214 C336 176 302 176 288 214 C268 176 232 176 196 214Z" fill="#8C6AA7"/></g>'
++   '<path d="M356 118 V470" stroke="#5C4A6E" stroke-width="10" stroke-linecap="round"/>'
++   '<path d="M356 470 C356 496 330 502 320 484" fill="none" stroke="#5C4A6E" stroke-width="10" stroke-linecap="round"/>'
++   '</g>'
++ '<g class="prg prg-cards off" data-prop="cards"><g transform="translate(120 452)">'
++   '<g class="i" style="--i:0"><rect x="-40" y="-56" width="80" height="112" rx="10" fill="#FFF" stroke="#D8C6E8" stroke-width="4"/><path d="M0 -22 L14 6 H-14Z" fill="#FF98A5"/></g>'
++   '<g class="i" style="--i:1;--d:1.1s"><rect x="-14" y="-64" width="80" height="112" rx="10" fill="#FFF" stroke="#D8C6E8" stroke-width="4" transform="rotate(12)"/><path d="M20 -14 h20 v20 h-20z" fill="#8C6AA7"/></g>'
++   '</g></g>';
+
+/* ---------------- the rig ---------------- */
+function mascot(p){
+  const g = (cls, part, inner) => '<g class="' + cls + '"' + (part ? ' data-part="' + part + '"' : '') + '>' + inner + '</g>';
+  const legNear = '<path d="M259 481 C267 514 260 548 250 574" stroke="#393A35" stroke-width="23" stroke-linecap="round" fill="none"/>'
+    + '<g class="shoe">'
+    + '<path d="M232 570 L270 570 L270 592 L227 592Z" fill="#F2EFF8"/>'
+    + '<path d="M228 583 C239 588 256 589 270 582 C287 582 309 596 322 611 C330 620 334 630 331 636 C305 647 252 647 225 638 C214 634 216 623 220 608Z" fill="#8C6AA7"/>'
+    + '<path d="M219 622 C244 635 299 639 333 628 L332 637 C328 646 292 648 262 646 C236 645 216 640 219 622Z" fill="#383333"/>'
+    + '<path d="M294 590 C287 596 281 602 278 608" stroke="#F5F2F9" stroke-width="8" stroke-linecap="round" fill="none"/>'
+    + '</g>';
+  const legFar = '<path d="M418 480 C432 513 424 550 414 574" stroke="#393A35" stroke-width="23" stroke-linecap="round" fill="none"/>'
+    + '<g class="shoe">'
+    + '<path d="M396 570 L434 570 L434 592 L391 592Z" fill="#F2EFF8"/>'
+    + '<path d="M392 583 C404 588 421 589 435 582 C452 583 474 596 487 612 C495 621 499 631 496 637 C470 647 417 647 390 638 C379 634 381 623 385 608Z" fill="#8C6AA7"/>'
+    + '<path d="M384 622 C409 635 464 639 498 628 L497 637 C493 646 457 648 427 646 C401 645 381 640 384 622Z" fill="#383333"/>'
+    + '<path d="M459 590 C452 596 446 602 443 608" stroke="#F5F2F9" stroke-width="8" stroke-linecap="round" fill="none"/>'
+    + '</g>';
+  const armFar = '<path d="M580 358 C617 384 637 418 636 455" stroke="#393A35" stroke-width="20" stroke-linecap="round" fill="none"/>'
+    + '<path d="M637 444 C649 445 657 454 661 467 C667 482 660 498 647 503 C634 508 621 501 620 487 L618 479 C611 481 607 476 611 469 C617 455 626 445 637 444Z" fill="#393A35" stroke="#2B2D29" stroke-width="1.5" stroke-linejoin="round"/>';
+  const armNear = '<path d="M151 358 C139 385 127 419 120 461" stroke="#393A35" stroke-width="21" stroke-linecap="round" fill="none"/>'
+    + '<path d="M120 450 C109 451 99 458 94 471 C87 487 94 502 107 508 C120 515 135 507 139 494 L142 486 C149 491 156 487 152 479 C149 467 135 453 120 450Z" fill="#393A35" stroke="#2B2D29" stroke-width="1.5" stroke-linejoin="round"/>';
+  const body = '<use href="#' + p + 'body" fill="#FF98A5"/><g clip-path="url(#' + p + 'bodyClip)">'
+    + '<use href="#' + p + 'body" transform="translate(0 -12)" fill="#FFAFB8"/>'
+    + '<g stroke-linecap="round"><path d="M356 148 C338 172 333 198 342 234" stroke="#EF7F8C" stroke-width="10" fill="none"/>'
+    + '<path d="M367 366 C382 391 375 420 356 447" stroke="#EA7787" stroke-width="11" fill="none"/>'
+    + '<path d="M357 368 C369 392 364 417 350 438" stroke="#FF9DAA" stroke-width="5" fill="none"/></g>'
+    + '<g stroke="#EE818D" stroke-width="8.5" stroke-linecap="round" stroke-linejoin="round" fill="none">'
+    + '<path d="M231 158 C248 148 269 150 279 164 C287 175 284 190 274 195 C262 201 258 210 262 222"/>'
+    + '<path d="M305 168 C315 178 313 194 303 201"/>'
+    + '<path d="M202 184 C176 184 158 203 160 226 C144 219 130 224 120 236 C109 249 111 266 115 279"/>'
+    + '<path d="M218 199 C199 195 186 208 187 223 C189 239 180 251 165 251"/>'
+    + '<path d="M159 272 C145 264 130 272 128 286 C126 299 130 309 119 317 C106 327 102 340 110 354"/>'
+    + '<path d="M182 296 C171 289 159 294 153 304 C147 315 153 327 165 332 C180 339 184 352 174 365"/>'
+    + '<path d="M109 385 C98 396 103 413 116 419"/>'
+    + '<path d="M201 356 C217 352 231 363 232 377 C232 391 245 400 259 396 C275 391 289 399 291 413"/>'
+    + '<path d="M172 391 C155 386 143 397 146 412 C150 429 167 432 181 427 C192 423 204 429 204 442"/>'
+    + '<path d="M230 429 C219 440 223 458 239 463 C256 470 273 461 275 447 C277 433 294 429 306 438"/>'
+    + '<path d="M315 371 C299 376 297 392 309 403 C322 414 325 428 317 441"/>'
+    + '<path d="M175 466 C184 481 198 486 215 483"/>'
+    + '<path d="M289 477 C306 471 319 460 327 448"/>'
+    + '<path d="M397 176 C396 160 412 151 426 156 C439 160 442 175 452 181 C462 186 473 182 477 171"/>'
+    + '<path d="M494 159 C508 165 515 178 511 191 C508 202 514 214 526 217"/>'
+    + '<path d="M550 198 C545 212 551 225 564 231 C579 238 583 251 578 265"/>'
+    + '<path d="M586 278 C601 285 605 301 597 316 C591 327 579 329 574 342 C569 356 575 366 585 373"/>'
+    + '<path d="M546 318 C528 317 518 331 525 345 C532 359 525 372 511 374"/>'
+    + '<path d="M570 399 C555 392 538 400 536 415 C535 430 520 437 507 430"/>'
+    + '<path d="M451 360 C435 355 422 366 424 380 C426 395 442 399 455 393 C469 387 483 394 484 408"/>'
+    + '<path d="M413 414 C424 422 423 436 435 443 C448 450 463 446 469 436 C477 423 490 423 501 430"/>'
+    + '<path d="M420 475 C438 481 455 474 458 460"/>'
+    + '<path d="M485 477 C501 477 516 469 523 458"/>'
+    + '</g>'
+    + '<g class="fx fx-shimmer off" data-fx="shimmer" opacity=".5">'
+    + NL(4, () => '<rect x="40" y="120" width="22" height="420" rx="11" fill="#FFFFFF"/>')
+    + '</g>'
+    + '</g>';
+  const face = ''
+    + '<g class="p-eyes off" data-face="eyes">'
+    + '<ellipse cx="289" cy="268" rx="38" ry="34" fill="#fff" stroke="#2E2B2B" stroke-width="4"/>'
+    + '<ellipse cx="468" cy="268" rx="38" ry="34" fill="#fff" stroke="#2E2B2B" stroke-width="4"/>'
+    + '<g class="p-pupilL" data-part="pupilL"><circle cx="289" cy="268" r="15.5" fill="#2E2B2B"/><circle cx="295" cy="260" r="5" fill="#fff"/></g>'
+    + '<g class="p-pupilR" data-part="pupilR"><circle cx="468" cy="268" r="15.5" fill="#2E2B2B"/><circle cx="474" cy="260" r="5" fill="#fff"/></g>'
+    + '</g>'
+    + '<g class="p-happy off" data-face="happy">'
+    + '<path d="M258 280 C270 258 300 254 314 272" fill="none" stroke="#2E2B2B" stroke-width="10" stroke-linecap="round"/>'
+    + '<path d="M436 272 C450 254 480 258 492 280" fill="none" stroke="#2E2B2B" stroke-width="10" stroke-linecap="round"/>'
+    + '</g>'
+    + '<g class="p-blush off" data-face="blush">'
+    + '<ellipse cx="204" cy="332" rx="42" ry="23" fill="#FF6E86" opacity=".5"/>'
+    + '<ellipse cx="552" cy="332" rx="42" ry="23" fill="#FF6E86" opacity=".5"/>'
+    + '</g>'
+    + '<g class="p-mouths">'
+    + '<g data-mouth="smirk"><path d="M349 342 C366 350 389 347 408 334" stroke="#3C3836" stroke-width="6.5" stroke-linecap="round" fill="none"/>'
+    + '<path d="M406 331 C411 333 414 337 414 341" stroke="#3C3836" stroke-width="4.5" stroke-linecap="round" fill="none"/></g>'
+    + '<g data-mouth="grin" class="off"><path d="M316 336 C344 386 402 386 430 336 Z" fill="#3C3836"/><path d="M348 360 C362 376 388 376 400 358 C384 366 362 366 348 360Z" fill="#FF8FA0"/></g>'
+    + '<g data-mouth="teeth" class="off"><path d="M318 334 C346 384 402 384 430 334 Z" fill="#3C3836"/><path d="M322 336 C350 350 396 350 426 336 L424 350 C396 362 350 362 322 350Z" fill="#FFFDF6"/>'
+    + '</g>'
+    + '<g data-mouth="grit" class="off"><rect x="328" y="340" width="88" height="22" rx="7" fill="#3C3836"/>'
+    + '<g stroke="#FFF6F8" stroke-width="3" stroke-linecap="round"><path d="M350 343 v16"/><path d="M372 343 v16"/><path d="M394 343 v16"/></g></g>'
+    + '<g data-mouth="o" class="off"><ellipse cx="372" cy="352" rx="22" ry="26" fill="#3C3836"/><ellipse cx="372" cy="344" rx="13" ry="9" fill="#FF8FA0" opacity=".7"/></g>'
+    + '<g data-mouth="wavy" class="off"><path d="M326 352 q12 -13 24 0 t24 0 t24 0" fill="none" stroke="#3C3836" stroke-width="6" stroke-linecap="round"/></g>'
+    + '<g data-mouth="frown" class="off"><path d="M334 360 C356 336 396 336 416 358" fill="none" stroke="#3C3836" stroke-width="6.5" stroke-linecap="round"/></g>'
+    + '<g data-mouth="flat" class="off"><path d="M338 350 H412" stroke="#3C3836" stroke-width="6.5" stroke-linecap="round" fill="none"/></g>'
+    + '</g>';
+  const glasses = '<g class="p-glasses" data-part="glasses"><g class="p-glasses-y"><g class="p-glasses-s"><g class="p-glasses-r"><g transform="rotate(-6 379 267)">'
+    + '<g stroke="#222625" stroke-linecap="round"><path d="M225 234 L184 235" stroke-width="15" fill="none"/><path d="M533 235 L557 243" stroke-width="13" fill="none"/><path d="M355 239 C369 231 385 231 400 239" stroke-width="13" fill="none"/></g>'
+    + '<g fill="#222625"><path d="M224 222 C260 215 321 215 351 222 C359 224 362 230 360 240 L350 285 C347 307 329 319 305 320 L280 320 C255 319 238 307 233 287 L218 241 C215 232 216 225 224 222Z"/>'
+    + '<path d="M404 222 C434 215 493 215 529 222 C537 224 543 230 540 241 L525 287 C520 307 503 319 479 320 L454 320 C428 319 411 307 405 285 L395 240 C393 230 396 224 404 222Z"/></g>'
+    + '<g fill="url(#' + p + 'tint)"><use href="#' + p + 'lensL"/><use href="#' + p + 'lensR"/></g>'
+    + '<g fill="#B2C3D1"><g clip-path="url(#' + p + 'lensLClip)"><path d="M278 224 L300 224 L248 314 L226 314Z" opacity=".23"/><path d="M311 224 L318 224 L266 314 L259 314Z" opacity=".12"/></g>'
+    + '<g clip-path="url(#' + p + 'lensRClip)"><path d="M454 224 L476 224 L424 314 L402 314Z" opacity=".23"/><path d="M487 224 L494 224 L442 314 L435 314Z" opacity=".12"/></g></g>'
+    + '<g stroke="#515750" stroke-width="2.5" stroke-linecap="round" opacity=".7" fill="none"><path d="M242 224 C270 221 314 222 335 225"/><path d="M414 225 C442 221 485 221 513 224"/></g>'
+    + '<g fill="#A8B0AE"><rect x="225" y="230" width="7" height="3.5" rx="1.75"/><rect x="525" y="230" width="7" height="3.5" rx="1.75"/></g>'
+    + '<g class="fx fx-glow off" data-fx="lensGlow"><path d="M232 226 C280 214 330 214 356 226 L352 292 C346 306 330 316 306 318 L286 318 C258 316 240 302 234 284Z" fill="#FFF" opacity=".22"/></g>'
+    + '</g></g></g></g></g>';
+  return '<svg class="bb" viewBox="0 0 740 740" width="100%" height="100%" fill="none" role="img" aria-label="butt-brain mascot">'
+    + '<defs>'
+    + '<path id="' + p + 'body" d="' + BODY_D + '"/>'
+    + '<clipPath id="' + p + 'bodyClip"><use href="#' + p + 'body"/></clipPath>'
+    + '<path id="' + p + 'lensL" d="' + LENS_L + '"/><path id="' + p + 'lensR" d="' + LENS_R + '"/>'
+    + '<clipPath id="' + p + 'lensLClip"><use href="#' + p + 'lensL"/></clipPath>'
+    + '<clipPath id="' + p + 'lensRClip"><use href="#' + p + 'lensR"/></clipPath>'
+    + '<linearGradient id="' + p + 'tint" x1="0" y1="228" x2="0" y2="308" gradientUnits="userSpaceOnUse"><stop stop-color="#3D4854"/><stop offset="1" stop-color="#1D2329"/></linearGradient>'
+    + '</defs>'
+    + g('p-rig', 'rig',
+        FX_BACK
+        + g('p-legFar', 'legFar', legFar)
+        + g('p-legNear', 'legNear', legNear)
+        + g('p-torso', 'torso',
+            g('p-armFar', 'armFar', armFar)
+            + body + face + glasses
+            + g('p-armNear', 'armNear', armNear)
+          )
+        + '<g class="prg-layer">' + PROPS + '</g>'
+        + FX_FRONT
+        + '<g class="p-hit" style="cursor:pointer;pointer-events:all"><circle cx="356" cy="330" r="300" fill="transparent"/></g>'
+      )
+    + '</svg>';
+}
+
+/* =================================================================== *
+ * 3. LOOPS — each entry = part keyframes + face + fx + prop.
+ *    spec format: 'keyframe-name seconds [easing] [delay]'  (comma = stack)
+ * =================================================================== */
+const LOOPS = {
+/* ---- Idle + mood ---- */
+idle:{n:'Idle',g:'Idle + mood',pt:{rig:'k-bob 3',torso:'k-purr 3',armNear:'k-armHold 3',armFar:'k-armHoldR 3'},m:'smirk'},
+bob:{n:'Happy bob',g:'Idle + mood',pt:{rig:'k-bob 1.15',armNear:'k-armUpL 1.15',armFar:'k-armUpR 1.15',legNear:'k-tap .575',legFar:'k-tapB .575'},m:'grin',bl:1},
+sway:{n:'Sway',g:'Idle + mood',pt:{rig:'k-sway 2',torso:'k-purr 1',armNear:'k-armHold 2',armFar:'k-armHoldR 2',legNear:'k-dangle 2',legFar:'k-dangle 2'},m:'smirk'},
+wiggle:{n:'Wiggle',g:'Idle + mood',pt:{torso:'k-wiggle .6',legNear:'k-tap .6',legFar:'k-tapB .6',armNear:'k-armHold 1.2',armFar:'k-armHoldR 1.2'},m:'smirk',bl:1},
+jellyWobble:{n:'Jelly wobble',g:'Idle + mood',pt:{rig:'k-jelly 1.25',torso:'k-wiggle .625',armNear:'k-armHold 1.25',armFar:'k-armHoldR 1.25',legNear:'k-dangle 1.25',legFar:'k-dangle 1.25'},m:'wavy',bl:1},
+squashPress:{n:'Squash + press',g:'Idle + mood',pt:{rig:'k-press 1.4',torso:'k-squash 1.4',armNear:'k-armHold 1.4',armFar:'k-armHoldR 1.4'},m:'o',fx:'dust'},
+stretchTall:{n:'Stretch tall',g:'Idle + mood',pt:{rig:'k-stretch 2.6',armNear:'k-armOverL 2.6',armFar:'k-armOverR 2.6',legNear:'k-tap 2.6',legFar:'k-tapB 2.6'},m:'grin',fx:'stars'},
+levitate:{n:'Levitate',g:'Idle + mood',pt:{rig:'k-bobBig 3.2',legNear:'k-dangle 1.6',legFar:'k-dangle 1.6',armNear:'k-armOverL 3.2',armFar:'k-armOverR 3.2'},m:'smirk',e:'open',gl:'up',fx:'halo'},
+floatSleepy:{n:'Sleepy float',g:'Idle + mood',pt:{rig:'k-float 4.2',legNear:'k-dangle 2.1',legFar:'k-dangle 2.1',armNear:'k-armOverL 4.2',armFar:'k-armOverR 4.2'},m:'wavy',e:'happy',gl:'up',fx:'zzz'},
+pace:{n:'Slow pace',g:'Idle + mood',pt:{rig:'k-shuffle 3.4',torso:'k-bob 3.4',legNear:'k-tap 3.4',legFar:'k-tapB 3.4',armNear:'k-armHold 3.4',armFar:'k-armHoldR 3.4'},m:'flat',fx:'zzz'},
+
+/* ---- Dance floor ---- */
+buttWiggle:{n:'Butt wiggle',g:'Dance floor',pt:{rig:'k-squash .48',torso:'k-wiggleFast .48',legNear:'k-kickA .48',legFar:'k-kickB .48',armNear:'k-armBack .48',armFar:'k-armBackR .48'},m:'smirk',fx:'dust',bl:1},
+buttDance:{n:'Butt dance',g:'Dance floor',pt:{rig:'k-flip 1.5',torso:'k-wiggleFast .375',legNear:'k-kickA .75',legFar:'k-kickB .75',armNear:'k-armBack .75',armFar:'k-armBackR .75'},m:'grin',fx:'notes',bl:1},
+boogie:{n:'Boogie',g:'Dance floor',pt:{rig:'k-bob .62, k-sway 1.24',torso:'k-wiggle .31',armNear:'k-armJazz .62',armFar:'k-armJazzR .62',legNear:'k-tap .62',legFar:'k-tapB .62'},m:'grin',fx:'notes',bl:1},
+moonwalk:{n:'Moonwalk',g:'Dance floor',pt:{rig:'k-lean 1.5',legNear:'k-slide 1.5',legFar:'k-slide 1.5',armNear:'k-armHold 1.5',armFar:'k-armHoldR 1.5'},m:'smirk',fx:'dust'},
+sockHop:{n:'Sock hop',g:'Dance floor',pt:{rig:'k-hop 1.05',legNear:'k-kickA .525',legFar:'k-kickB .525',armNear:'k-armWrap .525',armFar:'k-armWrapR .525'},m:'grin',fx:'notes',bl:1},
+jitterbug:{n:'Jitterbug',g:'Dance floor',pt:{rig:'k-shakeFast .3',torso:'k-wiggleFast .3',armNear:'k-armFlailL .3',armFar:'k-armFlailR .3',legNear:'k-tap .3',legFar:'k-tapB .3'},m:'grin',fx:'stars',bl:1},
+shimmy:{n:'Shimmy',g:'Dance floor',pt:{rig:'k-shimmy .42',torso:'k-wiggle .21',armNear:'k-armJazz .84',armFar:'k-armJazzR .84',legNear:'k-tap .42',legFar:'k-tapB .42'},m:'smirk',bl:1},
+hop:{n:'Frolic hop',g:'Dance floor',pt:{rig:'k-hop 1.2',armNear:'k-armUpL 1.2',armFar:'k-armUpR 1.2',legNear:'k-kickA .6',legFar:'k-kickB .6'},m:'grin',fx:'dust',bl:1},
+struts:{n:'Strut',g:'Dance floor',pt:{rig:'k-sway 1.05, k-bob 1.05',legNear:'k-kickA 2.1',legFar:'k-kickB 2.1',armNear:'k-armJazz 2.1',armFar:'k-armJazzR 2.1'},m:'grin',fx:'stars',bl:1},
+notes:{n:'Head bop (notes)',g:'Dance floor',pt:{rig:'k-bob .8, k-sway 1.6',torso:'k-wiggle .8',armNear:'k-armJazz 1.6',armFar:'k-armJazzR 1.6',legNear:'k-tap .8',legFar:'k-tapB .8'},m:'grin',e:'happy',gl:'up',fx:'notes',bl:1},
+
+/* ---- Travel ---- */
+waddle:{n:'Waddle',g:'Travel',pt:{rig:'k-sway .9',legNear:'k-paddle .9',legFar:'k-paddle .9',armNear:'k-armHold 1.8',armFar:'k-armHoldR 1.8'},m:'smirk'},
+pounce:{n:'Pounce',g:'Travel',pt:{rig:'k-lunge 1.1',torso:'k-crouch 1.1',armNear:'k-armPoint 1.1',armFar:'k-armBackR 1.1',legNear:'k-kickA .55',legFar:'k-kickB .55'},m:'teeth',fx:'dust'},
+sneak:{n:'Sneak',g:'Travel',pt:{rig:'k-shiftX 3.2',torso:'k-crouch 1.6',legNear:'k-tap 1.6',legFar:'k-tapB 1.6',pupilL:'k-pupilShift 1.4',pupilR:'k-pupilShift 1.4'},m:'flat',e:'open',gl:'up'},
+dash:{n:'Dash',g:'Travel',pt:{rig:'k-lean .6, k-bob .3',legNear:'k-paddle .3',legFar:'k-paddle .3',armNear:'k-armBack .6',armFar:'k-armBackR .6'},m:'teeth',e:'open',gl:'up',fx:'streaks'},
+zigzag:{n:'Zigzag',g:'Travel',pt:{rig:'k-zig 1.7',torso:'k-wiggle .425',legNear:'k-paddle .425',legFar:'k-paddle .425',armNear:'k-armBack 1.7',armFar:'k-armBackR 1.7'},m:'teeth',fx:'zig, dust'},
+slither:{n:'Slither',g:'Travel',pt:{rig:'k-shiftX 2.4, k-bob 1.2',torso:'k-wiggle 1.2',legNear:'k-paddle .6',legFar:'k-paddle .6',armNear:'k-armBack 2.4',armFar:'k-armBackR 2.4'},m:'smirk',fx:'dust'},
+burrow:{n:'Burrow',g:'Travel',pt:{rig:'k-sink 2.8',torso:'k-crouch 1.4',armNear:'k-armStir .7',armFar:'k-armStir .7'},m:'grit',fx:'mud'},
+spelunk:{n:'Spelunk',g:'Travel',pt:{rig:'k-crouch 2.4',torso:'k-wiggle 2.4',legNear:'k-paddle 1.2',legFar:'k-paddle 1.2',armNear:'k-armTap 1.2',armFar:'k-armTapR 1.2'},m:'flat',pr:'lamp',fx:'dust'},
+spin:{n:'Spin',g:'Travel',pt:{rig:'k-spin 1.15',armNear:'k-armUpL .575',armFar:'k-armUpR .575',legNear:'k-kickA 1.15',legFar:'k-kickB 1.15'},m:'grin',fx:'vortex'},
+whirr:{n:'Whirr',g:'Travel',pt:{rig:'k-spinFast .55',armNear:'k-armUpL .275',armFar:'k-armUpR .275'},m:'o',fx:'streaks'},
+rocket:{n:'Hyperspace',g:'Travel',pt:{rig:'k-stretch 1, k-bobBig 1',armNear:'k-armOverL 1, k-shakeFast .25',armFar:'k-armOverR 1, k-shakeFast .25'},m:'teeth',e:'open',gl:'up',fx:'streaks, stars'},
+morph:{n:'Morph',g:'Travel',pt:{rig:'k-jelly 2.2',torso:'k-wiggle 1.1',armNear:'k-armJazz 2.2',armFar:'k-armJazzR 2.2'},m:'o',e:'open',gl:'up',fx:'shimmer',f:'hue-rotate(60deg) saturate(1.3)'},
+
+/* ---- Think tank ---- */
+think:{n:'Think (bubble)',g:'Think tank',pt:{rig:'k-bob 2.4',torso:'k-purr 2.4',armNear:'k-armPoint 2.4',armFar:'k-armHoldR 2.4',pupilL:'k-pupilShift 3',pupilR:'k-pupilShift 3'},m:'smirk',e:'open',gl:'up',fx:'bubbles'},
+gears:{n:'Think hard (gears)',g:'Think tank',pt:{rig:'k-bob 2.2',armNear:'k-armPoint 2.2',armFar:'k-armHoldR 2.2',pupilL:'k-pupilShift 2.2',pupilR:'k-pupilShift 2.2'},m:'flat',e:'open',gl:'up',fx:'gears'},
+idea:{n:'Idea!',g:'Think tank',pt:{rig:'k-hop 1.4',armNear:'k-armPoint 1.4',armFar:'k-armHoldR 2.8'},m:'grin',e:'happy',gl:'up',fx:'idea',bl:1},
+read:{n:'Read / decipher',g:'Think tank',pt:{rig:'k-bob 3',armNear:'k-armHold 3',armFar:'k-armHoldR 3',pupilL:'k-pupilShift 3.4',pupilR:'k-pupilShift 3.4'},m:'flat',e:'open',gl:'up',pr:'paper'},
+draw:{n:'Draw / sketch',g:'Think tank',pt:{rig:'k-purr 2.6',armNear:'k-armStir 1.3',armFar:'k-armHoldR 2.6'},m:'smirk',pr:'pencil',fx:'scribble'},
+cascade:{n:'Cascade watch',g:'Think tank',pt:{rig:'k-bob 2',torso:'k-purr 2',armNear:'k-armPoint 2',armFar:'k-armHoldR 2'},m:'o',e:'open',gl:'up',pr:'code',fx:'blocks'},
+
+/* ---- Making stuff ---- */
+hammer:{n:'Hammer',g:'Making stuff',pt:{rig:'k-shakeFast .55',torso:'k-bob 1.1',armNear:'k-armHit 1.1',armFar:'k-armHoldR 2.2'},m:'grit',pr:'hammer',fx:'sparks'},
+wrench:{n:'Tinker (wrench)',g:'Making stuff',pt:{rig:'k-bob 2, k-purr 2',armNear:'k-armShake 1',armFar:'k-armHoldR 2'},m:'flat',pr:'wrench',fx:'gears'},
+assemble:{n:'Assemble (from pieces)',g:'Making stuff',once:1,pt:{torso:'asm-torso 2.8',legNear:'asm-legNear 2.8',legFar:'asm-legFar 2.8',armNear:'asm-armNear 2.8',armFar:'asm-armFar 2.8',glasses:'asm-glasses 2.8'},m:'smirk',fx:'pop'},
+unravel:{n:'Unravel / unfurl',g:'Making stuff',pt:{rig:'k-purr 2.4',armNear:'k-armUpL 2.4',armFar:'k-armUpR 2.4'},m:'o',e:'open',gl:'up',fx:'thread'},
+digitize:{n:'Number crunch',g:'Making stuff',pt:{rig:'k-bob 2.2',armNear:'k-armStir 1.1',armFar:'k-armHoldR 2.2'},m:'o',fx:'digits'},
+typing:{n:'Type / process',g:'Making stuff',pt:{rig:'k-bob 2, k-purr 2',armNear:'k-armTap .4',armFar:'k-armTapR .4',legNear:'k-tap 2',legFar:'k-tapB 2',pupilL:'k-pupilShift 2.6',pupilR:'k-pupilShift 2.6'},m:'flat',e:'open',gl:'up',pr:'keypad',fx:'blocks'},
+gitify:{n:'Gitify (branch)',g:'Making stuff',pt:{rig:'k-bob 2.4',armNear:'k-armTap .5',armFar:'k-armTapR .5'},m:'smirk',pr:'branch',fx:'blocks'},
+
+/* ---- Kitchen ---- */
+stir:{n:'Stir',g:'Kitchen',pt:{rig:'k-bob 1.6',armNear:'k-armStir .8',armFar:'k-armHoldR 1.6'},m:'smirk',pr:'whisk',fx:'crumbs'},
+cook:{n:'Cook (bain-marie)',g:'Kitchen',pt:{rig:'k-bob 2.2',armNear:'k-armStir 1.1',armFar:'k-armHoldR 2.2',legNear:'k-tap 2.2',legFar:'k-tapB 2.2'},m:'smirk',fx:'steam'},
+whisk:{n:'Whisk hard',g:'Kitchen',pt:{rig:'k-bob 1.2',torso:'k-squash 1.2',armNear:'k-armShake .3',armFar:'k-armHoldR 1.2'},m:'grit',pr:'whisk',fx:'steam'},
+zest:{n:'Zest',g:'Kitchen',pt:{rig:'k-purr 1.8',armNear:'k-armShake .6',armFar:'k-armHoldR 1.8'},m:'grin',pr:'zest',fx:'crumbs'},
+chop:{n:'Julienne',g:'Kitchen',pt:{rig:'k-shakeFast .5',armNear:'k-armHit .7',armFar:'k-armHoldR 1.4'},m:'teeth',pr:'chop',fx:'crumbs'},
+knead:{n:'Knead',g:'Kitchen',pt:{rig:'k-press 1.1',torso:'k-squash 1.1',armNear:'k-armStir 1.1',armFar:'k-armHoldR 2.2'},m:'grit',pr:'knead',fx:'crumbs'},
+sprinkle:{n:'Sprinkle / season',g:'Kitchen',pt:{rig:'k-bob 1.6',armNear:'k-armShake .8',armFar:'k-armHoldR 1.6'},m:'grin',fx:'crumbs'},
+steam:{n:'Simmer (steam)',g:'Kitchen',pt:{rig:'k-bob 2.6',torso:'k-squash 2.6',armNear:'k-armHold 2.6',armFar:'k-armHoldR 2.6'},m:'smirk',e:'happy',fx:'steam'},
+flames:{n:'Flambé (flames)',g:'Kitchen',pt:{rig:'k-lean 1.3',torso:'k-bob 1.3',armNear:'k-armBack 2.6',armFar:'k-armBackR 2.6'},m:'o',e:'open',gl:'up',fx:'flames',f:'saturate(1.15)'},
+
+/* ---- Weather + nature ---- */
+wind:{n:'Wind',g:'Weather + nature',pt:{rig:'k-lean 1.9',torso:'k-sway 1.9',armNear:'k-armBack 3.8',armFar:'k-armBackR 3.8',legNear:'k-dangle 1.9',legFar:'k-dangle 1.9'},m:'grit',fx:'wind'},
+billow:{n:'Billow',g:'Weather + nature',pt:{rig:'k-stretch 1.8',torso:'k-jelly 1.8',armNear:'k-armUpL 1.8',armFar:'k-armUpR 1.8'},m:'o',fx:'steam'},
+rainy:{n:'Rain (umbrella)',g:'Weather + nature',pt:{rig:'k-shiver .5, k-crouch .9',armNear:'k-armOverL 2',armFar:'k-armOverR 2'},m:'frown',e:'open',gl:'up',pr:'umbrella',fx:'drops'},
+frost:{n:'Frost',g:'Weather + nature',pt:{rig:'k-shiver .28',torso:'k-squash 2.8',armNear:'k-armWrap 1.4',armFar:'k-armWrapR 1.4'},m:'o',e:'open',gl:'up',fx:'snow'},
+mist:{n:'Mist / evaporate',g:'Weather + nature',pt:{rig:'k-float 3.6',torso:'k-jelly 3.6',armNear:'k-armHold 3.6',armFar:'k-armHoldR 3.6'},m:'wavy',e:'happy',gl:'up',fx:'mist, fog'},
+evaporate:{n:'Evaporate',g:'Weather + nature',pt:{rig:'k-fadeUp 3.2',torso:'k-bob 1.6',armNear:'k-armUpL 3.2',armFar:'k-armUpR 3.2'},m:'o',e:'open',gl:'up',fx:'mist'},
+vortex:{n:'Swirl / vortex',g:'Weather + nature',pt:{rig:'k-spin 3.4',torso:'k-jelly 1.7',armNear:'k-armUpL 1.7',armFar:'k-armUpR 1.7',legNear:'k-dangle 1.7',legFar:'k-dangle 1.7'},m:'o',fx:'vortex'},
+atom:{n:'Orbit / atoms',g:'Weather + nature',pt:{rig:'k-bobBig 2.6',torso:'k-purr 1.3',armNear:'k-armUpL 2.6',armFar:'k-armUpR 2.6'},m:'o',e:'open',gl:'up',fx:'atoms'},
+nest:{n:'Nest / roost',g:'Weather + nature',pt:{rig:'k-crouch 3',torso:'k-squash 3',armNear:'k-armWrap 3',armFar:'k-armWrapR 3'},m:'smirk',e:'happy',gl:'up',pr:'nest',fx:'zzz',bl:1},
+sprout:{n:'Sprout',g:'Weather + nature',pt:{rig:'k-stretch 2.8',torso:'k-bob 2.8',armNear:'k-armUpL 2.8',armFar:'k-armUpR 2.8'},m:'grin',e:'happy',gl:'up',fx:'leaves, sun',bl:1},
+flutter:{n:'Flutter (bees)',g:'Weather + nature',pt:{rig:'k-float 2.2',armNear:'k-flapL .22',armFar:'k-flapR .22',legNear:'k-tap 2.2',legFar:'k-tapB 2.2'},m:'grin',e:'happy',gl:'up',fx:'flies',bl:1},
+
+/* ---- Magic + sparkle ---- */
+sparkle:{n:'Sparkle burst',g:'Magic + sparkle',pt:{rig:'k-hop 1.3',armNear:'k-armJazz 1.3',armFar:'k-armJazzR 1.3'},m:'grin',e:'happy',gl:'up',fx:'stars',bl:1},
+confetti:{n:'Confetti',g:'Magic + sparkle',pt:{rig:'k-hop 1.5, k-sway 1.5',armNear:'k-armOverL 1.5',armFar:'k-armOverR 1.5',legNear:'k-kickA .75',legFar:'k-kickB .75'},m:'grin',fx:'confetti',bl:1},
+beam:{n:'Beam',g:'Magic + sparkle',pt:{rig:'k-bob 1.6',armNear:'k-armOverL 1.6',armFar:'k-armOverR 1.6'},m:'grin',e:'happy',gl:'up',fx:'sun, glow',bl:1},
+hearts:{n:'Hearts',g:'Magic + sparkle',pt:{rig:'k-purr 2.2, k-bob 2.2',armNear:'k-armWrap 2.2',armFar:'k-armWrapR 2.2'},m:'grin',e:'happy',gl:'up',fx:'hearts',bl:1},
+wand:{n:'Magic wand',g:'Magic + sparkle',pt:{rig:'k-bob 1.7',armNear:'k-armPoint 1.7',armFar:'k-armHoldR 1.7'},m:'smirk',pr:'wand',fx:'stars'},
+
+/* ---- Loud ---- */
+mega:{n:'Megaphone',g:'Loud',pt:{rig:'k-lean 1.1',armNear:'k-armPoint 1.1',armFar:'k-armHoldR 2.2'},m:'o',pr:'mega',fx:'sound'},
+bolt:{n:'Lightning / thunder',g:'Loud',pt:{rig:'k-shakeFast .34',torso:'k-wiggleFast .34',armNear:'k-armFlailL .68',armFar:'k-armFlailR .68'},m:'teeth',e:'open',gl:'up',fx:'bolt, flash',f:'contrast(1.06)'},
+lasso:{n:'Lasso / herd',g:'Loud',pt:{rig:'k-sway 1.4',armNear:'k-armUpL 1.4',armFar:'k-armBackR 1.4'},m:'teeth',pr:'lasso',fx:'dust'},
+
+/* ---- Confusion ---- */
+confuse:{n:'Befuddled',g:'Confusion',pt:{rig:'k-shake .5',torso:'k-wiggleFast .5',armNear:'k-armFlailL 1',armFar:'k-armFlailR 1',pupilL:'k-pupilDizzy .7',pupilR:'k-pupilDizzy .7'},m:'wavy',e:'open',gl:'up',fx:'questions',f:'saturate(.55) blur(.6px)'},
+hazy:{n:'Hazy / dazed',g:'Confusion',pt:{rig:'k-shake .8, k-bob 2.4',armNear:'k-armHold 2.4',armFar:'k-armHoldR 2.4',pupilL:'k-pupilDizzy 1.1',pupilR:'k-pupilDizzy 1.1'},m:'wavy',e:'open',gl:'up',fx:'fog',f:'blur(1.4px) saturate(.6)'},
+flail:{n:'Flail / panic',g:'Confusion',pt:{rig:'k-shakeFast .36',armNear:'k-armFlailL .36',armFar:'k-armFlailR .36',legNear:'k-tap .72',legFar:'k-tapB .72',pupilL:'k-pupilDizzy .5',pupilR:'k-pupilDizzy .5'},m:'o',e:'open',gl:'up',fx:'questions, sweat'},
+
+/* ---- Specials ---- */
+loader:{n:'Loader (eyes rolling)',g:'Specials',pt:{rig:'k-bob 3, k-purr 3',torso:'k-bob 3',armNear:'k-armHold 3',armFar:'k-armHoldR 3',pupilL:'k-pupilRoll 1.5',pupilR:'k-pupilRoll 1.5'},m:'o',e:'open',gl:'up',fx:'fog'},
+boop:{n:'Boop (poke)',g:'Specials',once:1,pt:{rig:'k-boop .9',torso:'k-jelly .9',armNear:'k-armHold .9',armFar:'k-armHoldR .9'},m:'o',fx:'boopring'},
+juggle:{n:'Juggle shoes + glasses',g:'Specials',pt:{rig:'k-bob .8',legNear:'jg-shoeA 1.6',legFar:'jg-shoeB 1.6',glasses:'jg-glass 1.6',armNear:'jg-armL 1.6',armFar:'jg-armR 1.6',torso:'k-purr .8'},m:'grin',e:'open',gl:'up',fx:'stars'}
+};
+
+/* =================================================================== *
+ * 4. WORD MAP — 187 words -> loop id (many words share a loop on purpose)
+ * =================================================================== */
+const WORD_MAP = {
+"Accomplishing":"confetti","Actioning":"dash","Actualizing":"sparkle","Architecting":"draw","Baking":"cook","Beaming":"beam","Beboppin'":"notes","Befuddling":"confuse","Billowing":"billow","Blanching":"steam","Bloviating":"mega","Boogieing":"boogie","Boondoggling":"sneak","Booping":"boop","Bootstrapping":"wrench","Brewing":"cook","Bunning":"nest","Burrowing":"burrow","Calculating":"digitize","Canoodling":"hearts","Caramelizing":"flames","Cascading":"cascade","Catapulting":"pounce","Cerebrating":"think","Channeling":"bolt","Channelling":"bolt","Choreographing":"draw","Churning":"stir","Clauding":"loader","Coalescing":"atom","Cogitating":"gears","Combobulating":"assemble","Composing":"draw","Computing":"typing","Concocting":"stir","Considering":"think","Contemplating":"think","Cooking":"cook","Crafting":"hammer","Creating":"confetti","Crunching":"digitize","Crystallizing":"frost","Cultivating":"sprout","Deciphering":"read","Deliberating":"think","Determining":"think","Dilly-dallying":"pace","Discombobulating":"confuse","Doing":"dash","Doodling":"draw","Drizzling":"mist","Ebbing":"mist","Effecting":"hammer","Elucidating":"beam","Embellishing":"sparkle","Enchanting":"wand","Envisioning":"think","Evaporating":"evaporate","Fermenting":"cook","Fiddle-faddling":"pace","Finagling":"sneak","Flambéing":"flames","Flibbertigibbeting":"flail","Flowing":"wind","Flummoxing":"confuse","Fluttering":"flutter","Forging":"hammer","Forming":"assemble","Frolicking":"hop","Frosting":"frost","Gallivanting":"struts","Galloping":"dash","Garnishing":"sprinkle","Generating":"confetti","Gesticulating":"flail","Germinating":"sprout","Gitifying":"gitify","Grooving":"notes","Gusting":"wind","Harmonizing":"notes","Hashing":"typing","Hatching":"nest","Herding":"lasso","Honking":"mega","Hullaballooing":"mega","Hyperspacing":"rocket","Ideating":"idea","Imagining":"think","Improvising":"boogie","Incubating":"nest","Inferring":"gears","Infusing":"steam","Ionizing":"bolt","Jitterbugging":"jitterbug","Julienning":"chop","Kneading":"knead","Leavening":"sprout","Levitating":"levitate","Lollygagging":"pace","Manifesting":"sparkle","Marinating":"mist","Meandering":"wind","Metamorphosing":"morph","Misting":"mist","Moonwalking":"moonwalk","Moseying":"pace","Mulling":"think","Mustering":"dash","Musing":"think","Nebulizing":"mist","Nesting":"nest","Newspapering":"read","Noodling":"notes","Nucleating":"atom","Orbiting":"atom","Orchestrating":"wand","Osmosing":"mist","Perambulating":"waddle","Percolating":"cook","Perusing":"read","Philosophising":"think","Photosynthesizing":"sprout","Pollinating":"flutter","Pondering":"think","Pontificating":"mega","Pouncing":"pounce","Precipitating":"rainy","Prestidigitating":"wand","Processing":"typing","Proofing":"sprout","Propagating":"sprout","Puttering":"pace","Puzzling":"confuse","Quantumizing":"vortex","Razzle-dazzling":"sparkle","Razzmatazzing":"confetti","Recombobulating":"assemble","Reticulating":"typing","Roosting":"nest","Ruminating":"think","Sautéing":"stir","Scampering":"dash","Schlepping":"pace","Scurrying":"dash","Seasoning":"sprinkle","Shenaniganing":"sneak","Shimmying":"shimmy","Simmering":"cook","Skedaddling":"dash","Sketching":"draw","Slithering":"slither","Smooshing":"squashPress","Sock-hopping":"sockHop","Spelunking":"spelunk","Spinning":"spin","Sprouting":"sprout","Stewing":"cook","Sublimating":"evaporate","Swirling":"vortex","Swooping":"pounce","Symbioting":"hearts","Synthesizing":"atom","Tempering":"flames","Thinking":"think","Thundering":"bolt","Tinkering":"wrench","Tomfoolering":"buttWiggle","Topsy-turvying":"spin","Transfiguring":"morph","Transmuting":"morph","Twisting":"whirr","Undulating":"jellyWobble","Unfurling":"stretchTall","Unravelling":"unravel","Vibing":"notes","Waddling":"waddle","Wandering":"pace","Warping":"vortex","Whatchamacalliting":"confuse","Whirlpooling":"vortex","Whirring":"whirr","Whisking":"whisk","Wibbling":"jellyWobble","Working":"hammer","Wrangling":"lasso","Zesting":"zest","Zigzagging":"zigzag"
+};
+const WORDS = Object.keys(WORD_MAP);
+const WORDS_BY_LOOP = {};
+WORDS.forEach(w => { const l = WORD_MAP[w]; (WORDS_BY_LOOP[l] = WORDS_BY_LOOP[l] || []).push(w); });
+const LOOP_IDS = Object.keys(LOOPS);
+
+/* keyword fallback for words that aren't in the map yet */
+const GUESS = [
+  [/danc|boogie|shimmy|bop|groov|jive|jitter|party|vibe/, 'boogie'],
+  [/bake|cook|brew|simmer|perc|stew|ferment|blanch|infus|steam|poach|roast|braise/, 'cook'],
+  [/think|cogitat|cerebrat|ponder|muse|mull|contemplat|deliberat|consider|ruminat|philosoph|determin|ponder/, 'think'],
+  [/confus|befuddl|flummox|discombob|puzzl|doubt|wibble|daze/, 'confuse'],
+  [/code|comput|process|hash|type|reticulat|git|debug|compile|script/, 'typing'],
+  [/draw|sketch|doodle|compos|choreograph|architect|design|draft/, 'draw'],
+  [/hammer|forge|craft|build|work|effect|smith|nail/, 'hammer'],
+  [/sprout|germinat|cultivat|leaven|proof|propagat|photosynth|grow|bloom|pollinat/, 'sprout'],
+  [/love|heart|cuddl|canoodl|symbiot|cuddle|snuggle/, 'hearts'],
+  [/rain|drizzl|precipitat|storm|shower|pour/, 'rainy'],
+  [/frost|freez|ice|snow|crystal|chill/, 'frost'],
+  [/wind|flow|gust|meander|billow|drift|waft/, 'wind'],
+  [/magic|enchant|prestidig|wand|spell|charm|orchestrat/, 'wand'],
+  [/sparkl|dazzl|razzle|razzmatazz|shine|glow|manifest|actualiz|embellish|garnish|glimmer/, 'sparkle'],
+  [/shout|honk|bloviat|pontificat|hullabaloo|yell|megaphone|announce/, 'mega'],
+  [/spin|swirl|twist|whirl|vortex|quantum|warp/, 'vortex'],
+  [/run|dash|scamper|scurry|skedaddl|gallop|rush|sprint|bolt-it/, 'dash'],
+  [/sneak|finagl|boondoggl|shenanigan|scheme|plot|slink/, 'sneak'],
+  [/sleep|lazy|lollygag|dilly|dally|putter|mosey|wander|schlep|amble/, 'pace'],
+  [/walk|waddle|perambulat|wobble|toddle/, 'waddle'],
+  [/orbit|atom|nucleat|synthes|coalesc|bind|fuse/, 'atom'],
+  [/jump|hop|frolic|boing|leap|skipp/, 'hop'],
+  [/kick|pounce|swoop|catapult|lunge|jump-at/, 'pounce'],
+  [/steam|boil|simmer|seeth|smoke/, 'steam'],
+  [/flam|fire|carameliz|temper|grill|sear|torch/, 'flames'],
+  [/whisk|beat|whip|churn|stir|mix|blend|fold/, 'whisk'],
+  [/chop|slice|julienne|dice|mince|cut/, 'chop'],
+  [/knead|dough|punch|press|squash|smoosh|flatten/, 'knead'],
+  [/read|perus|decipher|newspaper|scan|study|browse/, 'read'],
+  [/juggle|toss|balance/, 'juggle'],
+  [/assemble|build-up|construct|combobulat|forming/, 'assemble'],
+  [/load|wait|think-about|claud|generat-status/, 'loader'],
+  [/sing|yodel|hum|whistle|karaoke|music|chant|harmoni/, 'notes'],
+  [/nap|snooze|doze|rest|dream|recharg|chill-out|relax|unwind/, 'pace'],
+  [/paint|illustrat|annotat|diagram|wireframe|wireframe|draft|summari/, 'draw'],
+  [/stretch|yawn|reach|extend|unfold|expand|unfurl/, 'stretchTall'],
+  [/jump|bound|spring|vault|leap/, 'hop'],
+  [/garden|plant|water|bloom|farm|root|nurtur/, 'sprout'],
+  [/float|hover|glide|soar|ascend|levitat/, 'levitate'],
+  [/explode|burst|celebrat|launch|ship|deploy|release|publish/, 'confetti'],
+  [/clean|polish|shin|refin|tune|adjust|fix|repair|upgrad/, 'wrench'],
+  [/sail|navigat|redirect|migrat|journey|trek|travel|roam/, 'waddle'],
+  [/howl|roar|scream|bellow|declare|broadcast|shout/, 'mega'],
+  [/freeze|cool|refrigerat|ice-over|crystal/, 'frost'],
+  [/bounce|jiggle|wobble|wibble|shake|rattl/, 'jellyWobble'],
+  [/rotat|revolv|cycle|loop-around/, 'spin'],
+  [/connect|link|join|merge|integrat|unify|attach/, 'atom'],
+  [/sort|organiz|arrange|tidy|group|prioriti|list/, 'gears'],
+  [/search|find|look-up|explor|discov|investigat|audit|inspect/, 'read'],
+  [/kiss|cuddl|adore|crush|snuggle|befriend/, 'hearts'],
+  [/build|assembl|construct|migrat-schema|scaffold/, 'assemble']
+];
+function guess(word){
+  const w = String(word).toLowerCase();
+  for (const [re, id] of GUESS) if (re.test(w)) return id;
+  return 'bob';   /* last resort: still alive, still grinning */
+}
+function loopForWord(word){
+  if (WORD_MAP[word]) return WORD_MAP[word];
+  const ci = WORDS.find(w => w.toLowerCase() === String(word).toLowerCase());
+  if (ci) return WORD_MAP[ci];
+  return guess(word);
+}
+
+
+/* =================================================================== *
+ * 5. ENGINE — apply a loop to any .bb svg
+ * =================================================================== */
+const PART_SEL = {rig:'.p-rig',torso:'.p-torso',armNear:'.p-armNear',armFar:'.p-armFar',legNear:'.p-legNear',legFar:'.p-legFar',glasses:'.p-glasses',pupilL:'.p-pupilL',pupilR:'.p-pupilR'};
+const ALL_PARTS = '.p-rig,.p-torso,.p-armNear,.p-armFar,.p-legNear,.p-legFar,.p-glasses,.p-pupilL,.p-pupilR';
+const $$ = (sel, root) => Array.prototype.slice.call((root || document).querySelectorAll(sel));
+const $ = id => document.getElementById(id);
+const esc = s => String(s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const escAttr = s => String(s).replace(/["\\]/g, '\\$&');
+
+function setSpec(el, spec, once){
+  const items = String(spec).split(',').map(s => s.trim()).filter(Boolean).map(s => s.split(/\s+/));
+  if (!items.length) return;
+  const names = [], durs = [], eases = [], delays = [];
+  items.forEach(i => {
+    names.push(i[0]);
+    durs.push('calc(' + (parseFloat(i[1]) || 1) + 's / var(--spd,1))');
+    eases.push(i[2] || 'ease-in-out');
+    delays.push('calc(' + (parseFloat(i[3]) || 0) + 's / var(--spd,1))');
+  });
+  el.style.animationName = names.join(',');
+  el.style.animationDuration = durs.join(',');
+  el.style.animationTimingFunction = eases.join(',');
+  el.style.animationDelay = delays.join(',');
+  el.style.animationIterationCount = once ? '1' : 'infinite';
+  el.style.animationFillMode = 'both';
+}
+function clearPose(svg){
+  $$(ALL_PARTS, svg).forEach(el => { el.style.animation = ''; });
+  $$('[data-fx],[data-prop],[data-face],[data-mouth]', svg).forEach(el => el.classList.add('off'));
+  const g = svg.querySelector('.p-glasses');
+  if (g) g.classList.remove('is-up');
+  svg.style.filter = '';
+  $$('[data-mouth="smirk"]', svg).forEach(el => el.classList.remove('off'));   /* rest pose keeps the smile */
+  svg.dataset.loop = '';
+}
+function applyLoop(svg, id){
+  const L = LOOPS[id] ? LOOPS[id] : LOOPS.idle;
+  clearPose(svg);
+  svg.dataset.loop = id;
+  const gl = svg.querySelector('.p-glasses');
+  if (gl && L.gl === 'up') gl.classList.add('is-up');
+  const pt = L.pt || {};
+  Object.keys(pt).forEach(k => { const sel = PART_SEL[k]; if (sel) $$(sel, svg).forEach(el => setSpec(el, pt[k], L.once)); });
+  $$('[data-mouth="' + (L.m || 'smirk') + '"]', svg).forEach(el => el.classList.remove('off'));
+  const e = L.e || 'hidden';
+  if (e === 'open' || e === 'roll') $$('[data-face="eyes"]', svg).forEach(el => el.classList.remove('off'));
+  if (e === 'happy') $$('[data-face="happy"]', svg).forEach(el => el.classList.remove('off'));
+  if (L.bl) $$('[data-face="blush"]', svg).forEach(el => el.classList.remove('off'));
+  (L.fx || '').split(',').map(s => s.trim()).filter(Boolean).forEach(n => $$('[data-fx="' + n + '"]', svg).forEach(el => el.classList.remove('off')));
+  if (L.pr) $$('[data-prop="' + L.pr + '"]', svg).forEach(el => el.classList.remove('off'));
+  svg.style.filter = L.f || '';
+  return L;
+}
+function loopLen(id){
+  const L = LOOPS[id] || LOOPS.idle, d = [];
+  Object.keys(L.pt || {}).forEach(k => String(L.pt[k]).split(',').forEach(s => d.push(parseFloat(s.trim().split(/\s+/)[1]) || 1)));
+  return (d.length ? Math.max.apply(null, d) : 2) * 1000;
+}
+const SPD = () => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--spd')) || 1;
+
+function boop(svg){
+  const prev = svg.dataset.loop || 'idle';
+  applyLoop(svg, 'boop');
+  clearTimeout(svg._bt);
+  svg._bt = setTimeout(() => applyLoop(svg, prev), loopLen('boop') / SPD() + 260);
+}
+function mount(host, prefix, loopId){
+  host.innerHTML = mascot(prefix);
+  const svg = host.querySelector('svg');
+  const hit = svg.querySelector('.p-hit');
+  if (hit) hit.addEventListener('pointerdown', () => boop(svg));
+  if (loopId) applyLoop(svg, loopId); else clearPose(svg);
+  return svg;
+}
+
+/* ---- standalone SVG export: rig + baked-in stylesheet ---- */
+function exportSVG(id){
+  const tmp = document.createElement('div');
+  const svg = mount(tmp, 'x', id);
+  const css = KFCSS
+    .replace('.bb{width:100%;height:100%;display:block;overflow:visible}', '.bb{display:block;overflow:visible;--amp:1;--spd:1}')
+    .replace(/\n{2,}/g, '\n');
+  return '<svg xmlns="http://www.w3.org/2000/svg" class="bb" viewBox="0 0 740 740" width="740" height="740">\n'
+    + '<style>' + css + '</style>\n' + svg.innerHTML + '\n</svg>\n';
+}
+function download(name, text, mime){
+  const b = new Blob([text], {type: mime || 'text/plain'}), u = URL.createObjectURL(b);
+  const a = document.createElement('a');
+  a.href = u; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(u), 5000);
+}
+function copyText(text, btn){
+  const done = msg => { if (btn){ const t = btn.textContent; btn.textContent = msg; setTimeout(() => { btn.textContent = t; }, 1500); } };
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.top = '-1000px';
+    document.body.appendChild(ta); ta.select();
+    let ok = false; try { ok = document.execCommand('copy'); } catch (e) {}
+    ta.remove();
+    if (ok) done('copied ✓'); else { console.log(text); done('blocked — logged'); }
+  };
+  if (navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(() => done('copied ✓'), fallback);
+  else fallback();
+}
+
+/* =================================================================== *
+ * 6. UI
+ * =================================================================== */
+const uid = (() => { let n = 0; return () => 'm' + (++n); })();
+let tilesOn = true, curIdx = 0, playTimer = null;
+
+function boot(){
+  const root = document.documentElement;
+  root.style.setProperty('--spd', '1');
+  root.style.setProperty('--amp', '1');
+  if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches){
+    root.style.setProperty('--spd', '.6');
+    $('speed').value = '.6'; $('speedOut').value = '.6×';
+    tilesOn = false;
+  }
+
+  /* ---------- stage ---------- */
+  const stageSvg = mount($('stageHost'), uid(), 'idle');
+
+  function bar(){ $('playBar').style.width = (((curIdx + 1) / WORDS.length) * 100) + '%'; }
+  function stopAll(){
+    clearInterval(playTimer); playTimer = null;
+    $('playBar').style.width = '0';
+    $('btnPlayAll').textContent = '▶︎ play all ' + WORDS.length;
+    showWord(curIdx);
+  }
+  function showLoop(id, word){
+    const L = applyLoop(stageSvg, id);
+    $('stageWord').textContent = word || (WORDS_BY_LOOP[id] || [])[0] || L.n;
+    $('stageTag').textContent = L.g;
+    $('stageAnim').textContent = id;
+    $('stageMouth').textContent = L.m || 'smirk';
+    $('stageEyes').textContent = L.e || 'hidden';
+    $('stageFx').textContent = [L.fx, L.pr ? 'prop: ' + L.pr : ''].filter(Boolean).join(' + ') || '—';
+    const wrap = $('stageSamples');
+    wrap.innerHTML = '';
+    const ws = WORDS_BY_LOOP[id] || [];
+    if (!ws.length){
+      const s = document.createElement('span');
+      s.className = 'kv'; s.textContent = 'special state — no status word maps here';
+      wrap.appendChild(s);
+    }
+    ws.slice(0, 12).forEach(x => {
+      const b = document.createElement('button');
+      b.className = 'chip'; b.textContent = x;
+      b.onclick = () => showWord(WORDS.indexOf(x));
+      wrap.appendChild(b);
+    });
+    if (playTimer){
+      const p = document.createElement('button');
+      p.className = 'chip'; p.textContent = '⏹ stop cycling';
+      p.onclick = stopAll;
+      wrap.appendChild(p);
+    }
+  }
+  function showWord(i){
+    curIdx = (i + WORDS.length) % WORDS.length;
+    const w = WORDS[curIdx];
+    showLoop(WORD_MAP[w], w);
+    const on = $('wordChips').querySelector('[data-w="' + escAttr(w) + '"]');
+    $$('#wordChips .chip.on').forEach(c => c.classList.remove('on'));
+    if (on) on.classList.add('on');
+    bar();
+  }
+  $('btnPrev').onclick = () => showWord(curIdx - 1);
+  $('btnNext').onclick = () => showWord(curIdx + 1);
+  $('btnRandom').onclick = () => showWord(Math.floor(Math.random() * WORDS.length));
+  $('btnReplay').onclick = () => { const id = stageSvg.dataset.loop || 'idle'; clearPose(stageSvg); requestAnimationFrame(() => applyLoop(stageSvg, id)); };
+  $('btnPlayAll').onclick = () => {
+    if (playTimer){ stopAll(); return; }
+    $('btnPlayAll').textContent = '⏹ stop';
+    playTimer = setInterval(() => showWord(curIdx + 1), 2300 / SPD());
+    showWord(curIdx); bar();
+  };
+  $('btnCopySVG').onclick = () => copyText(exportSVG(stageSvg.dataset.loop || 'idle'), $('btnCopySVG'));
+  $('btnDL').onclick = () => download('butt-brain-' + (stageSvg.dataset.loop || 'idle') + '.svg', exportSVG(stageSvg.dataset.loop || 'idle'), 'image/svg+xml');
+  document.addEventListener('keydown', e => {
+    if (e.target && e.target.tagName === 'INPUT') return;
+    if (e.key === 'ArrowRight'){ showWord(curIdx + 1); }
+    else if (e.key === 'ArrowLeft'){ showWord(curIdx - 1); }
+    else if (e.key === ' '){ e.preventDefault(); $('btnReplay').click(); }
+  });
+
+  /* ---------- gallery ---------- */
+  const tilesEl = $('tiles');
+  const io = new IntersectionObserver(entries => {
+    entries.forEach(en => {
+      const tile = en.target;
+      let svg = tile.querySelector('svg');
+      const id = tile.dataset.loop;
+      if (en.isIntersecting){
+        if (!svg) svg = mount(tile.querySelector('.bbhost'), uid(), tilesOn ? id : null);   /* lazy: rigs are built on first sight */
+        else if (tilesOn){ if (svg.dataset.loop !== id) applyLoop(svg, id); }
+        else if (svg.dataset.loop) clearPose(svg);
+      } else if (svg && svg.dataset.loop) clearPose(svg);
+    });
+  }, {rootMargin: '200px 0px'});
+  LOOP_IDS.forEach(id => {
+    const L = LOOPS[id], words = WORDS_BY_LOOP[id] || [];
+    const tile = document.createElement('div');
+    tile.className = 'tile';
+    tile.dataset.loop = id;
+    tile.innerHTML = '<div class="box"><div class="bbhost"></div><span class="badge">' + esc(L.g) + '</span></div>'
+      + '<div class="cap"><b>' + esc(L.n) + '</b><span>' + esc(words.slice(0, 4).join(' · ') || (L.once ? 'one-shot state' : 'special state')) + '</span></div>';
+    tilesEl.appendChild(tile);
+    tile.addEventListener('click', () => { showLoop(id); window.scrollTo({top: 0, behavior: 'smooth'}); });
+    io.observe(tile);
+  });
+  function counters(n){
+    $('galCount').textContent = (n === undefined ? LOOP_IDS.length : n + ' / ' + LOOP_IDS.length) + ' loops · ' + WORDS.length + ' words mapped';
+  }
+  counters();
+  function setTileButtons(){
+    $('btnTiles').setAttribute('aria-pressed', String(tilesOn));
+    $('btnTiles').textContent = 'Tiles: ' + (tilesOn ? 'on' : 'off');
+    $('btnTiles2').setAttribute('aria-pressed', String(tilesOn));
+    $('btnTiles2').textContent = tilesOn ? 'Animate tiles' : 'Animate tiles: off';
+  }
+  const toggleTiles = () => {
+    tilesOn = !tilesOn;
+    setTileButtons();
+    $$('.tile').forEach(t => { const svg = t.querySelector('svg'); if (!svg) return; if (tilesOn) applyLoop(svg, t.dataset.loop); else clearPose(svg); });
+  };
+  $('btnTiles').onclick = toggleTiles;
+  $('btnTiles2').onclick = toggleTiles;
+  $('btnShuffleTiles').onclick = () => { const kids = $$('.tile').sort(() => Math.random() - .5); kids.forEach(k => tilesEl.appendChild(k)); };
+  $('galSearch').oninput = () => {
+    const q = $('galSearch').value.trim().toLowerCase();
+    let shown = 0;
+    $$('.tile').forEach(t => {
+      const L = LOOPS[t.dataset.loop];
+      const hay = (L.n + ' ' + L.g + ' ' + (WORDS_BY_LOOP[t.dataset.loop] || []).join(' ')).toLowerCase();
+      const ok = !q || hay.indexOf(q) > -1;
+      t.style.display = ok ? '' : 'none';
+      if (ok) shown++;
+    });
+    counters(shown);
+  };
+  setTileButtons();
+
+  /* ---------- words ---------- */
+  const chipWrap = $('wordChips');
+  WORDS.forEach((w, i) => {
+    const b = document.createElement('button');
+    b.className = 'chip';
+    b.dataset.w = w;
+    b.textContent = w + '  ·  ' + WORD_MAP[w];
+    b.onclick = () => { showWord(i); goto('stage'); };
+    chipWrap.appendChild(b);
+  });
+  $('wordCount').textContent = WORDS.length + ' words · ' + LOOP_IDS.length + ' loops';
+  $('wordSearch').oninput = () => {
+    const q = $('wordSearch').value.trim().toLowerCase();
+    let n = 0;
+    $$('#wordChips .chip').forEach(c => {
+      const ok = !q || c.dataset.w.toLowerCase().indexOf(q) > -1 || WORD_MAP[c.dataset.w].indexOf(q) > -1;
+      c.style.display = ok ? '' : 'none';
+      if (ok) n++;
+    });
+    $('wordCount').textContent = n + ' / ' + WORDS.length + ' words';
+  };
+  $('btnWordAll').onclick = () => { goto('stage'); if (!playTimer) $('btnPlayAll').click(); };
+
+  /* ---------- specials ---------- */
+  const asmSvg = mount($('asmHost'), uid(), 'assemble');
+  mount($('ldHost'), uid(), 'loader');
+  mount($('jgHost'), uid(), 'juggle');
+  mount($('hzHost'), uid(), 'hazy');
+  mount($('bdHost'), uid(), 'buttDance');
+  $$('[data-special="loader"]').forEach(h => mount(h, uid(), 'loader'));
+  const ringHost = document.querySelector('.ring .bbhost');
+  if (ringHost) mount(ringHost, uid(), 'loader');
+  $('asmReplay').onclick = () => { clearPose(asmSvg); requestAnimationFrame(() => applyLoop(asmSvg, 'assemble')); };
+  [['asmCopy','assemble'],['ldCopy','loader'],['jgCopy','juggle'],['hzCopy','hazy'],['bdCopy','buttDance']].forEach(([b, id]) => { $(b).onclick = () => copyText(exportSVG(id), $(b)); });
+  [['asmDL','assemble'],['ldDL','loader'],['jgDL','juggle'],['hzDL','hazy'],['bdDL','buttDance']].forEach(([b, id]) => { $(b).onclick = () => download('butt-brain-' + id + '.svg', exportSVG(id), 'image/svg+xml'); });
+  let wi = WORDS.indexOf('Clauding');
+  if (wi < 0) wi = 0;
+  $('ldWord').textContent = WORDS[wi];
+  $('ldCycle').onclick = () => { wi = (wi + 1) % WORDS.length; $('ldWord').textContent = WORDS[wi]; };
+  setInterval(() => { wi = (wi + 1) % WORDS.length; $('ldWord').textContent = WORDS[wi]; }, 2600 / SPD());
+
+  /* ---------- code tab ---------- */
+  const distinct = new Set(Object.values(WORD_MAP));
+  $('mapLoopCount').textContent = String(distinct.size);
+  const used = {};
+  WORDS.forEach(w => { (used[WORD_MAP[w]] = used[WORD_MAP[w]] || []).push(w); });
+  const tb = $('mapTable').tBodies[0];
+  WORDS.forEach(w => {
+    const L = LOOPS[WORD_MAP[w]];
+    const tr = document.createElement('tr');
+    tr.innerHTML = '<td><b>' + esc(w) + '</b></td><td><code>' + esc(WORD_MAP[w]) + '</code></td><td>' + esc(L ? L.g : '—') + '</td><td class="muted">'
+      + esc((used[WORD_MAP[w]] || []).filter(x => x !== w).slice(0, 6).join(', ')) + '</td>';
+    tb.appendChild(tr);
+  });
+  $('mapCopy').onclick = () => copyText(JSON.stringify(WORD_MAP, null, 2), $('mapCopy'));
+  $('mapDL').onclick = () => download('loop-map.json', JSON.stringify({loops: LOOP_IDS, words: WORD_MAP}, null, 2), 'application/json');
+  $$('[data-copy]').forEach(b => { b.onclick = () => copyText($(b.dataset.copy).innerText, b); });
+
+  /* ---------- sliders + tabs ---------- */
+  $('speed').oninput = () => { const v = parseFloat($('speed').value); root.style.setProperty('--spd', String(v)); $('speedOut').value = v.toFixed(1) + '×'; };
+  $('amp').oninput = () => { const v = parseFloat($('amp').value); root.style.setProperty('--amp', String(v)); $('ampOut').value = v.toFixed(1); };
+  window.goto = function(v){
+    $$('.tab').forEach(t => t.setAttribute('aria-selected', String(t.dataset.view === v)));
+    $$('.view').forEach(s => s.classList.toggle('on', s.id === 'view-' + v));
+  };
+  $$('.tab').forEach(t => { t.onclick = () => window.goto(t.dataset.view); });
+
+  showWord(0);
+  window.goto('stage');
+}
+
+if (typeof window !== 'undefined'){
+  Object.assign(window, {mascot, applyLoop, play:applyLoop, clearPose, boop, LOOPS, LOOP_IDS, LOOP_MAP:WORD_MAP, WORDS, loopForWord, guessLoop:guess, exportSVG, download, KFCSS, FX_BACK, FX_FRONT, PROPS});
+}
+try { boot(); } catch (err) { if (typeof console !== 'undefined') console.warn('boot skipped:', err && err.message); }
+
+</script>
+<script>(function(){function c(){var b=a.contentDocument||(a.contentWindow&&a.contentWindow.document);if(b){var d=b.createElement('script');d.innerHTML="window.__CF$cv$params={r:'a4b7e88b6a3e770f',t:'MTc5MjE2MjU2Ng=='};var a=document.createElement('script');a.src='/cdn-cgi/challenge-platform/scripts/jsd/main.js';document.getElementsByTagName('head')[0].appendChild(a);";b.getElementsByTagName('head')[0].appendChild(d)}}if(document.body){var a=document.createElement('iframe');a.height=1;a.width=1;a.style.position='absolute';a.style.top=0;a.style.left=0;a.style.border='none';a.style.visibility='hidden';document.body.appendChild(a);if('loading'!==document.readyState)c();else if(window.addEventListener)document.addEventListener('DOMContentLoaded',c);else{var e=document.onreadystatechange||function(){};document.onreadystatechange=function(b){e(b);'loading'!==document.readyState&&(document.onreadystatechange=e,c())}}}})();</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920" integrity="sha512-L0ha0OXavK/8okipN9F8BtP84dg9DUhPERbBXzwI6dgTA55d2+yweo3pn5CSFYs45/r8md2+xvUPtTdvTNRfjA==" data-cf-beacon='{"version":"2024.11.0","token":"1954b47c125f43f8b4338b3c4f804e4f","spa":2}' crossorigin="anonymous"></script>
+</body>
+</html>
