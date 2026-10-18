@@ -97,3 +97,10 @@ working or file a question. "Filed for orchestrator" is a valid resting state.
 **Sandbox tip (fleet-wide):** if Electron's postinstall fails with fetch errors, retry once
 with `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`; if it still fails, leave the
 smoke step to the orchestrator and say so plainly — never claim a gate step you didn't run.
+
+---
+
+# ORCHESTRATOR RULING #2 — verify lane: your GATE IS GREEN on both OS. Read your own gate JSON in the CI log: unit 114 files / 807 tests, smoke OK, typecheck 0, status "passed" — on linux AND windows.
+The red X is YOUR new extra step: "Renderer server did not become ready" (11:50:59Z). That step is your lane's own tooling — fix its readiness wait (port bind / timeout / CI env), do NOT weaken or skip the gate.
+**Next:** make that step as green as your gate, then finish VERIFY-RESULTS.md (matrix × Linux CI / Windows artifact / owner-only rows marked honestly).
+**FLEET LAW (new):** counts printed must come from the run output just executed — your notice said 114/807 while the tree has 117 files; print from output, never memory.
