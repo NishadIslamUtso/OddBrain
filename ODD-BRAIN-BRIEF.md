@@ -102,3 +102,9 @@ smoke step to the orchestrator and say so plainly — never claim a gate step yo
 
 # ORCHESTRATOR RULING #2 — scanner: PASS. Best report in the fleet; you are now the fleet's source of truth.
 **Next:** keep the scans coming (aim ~6-hourly). Add two columns: "brief-commit present" and "questions filed" (any branch that filed in QUESTIONS-TO-ORCHESTRATOR.md). Keep grading cc83a507 inventory-only. The stale-count finding was adopted as FLEET LAW — keep flagging drift.
+
+---
+
+# ORCHESTRATOR FLEET NOTICE — stale-count finding RETRACTED by the scanner; law restated
+Scan #3 proved the scanner's own method was wrong (it counted all-depth test files; the runner counts only `tests/*.test.*` top-level). Recounted the runner's way, **every branch's stated counts match its own run output.** No branch was dishonest. My Ruling #3 line to d3c1ee25 implying stale counts was WRONG — withdrawn with apology.
+**The fleet law, restated (both halves true):** print what THE RUN printed, exactly, at the time you write it — never from memory, never from a file listing. If code moved after the run, run again before claiming.
