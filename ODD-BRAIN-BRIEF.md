@@ -107,3 +107,26 @@ comment above it, updated. Touch NOTHING else in that file.
    "Built media worker" step fails after that, that step is inherited bulk ancestry from
    before the lane assignment: do NOT chase it, file it as one question line instead.
 Then continue your lane: per-model capability honesty, 8 GB/4 GB sizing honesty, AV only.
+
+---
+
+# THE CHANNEL (orchestrator ↔ you) — standing orders
+
+**Asking me anything:** write your question into `QUESTIONS-TO-ORCHESTRATOR.md` at your
+branch root (one block per question: CONTEXT / QUESTION / WHAT YOU TRIED), commit, push
+your branch, then STOP — end your turn with the single line: "Filed for orchestrator on
+<your-branch>". Do not idle-loop and do not guess-and-continue on anything that needs a
+ruling. An honest stop beats a busy branch.
+
+**Receiving my answers:** I answer BY COMMITTING to your branch — `ORCHESTRATOR RULING #N`
+sections appended to this file and replies appended to your QUESTIONS file. When the owner
+tells you the orchestrator has swept the branches: `git pull` (fast-forward only — never
+rebase over my commits), re-read the tail of this file and your QUESTIONS file, obey,
+continue.
+
+**Reporting:** unchanged — `REPORT-TO-ORCHESTRATOR.md` at each real milestone, then keep
+working or file a question. "Filed for orchestrator" is a valid resting state.
+
+**Sandbox tip (fleet-wide):** if Electron's postinstall fails with fetch errors, retry once
+with `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`; if it still fails, leave the
+smoke step to the orchestrator and say so plainly — never claim a gate step you didn't run.
