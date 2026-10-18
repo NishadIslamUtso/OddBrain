@@ -15,8 +15,8 @@ export type MemoryListAnswer = {
   files?: MemoryFile[]
 }
 
-export function createMemoryManager(vaultRoot: () => string) {
-  const folder = (): string => join(vaultRoot(), MEMORY_DIR)
+export function createMemoryManager(vaultRoot: () => string, customFolder: () => string = () => '') {
+  const folder = (): string => customFolder() || join(vaultRoot(), MEMORY_DIR)
 
   const list = async (): Promise<MemoryListAnswer> => {
     let names: string[]
@@ -62,10 +62,11 @@ export function createMemoryManager(vaultRoot: () => string) {
     return realFile === (await realFolder()) || realFile.startsWith(`${await realFolder()}${sep}`)
   }
 
-  const remove = async (name: string): Promise<{ ok: boolean; answer: string }> => {
+  const remove = async (name: string, expectedFolder?: string): Promise<{ ok: boolean; answer: string }> => {
+    if (expectedFolder && expectedFolder !== folder()) return { ok: false, answer: 'The memory folder changed. Refresh before removing a file.' }
     const checked = safeMemoryRelative(name)
     if (!checked.ok) return checked
-    const full = join(vaultRoot(), checked.rel)
+    const full = join(folder(), checked.rel.slice(MEMORY_DIR.length + 1))
     try {
       if (!(await contained(full))) return { ok: false, answer: 'That path is not really inside the memory folder.' }
       await rm(full, { force: false })
@@ -80,7 +81,7 @@ export function createMemoryManager(vaultRoot: () => string) {
   const read = async (name: string): Promise<{ ok: boolean; content?: string; answer?: string }> => {
     const checked = safeMemoryRelative(name)
     if (!checked.ok) return checked
-    const full = join(vaultRoot(), checked.rel)
+    const full = join(folder(), checked.rel.slice(MEMORY_DIR.length + 1))
     try {
       if (!(await contained(full))) return { ok: false, answer: 'That path is not really inside the memory folder.' }
       return { ok: true, content: await readFile(full, 'utf8') }

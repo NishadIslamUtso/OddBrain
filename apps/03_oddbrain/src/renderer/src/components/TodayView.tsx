@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useLook } from '../ui/LookContext'
 import { ArrowRight, Clock, FileText, MessageSquare, Shapes, Sun } from 'lucide-react'
 import { vaultGet } from '@shared/lib/vault'
 import { isToday, todaysArtifacts, todaysChats, worthDoing, type Suggestion, type TodayArtifact, type TodayChat } from '@shared/lib/today'
@@ -75,6 +76,7 @@ export default function TodayView({
   onOpenChat,
   onNew,
   onView,
+  onOpenMaps,
 }: {
   chats: TodayChat[]
   artifacts: TodayArtifact[]
@@ -82,7 +84,9 @@ export default function TodayView({
   onOpenChat: (chatId: string) => void
   onNew: () => void
   onView: (view: 'chat' | 'artifacts') => void
+  onOpenMaps?: () => void
 }) {
+  const look = useLook()
   const [entries, setEntries] = useState<MapEntry[]>([])
   const [mapsState, setMapsState] = useState<'loading' | 'ready' | 'empty' | 'missing'>('loading')
   const [snapshot, setSnapshot] = useState<string | null>(null)
@@ -158,6 +162,20 @@ export default function TodayView({
   // the sections stay for a PARTIAL day, where each has something honest to say.
   const mapsQuiet = mapsState === 'empty' || (mapsState === 'ready' && reads.length === 0)
   const allQuiet = !conversations.length && !made.length && mapsQuiet && snapshotState === 'empty'
+
+  if (look.layout === 'bento') return <div className="ob-bento-today" aria-label="Today">
+    <header><h1>Today</h1><span>{day}</span><button type="button" className="ob-small-button" onClick={onNew}>New chat</button></header>
+    <div className="ob-bento-grid"><section>
+      <h2>Continue</h2>{chats[0] ? <button type="button" className="ob-continue" onClick={() => onOpenChat(chats[0].id)}><strong>{chats[0].title}</strong><span>Open conversation<ArrowRight size={14} /></span></button> : <p className="ob-empty-line">No conversations yet.</p>}
+      {suggestions.length ? <><h2>Worth doing</h2>{suggestions.map((suggestion, index) => <SuggestionRow key={index} suggestion={suggestion} onOpenChat={onOpenChat} onView={onView} />)}</> : null}
+      <h2>Today's conversations</h2>{conversations.length ? conversations.map(chat => <button type="button" className="ob-dashboard-record" key={chat.id} onClick={() => onOpenChat(chat.id)}><MessageSquare size={14} /><span>{chat.title}</span><ArrowRight size={14} /></button>) : <p className="ob-empty-line">No conversations today.</p>}
+    </section><aside>
+      <h2>Current snapshot</h2>{snapshot ? <p className="ob-snapshot-text">{snapshot}</p> : <p className="ob-empty-line">{snapshotState === 'missing' ? 'No vault snapshot available.' : 'No snapshot yet.'}</p>}
+      <h2>Recently made</h2>{made.length ? made.map(item => <button type="button" className="ob-dashboard-record" key={item.id} onClick={() => onView('artifacts')}><Shapes size={14} /><span>{item.title}</span><ArrowRight size={14} /></button>) : <p className="ob-empty-line">No artifacts today.</p>}
+      <h2>Saved sources</h2>{reads.length ? reads.map((entry, index) => <p className="ob-dashboard-source" key={index}><span>{entry.title || entry.host || 'Untitled source'}</span><small>{kindBadge(entry.kind)} · {timeOfDay(entry.at)}</small></p>) : <p className="ob-empty-line">{mapsState === 'missing' ? 'No vault sources available.' : 'No sources today.'}</p>}
+      {onOpenMaps ? <button type="button" className="ob-text-button" onClick={onOpenMaps}>Browsing maps<ArrowRight size={14} /></button> : null}
+    </aside></div>
+  </div>
 
   return (
     <div className="flex-1 overflow-y-auto" aria-label="Today">

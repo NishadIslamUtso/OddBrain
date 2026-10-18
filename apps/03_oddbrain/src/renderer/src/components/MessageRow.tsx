@@ -8,6 +8,8 @@ import { parseCloudModel } from '@shared/lib/providers'
 import type { ArtifactView } from '@/state/artifactView'
 import ArtifactCard from './ArtifactCard'
 import BrainMark from './BrainMark'
+import CopyText from '../ui/CopyText'
+import { useLook } from '../ui/LookContext'
 
 /**
  * One turn in the conversation.
@@ -83,11 +85,13 @@ export default function MessageRow({
   /** The artifact the error belongs to, so it is not printed on every card. */
   rewriteErrorFor?: string
 }) {
+  const look = useLook()
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-2xl bg-card px-4 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
+        <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-[14px_14px_4px_14px] bg-card px-3.5 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
           {message.content}
+          <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div>
           {message.editedAt && <span className="mt-1 block text-[11px] text-muted">edited</span>}
           {(message.attachments || []).length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5">
@@ -115,16 +119,16 @@ export default function MessageRow({
     return () => window.removeEventListener(THINKING_OPEN_EVENT, follow)
   }, [])
   return (
-    <div className="flex gap-3.5">
+    <div className="flex gap-3">
       <span className="mt-0.5 shrink-0">
-        <BrainMark size={26} />
+        <BrainMark size={18} />
       </span>
       <div className="min-w-0 flex-1">
         {message.thinking ? (
           <details
             open={thinkingOpen || undefined}
             onToggle={(event) => setThinkingOpen((event.target as HTMLDetailsElement).open)}
-            className="mb-2 rounded-lg border border-line bg-panel/60 px-3 py-2"
+            className="mb-2 py-2"
           >
             <summary className="cursor-pointer text-[12px] text-muted">
               Thinking{streaming ? ' (still going)' : ''}
@@ -139,17 +143,18 @@ export default function MessageRow({
           <p className="mb-2 text-[12px] text-muted">{message.stage}</p>
         ) : null}
 
-        {message.content ? (
+        {message.content && (look.streamReplies || !streaming) ? (
           <div className="whitespace-pre-wrap break-words text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
             {message.content}
           </div>
         ) : null}
+        {message.content && message.status !== 'streaming' ? <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div> : null}
         {message.content && message.status !== 'streaming' ? <SpeakButton text={message.content} /> : null}
 
         {streaming && !message.content && !message.stage ? (
           <p className="text-[13px] text-muted">Thinking…</p>
         ) : null}
-        {streaming && message.content ? (
+        {streaming && message.content && look.streamReplies ? (
           <span className="caret ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 bg-accent" />
         ) : null}
 

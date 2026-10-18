@@ -114,10 +114,10 @@ export const DEFAULT_APPEARANCE: Appearance = Object.freeze({
   textSize: 'medium',
   font: 'sans',
   motion: 'system',
-  mascotWords: true,
-  rowExplanations: true,
-  packCss: '',
-  designSystem: '',
+    mascotWords: false,
+    rowExplanations: false,
+    packCss: '',
+    designSystem: '',
 })
 
 /** The id of the <style> element a pack theme's stylesheet lives in. */

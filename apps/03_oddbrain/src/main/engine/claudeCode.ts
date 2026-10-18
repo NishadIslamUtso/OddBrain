@@ -48,6 +48,8 @@ export type StartSessionInput = {
   images?: Array<{ mime: string; data: string }>
   /** Where kept copies go, when the app asked for checkpoints at all. */
   checkpointDir?: string
+  /** Read at each approval: a live session must honor Auto-keep changes. */
+  shouldCheckpoint?: () => boolean
   /**
    * A provider key from Models, resolved by the door that received the send.
    * Present only when the chosen brain is a provider brain; the engine is
@@ -317,7 +319,7 @@ export function startClaudeCodeSession(input: StartSessionInput): EngineSession 
           })}\n`,
         )
       }
-      if (allow && asked && checkpointWorthTaking(asked.tool) && asked.file && input.checkpointDir) {
+      if (allow && asked && checkpointWorthTaking(asked.tool) && asked.file && input.checkpointDir && input.shouldCheckpoint?.() !== false) {
         // Fail CLOSED: the promise is "the old self is kept before the Allow
         // travels". If keeping it fails, the Allow must not travel — the
         // engine gets an honest deny and the person sees why.
