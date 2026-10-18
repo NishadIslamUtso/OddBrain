@@ -146,7 +146,8 @@ These are code, not policy prose. Each one has tests.
 
 ## The interface, by the numbers
 
-- **7 main views:** Chat, Artifacts, Today, Projects, Vault, Brain, Code.
+- **Six sidebar destinations:** Chat, Artifacts, Today, Projects, Vault, Brain;
+  plus a full-screen Code board reachable from the command palette.
 - **18 Settings destinations**, in six groups:
   - Your space: Appearance; Windows & shortcuts
   - Models & runtime: Engine; Models & API keys; Performance
