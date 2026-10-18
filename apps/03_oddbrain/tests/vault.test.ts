@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from 'vitest'
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises'
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createVaultReader, saveVaultFolder } from '../src/main/vault'
@@ -80,10 +80,10 @@ describe('read-only folder boundary', () => {
     const preferences = join(await temp(), 'new-app-data', 'folder.txt')
     await writeFile(join(folder, 'Keep.md'), 'untouched')
     await saveVaultFolder(preferences, folder)
-    expect(await readFile(preferences, 'utf8')).toBe(folder)
+    expect(await readFile(preferences, 'utf8')).toBe(await realpath(folder))
     expect(await readFile(join(folder, 'Keep.md'), 'utf8')).toBe('untouched')
     await expect(saveVaultFolder(preferences, join(folder, 'not-a-folder'))).rejects.toThrow()
-    expect(await readFile(preferences, 'utf8')).toBe(folder)
+    expect(await readFile(preferences, 'utf8')).toBe(await realpath(folder))
   })
 })
 

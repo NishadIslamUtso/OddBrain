@@ -12,6 +12,7 @@ export const isDesktop = (): boolean => typeof window !== 'undefined' && Boolean
 
 /** A browser preview can keep real local records, but cannot claim machine access. */
 export function createBrowserClient(storage: Storage): NativeApi {
+  let pending: Promise<unknown> = Promise.resolve()
   const read = async (): Promise<WorkspaceReply> => {
     try {
       const raw = storage.getItem(KEY)
@@ -39,10 +40,9 @@ export function createBrowserClient(storage: Storage): NativeApi {
       }
     }
   }
-  return {
-    workspace: {
-      read,
-      write: async (data: Workspace, expectedRevision: number): Promise<WorkspaceReply> => {
+  const write = (data: Workspace, expectedRevision: number): Promise<WorkspaceReply> => {
+    const next = pending.then(async () => {
+      const guarded = async (): Promise<WorkspaceReply> => {
         const current = await read()
         if (!current.ok) return current
         if (current.revision !== expectedRevision)
@@ -51,12 +51,22 @@ export function createBrowserClient(storage: Storage): NativeApi {
           const checked = validateWorkspace(data),
             revision = expectedRevision + 1
           storage.setItem(KEY, JSON.stringify({ revision, data: checked }))
-          return { ok: true, data: checked, revision, location: browserLocation }
+          return { ok: true as const, data: checked, revision, location: browserLocation }
         } catch (failure) {
           return { ok: false, error: `Browser storage refused the write: ${(failure as Error).message}` }
         }
-      },
-    },
+      }
+      // Web Locks serialize writes across cooperating tabs; the queue covers browsers without it.
+      return navigator.locks?.request ? navigator.locks.request(KEY, guarded) : guarded()
+    })
+    pending = next.then(
+      () => undefined,
+      () => undefined,
+    )
+    return next
+  }
+  return {
+    workspace: { read, write },
     vault: {
       choose: async (): Promise<VaultReply> => ({
         ok: false,
@@ -75,4 +85,6 @@ export function createBrowserClient(storage: Storage): NativeApi {
   }
 }
 
-export const client = (): NativeApi => window.oddbrain ?? createBrowserClient(window.localStorage)
+let browserClient: NativeApi | null = null
+export const client = (): NativeApi =>
+  window.oddbrain ?? (browserClient ??= createBrowserClient(window.localStorage))

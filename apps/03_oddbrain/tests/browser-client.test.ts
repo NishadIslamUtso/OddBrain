@@ -23,6 +23,16 @@ describe('browser preview adapter', () => {
     expect(await api.workspace.read()).toMatchObject({ ok: true, revision: 1, data })
   })
 
+  it('serializes simultaneous writes in one tab instead of silently losing the first', async () => {
+    const api = createBrowserClient(localStorage)
+    const first = newProject(emptyWorkspace(), 'one', 'First', new Date().toISOString())
+    const second = newProject(emptyWorkspace(), 'two', 'Second', new Date().toISOString())
+    const [a, b] = await Promise.all([api.workspace.write(first, 0), api.workspace.write(second, 0)])
+    expect(a).toMatchObject({ ok: true, revision: 1 })
+    expect(b).toMatchObject({ ok: false, error: expect.stringContaining('changed in another tab') })
+    expect(await api.workspace.read()).toMatchObject({ ok: true, data: first })
+  })
+
   it('protects a corrupted browser record rather than replacing it', async () => {
     localStorage.setItem(key, '{invalid')
     const api = createBrowserClient(localStorage)

@@ -16,8 +16,8 @@
     "smoke": "electron . --smoke",
     "dist:win": "npm run build && electron-builder --win",
     "dist:win:dir": "npm run build && electron-builder --win --dir",
-    "format": "prettier --write 'src/**/*.{ts,tsx,css,html}' 'tests/**/*.{ts,tsx}' '*.{json,ts,mts}'",
-    "format:check": "prettier --check 'src/**/*.{ts,tsx,css,html}' 'tests/**/*.{ts,tsx}' '*.{json,ts,mts}'"
+    "format": "prettier --write \"src/**/*.{ts,tsx,css,html}\" \"tests/**/*.{ts,tsx}\" \"*.{json,ts,mts}\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx,css,html}\" \"tests/**/*.{ts,tsx}\" \"*.{json,ts,mts}\""
   },
   "dependencies": {
     "lucide-react": "^0.469.0",
