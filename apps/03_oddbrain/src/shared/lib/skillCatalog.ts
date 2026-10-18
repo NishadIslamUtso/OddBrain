@@ -1,31 +1,34 @@
 /**
  * The skill catalog (Track D, sourced 2026-10-16).
  *
- * Research duty first: anthropics/skills is the canonical open collection
+ * Research duty first: anthropics/skills is the canonical collection
  * (verified live: the repo lists exactly these skills under skills/). Each
- * entry here points at the raw SKILL.md the engine folders actually need —
- * one click installs it through the app's one-vault-to-every-engine deploy
- * (Claude Code's ~/.claude/skills, agy's .agents/skills), which already
- * exists from Track A.
+ * entry names an allowlisted upstream directory. Installation resolves main
+ * to an immutable commit, downloads that commit archive, and preserves the
+ * complete directory — SKILL.md, licenses, scripts, references and assets —
+ * rather than producing a broken one-file imitation.
  *
  * Curation rule: only what a person doing real work on one machine would
- * use. Anthropic's license rides along with every file — the app adds
- * nothing to it and takes nothing from it.
+ * use. Upstream license files are preserved byte-for-byte with each skill.
  */
 
 export type CatalogSkill = {
   name: string
   /** What it is, in one honest sentence. */
   what: string
-  /** The raw file the install door fetches. Only this exact host is allowed. */
+  /** The one curated repository the installer may resolve and download. */
+  repo: 'anthropics/skills'
+  /** Human-readable upstream main file; installation pins a commit archive. */
   source: string
 }
 
-const RAW = 'https://raw.githubusercontent.com/anthropics/skills/main/skills'
+const REPO = 'anthropics/skills' as const
+const RAW = `https://raw.githubusercontent.com/${REPO}/main/skills`
 
 const entry = (name: string, what: string): CatalogSkill => ({
   name,
   what,
+  repo: REPO,
   source: `${RAW}/${name}/SKILL.md`,
 })
 

@@ -67,7 +67,7 @@ logs/
 
 # Ollama models (don't commit large models)
 ollama/
-models/
+/models/
 
 # Vault private data (optional — user may want to keep vault private, but starter is OK)
 # Uncomment if you don't want to push real vault data:

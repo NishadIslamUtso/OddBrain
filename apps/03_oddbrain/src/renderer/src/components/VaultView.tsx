@@ -1,3 +1,4 @@
+import MemoryMap from './MemoryMap'
 import { sampleEnabled } from '@shared/lib/sampleWorkspace'
 import { Mascot } from '../motion/Mascot'
 import { useEffect, useRef, useState } from 'react'
@@ -20,6 +21,8 @@ const leaf = (path: string): string => path.split('/').filter(Boolean).at(-1) ??
 const folderOf = (path: string): string => path.split('/').slice(0, -1).join('/') || '(root)'
 
 export default function VaultView({ onAddToComposer }: { onAddToComposer: (path: string, content: string) => void }) {
+  const [sources, setSources] = useState(false)
+  useEffect(() => { const open = () => setSources(true); window.addEventListener('app:vault-sources-select', open); return () => window.removeEventListener('app:vault-sources-select', open) }, [])
   const mounted = useRef(false), fileTicket = useRef(0), searchTicket = useRef(0)
   const [files, setFiles] = useState<string[]>([])
   const [exported, setExported] = useState('')
@@ -109,7 +112,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
       <div className="mx-auto flex h-full w-full max-w-[var(--chat-width)] flex-col px-4 py-6">
         <header className="ob-screen-header flex items-center gap-2.5">
           <Mascot motion="read" size={32} static />
-          <h1 className="text-[20px] font-semibold text-ink">Vault</h1>
+          <h1 className="text-[20px] font-semibold text-ink">Vault</h1><button type="button" className="ob-small-button" aria-pressed={sources} onClick={() => setSources(!sources)}>{sources ? 'Show files' : 'Capture sources'}</button>
           {root ? (
             <span className="min-w-0 truncate text-[11.5px] text-muted" title={root}>
               {root}
@@ -138,6 +141,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
             </>
           ) : null}
         </header>
+        {sources ? <div className="min-h-0 flex-1 overflow-auto"><MemoryMap open onClose={() => setSources(false)} embedded /></div> : <>
         {exported ? <p className="mt-1 text-[11px] text-muted">{exported}</p> : null}
 
         <div className="mt-4 flex items-center gap-2">
@@ -245,6 +249,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
             </aside>
           ) : null}
         </div>
+        </>}
       </div>
     </div>
   )

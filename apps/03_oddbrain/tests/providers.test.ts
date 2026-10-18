@@ -130,6 +130,13 @@ test('server-sent events survive being split anywhere, including mid-separator',
   assert.deepEqual(crlf.push('event: ping\r\n\r\n'), [{ event: 'ping', data: '' }])
 })
 
+test('server-sent event buffering and discovered model names stay bounded', () => {
+  const parser = createSseParser(20)
+  assert.throws(() => parser.push('data: ' + 'x'.repeat(30)), /oversized streaming event/)
+  assert.throws(() => createSseParser(20).push('data: ' + 'x'.repeat(30) + '\n\n'), /oversized streaming event/)
+  assert.deepEqual(readModelNames({ data: [{ id: 'same' }, { id: ' same ' }, { id: 'x'.repeat(301) }, { id: 'other' }] }), ['same', 'other'])
+})
+
 test('an Anthropic stream becomes the same records the interface already reads', () => {
   assert.deepEqual(
     translateSseEvent('anthropic', {

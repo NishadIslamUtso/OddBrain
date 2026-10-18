@@ -29,8 +29,12 @@ export default function useMediaAttachments(attachments: Attachment[], setAttach
     const ticket = generation.current
     try {
       if (source.file.size > MAX_MEDIA_BYTES) throw Error('This file exceeds the 50 MB ingestion limit. Split or export it first.')
-      const selected = await bridge.media.read(); if (ticket !== generation.current) return; setPrefs(selected)
-      const expected = route === 'transcribe' ? { provider: prefs.transcriptionProvider, model: prefs.transcriptionModel } : { provider: prefs.provider, model: prefs.model }
+      // Bind an explicit upload to the provider/model printed on the button
+      // that was clicked. The refreshed preferences are for the next review;
+      // silently rerouting this already-approved file would be incorrect.
+      const reviewed = prefs
+      const currentPreferences = await bridge.media.read(); if (ticket !== generation.current) return; setPrefs(currentPreferences)
+      const expected = route === 'transcribe' ? { provider: reviewed.transcriptionProvider, model: reviewed.transcriptionModel } : { provider: reviewed.provider, model: reviewed.model }
       let added: Attachment[], description: string
       if (isDemo && route === 'local' && !/\.(pdf|docx|xlsx|pptx|odt|ods|odp)$/i.test(source.file.name)) {
         if (/^video\//.test(source.file.type)) {

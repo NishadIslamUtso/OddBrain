@@ -14,6 +14,7 @@
  */
 import {
   appendFileSync,
+  lstatSync,
   existsSync,
   mkdirSync,
   openSync,
@@ -24,9 +25,12 @@ import {
   realpathSync,
   statSync,
   writeFileSync,
+  renameSync,
+  unlinkSync,
 } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import { InputError } from './errors'
+import { randomUUID } from 'node:crypto'
 
 /**
  * Vault-relative keys speak the Obsidian dialect: forward slashes, whatever
@@ -40,6 +44,7 @@ export function toPosix(relative: string): string {
 import { dhakaParts } from './text'
 
 export function createVaultFiles(root: string, clock: () => Date) {
+  root = resolve(root)
   const realRoot = realpathSync(root)
 
   function filePath(relative: string): string {
@@ -47,6 +52,14 @@ export function createVaultFiles(root: string, clock: () => Date) {
     // The root itself is inside the vault (an empty relative path); anything
     // short of it that does not sit under the root is an escape.
     if (full !== root && !full.startsWith(root + sep)) throw new InputError('Path outside vault.')
+    // existsSync follows links, so a dangling link looks absent. Inspect every
+    // existing component first, including the leaf, before any read or write.
+    let ancestor = full
+    while (ancestor !== root) {
+      try { if (lstatSync(ancestor).isSymbolicLink()) throw new InputError('Symlink outside vault or unsupported linked path.') }
+      catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+      ancestor = dirname(ancestor)
+    }
     return full
   }
 
@@ -60,7 +73,7 @@ export function createVaultFiles(root: string, clock: () => Date) {
     }
     mkdirSync(full, { recursive: true })
     const real = realpathSync(full)
-    if (!real.startsWith(realRoot + sep)) throw new InputError('Symlink outside vault.')
+    if (real !== realRoot && !real.startsWith(realRoot + sep)) throw new InputError('Symlink outside vault.')
     return full
   }
 
@@ -70,6 +83,27 @@ export function createVaultFiles(root: string, clock: () => Date) {
     const real = realpathSync(full)
     if (!real.startsWith(realRoot + sep)) throw new InputError('Symlink outside vault.')
     return readFileSync(full, 'utf8')
+  }
+
+  function readBytes(relative: string): Buffer {
+    const full = filePath(relative)
+    if (!existsSync(full)) return Buffer.alloc(0)
+    if (!realpathSync(full).startsWith(realRoot + sep)) throw new InputError('Symlink outside vault.')
+    return readFileSync(full)
+  }
+
+  /** Replace projections/checkpoints atomically; immutable source revisions use writeOnce. */
+  function writeAtomic(relative: string, content: string): void {
+    ensureDirectory(dirname(relative))
+    const full = filePath(relative)
+    if (existsSync(full) && !realpathSync(full).startsWith(realRoot + sep)) throw new InputError('Symlink outside vault.')
+    const temporary = `${full}.${randomUUID()}.tmp`
+    try {
+      writeFileSync(temporary, content, { flag: 'wx' })
+      renameSync(temporary, full)
+    } finally {
+      if (existsSync(temporary)) unlinkSync(temporary)
+    }
   }
 
   /** Write a file only if it is not there yet. Returns true when it already was. */
@@ -176,24 +210,28 @@ export function createVaultFiles(root: string, clock: () => Date) {
     relative: string,
     extension: string,
     limit = 4000
-  ): { files: string[]; capped: boolean } {
+  ): { files: string[]; capped: boolean; incomplete?: boolean; issues?: string[] } {
     const directory = filePath(relative)
     if (!existsSync(directory)) return { files: [], capped: false }
     const files: string[] = []
     let capped = false
     let visited = 0
+    const issues: string[] = []
     const walk = (current: string): void => {
       if (capped) return
       let entries: import('node:fs').Dirent[]
       try {
+        filePath(toPosix(current.slice(root.length + 1)))
         entries = readdirSync(current, { withFileTypes: true })
       } catch {
+        issues.push(`Could not read ${current}`)
         return
       }
       for (const entry of entries) {
         if (capped) return
         if (entry.name.startsWith('.')) continue
         const full = resolve(current, entry.name)
+        if (entry.isSymbolicLink() || (!entry.isDirectory() && !entry.isFile())) { issues.push(`Unsupported linked or special entry: ${full}`); continue }
         if (entry.isDirectory()) {
           visited += 1
           if (visited > limit) {
@@ -214,16 +252,16 @@ export function createVaultFiles(root: string, clock: () => Date) {
     try {
       walk(directory)
     } catch {
-      /* A partially unreadable vault reports what it could read. */
+      issues.push('The source walk could not finish.')
     }
-    return { files, capped }
+    return { files, capped, ...(issues.length ? { incomplete: true, issues } : {}) }
   }
 
   /** Markdown file names in one folder, for the entity library. */
   function listMarkdown(relative: string): string[] {
     const directory = filePath(relative)
     if (!existsSync(directory)) return []
-    return readdirSync(directory).filter(file => file.endsWith('.md'))
+    return readdirSync(directory, { withFileTypes: true }).filter(file => file.isFile() && file.name.endsWith('.md')).map(file => file.name)
   }
 
   return {
@@ -232,6 +270,8 @@ export function createVaultFiles(root: string, clock: () => Date) {
     ensureDirectory,
     read,
     readHead,
+    readBytes,
+    writeAtomic,
     writeOnce,
     write,
     append,

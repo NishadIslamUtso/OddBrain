@@ -35,7 +35,7 @@ test('skills: each engine gets its own exact shape, from one vault entry', () =>
   const skill = { name: 'Lint House', description: 'Run the linters', body: 'Do the lint dance.' }
   const claude = toClaudeSkill(skill)
   assert.match(claude.relative, /lint-house[/\\]SKILL\.md$/)
-  assert.match(claude.content, /^---\nname: lint-house\ndescription: Run the linters\n---/)
+  assert.match(claude.content, /^---\nname: lint-house\ndescription: "Run the linters"\n---/)
   const agy = toAgySkill(skill)
   assert.equal(agy.relative, 'lint-house.md', 'agy: the file name is the slash command')
   assert.match(agy.content, /Do the lint dance\./)
@@ -112,7 +112,7 @@ test('mcp: a deploy writes both config files into the workspace', () => {
   const root = mkdtempSync(join(tmpdir(), 'oddbrain-mcp-'))
   try {
     const written = deployMcp([{ name: 'files', command: 'npx', args: ['files-mcp'] }], root)
-    assert.equal(written.length, 2)
+    assert.equal(written.written.length, 2)
     assert.match(readFileSync(join(root, '.mcp.json'), 'utf8'), /files-mcp/)
     assert.match(readFileSync(join(root, '.agents', 'mcp_config.json'), 'utf8'), /files-mcp/)
     assert.ok(readdirSync(join(root, '.agents')).includes('mcp_config.json'))

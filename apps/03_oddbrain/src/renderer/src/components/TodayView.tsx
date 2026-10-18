@@ -1,3 +1,4 @@
+import { MemoryAttention } from './MemoryWorkspace'
 import { sampleEnabled } from '@shared/lib/sampleWorkspace'
 import { Mascot } from '../motion/Mascot'
 import { useEffect, useState } from 'react'
@@ -168,14 +169,14 @@ export default function TodayView({
   if (look.layout === 'bento') return <div className="ob-bento-today" aria-label="Today">
     <header className="ob-screen-header"><Mascot motion="stretch" size={32} static /><h1>Today</h1><span>{day}</span><button type="button" className="ob-small-button" onClick={onNew}>New chat</button></header>
     <div className="ob-bento-grid"><section>
-      <h2>Continue</h2>{chats[0] ? <button type="button" className="ob-continue" onClick={() => onOpenChat(chats[0].id)}><strong>{chats[0].title}</strong><span>Open conversation<ArrowRight size={14} /></span></button> : <p className="ob-empty-line">No conversations yet.</p>}
+      <MemoryAttention /><h2>Continue</h2>{chats[0] ? <button type="button" className="ob-continue" onClick={() => onOpenChat(chats[0].id)}><strong>{chats[0].title}</strong><span>Open conversation<ArrowRight size={14} /></span></button> : <p className="ob-empty-line">No conversations yet.</p>}
       {suggestions.length ? <><h2>Worth doing</h2>{suggestions.map((suggestion, index) => <SuggestionRow key={index} suggestion={suggestion} onOpenChat={onOpenChat} onView={onView} />)}</> : null}
       <h2>Today's conversations</h2>{conversations.length ? conversations.map(chat => <button type="button" className="ob-dashboard-record" key={chat.id} onClick={() => onOpenChat(chat.id)}><MessageSquare size={14} /><span>{chat.title}</span><ArrowRight size={14} /></button>) : <p className="ob-empty-line">No conversations today.</p>}
     </section><aside>
       <h2>Current snapshot</h2>{snapshot ? <p className="ob-snapshot-text">{snapshot}</p> : <p className="ob-empty-line">{snapshotState === 'missing' ? 'No vault snapshot available.' : 'No snapshot yet.'}</p>}
       <h2>Recently made</h2>{made.length ? made.map(item => <button type="button" className="ob-dashboard-record" key={item.id} onClick={() => onView('artifacts')}><Shapes size={14} /><span>{item.title}</span><ArrowRight size={14} /></button>) : <p className="ob-empty-line">No artifacts today.</p>}
       <h2>Saved sources</h2>{reads.length ? reads.map((entry, index) => <p className="ob-dashboard-source" key={index}><span>{entry.title || entry.host || 'Untitled source'}</span><small>{kindBadge(entry.kind)} · {timeOfDay(entry.at)}</small></p>) : <p className="ob-empty-line">{mapsState === 'missing' ? 'No vault sources available.' : 'No sources today.'}</p>}
-      {onOpenMaps ? <button type="button" className="ob-text-button" onClick={onOpenMaps}>Browsing maps<ArrowRight size={14} /></button> : null}
+      {onOpenMaps ? <button type="button" className="ob-text-button" onClick={onOpenMaps}>Capture sources<ArrowRight size={14} /></button> : null}
     </aside></div>
   </div>
 
@@ -194,6 +195,7 @@ export default function TodayView({
             New chat
           </button>
         </header>
+        <MemoryAttention />
 
         {/* Quick actions: only doors the app really has, wired to real handlers.
             New chat lives once, in the header above. */}

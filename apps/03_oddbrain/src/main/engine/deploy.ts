@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto'
+import { configBytes, preserveConfig, commitConfigs, noLinkedPath } from './configTransaction'
+import { normalizeMcpServers, readMcpList } from '../../shared/lib/mcp'
 /**
  * deploy.ts — one vault, every engine.
  *
@@ -22,6 +25,7 @@
  */
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
+import { parse as parseYaml } from 'yaml'
 
 /** A skill as the app's vault keeps it: three fields, all plain. */
 export type VaultSkill = { name: string; description: string; body: string }
@@ -45,11 +49,19 @@ export function parseSkillMd(text: string): { name: string; description: string;
   let description = ''
   let body = normalized
   if (match) {
-    for (const line of match[1].split('\n')) {
-      const pair = /^(\w[\w-]*):\s*(.*)$/.exec(line.trim())
-      if (!pair) continue
-      if (pair[1] === 'name') name = pair[2].trim()
-      if (pair[1] === 'description') description = pair[2].trim()
+    // Skill frontmatter is YAML, not a hand-written `key: value` dialect.
+    // Current Anthropic skills use quoted, very long descriptions; slicing the
+    // source line used to leave an unmatched quote and made the installed skill
+    // invalid. Parse the actual format, then bound the plain values.
+    try {
+      const header = parseYaml(match[1]) as Record<string, unknown> | null
+      if (header && typeof header === 'object') {
+        if (typeof header.name === 'string') name = header.name
+        if (typeof header.description === 'string') description = header.description
+      }
+    } catch {
+      // Invalid frontmatter remains invalid below: no title/name means the
+      // install path refuses it instead of trying to repair untrusted syntax.
     }
     body = normalized.slice(match[0].length)
   }
@@ -61,8 +73,13 @@ export function parseSkillMd(text: string): { name: string; description: string;
   }
 }
 
-const frontmatter = (skill: VaultSkill): string =>
-  `---\nname: ${cleanName(skill.name)}\ndescription: ${skill.description.replace(/\n/g, ' ').slice(0, 300)}\n---\n\n`
+const frontmatter = (skill: VaultSkill): string => {
+  const description = skill.description.replace(/\s+/g, ' ').trim().slice(0, 300)
+  // A JSON string is also a valid YAML double-quoted scalar. Quote after
+  // truncating so quotes, colons and a cut in the middle of an upstream value
+  // can never create malformed frontmatter.
+  return `---\nname: ${cleanName(skill.name)}\ndescription: ${JSON.stringify(description)}\n---\n\n`
+}
 
 /** The exact bytes each engine expects for one skill. */
 export function toClaudeSkill(skill: VaultSkill): { relative: string; content: string } {
@@ -164,12 +181,32 @@ export function mcpForAgy(servers: McpServer[]): string {
   return `${JSON.stringify({ mcpServers: out }, null, 2)}\n`
 }
 
-/** Write the canonical list into both engines' config files in the workspace. */
-export function deployMcp(servers: McpServer[], workspace: string): string[] {
-  mkdirSync(join(workspace, '.agents'), { recursive: true })
-  const claudePath = join(workspace, '.mcp.json')
-  const agyPath = join(workspace, '.agents', 'mcp_config.json')
-  writeFileSync(claudePath, mcpForClaude(servers), 'utf8')
-  writeFileSync(agyPath, mcpForAgy(servers), 'utf8')
-  return [claudePath, agyPath]
+/** Backups are verified before any managed file changes. Later outside edits
+ * are detected against the last written hashes and receive their own backup. */
+export function deployMcp(servers: McpServer[], workspace: string, centralFile?: string): { written: string[]; kept: string[] } {
+  const normalized = normalizeMcpServers(servers)
+  if (normalized.problems.length) throw Error(normalized.problems.join(' '))
+  noLinkedPath(workspace)
+  const marker = join(workspace, '.agents', '.oddbrain-mcp-managed')
+  let managed: Record<string, string> = {}
+  try {
+    const parsed: unknown = JSON.parse(configBytes(marker)?.toString('utf8') || '{}')
+    if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) managed = Object.fromEntries(Object.entries(parsed).filter(([, value]) => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)))
+  } catch { /* An old marker proves no ownership; preserve the files. */ }
+  const hash = (data: string | Buffer) => createHash('sha256').update(data).digest('hex')
+  const entries = [{ path: join(workspace, '.mcp.json'), text: mcpForClaude(normalized.servers) }, { path: join(workspace, '.agents', 'mcp_config.json'), text: mcpForAgy(normalized.servers) }]
+  const kept: string[] = []
+  for (const entry of entries) {
+    const previous = configBytes(entry.path)
+    if (previous && hash(previous) !== managed[entry.path]) kept.push(preserveConfig(entry.path, previous))
+  }
+  if (centralFile) {
+    const previous = configBytes(centralFile)
+    if (previous && readMcpList(previous.toString('utf8')).problem) kept.push(preserveConfig(centralFile, previous))
+    entries.push({ path: centralFile, text: JSON.stringify({ servers: normalized.servers }) })
+  }
+  const written = entries.slice(0, 2).map(entry => entry.path)
+  entries.push({ path: marker, text: JSON.stringify(Object.fromEntries(entries.slice(0, 2).map(entry => [entry.path, hash(entry.text)]))) })
+  commitConfigs(entries)
+  return { written, kept }
 }

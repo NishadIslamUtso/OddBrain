@@ -72,14 +72,17 @@ const visit = (url: string, at: string, extra: Record<string, unknown> = {}): Re
   title: '',
   visited_at: at,
   captured_at: at,
+  capture_status: 'visit-only',
+  interpretation: 'Visit metadata is not proof of reading or agreement.',
   ...extra,
 })
+const savedVisit = (service: Fixture['service'], data: Record<string, unknown>) => service.files().append('02 Sources/Browser Activity/2026/10.jsonl', JSON.stringify(data) + '\n')
 
 test('the map reads conversations, pages and visits, newest first', (t) => {
   const { service, map } = fixture(t)
   service.capture(conversation('a'))
   service.capture(page('https://example.com/one', 'One'))
-  service.capture(visit('https://news.example/story', '2026-10-10T17:00:00Z'))
+  savedVisit(service, visit('https://news.example/story', '2026-10-10T17:00:00Z'))
 
   const { entries, summary } = map()
   assert.deepEqual(summary.kinds, { conversation: 1, page: 1, visit: 1 })
@@ -123,7 +126,7 @@ test('a captured page is one entry: its visit line points at the file, not at a 
 
 test('a visit says it is only a visit, in the vault’s own words', (t) => {
   const { service, map } = fixture(t)
-  service.capture(visit('https://reading.example/article', '2026-10-10T17:00:00Z'))
+  savedVisit(service, visit('https://reading.example/article', '2026-10-10T17:00:00Z'))
   const [entry] = map().entries
   assert.equal(entry.kind, 'visit')
   assert.equal(entry.completeness, 'visit-only')
@@ -156,7 +159,7 @@ test('days are Dhaka days, and the summary always describes the entries beside i
   // 10:00 UTC is the afternoon of the 10th in Dhaka; 19:00 UTC is already the
   // 11th there, which is the whole point of a Dhaka calendar.
   service.capture(conversation('d1', { captured_at: '2026-10-10T10:00:00Z' }))
-  service.capture(visit('https://late.example/x', '2026-10-10T19:00:00Z'))
+  savedVisit(service, visit('https://late.example/x', '2026-10-10T19:00:00Z'))
   assert.equal(dhakaDay('2026-10-10T10:00:00Z'), '2026-10-10')
   assert.equal(dhakaDay('2026-10-10T19:00:00Z'), '2026-10-11')
 
@@ -209,7 +212,7 @@ test('a missing vault is reported, and nothing is created to satisfy the map', (
 
 test('a truncated line is not a visit: only complete records count', (t) => {
   const { root, service, map } = fixture(t)
-  service.capture(visit('https://one.example/a', '2026-10-10T17:00:00Z'))
+  savedVisit(service, visit('https://one.example/a', '2026-10-10T17:00:00Z'))
   // Append half a record, the way a crash mid-write would leave one.
   const month = join(root, '02 Sources/Browser Activity/2026/10.jsonl')
   const fs = require('node:fs') as typeof import('node:fs')

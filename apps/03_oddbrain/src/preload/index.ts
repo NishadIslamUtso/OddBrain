@@ -1,3 +1,4 @@
+import type { MemoryBridge } from '../shared/lib/memoryWorkspace'
 import type { MediaBridge } from '../shared/lib/mediaBridge'
 import type { MarketplaceBridge } from '../shared/lib/marketplace'
 import type { AutomationBridge, AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
@@ -48,6 +49,14 @@ const engineApi = {
     ipcRenderer.invoke('engine:clear-binary', id),
   binaryOverride: (id: 'claude-code' | 'agy'): Promise<{ path: string }> =>
     ipcRenderer.invoke('engine:binary-override', id),
+  /** The CLI's own sign-in answer. agy has none, and says so. */
+  authStatus: (id?: 'claude-code' | 'agy'): Promise<{ ok: boolean; loggedIn: boolean; method: string; provider: string; answer: string }> =>
+    ipcRenderer.invoke('engine:auth-status', id),
+  /** Open the engine's own login in a terminal; nothing is read back. */
+  openLogin: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:open-login'),
+  /** The Ollama answering on the door, plus whether Claude Code can use it. */
+  ollamaVersion: (): Promise<{ ok: boolean; version: string; compatible: boolean; answer: string }> =>
+    ipcRenderer.invoke('engine:ollama-version'),
   /** Bring a brain home; progress arrives through onPullEvent. */
   pull: (name: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:pull', name),
   /** Take a brain off this machine. */
@@ -198,6 +207,7 @@ const marketplaceApi: MarketplaceBridge = {
 const api = {
   media: mediaApi, marketplace: marketplaceApi,
   automation: automationApi,
+  memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,
   app: {
     previewHtml: (): Promise<{ ok: boolean; html?: string; error?: string }> => ipcRenderer.invoke('app:preview-html'),
     claimLaunch: (): Promise<boolean> => ipcRenderer.invoke('app:claim-launch'),
@@ -323,11 +333,11 @@ const api = {
   },
   mcp: {
     /** The one MCP server list, and which engine configs it was deployed to. */
-    read: (): Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }> }> =>
+    read: (): Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>; problem: string }> =>
       ipcRenderer.invoke('mcp:read'),
     write: (
       servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>,
-    ): Promise<{ ok: boolean; written: string[] }> => ipcRenderer.invoke('mcp:write', { servers }),
+    ): Promise<{ ok: boolean; written: string[]; answer: string }> => ipcRenderer.invoke('mcp:write', { servers }),
   },
   structure: {
     /** What a folder is, and exactly what a structure apply would add. */
@@ -364,6 +374,7 @@ const api = {
       ipcRenderer.invoke('vault:capture-chat', { title, markdown }),
   },
   extension: {
+    publishAppearance: (value: import('../shared/lib/extensionAppearance').ExtensionAppearance): Promise<{ ok: boolean }> => ipcRenderer.invoke('extension:appearance', value),
     /**
      * Whether the browser extension can reach this app, and at what address. A
      * port that is open is a fact the interface shows rather than something to

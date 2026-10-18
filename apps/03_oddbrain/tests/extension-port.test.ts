@@ -280,7 +280,7 @@ test('the port carries the capture side only: no chat, no export, no settings', 
   // page for the engine to ask about, served by the same vault route table.
   assert.deepEqual(
     [...EXTENSION_ROUTES.keys()].sort(),
-    ['/', '/blacklist', '/capsules', '/capture', '/context', '/grep', '/health', '/links', '/onui', '/status']
+    ['/', '/appearance', '/blacklist', '/capsules', '/capture', '/context', '/conversation-sync', '/grep', '/health', '/links', '/onui', '/status']
   )
 })
 

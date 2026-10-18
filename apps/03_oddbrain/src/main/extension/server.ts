@@ -1,3 +1,4 @@
+import { normalizeExtensionAppearance, type ExtensionAppearance } from '../../shared/lib/extensionAppearance'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
 import { randomBytes, timingSafeEqual } from 'node:crypto'
 import { BODY_LIMIT, readBody } from '../api/body'
@@ -16,7 +17,7 @@ import type { VaultService } from '../vault/service'
  * answers the capture side of the vault and nothing else:
  *
  *   - no chat and no model routes, so an extension can never spend a saved key
- *   - no settings, so it cannot change how the app is configured
+ *   - read-only appearance tokens, never general settings or configuration writes
  *   - no export, so it cannot ask for the whole vault in one response
  *   - JSON writes only, same 20 MB ceiling as the app, loopback only
  *
@@ -48,6 +49,7 @@ export const DEFAULT_EXTENSION_PORT = 8765
 export const EXTENSION_ROUTES = new Map<string, string[]>([
   ['/', ['GET']],
   ['/health', ['GET']],
+  ['/appearance', ['GET']],
   ['/status', ['GET']],
   ['/context', ['GET']],
   ['/capsules', ['GET']],
@@ -56,6 +58,7 @@ export const EXTENSION_ROUTES = new Map<string, string[]>([
   ['/links', ['GET']],
   ['/blacklist', ['GET', 'POST']],
   ['/capture', ['POST']],
+  ['/conversation-sync', ['POST']],
 ])
 
 export type ExtensionApi = {
@@ -121,7 +124,7 @@ function cors(origin: string): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'content-type',
+    'Access-Control-Allow-Headers': 'content-type, x-oddbrain-pair',
     'Access-Control-Max-Age': '600',
     Vary: 'Origin',
   }
@@ -140,6 +143,7 @@ export function startExtensionApi(options: {
    * a caller that has not been told about permissions (a test) is not silently
    * blocked, and the app always passes the real answer.
    */
+  appearance?: () => ExtensionAppearance | null
   mayCapture?: () => boolean
   /**
    * The per-install pairing secret. Absent means one is generated for this
@@ -240,7 +244,7 @@ export function startExtensionApi(options: {
         {
           ok: false,
           error:
-            'This extension is not paired with OddBrain yet. Open OddBrain, choose Settings > Plugins > Agent access, copy the pairing token, and paste it into the extension popup (or send it as the x-oddbrain-pair header).',
+            'This extension is not paired with OddBrain yet. Open OddBrain, choose Settings > Apps & extensions > Agent access, copy the pairing token, and paste it into the extension popup (or send it as the x-oddbrain-pair header).',
         },
         decision.allow
       )
@@ -263,10 +267,16 @@ export function startExtensionApi(options: {
           // of retrying a request that will keep being refused.
           captures: mayCapture(),
           timezone: 'Asia/Dhaka',
-          message: 'The browser extension posts captures here. Nothing else is served on this port.',
+          message: 'Paired browser capture, context, site exclusions and read-only appearance.',
         },
         decision.allow
       )
+      return
+    }
+
+    // A paired, read-only visual snapshot. No general settings endpoint.
+    if (route === '/appearance') {
+      send(response, 200, { ok: true, appearance: normalizeExtensionAppearance(options.appearance?.()) }, decision.allow)
       return
     }
 
@@ -301,7 +311,7 @@ export function startExtensionApi(options: {
     // The one permission this port acts on. Reading the never-check list is still
     // allowed while captures are off: the list is what keeps a site private, and
     // the popup has to be able to show it.
-    if (route === '/capture' && !mayCapture()) {
+    if (['/capture', '/conversation-sync'].includes(route) && !mayCapture()) {
       send(
         response,
         403,

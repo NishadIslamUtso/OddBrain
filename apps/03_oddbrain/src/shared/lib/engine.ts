@@ -135,6 +135,11 @@ const ENGINES: readonly EngineId[] = ['claude-code', 'agy']
  */
 const MODEL_PATTERN = /^[\w.:@/-]+$/
 
+/** True for a model name the launch line can carry without a shell seeing it. */
+export function isValidModelName(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 120 && MODEL_PATTERN.test(value)
+}
+
 /**
  * Read engine settings from a parsed settings file without ever throwing —
  * the same promise the rest of the settings make. Anything missing, unknown
@@ -219,4 +224,9 @@ export function toolSummary(name: string, input: unknown): string {
   if (name === 'Glob' || name === 'Grep') return string_('pattern').slice(0, 120)
   const text = JSON.stringify(value) ?? ''
   return text.length <= 160 ? text : `${text.slice(0, 157)}…`
+}
+
+/** Engine-specific model/provider choices never leak into another adapter. */
+export function selectEngine(current: EngineSettings, id: EngineId): EngineSettings {
+  return current.id === id ? current : { ...current, id, model: '', cloudProvider: '' }
 }

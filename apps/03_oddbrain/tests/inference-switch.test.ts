@@ -23,3 +23,17 @@ test('unknown location and denied metadata fail closed when an inference categor
  expect((await inferenceAllowed(local,true,false,(async()=>{throw Error('unreachable')})as typeof fetch)).ok).toBe(false)
  expect((await inferenceAllowed(local,false,false,localTagFetch)).ok).toBe(false)
 })
+
+test('native Claude default needs cloud permission, not an Ollama model lookup', async () => {
+ let calls = 0
+ const request = (async () => { calls++; throw Error('must not query Ollama') }) as typeof fetch
+ const engine = { ...DEFAULT_ENGINE, model: '', cloudProvider: '' as const }
+ expect((await inferenceAllowed(engine, false, true, request)).ok).toBe(true)
+ expect((await inferenceAllowed(engine, true, false, request)).ok).toBe(false)
+ expect(calls).toBe(0)
+})
+
+test('oversized streamed model metadata fails closed', async () => {
+ const request = (async () => new Response(' '.repeat(2_000_001))) as typeof fetch
+ expect((await inferenceAllowed(local, true, false, request)).ok).toBe(false)
+})

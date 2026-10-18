@@ -67,6 +67,7 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
       createRoot(host).render(React.createElement(BrainView, { vault: { state: 'ready', path: 'TEST FIXTURE — not a real vault', error: '' }, isDemo: false, onOpenVault: () => {} }))
     }, { files, edges })
     const graph = page.locator('#isolated-graph-fixture'), canvas = graph.locator('canvas')
+    await graph.getByRole('tab', { name: 'Map', exact: true }).click()
     await canvas.waitFor(); await page.waitForTimeout(150)
     assert((await graph.innerText()).includes('90 of 90 notes'))
     const original = await canvas.evaluate(c => c.toDataURL())

@@ -111,7 +111,7 @@ async function writeStoredPatterns(list) {
 
 async function getBlacklist() {
   const stored = await readStoredPatterns()
-  return relayOrDirect({ type: 'ob-blacklist-get' }, async () => {
+  const answer = await relayOrDirect({ type: 'ob-blacklist-get' }, async () => {
     try {
       const response = await fetch(`${localApi()}${BLACKLIST_ENDPOINT}`, { headers: await pairHeadersFor(false) })
       if (!response.ok) return stored
@@ -125,6 +125,8 @@ async function getBlacklist() {
       return stored
     }
   })
+  if (Array.isArray(answer)) { await writeStoredPatterns(answer); return answer }
+  return stored
 }
 
 async function checkBlacklist(url) {

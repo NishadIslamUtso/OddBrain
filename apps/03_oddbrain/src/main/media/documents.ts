@@ -1,10 +1,24 @@
-import { dirname, join, sep } from 'node:path'
+import { dirname, join } from 'node:path'
 import { crc32 } from '../vault/zip'
 import { imageSize } from 'image-size'
 import { mediaKind } from './formats'
 import { fromBuffer, type Entry, type ZipFile } from 'yauzl'
 import { XMLParser } from 'fast-xml-parser'
 import { MAX_EXTRACTED_TEXT, type MediaResult } from '../../shared/lib/mediaBridge'
+
+/**
+ * A pdf.js data directory, in the one form pdf.js accepts on every platform.
+ *
+ * pdf.js requires these to end with a forward slash and then reads them with
+ * `fs.readFile`. `path.join(root, 'cmaps') + path.sep` is `D:\...\cmaps\` on
+ * Windows, which pdf.js rejects outright ("must include trailing slash") — the
+ * PDF path worked on Linux and failed only on the owner's OS. Normalising the
+ * separators and appending `/` fixes it without changing the filesystem path
+ * Windows accepts.
+ */
+export function pdfAssetBase(root: string, name: string): string {
+  return join(root, name).replace(/\\/g, '/').replace(/\/+$/, '') + '/'
+}
 
 const xml = new XMLParser({ ignoreAttributes: false, attributeNamePrefix: '@', removeNSPrefix: true, parseTagValue: false, processEntities: false })
 function parseXml(source: string): any {
@@ -85,11 +99,7 @@ export async function decodeDocument(name: string, bytes: Buffer): Promise<Media
     Object.assign(globalThis, { DOMMatrix: canvas.DOMMatrix, ImageData: canvas.ImageData, Path2D: canvas.Path2D })
     const pdf = await import('pdfjs-dist/legacy/build/pdf.mjs')
     const root = dirname(require.resolve('pdfjs-dist/package.json'))
-    // pdfjs's Node factories read these strings as filesystem paths after appending
-    // a file name, and reject anything not ending in "/". Forward slashes are valid
-    // Windows path separators; backslashes are not valid here on any platform.
-    const dataDir = (p: string) => p.split(sep).join('/') + '/'
-    const task = pdf.getDocument({ standardFontDataUrl: dataDir(join(root, 'standard_fonts')), cMapUrl: dataDir(join(root, 'cmaps')), cMapPacked: true, wasmUrl: dataDir(join(root, 'wasm')), data: new Uint8Array(bytes), useSystemFonts: false, useWorkerFetch: false, disableFontFace: true, stopAtErrors: true })
+    const task = pdf.getDocument({ standardFontDataUrl: pdfAssetBase(root, 'standard_fonts'), cMapUrl: pdfAssetBase(root, 'cmaps'), cMapPacked: true, wasmUrl: pdfAssetBase(root, 'wasm'), data: new Uint8Array(bytes), useSystemFonts: false, useWorkerFetch: false, disableFontFace: true, stopAtErrors: true })
     try {
       const doc = await task.promise
       const count = Math.min(doc.numPages, 50)

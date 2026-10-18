@@ -3,7 +3,7 @@ out/
 dist/
 dist-web/
 *.log
-vault/
+/vault/
 
 # Generated from the real renderer during build, not a maintained second UI.
 resources/oddbrain-preview.html

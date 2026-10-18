@@ -7,10 +7,11 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import {
+  engineImages,
   framePoints,
-  dictationSupported,
-  ttsSupported,
   MAX_ENGINE_ATTACHMENTS,
+  MAX_ENGINE_IMAGE_BYTES,
+  MAX_ENGINE_IMAGE_CHARS,
   ENGINE_IMAGE_MIMES,
 } from '../src/shared/lib/media'
 import {
@@ -43,13 +44,17 @@ test('frame points are even, inside the clip, never at the edges', () => {
   assert.equal(ten.length, 10)
 })
 
-test('the media guards answer for machines without the hardware', () => {
-  assert.equal(dictationSupported({}), false)
-  assert.equal(dictationSupported({ webkitSpeechRecognition: function Fake() {} }), true)
-  assert.equal(ttsSupported({}), false)
-  assert.equal(ttsSupported({ speechSynthesis: {} }), true)
+test('the media boundary limits what can ride with one engine task without truncation', () => {
   assert.ok(MAX_ENGINE_ATTACHMENTS === 4, 'four attachments ride with one task')
   assert.deepEqual([...ENGINE_IMAGE_MIMES], ['image/png', 'image/jpeg', 'image/webp'])
+  assert.equal(MAX_ENGINE_IMAGE_CHARS, Math.ceil(MAX_ENGINE_IMAGE_BYTES / 3) * 4)
+  const tiny = { mime: 'image/png', data: Buffer.from('tiny').toString('base64') }
+  assert.deepEqual(engineImages([tiny]), { ok: true, images: [tiny] })
+  assert.match((engineImages(Array(5).fill(tiny)) as { ok: false; answer: string }).answer, /Nothing was silently dropped/)
+  assert.match((engineImages([{ ...tiny, data: 'not base64!' }]) as { ok: false; answer: string }).answer, /invalid/)
+  const over = Buffer.alloc(MAX_ENGINE_IMAGE_BYTES + 1).toString('base64')
+  assert.match((engineImages([{ ...tiny, data: over }]) as { ok: false; answer: string }).answer, /larger than 2 MB/)
+  assert.equal(engineImages('not a list').ok, false)
 })
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8')

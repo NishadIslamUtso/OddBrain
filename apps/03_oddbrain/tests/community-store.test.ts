@@ -144,11 +144,29 @@ test('a URL entry is read honestly: verified stays false, downloadable says what
   assert.match(noFiles!.problem, /lists no files/)
 })
 
-test('a files list that leaves the folder is refused in full', () => {
-  const bad = { name: 'Bad index', packs: [{ id: 'bad.pack', name: 'Bad', version: '1.0.0', author: 'x', checksum: 'a'.repeat(64), source: 'p', files: ['../escape.md'] }] }
-  const parsed = parseIndex(JSON.stringify(bad))
-  if ('packs' in parsed) throw new Error('an escaping file list parsed')
-  else assert.match(parsed.problem, /outside its folder/)
+test('unsafe, duplicate and silently truncated index entries are refused in full', async () => {
+  const base = { name: 'Bad index', packs: [{ id: 'bad.pack', name: 'Bad', version: '1.0.0', author: 'x', checksum: 'a'.repeat(64), source: 'p', files: ['../escape.md'] }] }
+  const escaping = parseIndex(JSON.stringify(base))
+  if ('packs' in escaping) throw new Error('an escaping file list parsed')
+  else assert.match(escaping.problem, /outside its folder/)
+
+  const duplicateFile = parseIndex(JSON.stringify({ ...base, packs: [{ ...base.packs[0], files: ['manifest.json', 'manifest.json'] }] }))
+  if ('packs' in duplicateFile) throw new Error('a duplicate file list parsed')
+  else assert.match(duplicateFile.problem, /more than once/)
+
+  const duplicatePack = parseIndex(JSON.stringify({ ...base, packs: [{ ...base.packs[0], files: ['manifest.json'] }, { ...base.packs[0], files: ['manifest.json'] }] }))
+  if ('packs' in duplicatePack) throw new Error('duplicate pack ids parsed')
+  else assert.match(duplicatePack.problem, /more than once/)
+
+  const tooMany = parseIndex(JSON.stringify({ name: 'Huge', packs: Array.from({ length: 501 }, (_, i) => ({ ...base.packs[0], id: `pack.${i}` })) }))
+  if ('packs' in tooMany) throw new Error('an oversized index was silently truncated')
+  else assert.match(tooMany.problem, /more than 500/)
+
+  let fetched = false
+  const insecure = await readIndex({ kind: 'url', url: 'http://store.example/index.json' }, async () => { fetched = true; return '{}' })
+  assert.equal(insecure.ok, false)
+  if (!insecure.ok) assert.match(insecure.problem, /must use HTTPS/)
+  assert.equal(fetched, false, 'an insecure remote URL is refused before a request')
 })
 
 /* ---- helpers ---- */

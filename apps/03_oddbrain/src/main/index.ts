@@ -1,3 +1,10 @@
+import { discoverClaudeModels } from './engine/modelDiscovery'
+import { selectEngine } from '../shared/lib/engine'
+import { configBytes } from './engine/configTransaction'
+import { createMemoryWorkspace } from './memory/workspace'
+import { createMemoryOrganizer } from './memory/organizer'
+import type { MemoryAction } from '../shared/lib/memoryWorkspace'
+import { normalizeExtensionAppearance, type ExtensionAppearance } from '../shared/lib/extensionAppearance'
 import { createMediaService } from './media/service'
 import { createMarketplaceService } from './engine/marketplace'
 import type { MediaInput, MediaPreferences } from '../shared/lib/mediaBridge'
@@ -17,7 +24,7 @@ import { loadAppFlags, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
 import { registerStagingRoot, setBinaryOverride, binaryOverride } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
-import { dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
@@ -36,9 +43,9 @@ import {
 import { cloudEnabled, normalizePermissions } from '../shared/lib/permissions'
 import { registerArtifactIpc } from './artifacts/ipc'
 import { createEngineSocket, type EngineSocket } from './engine/socket'
-import { normalizeEngine } from '../shared/lib/engine'
+import { isValidModelName, normalizeEngine } from '../shared/lib/engine'
 import { APPROVAL_MODES, type ApprovalMode, type EngineAvailability, type EngineEvent, type EngineId, type EngineModelEntry } from '../shared/lib/engine'
-import { ENGINE_IMAGE_MIMES, MAX_ENGINE_IMAGE_CHARS as ENGINE_IMAGE_CHARS, MAX_ENGINE_ATTACHMENTS as ENGINE_IMAGE_LIMIT } from '../shared/lib/media'
+import { engineImages } from '../shared/lib/media'
 import { listCheckpoints, restoreCheckpoint, inspectCheckpoint } from './engine/checkpoints'
 import { createRecipeManager } from './recipes'
 import { createCompactManager } from './compact'
@@ -52,8 +59,11 @@ import { agyModelSource, detectEngine } from './engine/availability'
 import { enginePath } from './engine/enginePath'
 import { pdfSafeName } from '../shared/lib/artifacts'
 import { parsePullLine, validateModelName } from './engine/pull'
+import { openLogin, readAuthStatus } from './engine/authStatus'
+import { readOllamaVersion } from './engine/ollamaVersion'
 import { deployMcp, deploySkill, scanClaudeSkills, type McpServer, type VaultSkill } from './engine/deploy'
 import { installCatalogSkill } from './engine/skillCatalogInstall'
+import { normalizeMcpServers, readMcpList } from '../shared/lib/mcp'
 import { installPackFromFolder, listPacks, removePack } from './engine/packs'
 import { exportPack } from './engine/exportPack'
 import { installFromIndex, readIndex } from './engine/storeIndex'
@@ -283,6 +293,10 @@ function registerBridges(): void {
   handle('market:plan', (event, repo: string, action: MarketplaceAction, plugin?: string) => marketAnswer(() => marketplaceService!.plan(track(event.sender), repo, action, plugin)))
   handle('market:confirm', (event, token: string) => marketAnswer(() => marketplaceService!.confirm(track(event.sender), token)))
   handle('market:cancel', event => { marketplaceService!.cancel(event.sender.id) })
+  const memoryAnswer = async (run: () => unknown) => { try { if (!memoryOrganizer) throw Error('Memory organizer is still starting.'); return { ok: true, view: await run() } } catch (e) { return { ok: false, error: (e as Error).message } } }
+  handle('memory-workspace:read', () => memoryAnswer(() => memoryOrganizer!.read()))
+  handle('memory-workspace:act', (_event, action: MemoryAction) => memoryAnswer(() => memoryOrganizer!.act(action)))
+  handle('memory-workspace:run', () => memoryAnswer(() => memoryOrganizer!.run()))
   handle('settings:read', () => settings)
   handle('automation:read', () => { if (!automation) throw Error('Automation is still starting.'); return automation.view() })
   handle('automation:update', (_event, input: Partial<AutomationPreferences>) => {
@@ -415,6 +429,12 @@ function registerBridges(): void {
    * Settings > System: a port that is open is a fact the person should be able to
    * see, not something to find out from an extension that quietly stopped working.
    */
+  handle('extension:appearance', (_event, value: unknown) => {
+    const clean = normalizeExtensionAppearance(value)
+    if (!clean) return { ok: false }
+    extensionAppearance = clean
+    return { ok: true }
+  })
   handle('extension:status', () => ({
     ok: true,
     listening: Boolean(extensionApi?.listening),
@@ -579,8 +599,10 @@ function registerBridges(): void {
   }))
 
   handle('engine:pick', (_event, id: string): { ok: boolean; answer: string } => {
-    const wanted = normalizeEngine({ id }).id
-    settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, id: wanted } })
+    if (id !== 'claude-code' && id !== 'agy') return { ok: false, answer: 'Unknown engine.' }
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Stop the active task or wait for it to finish before switching engines.' }
+    const wanted = id
+    settings = writeSettings(settingsFile, { ...settings, engine: selectEngine(settings.engine, wanted) })
     return { ok: true, answer: `engine set to ${wanted}` }
   })
 
@@ -591,20 +613,9 @@ function registerBridges(): void {
       if (!text) return { ok: false, answer: 'Write what the engine should do first.' }
       // Pictures: only what the wire can carry, only a few, only small. A bad
       // list is refused with the reason, never silently dropped.
-      const images: Array<{ mime: string; data: string }> = []
-      if (Array.isArray(pictures)) {
-        for (const entry of pictures.slice(0, ENGINE_IMAGE_LIMIT)) {
-          const mime = (entry as Record<string, unknown>)?.mime
-          const data = (entry as Record<string, unknown>)?.data
-          if (typeof mime !== 'string' || typeof data !== 'string' || !ENGINE_IMAGE_MIMES.includes(mime as never)) {
-            return { ok: false, answer: 'One of the pictures is not a PNG, JPEG or WebP. Nothing was sent.' }
-          }
-          if (data.length > ENGINE_IMAGE_CHARS || !data) {
-            return { ok: false, answer: 'One of the pictures is larger than 2 MB. Nothing was sent.' }
-          }
-          images.push({ mime, data })
-        }
-      }
+      const checkedImages = engineImages(pictures ?? [])
+      if (!checkedImages.ok) return checkedImages
+      const images = checkedImages.images
       if (!engine) return { ok: false, answer: 'The engine is still waking up, try again in a moment.' }
       // The working folder is the app's decision, never the window's: the
       // folder the owner picked in the engine bay, or the vault when none.
@@ -614,6 +625,7 @@ function registerBridges(): void {
       dispatchingWork = true
       try {
       const ownDispatch = workDispatchGeneration
+      memoryOrganizer?.cancel()
       await automation?.beginWork(text, settings.engine)
       if (ownDispatch !== workDispatchGeneration) { automation?.rejectWork(); return { ok: false, answer: 'The task was canceled before it started.' } }
       const usedEngine = { ...settings.engine }
@@ -1127,18 +1139,39 @@ function registerBridges(): void {
   })
 
   // The one MCP list, stored once, deployed to every engine's config.
-  handle('mcp:read', () => {
+  //
+  // A list that cannot be parsed is reported, not shown as empty: an empty
+  // screen next to a Save button is how a hand-edited list would disappear.
+  handle('mcp:read', (): { servers: McpServer[]; problem: string } => {
     try {
-      return JSON.parse(readFileSync(mcpFile, 'utf8')) as { servers: McpServer[] }
-    } catch {
-      return { servers: [] as McpServer[] }
+      const bytes = configBytes(mcpFile)
+      return bytes === null ? { servers: [], problem: '' } : readMcpList(bytes.toString('utf8'))
+    } catch (e) {
+      return { servers: [], problem: `The saved tool-server list could not be read: ${(e as Error).message}` }
     }
   })
 
-  handle('mcp:write', (_event, payload: { servers: McpServer[] }): { ok: boolean; written: string[] } => {
-    const servers = Array.isArray(payload?.servers) ? payload.servers.slice(0, 100) : []
-    writeFileSync(mcpFile, JSON.stringify({ servers }), 'utf8')
-    return { ok: true, written: deployMcp(servers, settings.engine.workspace || vaultRoot()) }
+  handle('mcp:write', (_event, payload: { servers: McpServer[] }): { ok: boolean; written: string[]; answer: string } => {
+    // The window validates too, but main is the door: a forged payload gets
+    // the same refusal, and nothing half-valid is written to an engine config.
+    const normalized = normalizeMcpServers(payload?.servers)
+    if (normalized.problems.length) {
+      return { ok: false, written: [], answer: normalized.problems[0] }
+    }
+    let deployed: ReturnType<typeof deployMcp>
+    try { deployed = deployMcp(normalized.servers, settings.engine.workspace || vaultRoot(), mcpFile) }
+    catch (e) { return { ok: false, written: [], answer: (e as Error).message } }
+    const keptCopies = deployed.kept
+    const keptNote = keptCopies.length
+      ? ` The list that was there before is kept beside it (${keptCopies.map(path => basename(path)).join(', ')}).`
+      : ''
+    return {
+      ok: true,
+      written: deployed.written,
+      answer: (normalized.servers.length
+        ? `${normalized.servers.length} tool server${normalized.servers.length === 1 ? '' : 's'} written to ${deployed.written.length} engine file${deployed.written.length === 1 ? '' : 's'}.`
+        : 'The tool server list is empty; both engine configs were rewritten empty.') + keptNote,
+    }
   })
 
   // Mods (Phase 1): a pack is a folder with a manifest. Install = the person
@@ -1189,7 +1222,7 @@ function registerBridges(): void {
     if (kind === 'url' || /^https?:\/\//.test(clean)) {
       try {
         const parsed = new URL(clean)
-        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+        if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) return null
         return { kind: 'url', url: parsed.toString() }
       } catch {
         return null
@@ -1455,42 +1488,11 @@ function registerBridges(): void {
       const answer = await agyModelSource(known.found).models()
       return answer
     }
-    const door = settings.engine.baseUrl || 'http://localhost:11434'
-    try {
-      const answer = await fetch(`${door}/api/tags`, { signal: AbortSignal.timeout(4000) })
-      if (!answer.ok) return { ok: false, models: [], error: `the brain door answered ${answer.status}` }
-      const data = (await answer.json()) as { models?: Array<{ name?: string; size?: number; remote_model?: string }> }
-      const models: EngineModelEntry[] = (data.models ?? [])
-        .filter((m): m is { name: string; size?: number; remote_model?: string } => typeof m.name === 'string')
-        .map((m) => {
-          const cloud = Boolean(m.remote_model) || m.name.endsWith(':cloud')
-          return {
-            name: m.name,
-            cloud,
-            sizeGB: cloud || typeof m.size !== 'number' ? null : Math.round((m.size / 1e9) * 10) / 10,
-          }
-        })
-      // A key saved in Models adds that provider's real brains to this list —
-      // read from the provider's own door, never invented. The app itself
-      // still calls no provider: picking one of these routes the ENGINE there
-      // with the key on the next send.
-      if (cloud && keyStore?.has('anthropic') && cloudEnabled(settings.permissions, 'anthropic', true)) {
-        try {
-          const providerBrains = await cloud.listModels('anthropic')
-          for (const brain of providerBrains.slice(0, 50)) {
-            if (brain && typeof brain.name === 'string' && !models.some((m) => m.name === brain.name)) {
-              models.push({ name: brain.name, cloud: true, sizeGB: null, provider: 'anthropic' })
-            }
-          }
-        } catch {
-          // The provider door not answering costs nothing: the local list
-          // stands, and the Test button in Models says what went wrong.
-        }
-      }
-      return { ok: true, models }
-    } catch {
-      return { ok: false, models: [], error: 'the brain door (Ollama) is not answering, start Ollama, then refresh' }
-    }
+    return discoverClaudeModels({
+      baseUrl: settings.engine.baseUrl || 'http://localhost:11434',
+      providerModels: cloud && keyStore?.has('anthropic') && cloudEnabled(inferencePermissions(), 'anthropic', true)
+        ? () => cloud!.listModels('anthropic') : undefined,
+    })
   })
 
   // The throttle: how much the engine may do before asking. The app offers
@@ -1545,10 +1547,28 @@ function registerBridges(): void {
   })
 
   handle('engine:model', (_event, model: string, provider?: string): { ok: boolean; answer: string } => {
-    const clean = normalizeEngine({ ...settings.engine, model, cloudProvider: provider === 'anthropic' ? 'anthropic' : '' })
+    const typed = typeof model === 'string' ? model.trim() : ''
+    if (typed && !isValidModelName(typed)) {
+      return { ok: false, answer: 'Model names use letters, digits, dots, colons, @, / and dashes only; nothing was changed.' }
+    }
+    const clean = normalizeEngine({ ...settings.engine, model: typed, cloudProvider: provider === 'anthropic' ? 'anthropic' : '' })
     settings = writeSettings(settingsFile, { ...settings, engine: clean })
     return { ok: true, answer: clean.cloudProvider ? `brain set to ${clean.model} via ${clean.cloudProvider}` : `brain set to ${clean.model}` }
   })
+
+  // Is the engine actually signed in? The CLI answers for itself; agy does not.
+  handle('engine:auth-status', (_event, id?: string): Promise<unknown> =>
+    readAuthStatus(id === 'agy' ? 'agy' : 'claude-code'),
+  )
+
+  // Open the CLI's own login in a terminal. The app starts the CLI; it never
+  // receives the credentials and never runs an OAuth flow in its own window.
+  handle('engine:open-login', () => openLogin())
+
+  // Which Ollama is answering, and whether it can serve Claude Code's door.
+  handle('engine:ollama-version', (): Promise<unknown> =>
+    readOllamaVersion({ baseUrl: settings.engine.baseUrl || 'http://127.0.0.1:11434' }),
+  )
 
   // "Open a folder" — the engine's workplace, chosen once and remembered.
   handle('engine:pick-workspace', async (): Promise<{ ok: boolean; answer: string }> => {
@@ -1691,6 +1711,7 @@ function applyQuickShortcut(): void {
 }
 
 
+let extensionAppearance: ExtensionAppearance | null = null
 let extensionApi: ExtensionApi | null = null
 let settings: AppSettings = { ...EMPTY_SETTINGS }
 let settingsFile = ''
@@ -1700,6 +1721,8 @@ let cloud: CloudClient | null = null
 let engine: EngineSocket | null = null
 let automation: AutomationService | null = null
 let reviewer: ReturnType<typeof createTextReviewer> | null = null
+let memoryOrganizer: ReturnType<typeof createMemoryOrganizer> | null = null
+let foregroundApiRequests = 0
 let dispatchingWork = false
 let workDispatchGeneration = 0
 const engineHistory: EngineEvent[] = []
@@ -2043,10 +2066,17 @@ app.whenReady().then(async () => {
       fetchImpl: (input, init) => fetch(input, { ...init, redirect: 'error' }) })
     reviewer = createTextReviewer({ permissions: () => inferencePermissions(), cloudAllowed: () => automation?.preferences().allowCloudInference !== false, cloud: () => reviewCloud, engine: () => settings.engine })
     automation = createAutomationService({ file: join(app.getPath('userData'), 'automation.json'), engine: () => settings.engine,
-      runText: (task, preferences, signal) => reviewer!.run(task, preferences, signal),
+      runText: (task, preferences, signal) => { memoryOrganizer?.cancel(); return reviewer!.run(task, preferences, signal) },
       onChanged: (view: AutomationView) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('automation:changed', view) } })
     for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) try { window.webContents.send('automation:changed', automation.view()) } catch {}
     app.on('before-quit', () => { void automation?.dispose() })
+    memoryOrganizer = createMemoryOrganizer({
+      store: () => createMemoryWorkspace(createVaultService({ vaultPath: vaultRoot() }).files()),
+      busy: () => dispatchingWork || !!engine?.turnBusy() || foregroundApiRequests > 0 || !!automation?.view().current,
+      configuration: () => JSON.stringify({ engine: settings.engine, permissions: inferencePermissions(), cloud: automation?.preferences().allowCloudInference, custom: settings.cloud, keyProviders: keyStore?.ids() }),
+      run: (system, prompt, preferences, signal) => reviewer!.organize(system, prompt, preferences, signal),
+    })
+    app.on('before-quit', () => memoryOrganizer?.dispose())
     const enabled = keyStore.ids().length
     console.log(
       `[cloud] keys ${keyStore.encryption === 'os' ? 'sealed by this machine' : 'held for this run only'}; ` +
@@ -2065,7 +2095,7 @@ app.whenReady().then(async () => {
       // The API is handed the cloud client, so a chat whose model names a
       // provider streams from there — through the same address, as the same
       // records, with no second path for the interface to know about.
-      api = await startLocalApi({ port: API_PORT, rendererDir, vault, cloud: cloud || undefined })
+      api = await startLocalApi({ port: API_PORT, rendererDir, vault, cloud: cloud || undefined, onInferenceActivity: busy => { foregroundApiRequests = Math.max(0, foregroundApiRequests + (busy ? 1 : -1)); if (busy) memoryOrganizer?.cancel() } })
       if (api.port !== API_PORT) {
         console.log(`[api] port ${API_PORT} was busy; listening on ${api.port} instead.`)
       }
@@ -2096,6 +2126,7 @@ app.whenReady().then(async () => {
     }
     extensionApi = await startExtensionApi({
       port: extensionPortWanted(),
+      appearance: () => extensionAppearance,
       vault,
       mayCapture: () => settings.permissions.browserCapture,
       pairToken,

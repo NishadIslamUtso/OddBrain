@@ -1,92 +1,326 @@
-<!DOCTYPE html>
-<html>
-<head>
-<meta charset="utf-8">
-<style>
-/* OddBrain's own tokens, same family as the app: deep charcoal panels, cream
-   ink, the violet accent, the rose brand mark. No generic grey. */
-:root {
-  --bg: #141417; --panel: #1a1a1f; --card: #202027; --line: #2e2e36;
-  --ink: #ececef; --muted: #9a9aa3; --accent: #7350ff; --brand: #e8a0b4;
-  --radius: 10px;
-}
-body { width: 380px; background: var(--bg); color: var(--ink); font-family: 'Segoe UI', system-ui, sans-serif; margin: 0; padding: 0; }
-.header { padding: 12px; border-bottom: 1px solid var(--line); display: flex; justify-content: space-between; align-items: center; background: var(--panel); }
-.header h1 { font-size: 14px; margin: 0; font-weight: 600; letter-spacing: 0.2px; display: flex; align-items: center; gap: 7px; }
-.header .mark { width: 18px; height: 18px; border-radius: 5px; background: var(--brand); display: inline-flex; align-items: center; justify-content: center; color: #141417; font-size: 11px; font-weight: 700; }
-.tabs { display: flex; border-bottom: 1px solid var(--line); background: var(--panel); }
-.tab { flex: 1; padding: 8px; text-align: center; cursor: pointer; font-size: 12px; background: transparent; border: none; color: var(--muted); border-bottom: 2px solid transparent; }
-.tab.active { color: var(--ink); border-bottom-color: var(--accent); }
-.content { padding: 12px; max-height: 400px; overflow-y: auto; }
-.capsule { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; margin-bottom: 8px; cursor: grab; font-size: 12px; }
-.capsule:hover { border-color: var(--accent); }
-.capsule-title { font-weight: 600; margin-bottom: 4px; }
-.capsule-meta { color: var(--muted); font-size: 10px; }
-.blacklist-item { display: flex; justify-content: space-between; background: var(--card); padding: 6px 8px; margin-bottom: 4px; border-radius: var(--radius); font-size: 11px; align-items: center; }
-input { background: var(--card); border: 1px solid var(--line); color: var(--ink); padding: 8px; border-radius: var(--radius); width: 100%; box-sizing: border-box; font-size: 12px; }
-input:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
-input::placeholder { color: var(--muted); }
-button { background: var(--card); color: var(--ink); border: 1px solid var(--line); padding: 6px 12px; border-radius: 999px; cursor: pointer; font-size: 11px; }
-button:hover { border-color: var(--accent); }
-button.primary { background: var(--accent); color: #ffffff; border-color: var(--accent); }
-button.primary:hover { background: #6240e6; }
-.log { font-size: 10px; color: var(--muted); background: var(--panel); padding: 6px; border-radius: var(--radius); margin-bottom: 4px; }
-.permission-banner { background: #201a10; border: 1px solid #554a2a; color: var(--ink); padding: 8px; border-radius: var(--radius); font-size: 11px; margin-bottom: 10px; }
-.permission-banner button { margin-top: 6px; }
-</style>
-</head>
-<body>
-<div class="header">
-  <h1><span class="mark">OB</span>OddBrain Vault</h1>
-  <span id="status" style="font-size:10px;color:var(--brand);">● Local</span>
-</div>
-<div class="tabs">
-  <button class="tab active" data-tab="capsules">Capsules</button>
-  <button class="tab" data-tab="blacklist">Never-Check</button>
-  <button class="tab" data-tab="activity">Activity</button>
-  <button class="tab" data-tab="pairing">Pairing</button>
-</div>
-<div class="content" id="pairing-tab" style="display:none;">
-  <p style="font-size:11px;color:#aaa;">This extension proves itself to the app with a pairing token. Copy it once from <b>OddBrain → Settings → Plugins → Agent access</b> and paste it here. It stays in this browser only.</p>
-  <input id="pair-token" placeholder="paste the pairing token" style="margin:8px 0;">
-  <div style="display:flex;gap:6px;">
-    <button id="pair-save" class="primary">Save token</button>
-    <button id="pair-clear">Clear</button>
-  </div>
-  <p id="pair-status" style="font-size:11px;color:#0a0;margin-top:8px;"></p>
-</div>
-<div class="content" id="capsules-tab">
-  <div id="broad-banner" class="permission-banner" style="display:none;">
-    Broad capture is off. AI sites only by default.<br>
-    Enable to check every site (your default rule).<br>
-    <button id="enable-broad">Enable broad access (all sites)</button>
-  </div>
-  <div id="history-banner" class="permission-banner" style="display:none;">
-    Browser history trail off.<br>
-    <button id="enable-history">Enable history trail (URL/title/time)</button>
-  </div>
-  <input id="search" placeholder="Search capsules..." style="margin-bottom:8px;">
-  <div id="capsule-list"></div>
-  <div style="margin-top:12px;">
-    <button id="capture-current">Capture Current Page as Capsule</button>
-  </div>
-</div>
-<div class="content" id="blacklist-tab" style="display:none;">
-  <p style="font-size:11px;color:#aaa;">URLs/domains to never check. Empty = check everything (your rule).</p>
-  <div style="display:flex;gap:6px;margin-bottom:8px;">
-    <input id="blacklist-input" placeholder="e.g. bank.com/*">
-    <button id="blacklist-add">Add</button>
-  </div>
-  <div id="blacklist-list"></div>
-</div>
-<div class="content" id="activity-tab" style="display:none;">
-  <div id="activity-log"></div>
-  <div style="display:flex;gap:6px;margin-top:8px;">
-    <button id="clear-queue">Clear Queue</button>
-    <button id="test-offline">Test offline queue</button>
-  </div>
-  <p style="font-size:10px;color:#666;margin-top:8px;">If you see "Queued, app offline" - start OddBrain (it listens at 127.0.0.1:8765)</p>
-</div>
-<script src="popup.js"></script>
-</body>
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>OddBrain</title>
+    <link rel="stylesheet" href="popup.css" />
+  </head>
+  <body>
+    <div id="app">
+      <header class="header">
+        <button id="brand" class="brand" aria-label="OddBrain, save a page">
+          <span id="wordmark">OddBrain</span>
+        </button>
+        <button
+          id="open-panel"
+          class="icon-button"
+          title="Keep OddBrain beside this page"
+          aria-label="Open side panel"
+        >
+          <svg
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.5"
+          >
+            <rect x="3" y="4" width="18" height="16" rx="2" />
+            <path d="M15 4v16" />
+          </svg>
+        </button>
+      </header>
+      <nav class="tabs" aria-label="Extension sections">
+        <button data-tab="save" aria-current="page">Capture</button
+        ><button data-tab="library">Capsules</button
+        ><button data-tab="activity">Activity</button
+        ><button data-tab="settings">Settings</button>
+      </nav>
+      <main>
+        <section id="save-view" class="view" aria-label="Conversation capture and manual saves">
+          <div class="greeting">
+            <div>
+              <p class="eyebrow">KEEP THE CONVERSATION</p>
+              <h1>Conversations, kept.</h1>
+              <p id="brain-caption">
+                New messages save while you’re here.
+              </p>
+            </div>
+            <button id="brain" class="brain" aria-label="Poke OddBrain">
+              <span id="brain-art"></span
+              ><span id="brain-word" aria-hidden="true"></span>
+            </button>
+          </div>
+          <section
+            id="conversation-progress"
+            class="sync-progress"
+            aria-label="Conversation saving"
+            hidden
+          >
+            <div class="section-heading">
+              <h2 id="conversation-state">Conversation memory</h2>
+              <button id="conversation-pause" class="text-button">Pause</button>
+            </div>
+            <progress
+              id="conversation-bar"
+              max="1"
+              value="0"
+              aria-label="Loaded messages saved"
+            ></progress>
+            <p id="conversation-detail" class="small muted" role="status"></p>
+          </section>
+          <div class="page-heading">
+            <span id="page-site">Your current page</span
+            ><button id="refresh-page" class="text-button">Refresh</button>
+          </div>
+          <h2 id="page-title">Take the useful bit with you.</h2>
+          <p id="page-hint" class="muted">
+            Review a page or selection before saving it to your vault.
+          </p>
+          <div class="capture-modes" role="group" aria-label="Capture format">
+            <button data-mode="page" aria-pressed="true">Page</button
+            ><button data-mode="selection" aria-pressed="false">
+              Selection</button
+            ><button data-mode="capsule" aria-pressed="false">Capsule</button
+            ><button data-mode="structure" aria-pressed="false">
+              Structure
+            </button>
+          </div>
+          <div id="review" hidden>
+            <label for="capture-title">Title</label
+            ><input id="capture-title" maxlength="250" />
+            <div id="capsule-fields" hidden>
+              <label for="capture-goal"
+                >Goal <span class="optional">optional</span></label
+              ><input id="capture-goal" maxlength="500" /><label
+                for="capture-constraint"
+                >Constraint <span class="optional">optional</span></label
+              ><input id="capture-constraint" maxlength="500" />
+            </div>
+            <div class="page-heading">
+              <label for="capture-content" id="content-label"
+                >What gets saved</label
+              ><span id="capture-size" class="muted"></span>
+            </div>
+            <textarea
+              id="capture-content"
+              spellcheck="false"
+              maxlength="60000"
+            ></textarea>
+            <p id="capture-scope" class="small muted"></p>
+          </div>
+          <button id="capture-current" class="primary full">
+            Review page <span aria-hidden="true">↗</span>
+          </button>
+          <button id="discard" class="text-button full" hidden>
+            Discard preview
+          </button>
+          <p class="privacy-note">
+            Forms, passwords and unsent drafts stay out.
+          </p>
+        </section>
+        <section
+          id="library-view"
+          class="view"
+          aria-label="Capsule library"
+          hidden
+        >
+          <div class="section-heading">
+            <h1>Carry the context.</h1>
+            <button id="refresh-library" class="text-button">Refresh</button>
+          </div>
+          <p class="muted">Goals, decisions and the bits worth repeating.</p>
+          <label class="sr-only" for="search">Search capsules</label
+          ><input
+            id="search"
+            type="search"
+            placeholder="Find a capsule…"
+            autocomplete="off"
+          />
+          <p id="library-source" class="small muted"></p>
+          <div id="capsule-list"></div>
+          <div id="capsule-detail" hidden></div>
+        </section>
+        <section
+          id="activity-view"
+          class="view"
+          aria-label="Capture activity"
+          hidden
+        >
+          <h1>Where it went.</h1>
+          <p class="muted">Saved, waiting, or refused. No guessing.</p>
+          <div class="section-heading">
+            <h2 id="queue-count">Outbox</h2>
+            <button id="retry-queue" class="text-button">Retry now</button>
+          </div>
+          <div id="queue-list"></div>
+          <button id="clear-queue" class="text-button" hidden>
+            Clear waiting captures
+          </button>
+          <div class="section-heading divider">
+            <h2>Recent activity</h2>
+            <button id="clear-activity" class="text-button">
+              Clear history
+            </button>
+          </div>
+          <div id="activity-log"></div>
+          <details>
+            <summary>Diagnostics</summary>
+            <p class="small muted">
+              A test entry stays in this browser and is never sent to your
+              vault.
+            </p>
+            <button id="test-offline">Add offline test entry</button>
+          </details>
+        </section>
+        <section
+          id="settings-view"
+          class="view"
+          aria-label="Extension settings"
+          hidden
+        >
+          <h1>Same brain. Smaller window.</h1>
+          <section class="settings-section">
+            <h2>Connected app</h2>
+            <p class="muted">
+              Copy the pairing token from OddBrain → Settings → Apps &
+              extensions → Agent access.
+            </p>
+            <label for="pair-token">Pairing token</label
+            ><input
+              id="pair-token"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Paste the token from the app"
+            />
+            <details>
+              <summary>Connection port</summary>
+              <label for="app-port">Loopback port</label
+              ><input
+                id="app-port"
+                type="number"
+                min="1"
+                max="65535"
+                value="8765"
+              />
+              <p class="small muted">
+                Match the port shown in the desktop app. The address stays
+                127.0.0.1.
+              </p>
+            </details>
+            <div class="button-row">
+              <button id="pair-save" class="primary">
+                Save & test connection</button
+              ><button id="pair-clear">Forget</button>
+            </div>
+            <p id="pair-status" role="status" class="small"></p>
+          </section>
+          <section class="settings-section">
+            <h2>Appearance</h2>
+            <p id="appearance-status" class="muted">
+              Follows your desktop look after pairing.
+            </p>
+            <button id="sync-appearance">Sync from app</button>
+            <p class="small muted">
+              Palette, typography, density, corners and brain behaviour follow
+              the app. The browser controls panel position and width. No second
+              set of theme settings to keep in sync.
+            </p>
+          </section>
+          <section class="settings-section">
+            <h2>What may be collected</h2>
+            <label class="switch-row"
+              ><span
+                >AI conversation memory<small
+                  >Automatically save titles, messages and accessible original
+                  attachments while the site is open. Never unsent
+                  drafts.</small
+                ></span
+              ><input id="auto-ai" type="checkbox"
+            /></label>
+            <div id="conversation-sites"></div>
+            <p class="small muted">
+              Messaging and Classroom need one-time site access. Readers only
+              collect opened conversations or course streams, not inbox-wide
+              history, Facebook posts or Instagram feeds. Reload existing tabs
+              after enabling a site.
+            </p>
+            <details>
+              <summary>AI sites and capture coverage</summary>
+              <p id="conversation-ai-sites" class="small muted"></p>
+              <p class="small muted">
+                Readers depend on the site's current layout. Unrecognized
+                speakers or message identities are flagged. Attachments that
+                cannot be downloaded remain pending, never counted as saved.
+                Rendered images may be previews rather than full-resolution
+                originals. Transfers are limited to 256 MB per attachment. No
+                automatic transcription or external AI processing.
+              </p>
+            </details>
+            <label class="switch-row"
+              ><span
+                >Capture other pages<small
+                  >Requires optional access to all websites.</small
+                ></span
+              ><input id="broad-access" type="checkbox"
+            /></label>
+            <p class="small muted">
+              Browser history is not collected. Existing saved visits stay in your vault. Manual saves work on the tab you choose without broad access.
+              Private windows are disabled. Reload open tabs after changing site
+              access.
+            </p>
+          </section>
+          <section class="settings-section">
+            <h2>Beside your editor</h2>
+            <label class="switch-row"
+              ><span
+                >Show the OddBrain button<small
+                  >Capsules and prompt context on allowed pages.</small
+                ></span
+              ><input id="companion-enabled" type="checkbox" /></label
+            ><label class="switch-row"
+              ><span
+                >Suggest cached capsules while typing<small
+                  >Matching stays in the page. No draft is sent.</small
+                ></span
+              ><input id="inline-suggestions" type="checkbox"
+            /></label>
+          </section>
+          <section class="settings-section">
+            <h2>Never-check sites</h2>
+            <p class="muted">
+              These exclusions also block manual captures and queued retries.
+            </p>
+            <form id="blacklist-form" class="button-row">
+              <label for="blacklist-input" class="sr-only"
+                >Site or URL pattern</label
+              ><input
+                id="blacklist-input"
+                placeholder="example.com/*"
+                maxlength="500"
+              /><button id="blacklist-add">Add</button>
+            </form>
+            <p id="blacklist-status" class="small" role="status"></p>
+            <div id="blacklist-list"></div>
+          </section>
+        </section>
+      </main>
+      <div id="notice" role="status" aria-live="polite" hidden></div>
+      <footer>
+        <button id="connection" class="text-button">Checking connection…</button
+        ><span id="outbox-footer"></span>
+      </footer>
+    </div>
+    <dialog id="confirm-dialog">
+      <h2 id="confirm-title">Are you sure?</h2>
+      <p id="confirm-message"></p>
+      <div class="button-row">
+        <button id="confirm-cancel">Keep it</button
+        ><button id="confirm-ok" class="primary">Continue</button>
+      </div>
+    </dialog>
+    <script src="../lib/appearance.js"></script>
+    <script src="../lib/conversation-adapters.js"></script>
+    <script src="popup.js"></script>
+  </body>
 </html>

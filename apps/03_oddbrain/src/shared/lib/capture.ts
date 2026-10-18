@@ -23,6 +23,7 @@ export type CapturedAttachment =
   | { id: string; name: string; kind: 'text'; text: string }
 
 export type CapturedMessage = {
+  id?: string
   role: 'user' | 'assistant'
   text: string
   timestamp: string
@@ -69,6 +70,7 @@ export function conversationCapture(
       )
     }
     return {
+      id: message.id,
       role: message.role,
       text: message.content,
       timestamp: message.at || message.timestamp || captured,
