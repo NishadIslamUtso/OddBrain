@@ -1600,7 +1600,8 @@ function registerBridges(): void {
   handle('engine:open-login', () => openLogin())
 
   // Which Ollama is answering, and whether it can serve Claude Code's door.
-  handle('engine:ollama-version', () => readOllamaVersion())
+  // The door is whatever the person configured, not a hard-coded default.
+  handle('engine:ollama-version', () => readOllamaVersion({ baseUrl: settings.engine.baseUrl || undefined }))
 
   // "Open a folder" — the engine's workplace, chosen once and remembered.
   handle('engine:pick-workspace', async (): Promise<{ ok: boolean; answer: string }> => {

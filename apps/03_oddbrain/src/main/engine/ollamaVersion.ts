@@ -44,12 +44,12 @@ export async function readOllamaVersion(
   const base = (options.baseUrl || 'http://127.0.0.1:11434').replace(/\/+$/, '')
   try {
     const response = await (options.fetchImpl || fetch)(`${base}/api/version`, { signal: AbortSignal.timeout(options.timeoutMs ?? 3000) })
-    if (!response.ok) return { ok: false, version: '', compatible: false, answer: `The brain door answered ${response.status} when asked its version.` }
+    if (!response.ok) return { ok: false, version: '', compatible: false, answer: `${base} answered ${response.status} when asked its version.` }
     const data = (await response.json()) as { version?: unknown }
     const version = typeof data.version === 'string' ? data.version : ''
-    if (!version) return { ok: false, version: '', compatible: false, answer: 'The brain door did not say which version it is.' }
+    if (!version) return { ok: false, version: '', compatible: false, answer: `${base} did not say which version it is.` }
     return { ok: true, version, ...ollamaAnswer(version) }
   } catch {
-    return { ok: false, version: '', compatible: false, answer: 'No Ollama is answering on 127.0.0.1:11434.' }
+    return { ok: false, version: '', compatible: false, answer: `No Ollama is answering at ${base}.` }
   }
 }

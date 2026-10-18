@@ -54,6 +54,11 @@ jobs:
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build
+      - name: Build the browser preview too
+        # A second build, from vite.web.config.ts — the surface someone can open
+        # without installing anything. Nothing else here touches it.
+        working-directory: apps/03_oddbrain
+        run: npm run build:web
       - name: Smoke — the window opens and the console is clean
         working-directory: apps/03_oddbrain
         timeout-minutes: 5
