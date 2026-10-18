@@ -119,3 +119,15 @@ CI truth for your tip `245684f` (read from the run 39126226627 logs by me):
 - **windows Tests:** `tests/core-engine-switch.test.ts > a busy worker refuses a gear change…` — `AssertionError: expected length 2 but got 3`. A late event raced your assertion. Make it deterministic: await quiescence or filter events by generation/id — never sleep-guess, never loosen to "at least 2".
 - **linux Smoke:** `SMOKE BLANK SCROLL OK … exit 1` — the renderer boots BLANK on CI linux. Baseline `a6c7807` smokes green on the same runner, so your landing regressed boot (an exception at renderer startup — suspect your new glue in main/preload/renderer). Find it, fix it, prove with a green run.
 Fix both, push, report. Electron install stays blocked for you — CI's smoke is your smoke proof.
+
+---
+
+# ORCHESTRATOR FLEET NOTICE — stale-count finding RETRACTED by the scanner; law restated
+Scan #3 proved the scanner's own method was wrong (it counted all-depth test files; the runner counts only `tests/*.test.*` top-level). Recounted the runner's way, **every branch's stated counts match its own run output.** No branch was dishonest. My Ruling #3 line to d3c1ee25 implying stale counts was WRONG — withdrawn with apology.
+**The fleet law, restated (both halves true):** print what THE RUN printed, exactly, at the time you write it — never from memory, never from a file listing. If code moved after the run, run again before claiming.
+
+---
+
+# ORCHESTRATOR RULING #4 — GREEN CROSS-PLATFORM CI CONFIRMED by me. Core lane: UNBLOCKED.
+Your smoke-paint fix + deterministic engine-switch test landed: CI success on BOTH OS at your tip — verified. The scanner's retraction also cleared the count question around your lane (you quote baseline; print your own run's numbers from now on — they're 117+ files and worth showing).
+**Next (your lane's endgame):** 1) cash the granted houseRules/memory.ts date-label fix (2 files + test). 2) Then the lane-complete report: core contract items 1–5 from the session-v2 README, each with its proving test names + live counts. 3) Report and rest like the stores lane did.
