@@ -106,10 +106,10 @@ test('editing a project name sends the changed name through the existing project
   expect(container.textContent).toContain('Renamed project')
 })
 
-test('artifact type/search controls filter actual items and Trash recovery is an explicit desktop request', async () => {
+test('artifact type/search/sort controls use real items and Trash recovery is an explicit desktop request', async () => {
   const common = { createdAt: '2026-10-18T00:00:00.000Z', updatedAt: '2026-10-18T00:00:00.000Z', origin: 'import' as const, current: 0, versionCount: 1, bytes: 12 }
   const items: ArtifactSummary[] = [
-    { ...common, id: 'alpha', title: 'Alpha', type: 'html' },
+    { ...common, id: 'alpha', title: 'Alpha', type: 'html', updatedAt: '2026-10-17T00:00:00.000Z' },
     { ...common, id: 'beta', title: 'Beta', type: 'svg' },
   ]
   const trash = vi.spyOn(bridge.artifacts, 'trashList').mockResolvedValue({ ok: true, items: [] })
@@ -121,8 +121,12 @@ test('artifact type/search controls filter actual items and Trash recovery is an
       onRestore: async () => ({ ok: false }), onImport: async () => ({ ok: false }), onOpenInChat: () => undefined })
   }
   await act(async () => { root.render(h(Harness)) })
-  expect(container.querySelector('[aria-label="Open Alpha"]')).not.toBeNull()
-  expect(container.querySelector('[aria-label="Open Beta"]')).not.toBeNull()
+  const visibleOrder = (): string[] => [...container.querySelectorAll('ul.grid button[aria-label^="Open "]')].map(button => button.getAttribute('aria-label') || '')
+  expect(visibleOrder()).toEqual(['Open Beta', 'Open Alpha'])
+  const sort = container.querySelector<HTMLSelectElement>('select[aria-label="Artifact sort"]')
+  expect(sort).not.toBeNull()
+  await act(async () => { sort!.value = 'name'; sort!.dispatchEvent(new Event('change', { bubbles: true })) })
+  expect(visibleOrder()).toEqual(['Open Alpha', 'Open Beta'])
   await press([...container.querySelectorAll('[aria-label="Artifact type"] button')].find(button => button.textContent === 'SVG') || null)
   expect(container.querySelector('[aria-label="Open Alpha"]')).toBeNull()
   expect(container.querySelector('[aria-label="Open Beta"]')).not.toBeNull()
