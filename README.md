@@ -1,304 +1,56 @@
 # OddBrain
 
-A Windows desktop app that drives local coding-agent CLIs — Claude Code and
-Google's agy — inside one window, and keeps everything they do in a vault you
-own. Local-first: no model and no telemetry ship with it. Free local brains come
-from Ollama on the same machine.
+A desktop app that drives coding-agent CLIs — Claude Code and Google's agy —
+through their own stream-json protocols, and shows their work as reviewable,
+undoable steps inside a local Obsidian-style vault. Local-first: no model,
+no cloud service, no telemetry ships with it. Free local brains come from a
+staged Ollama.
 
-**Status: built and tested, not yet used by a human for real work.** The gate is
-green on this tree (numbers below), the installer is unsigned, and the owner's
-first signed-in session with a model has not happened yet. Everything in this
-file describes what the code does today, not what a roadmap wishes it did.
+**Status: built, tested, never used by a human yet.** The honest state of
+every claim lives in [`00_LIVING_DOCS/JUDGE-BRIEF.md`](00_LIVING_DOCS/JUDGE-BRIEF.md).
+Read that before trusting anything else in this repository, including the
+changelog, which records development in a promotional voice.
 
-The machine this is built for is the owner's laptop: Ryzen 7, 8 GB RAM, an RTX
-3050 with 4 GB of VRAM, Windows 11, and a 1920×1080 panel at 125% — 1536×864 of
-logical space. The performance profiles and the interface's size table are built
-for that, and say so where they refer to it.
+## What works
 
-This is the only Markdown file in the repository. The `store/packs` files ending
-in `.md` are product data the app reads at runtime — skill prompts and prompt
-starters — not documentation.
+- Engines: claude-code (full wire), agy (wire implemented against the real
+  binary; a signed-in turn has not been driven yet), headless Ollama as the
+  free fallback. Engines are detected on the machine, not invented.
+- Permission cards: every file-touching step asks ("Full speed" is the one
+  gear that turns the cards off, and it says so). Deny reaches the engine as a
+  real deny. Checkpoints are taken before an Allow is forwarded — and if a
+  checkpoint cannot be taken, the change is denied, not allowed blind. Every
+  change is restorable, including files the engine created from nothing.
+- Watch mode, recipes, split steps, battles, compaction, turn journal, auto
+  memory, artifact previews with pop-out and PDF export, find-in-conversation,
+  a quick-ask window on a global hotkey — all riding the one send path.
+- The OddBrain motion kit: 77 animations keyed to real engine states, all
+  pausable (Calm/Still, OS reduced-motion), never blocking interaction.
 
-## What it is
-
-OddBrain is a front end for agent CLIs you already install and sign into. It
-starts them, speaks their stream-json protocols, and renders each step as
-something you can read, approve, undo, and find again later.
-
-- **Engines:** exactly two — `claude-code` and `agy`. Both are detected on the
-  machine, never invented. Each has a *Point to the exe…* override in Settings.
-- **Ollama is not an engine.** It is the local brain server: a model runtime the
-  app can start, stop, and talk to. It never appears as a third engine.
-- **The vault** is an Obsidian-compatible folder: conversations, sources,
-  entities, events, working memory, review queues, journal, and an undo log.
-  Point it anywhere; nothing is written outside the folder you chose.
-- **The extension** captures browser pages into the same vault. It starts on the
-  AI sites it declares in its manifest; broad access to every site is one
-  explicit Chrome permission away, requested from the extension's own popup, and
-  the blacklist applies either way (an empty blacklist means "check everything"
-  once broad access is on). It is a separate program with its own port, pairing
-  token, and permission boundary.
-- **Artifacts** are files the engines make or you attach: previewed in-app,
-  poppable to their own window, exportable to PDF, and restorable from the
-  checkpoint taken before every approved write.
-
-## Run it
-
-Requirements: Windows 10/11 x64 for the desktop build; Node.js 22.13 or newer.
-CI runs the same checks on Linux; neither Linux nor macOS is a supported product target.
+## Verify
 
 ```bash
-npm ci            # dependencies exactly as locked
-npm run dev       # electron-vite dev, app window with HMR
-npm test          # vitest, full suite
-npm run typecheck # tsc --noEmit
-npm run build     # typecheck, then main/preload/renderer bundles, then the offline preview HTML
+git clone https://github.com/NishadIslamUtso/OddBrain.git
+cd OddBrain/apps/03_oddbrain
+npm ci && npx vitest run      # 99 files / 723 tests
+npx tsc --noEmit && npm run build
 ```
 
-Packaging (Windows):
+CI runs the same on every push.
 
-```bash
-npm run dist:win       # NSIS installer into dist/
-npm run dist:win:dir   # unpacked folder, faster to inspect
-```
+## Not done yet
 
-The installer is per-user, so it does not ask for administrator rights, and it
-is unsigned, so Windows shows the "unknown publisher" warning. There is no
-certificate in this repository and none is pretended.
+- The owner's first real, signed-in session (Claude Code and agy).
+- A verified Windows install and acceptance run.
+- Screenshots of real model conversations (the gallery mostly shows a clearly
+  labeled test stand-in engine).
 
-Optional browser extension: open `chrome://extensions` in Edge or Chrome, turn on
-Developer mode, choose *Load unpacked*, and select the `extension/` folder (the
-installed app also ships a copy as `resources/extension`).
-
-## Repository layout
-
-The app is the repository root. There is no monorepo and no second app.
+## Layout
 
 ```
-src/main/        Electron main process: engines, vault, artifacts, downloads,
-                 media decoding, extension API, watchers, window bounds
-src/preload/     the contextBridge surface — the only thing the window can call
-src/renderer/    React 19 interface (components, ui/, hooks, styles)
-src/shared/      types and pure rules used by both sides (engines, providers,
-                 palettes, motion kit data, pack format, permissions)
-tests/           Vitest suite; node and jsdom environments
-scripts/         build, icon, UI-check and media-runtime scripts
-store/packs/     the community pack index shipped with the app (skills + prompts)
-extension/       Manifest V3 browser extension (capture, pairing, blacklist)
-resources/       app mark and generated icons
-.github/         CI: checks on Linux + Windows, installer build on tags
+apps/03_oddbrain/    the app (src/main, src/preload, src/renderer, src/shared, tests)
+00_LIVING_DOCS/         judge brief, changelog, receipts; archive/ holds old planning docs
 ```
 
-## Engines and the rules around them
-
-| Engine | Wire | State |
-| --- | --- | --- |
-| `claude-code` | `claude` CLI, stream-json | full turn path; permission prompts and denies are forwarded |
-| `agy` | Google Antigravity CLI, stream-json | wire implemented against the real binary; no permission cards; a signed-in turn has not been driven |
-| Ollama | local HTTP at `127.0.0.1:11434` | local brain server, not an engine; 0.14 or newer for the Anthropic-compatible door Claude Code uses |
-
-Rules the code enforces:
-
-- Engine binaries are found on `PATH` (including `winget`, `npm` and portable
-  locations), and a missing one is reported as missing. No engine is listed
-  unless it exists on this machine.
-- Spawning passes an argument vector, never a shell string. On Windows the
-  executable path is quoted by `shellSafeCommand`; the app never builds a command
-  line out of model output.
-- Every file-touching step from Claude Code needs your approval. "Full speed" is
-  the single switch that turns approval cards off, and it says so on the switch.
-  agy raises no permission cards here — its CLI has no stdio prompt door, so agy's
-  own settings throttle it instead, and the Engine bay says so where you pick it.
-- Before an Allow is forwarded, a checkpoint is taken. If the checkpoint cannot
-  be taken, the change is denied rather than allowed blind.
-- A Deny reaches Claude Code as a real deny, not as silence.
-- **Tool servers are configuration, not execution.** Adding an MCP entry writes
-  the one list into each engine's own config file; the app never runs the
-  command itself. Names, transports and URLs are validated in the window and
-  again in the main process before anything is written.
-- **Nothing a person wrote is overwritten without a copy.** The first time the
-  app writes engine configs into a folder it keeps whatever was already there,
-  beside it, as `.oddbrain-original`, and leaves a marker so later saves make no
-  more copies. A saved tool-server list that cannot be read is reported as such
-  — never drawn as an empty list next to a Save button — and is copied aside
-  before it is replaced.
-- Downloads come only from each publisher's official host and its declared
-  redirect hosts, capped in size, written to the app's own engines folder,
-  hashed with SHA-256, and — on Windows — run only after a second, explicit
-  permission that shows the full command.
-- With "Warm runtime" on, the staged Ollama runtime starts with the app and the
-  app stops only the runtime it started. An Ollama installed elsewhere is used
-  as-is — stop it your way. Installing it yourself is fine:
-  `winget install Ollama.Ollama`.
-- **Sign-in is asked, not assumed.** Connectors runs the engine's own
-  `claude auth status` and shows its answer — signed in, or the one command that
-  fixes it. A "Sign in…" button opens the CLI's own login in a real terminal and
-  reads nothing back. agy has no such command and says so.
-- Connectors also asks Ollama's door for its version and states whether it can
-  serve Claude Code's local brain route; 0.14 or newer is required.
-- **A swap is saved, not teleported.** Choosing the other engine persists the
-  choice immediately. If a turn is running it keeps the engine it started on and
-  the bay says so in one sentence; the next turn uses the new one. Picking an
-  engine that is not installed says a turn will refuse until it is.
-
-## Security walls
-
-These are code, not policy prose. Each one has tests.
-
-- **Keys never leave the main process.** Provider API keys are sealed with the
-  OS facility (Electron `safeStorage`) and are only decrypted in main. The
-  renderer sees a label, a source, and whether a key is saved — never the key.
-- **One IPC door, checked twice.** `ipcGuard` registers every handler with a
-  caller check against the parsed origins the app itself loaded. A window that
-  navigates elsewhere loses the whole surface.
-- **Extension pairing is consensual.** The extension API listens on a fixed
-  localhost port, requires a per-install pairing token, and allows only
-  `chrome-extension://` origins. It exposes no chat, model, or key routes, so a
-  browser extension can never spend a saved key.
-- **Redirects are pinned.** A download that redirects off the publisher's
-  declared host list is refused; each hop is parsed, not prefix-matched.
-- **Zip handling is deliberately narrow.** Stored/deflate only, a zip-slip
-  refusal, an entry-size ceiling, and a forged-declaration check before any
-  OOXML/ODF part is expanded. DTDs and entity declarations are rejected.
-- **Paths stay inside the vault.** Relative paths are resolved and compared
-  against the vault root; `..` escapes and absolute surprises are refused.
-- **Documents are decoded locally.** PDF text, Office/ODF text, images and
-  audio stay on the machine. PDF.js asset URLs are normalised with a forward
-  slash so the same path works on Windows and Linux.
-- **No telemetry, no cloud service, no bundled model.** Cloud providers are
-  optional and only run after you add a key. Nothing is sent anywhere by default.
-- **Speech stays local and opt-in.** Dictation uses Windows System.Speech on the
-  machine; it listens only while you are dictating, and there is no wake word,
-  no background recording, and no cloud speech provider unless you add one.
-
-## The interface, by the numbers
-
-- **Six sidebar destinations:** Chat, Artifacts, Today, Projects, Vault, Brain;
-  plus a full-screen Code board reachable from the command palette.
-- **18 Settings destinations**, in six groups (Connectors now holds the engine
-  sign-in check, the Ollama version answer, and the one MCP tool-server list):
-  - Your space: Appearance; Windows & shortcuts
-  - Models & runtime: Engine; Models & API keys; Performance
-  - Access & connections: Agent access; Connectors; Plugins
-  - Files & memory: Voice & files; Vault; Memory; Browsing maps
-  - Agent behavior: House rules; Skills; Recipes; Hooks
-  - Application: System; About & help
-- **Appearance has 5 tabs:** Looks, Layout, Details, Brain, Mixes.
-  - 10 palettes: app, studio, paper, midnight, sage, peach, blue, citrus, rose, mono.
-  - 8 look presets. A preset applies once and is then yours to edit.
-  - 8 layouts: classic sidebar, top bar, rail + list, command first, list + detail,
-    bento dashboard, console, floating window.
-  - 4 interface styles: Editorial, Soft studio, Ink & paper, Glass studio.
-  - A live miniature updates as you choose; nothing is applied to a screenshot.
-- **77 motion scenes:** 76 scenes plus one loader, keyed to real engine states,
-  pausable (Calm/Still and OS reduced-motion), never blocking input.
-- **Everything on screen is real.** No dummy switches, no fake-live indicators,
-  no invented model names, no "10M+" counters. Status is words, and every number
-  shown is countable in the app.
-
-## Decisions that shaped this repository
-
-- **Windows desktop only.** The product targets Windows; CI also runs the checks
-  on Linux for speed. There is no web build of the product — the single-file
-  offline preview exists only as an export asset.
-- **Two engines, one local server.** No third engine, no hosted model of our own.
-- **The vault is the memory.** The app writes Markdown and plain files a person
-  can open in Obsidian; no database owns the notes.
-- **No sample vault in the repository.** A fresh clone has no notebook in it; the
-  first run lands in the user's app-data folder and Settings can point the app
-  anywhere. This rebuild removed the checked-in sample vault and the code path
-  that looked for one.
-- **One README, no docs tree.** Product facts live here. The repository carries
-  no `docs/`, `spec/`, `memory/`, or living-docs folder to drift out of date.
-- **Flattened layout.** The app moved from `apps/03_oddbrain/` to the repository
-  root; the two other prototype apps in the old tree were deleted. Workflows,
-  builder paths, and test imports were updated to match.
-- **English only, blunt copy.** No other locales ship. The interface says what
-  happened and what it will not do.
-- **No new fonts, no cloud sync, no microphone, no telemetry.**
-
-## The gate
-
-Run on this tree, on 2026-10-18:
-
-```
-npx tsc --noEmit -p tsconfig.json     exit 0
-npx vitest run                        131 files passed, 893 tests passed
-npm run build                         exit 0 (main, preload, renderer, preview)
-```
-
-CI runs the same gate in `.github/workflows/checks.yml` on every push: Linux
-(install, types, tests, build, and the browser preview's own build) and Windows
-(npm ci, types, tests with a JUnit report and a commit comment naming failures,
-build, and a five-minute `electron . --smoke`). `.github/workflows/installer.yml` builds the NSIS
-installer, its checksum, and publishes them on a tag.
-
-The Windows PDF failure that this branch inherited is fixed here: pdf.js now
-receives a forward-slash data directory on both platforms, and a test pins it.
-The branch also carries clean-build's Node-20 test shim, so the suite runs in
-older sandboxes without touching app code.
-
-The browser acceptance scripts (`npm run test:ui`, and the screenshots they
-take) need a real browser, so they remain a person's run, not a CI step. What
-they prove about the settings rail — eighteen destinations open, each with its
-own heading and no button nested in another — is now also a jsdom test
-(`tests/settings-sections.test.ts`), which CI does run.
-
-## Proven against the real CLI
-
-Run on 2026-10-18 in this checkout against Claude Code **2.1.302** — the package
-the app's own downloader would stage — with a throwaway `HOME`, so nothing on a
-real machine was touched. These are the engine's own JSON lines, cut to the
-fields that decide anything:
-
-| What the app runs | What the engine answered |
-|---|---|
-| `claude auth status` | `{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}` — printed on **stderr** |
-| `claude plugin marketplace add anthropics/claude-code --json` | `{"command":"marketplace-add","outcome":"ok","marketplace":"claude-code-plugins"}` |
-| `claude plugin marketplace list --json` | `[{"name":"claude-code-plugins","source":"github","repo":"anthropics/claude-code"}]` |
-| `claude plugin install code-review --marketplace anthropics/claude-code --scope user --json` | `{"command":"install","outcome":"ok","plugin":"code-review@claude-code-plugins","scope":"user"}` |
-| `claude plugin disable code-review@claude-code-plugins --scope user --json` | `{"command":"disable","outcome":"ok","scope":"user"}` |
-| `claude plugin enable code-review@claude-code-plugins --scope user --json` | `{"command":"enable","outcome":"ok","scope":"user"}` |
-| `claude plugin update code-review@claude-code-plugins --scope user --json` | `{"command":"update","outcome":"ok","updateOutcome":"up_to_date"}` |
-| `claude plugin uninstall code-review@claude-code-plugins --scope user --keep-data --json` | `{"command":"uninstall","outcome":"ok","keptData":true}` |
-
-Those are the exact argument vectors `marketplaceArgs` builds, so the store path
-the audit asked about — find a catalog, add it, install, disable, update,
-remove — ran end to end, not only in a unit test. A plugin whose install runs a
-marketplace-declared command still refuses without `-y`; the app never passes
-it, and the permission card shows the command instead.
-
-Still unproven: the same path on a signed-in Windows machine, a signed-in agy
-turn, and the installer on the owner's laptop.
-
-## Known limits
-
-- The owner's first real signed-in session, on both engines, has not happened.
-- The app runs no OAuth flow of its own. It detects engines and asks the CLI for
-  its sign-in state; "Sign in…" only opens the CLI's own login in a terminal, so
-  credentials never pass through the app.
-- Claude Code's subscription models are not enumerated in the picker. Leave the
-  model empty to use the engine's default; a typed model name is validated and
-  passed through only if the person supplies it. A saved Anthropic key adds the
-  provider's real list.
-- The agy wire is implemented but unproven against a live signed-in turn, and
-  agy has no catalog adapter: the Plugins screen offers Claude Code marketplaces
-  and OddBrain packs, and says plainly that agy has neither.
-- Tool servers can be added, listed and removed for both engines; the browser
-  control presets (Chrome DevTools, Playwright) are shortcuts into that same
-  list, not a second mechanism.
-- The Plugins screen offers two known public catalogs as starting points
-  (`anthropics/claude-code`, `anthropics/skills`); there is no directory search
-  beyond typing a repository.
-- No signed installer; SmartScreen will warn.
-- OCR is not built in. Scanned PDFs without a text layer are reported as having
-  no extractable text, and a vision provider or OCR export is the way through.
-- The browser extension is loaded unpacked; it is not in a store.
-- Smoke testing needs Electron's binary, which is downloaded at install time and
-  cannot be fetched in a network-restricted sandbox. CI runs it on Windows.
-
-## License
-
-Apache-2.0. See `LICENSE`. Engine CLIs are your own installs; no Anthropic or
-Google assets are bundled. The vault you point the app at is yours, including
-everything the app writes into it.
+OddBrain's own code is Apache-2.0 (see `LICENSE`). Engine CLIs are the user's
+installs; no Anthropic or Google assets are bundled.

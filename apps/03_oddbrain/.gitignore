@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+dist-web/
+*.log
+vault/
+
+# Generated from the real renderer during build, not a maintained second UI.
+resources/oddbrain-preview.html
+src/renderer/public/oddbrain-preview.html
+qa-ui/

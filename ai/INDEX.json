@@ -1,0 +1,169 @@
+{
+  "repo": "OddBrain",
+  "generated": "2026-10-16T19:30:00+06:00",
+  "file_index": [
+    {
+      "path": "00_LIVING_DOCS/JUDGE-BRIEF.md",
+      "purpose": "THE entry point for external AI judges: the owner's rules, the claims with code pointers, how to verify, the verdict format",
+      "type": "judge-brief"
+    },
+    {
+      "path": "00_LIVING_DOCS/TODO_NEXT.md",
+      "purpose": "THE live state (wins on order over TODOLIST.md); items 1-15-done are the built truth",
+      "type": "living-todo"
+    },
+    {
+      "path": "00_LIVING_DOCS/receipts/",
+      "purpose": "The screenshots gallery shipped in-repo: live-drive figures (g27-g68), cited per feature by the CHANGELOG; per-batch test counts in the captions",
+      "type": "receipts"
+    },
+    {
+      "path": "00_LIVING_DOCS/RELEASE-WINDOWS.md",
+      "purpose": "The Windows installer recipe + every build's size/sha256",
+      "type": "release"
+    },
+    {
+      "path": "apps/03_oddbrain/src/shared/lib/memory.ts",
+      "purpose": "Auto memory contract: the pass order, the path guard, read cap",
+      "type": "app-source"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/memoryFiles.ts",
+      "purpose": "Memory folder reader: list/read/remove rooted at the engine's working folder",
+      "type": "app-source"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/journal.ts",
+      "purpose": "The turn journal (engine-journal.json, cap 60) behind 'Earlier sessions'",
+      "type": "app-source"
+    },
+    {
+      "path": "apps/03_oddbrain/src/main/engine/",
+      "purpose": "The engine spine: availability, claudeCode (stream-json), agy (its own verified wire), socket, stream, deploy, downloads (with a real ollama start/stop), checkpoints (race-free), packs, pull, skillCatalogInstall, storeIndex, exportPack, vaultSkills, houseRulesDeploy",
+      "type": "app-source"
+    },
+    {
+      "path": ".ai/AGENT_INSTRUCTIONS.md",
+      "purpose": "Instructions for any AI taking over this repo; mandatory read first",
+      "type": "ai-instruction"
+    },
+    {
+      "path": ".ai/CONTEXT.json",
+      "purpose": "Machine-readable user, hardware, capture policy, extension UX, model constraints",
+      "type": "ai-context"
+    },
+    {
+      "path": ".ai/STATE.json",
+      "purpose": "Current build state: the app, its verified checks, its gaps, the historical apps",
+      "type": "ai-state"
+    },
+    {
+      "path": ".ai/INDEX.json",
+      "purpose": "This file: the index an AI uses to find things",
+      "type": "ai-index"
+    },
+    {
+      "path": "ai/",
+      "purpose": "Visible mirror of .ai/ for the GitHub web upload",
+      "type": "ai-mirror"
+    },
+    {
+      "path": "README.md",
+      "purpose": "Where the app actually is, quick start, the owner's standing instructions",
+      "type": "readme"
+    },
+    {
+      "path": "BRANCH_TESTING.md",
+      "purpose": "How to test any branch, by hand and automatically",
+      "type": "testing"
+    },
+    {
+      "path": "TESTING_CHECKLIST.md",
+      "purpose": "The checklist to run before merging",
+      "type": "testing"
+    },
+    {
+      "path": "00_LIVING_DOCS/REQUIREMENTS_LIVING.md",
+      "purpose": "Living requirements + acceptance checklist; updated on every change",
+      "type": "living-requirement"
+    },
+    {
+      "path": "00_LIVING_DOCS/ARCHITECTURE_LIVING.md",
+      "purpose": "App / vault / extension architecture and data flows",
+      "type": "living-architecture"
+    },
+    {
+      "path": "00_LIVING_DOCS/DECISIONS_LOG.md",
+      "purpose": "Every decision with date, reason, alternatives",
+      "type": "living-decisions"
+    },
+    {
+      "path": "00_LIVING_DOCS/CHANGELOG.md",
+      "purpose": "What changed each session",
+      "type": "living-changelog"
+    },
+    {
+      "path": "00_LIVING_DOCS/TODO_NEXT.md",
+      "purpose": "Immediate next actions, in priority order",
+      "type": "living-todo"
+    },
+    {
+      "path": "apps/03_oddbrain/",
+      "purpose": "THE APP: Electron + React + TypeScript, vault service, settings, tests, browser preview",
+      "type": "app"
+    },
+    {
+      "path": "apps/03_oddbrain/tests/pending/",
+      "purpose": "Parked suites (composer menu, props, wiring) with a README explaining what unblocks each",
+      "type": "app-tests"
+    },
+    {
+      "path": "apps/01_claude-exact-pixel-clone/",
+      "purpose": "HISTORICAL: the first screenshot-matched clone; port source for logic only",
+      "type": "app-historical"
+    },
+    {
+      "path": "apps/02_electron-claude-clone-v6/",
+      "purpose": "HISTORICAL: older Electron fork used as a feature reference",
+      "type": "app-historical"
+    },
+    {
+      "path": "extension/",
+      "purpose": "MV3 extension starter + spec; cannot reach the app until a loopback port exists",
+      "type": "extension"
+    },
+    {
+      "path": "vault/Brain/",
+      "purpose": "The canonical Obsidian vault: 00 System to 90 Archive, templates, system docs",
+      "type": "vault"
+    },
+    {
+      "path": "memory/sessions/",
+      "purpose": "Session logs, chronological, for handover",
+      "type": "memory"
+    },
+    {
+      "path": "spec/",
+      "purpose": "HISTORICAL: the old clone's specs, pixel measurements, merge plan, audits",
+      "type": "spec-historical"
+    },
+    {
+      "path": "docs/originals/",
+      "purpose": "HISTORICAL: the original requirement files, master plan, blueprint",
+      "type": "docs-archive"
+    }
+  ],
+  "search_hints_for_ai": {
+    "where_is_the_app": "apps/03_oddbrain/ - src/main, src/preload, src/renderer/src, src/shared",
+    "where_is_the_vault_write": "apps/03_oddbrain/src/main/vault/ (service, routes, files, text, blacklist)",
+    "where_are_the_settings": "apps/03_oddbrain/src/renderer/src/components/SettingsView.tsx + state/appearance.ts + state/performance.ts",
+    "where_is_the_memory_math": "apps/03_oddbrain/src/shared/lib/inference.ts (fitCheck, fitToProfile, PROFILE_BUDGET_GB)",
+    "where_is_requirements": "00_LIVING_DOCS/REQUIREMENTS_LIVING.md",
+    "where_is_handover": "00_LIVING_DOCS/HANDOVER_LIVING.md",
+    "where_is_vault_structure": "vault/Brain/00 System/",
+    "where_is_extension_spec": "extension/README.md + extension/EXTENSION_SPEC.md",
+    "where_to_log_changes": "00_LIVING_DOCS/CHANGELOG.md + memory/sessions/",
+    "what_does_the_owner_want": "README.md section 'What the user has asked for (standing instructions)'"
+  },
+  "note_2026_10_16": "The engine era landed (v3 branch, 0.9.0). The per-file truth is the working tree itself; start from 00_LIVING_DOCS/JUDGE-BRIEF.md. STATE.json is current as of this date."
+}

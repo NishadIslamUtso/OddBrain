@@ -1,0 +1,119 @@
+{
+  "user": {
+    "name": "Utso",
+    "display_name": "NU Utso",
+    "email": "nishadislamutso@gmail.com",
+    "location": "Dhaka, Dhaka Division, BD",
+    "timezone": "Asia/Dhaka",
+    "language": "English + Bengali mix, informal",
+    "github_intent": "single user, AI-optimized repo as memory/handover, not human portfolio"
+  },
+  "hardware": {
+    "device": "ASUS TUF Gaming A15",
+    "cpu": "Ryzen 7",
+    "ram_gb": 8,
+    "vram_gb": 4,
+    "gpu": "RTX 3050",
+    "storage_gb": 500,
+    "os": "Windows 11",
+    "constraints": [
+      "slow downloads - avoid large downloads",
+      "8GB RAM tight for large models - use quantized qwen2.5:3b baseline ~2GB",
+      "4GB VRAM limits vision models",
+      "No native build tools assumed - bat files must handle",
+      "Ollama already installed separately, qwen2.5:3b already pulled"
+    ]
+  },
+  "current_runtime": {
+    "ollama_installed": true,
+    "ollama_model": "qwen2.5:3b",
+    "ollama_api": "http://127.0.0.1:11434",
+    "vault_api": "in-process in the desktop app (src/main/vault/) - there is NO port 8765 in this app and the extension cannot reach it yet",
+    "dev_server": "npm run dev (Electron) | npm run preview:web (browser preview on 4174)",
+    "ollama_origins": "not needed by the Electron app; Ollama is called from the main/app side, not a browser page"
+  },
+  "app_identity": {
+    "name": "OddBrain",
+    "casing": "preserve double S",
+    "role": "driver of vault and extension",
+    "vault_role": "organizer / keeper, Obsidian Markdown canonical",
+    "extension_role": "collector + context suggester, local-only",
+    "theme_default": "dark, tokenised: accent #7c5cff by default, conversation width 760px, both changeable in Settings > Appearance",
+    "window": "fully on-screen, Windows title bar + close controls visible",
+    "chat_target": "the owner's own approved mockups (chat shell, appearance, the full-window settings rail) - not Claude pixel parity"
+  },
+  "capture_policy": {
+    "default": "check everything by default across all sites + all AIs after one-time permission",
+    "on_inaccessible": "log \"wasn't accessible - reason\" in 09 Activity & Undo + 01 Inbox/Processing Errors, no popup/ask",
+    "explicit_collect": "right-click 'Collect this page now' or paste URL to force",
+    "blacklist": {
+      "type": "never-check blacklist, default allow explicit deny",
+      "storage": "00 System/Privacy & Access.md + 00 System/Connectors/Source Scope.md excluded_patterns + chrome.storage.sync",
+      "example": "bank.com/*, https://private.example.com/page",
+      "editable": true,
+      "revocable": true
+    },
+    "never_collect_even_with_broad": [
+      "passwords",
+      "cookies",
+      "auth tokens",
+      "payment fields",
+      "unsent composer contents",
+      "hidden keystrokes",
+      "continuous screenshot",
+      "incognito unless separately enabled"
+    ]
+  },
+  "extension_ux": {
+    "capsule_hub": {
+      "reference": "Capsule Hub by Tilantra - Mozilla addon",
+      "features": [
+        "capture once as reusable Capsule with goals/constraints/background/decisions/attachments",
+        "library organized by project",
+        "drag-drop inject into any AI chat box",
+        "version/branch/rollback",
+        "transfer attachments across tools",
+        "prompt enhancer 'Cook This Prompt'"
+      ]
+    },
+    "quillbot": {
+      "reference": "Quillbot AI Writing - Chrome Web Store",
+      "features": [
+        "works in background ready when needed",
+        "works in any text field across web",
+        "highlight text or open toolbar for instant suggestions",
+        "real-time suggestions as you type",
+        "inline dropdown, no tab switching"
+      ]
+    },
+    "local_only": true,
+    "no_external_account": true
+  },
+  "model_constraints": {
+    "qwen2.5:3b_limits": [
+      "misreads 'slow' as 'Solow'",
+      "generic answers",
+      "claims cannot remember current chat",
+      "interprets Flappy Bird example in system prompt as must create game every reply -> Tic Tac Toe loop"
+    ],
+    "fix_tictactoe": "override systemPrompt for qwen2.5:3b to simple assistant, only create artifacts when explicitly asked, clear localStorage chat_history",
+    "ui_vs_intelligence": "UI parity != intelligence, don't promise local model equals Claude",
+    "model_aware": "expose every verified option for selected model, hide/disable unsupported, update controls when model changes"
+  },
+  "claude_screenshots_spec": {
+    "files": [
+      "191547.png - main greeting Evening Utso + composer How can I help you today? + orange asterisk + Project dropdown Sonnet 5.5 Medium Manual",
+      "191558.png - File Edit View Go Help menu",
+      "191608.png - user menu nishadislamutso@gmail.com Settings Language Get help Upgrade plan Get apps and extensions Learn more Get API keys Log out",
+      "191636.png - Apps and extensions modal Claude Code Microsoft 365 Chrome",
+      "191646.png - context menu Open in new window Pin Rename Add to project Move to group Delete on CSE220 MID",
+      "191707.png - Settings Appearance Theme system/sun/moon Chat font Anthropic Serif Transcript size Small/Medium/Large Width Narrow/Medium/Wide Motion System/Reduced Voice Language English Style Buttery Speed Normal left nav General Account Privacy Billing Capabilities Memory Reflect Time and focus Claude Code System Extensions Developer Skills Connectors"
+    ],
+    "exact_clone_target": "apps/01_claude-exact-pixel-clone (historical; apps/03_oddbrain is the app)"
+  },
+  "current_app": {
+    "path": "apps/03_oddbrain",
+    "what": "Electron + React + TypeScript desktop assistant, vault writes, artifacts, comment mode, full-window Settings",
+    "not": "not a Claude clone; built from the owner's approved mockups"
+  }
+}

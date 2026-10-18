@@ -24,10 +24,13 @@ jobs:
         with:
           node-version: 22
       - name: Install
+        working-directory: apps/03_oddbrain
         run: npm ci --no-audit --no-fund
       - name: Build and package the installer
+        working-directory: apps/03_oddbrain
         run: npm run dist:win
       - name: Prove it - sha256 into the summary
+        working-directory: apps/03_oddbrain
         shell: pwsh
         run: |
           $h = (Get-FileHash dist/OddBrain-Setup-0.9.0.exe -Algorithm SHA256).Hash.ToLower()
@@ -41,8 +44,8 @@ jobs:
         with:
           name: OddBrain-Setup-${{ github.sha }}
           path: |
-            dist/OddBrain-Setup-0.9.0.exe
-            dist/OddBrain-Setup-0.9.0.exe.sha256
+            apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe
+            apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe.sha256
           retention-days: 30
           if-no-files-found: error
       - name: Attach to the release (on a version tag only)

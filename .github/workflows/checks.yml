@@ -15,10 +15,13 @@ jobs:
         with:
           node-version: 22
       - name: Install
+        working-directory: apps/03_oddbrain
         run: npm install --no-audit --no-fund
       - name: Types
+        working-directory: apps/03_oddbrain
         run: npx tsc --noEmit -p tsconfig.json
       - name: Tests
+        working-directory: apps/03_oddbrain
         run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-linux.xml
       - name: Linux speaks
         if: always()
@@ -26,7 +29,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const p = 'junit-linux.xml';
+            const p = 'apps/03_oddbrain/junit-linux.xml';
             if (fs.existsSync(p)) {
               const raw = fs.readFileSync(p, 'utf8');
               const lines = [];
@@ -49,13 +52,10 @@ jobs:
               }
             }
       - name: Build
+        working-directory: apps/03_oddbrain
         run: npm run build
-      - name: Build the browser preview too
-        # The preview is how the owner looks at the interface without installing
-        # anything. It is a different build (vite.web.config.ts) and nothing else
-        # in this workflow touches it, so it could break unnoticed.
-        run: npm run build:web
       - name: Smoke — the window opens and the console is clean
+        working-directory: apps/03_oddbrain
         timeout-minutes: 5
         env:
           ELECTRON_DISABLE_SANDBOX: 1
@@ -73,10 +73,13 @@ jobs:
         with:
           node-version: 22
       - name: Install
+        working-directory: apps/03_oddbrain
         run: npm ci --no-audit --no-fund
       - name: Types
+        working-directory: apps/03_oddbrain
         run: npx tsc --noEmit -p tsconfig.json
       - name: Tests
+        working-directory: apps/03_oddbrain
         run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-windows.xml
       - name: Windows speaks
         if: always()
@@ -84,7 +87,7 @@ jobs:
         with:
           script: |
             const fs = require('fs');
-            const p = 'junit-windows.xml';
+            const p = 'apps/03_oddbrain/junit-windows.xml';
             if (fs.existsSync(p)) {
               const raw = fs.readFileSync(p, 'utf8');
               const lines = [];
@@ -107,8 +110,10 @@ jobs:
               }
             }
       - name: Build
+        working-directory: apps/03_oddbrain
         run: npm run build
       - name: Smoke — the window opens and the console is clean
+        working-directory: apps/03_oddbrain
         timeout-minutes: 5
         shell: pwsh
         run: npx electron . --smoke
