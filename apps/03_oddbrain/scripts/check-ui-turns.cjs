@@ -6,7 +6,7 @@ await p.evaluate(async()=>{
  const engineModule=performance.getEntriesByType('resource').map(e=>e.name).filter(s=>s.includes('/src/state/engine.ts')).at(-1)||'/src/state/engine.ts';const m=await import(engineModule);m.resetEngineForTests();window.__engine=m.engineStore();window.__calls={sent:[],answered:[]};window.api={};window.engineApi={
   read:async()=>({engine:{id:'claude-code',model:'qwen2.5-coder:3b',baseUrl:'',workspace:'C:\\Projects\\OddBrain',approval:'ask'},running:false,history:[]}),
   onEvent:fn=>{window.__emit=fn;return()=>{}},onPullEvent:()=>()=>{},detect:async()=>[],models:async()=>({ok:true,models:[]}),
-  send:async prompt=>{window.__calls.sent.push(prompt);return {ok:true,answer:'started'}},answer:async(requestId,allow)=>{window.__calls.answered.push({requestId,allow});return {ok:true}},stop:async()=>({ok:true})
+  send:async prompt=>{window.__calls.sent.push(prompt);return {ok:true,answer:'started'}},answer:async(requestId,allow)=>{window.__calls.answered.push({requestId,allow});return {ok:true}},stop:async()=>({ok:true}),dictation:{start:async()=>({ok:false,answer:'This test window has no speech engine.'}),stop:async()=>{},onEvent:()=>()=>{}}
  };await window.__engine.init();
 });
 await p.getByRole('textbox',{name:'Message',exact:true}).fill('Update welcome.html after checking it.');await p.getByRole('button',{name:'Send',exact:true}).click();assert.equal(await p.evaluate(()=>window.__calls.sent.length),1);assert.equal(await p.locator('.ob-brain-toy:visible').count(),0);assert(await p.locator('.ob-engine-activity').isVisible());

@@ -88,7 +88,8 @@ export default function Composer({
   useEffect(() => {
     // The desktop's offline recognizer speaks first when it exists; its words
     // and its honest stops arrive on this one channel.
-    const off = getEngineApi().dictation.onEvent((event) => {
+    const dictation = getEngineApi().dictation
+    const off = dictation?.onEvent((event) => {
       if (event.kind === 'text') appendHeard(event.value)
       else {
         setListening(false)
