@@ -30,3 +30,17 @@ test('the door is asked its version; no door, a bad answer and an old runtime ea
   expect(missing.ok).toBe(false)
   expect(missing.answer).toContain('No Ollama')
 })
+
+test('every answer names the door that was actually asked, not a default', async () => {
+  const asked: string[] = []
+  const refuse = (async (url: string) => { asked.push(String(url)); throw new Error('ECONNREFUSED') }) as unknown as typeof fetch
+  const answer = await readOllamaVersion({ fetchImpl: refuse, baseUrl: 'http://192.168.1.9:11435/' })
+  expect(asked).toEqual(['http://192.168.1.9:11435/api/version'])
+  expect(answer.answer).toContain('192.168.1.9:11435')
+  expect(answer.answer).not.toContain('127.0.0.1')
+
+  const unreachable = await readOllamaVersion({ fetchImpl: (async () => new Response('busy', { status: 503 })) as unknown as typeof fetch, baseUrl: 'http://box:11434' })
+  expect(unreachable.answer).toContain('http://box:11434')
+  const empty = await readOllamaVersion({ fetchImpl: (async () => new Response('{}')) as unknown as typeof fetch, baseUrl: 'http://box:11434' })
+  expect(empty.answer).toContain('http://box:11434')
+})

@@ -246,3 +246,28 @@ describe('organizer model transport and extension boundary', () => {
     expect(() => changeMemory(emptyMemory(), { type: 'preferences', enabled: true, allowExternal: 'yes', model: '', expectedRevision: 0 }, now, 'id')).toThrow('explicit organizer permissions')
   })
 })
+
+describe('a state file that lies', () => {
+  it('reports a looping chapter basis as a sentence, never a stack overflow', () => {
+    // The state file is JSON inside the vault: anything else with file access can
+    // edit it. A basis that points back at its own chapter used to recurse until
+    // the stack died, which is a crash, not an answer.
+    const root = mkdtempSync(join(tmpdir(), 'ob-memory-loop-')); roots.push(root)
+    const vault = createVaultService({ vaultPath: root }), store = createMemoryWorkspace(vault.files(), () => now)
+    const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    const source: MemorySource = {
+      id, path: `06 Review/Organizer/Chapter sources/${id}.json`, title: 'Loop', provider: 'Your confirmed memory',
+      conversation: id, message: id, role: 'reviewed-facts', speaker: 'You', account: '', kind: 'confirmed',
+      basis: [{ id, revision: 1 }], observed: now, hash: 'x', start: 0, end: 10,
+    }
+    vault.files().writeAtomic('06 Review/Organizer/state.json', JSON.stringify({
+      ...emptyMemory(), revision: 1,
+      proposals: [{ id, revision: 1, state: 'approved', kind: 'story', subject: 'self', title: 'Loop', text: 't', quote: 'q', date: '', uncertainty: '', authored: 'ai', reviewedAt: now, model: 'm', history: [], source }],
+    }))
+    let thrown: unknown = null
+    try { store.evidence(store.read().proposals[0].source) } catch (error) { thrown = error }
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toContain('loops back to itself')
+    expect((thrown as Error).name).not.toBe('RangeError')
+  })
+})

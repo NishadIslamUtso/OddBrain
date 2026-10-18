@@ -54,14 +54,23 @@ export function createMemoryWorkspace(files: VaultFiles, clock: () => string = (
     if (changed) { state.revision++; save(state) }
     return state
   }
-  function evidence(source: MemorySource): string {
+  function evidence(source: MemorySource, seen: Set<string> = new Set()): string {
     if (source.kind === 'confirmed') {
       if (!/^06 Review\/Organizer\/Chapter sources\/[a-f0-9-]{36}\.json$/.test(source.path)) throw Error('Invalid chapter evidence path.')
-      if (staleBasis(source, read())) throw Error('Confirmed chapter evidence changed. Request a new draft.')
-      for (const basis of source.basis || []) { const original = read().proposals.find(p => p.id === basis.id); if (original) evidence(original.source) }
-      const bundle = JSON.parse(files.read(source.path) || 'null')
-      if (!bundle || hash(JSON.stringify(bundle.message)) !== source.hash) throw Error('Chapter evidence is missing or changed.')
-      return bundle.message.text
+      // The state file is plain JSON inside the vault, where anything else with
+      // file access can edit it. A basis that loops back to itself must be one
+      // clear sentence, not a stack overflow. `seen` is the current path only,
+      // so two chapters sharing one confirmed record are still both allowed.
+      if (seen.has(source.id)) throw Error('This chapter’s basis loops back to itself. Reject the draft and build it again from confirmed records.')
+      seen.add(source.id)
+      try {
+        const state = read()
+        if (staleBasis(source, state)) throw Error('Confirmed chapter evidence changed. Request a new draft.')
+        for (const basis of source.basis || []) { const original = state.proposals.find(p => p.id === basis.id); if (original) evidence(original.source, seen) }
+        const bundle = JSON.parse(files.read(source.path) || 'null')
+        if (!bundle || hash(JSON.stringify(bundle.message)) !== source.hash) throw Error('Chapter evidence is missing or changed.')
+        return bundle.message.text
+      } finally { seen.delete(source.id) }
     }
     if (!/^02 Sources\/Conversations\/(?:Browser|App)\/[a-f0-9]{64}\/revisions\/[a-f0-9]{64}-[a-f0-9]{64}\.json$/.test(source.path)) throw Error('Invalid memory source path.')
     const base = source.path.split('/revisions/')[0], conversation = JSON.parse(files.read(base + '/conversation.json') || 'null')

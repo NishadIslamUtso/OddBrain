@@ -51,6 +51,31 @@ jobs:
                 });
               }
             }
+      # One test in the suite is browser-only and skips itself without a
+      # configured browser, so it never ran on a push. It reads a real page
+      # through the real content reader into a real temporary vault. Chromium is
+      # cheap on a Linux runner; that turns a permanent skip into a check.
+      - name: Browser for the browser-only test
+        working-directory: apps/03_oddbrain
+        run: |
+          npx playwright-core install --with-deps chromium
+          printf '{"headless":true}\n' > browser-options.json
+      - name: The conversation reader, in a real browser
+        working-directory: apps/03_oddbrain
+        env:
+          ODDBRAIN_BROWSER_OPTIONS: browser-options.json
+        run: npx vitest run tests/conversation-runner.test.ts
+      # The extension's popup and companion, against the preview server that
+      # serves the real files. Also browser-only, also never run on a push.
+      - name: The extension companion, in a real browser
+        working-directory: extension
+        env:
+          ODDBRAIN_BROWSER_OPTIONS: ${{ github.workspace }}/apps/03_oddbrain/browser-options.json
+        run: |
+          node scripts/preview-server.cjs & server=$!
+          trap 'kill $server 2>/dev/null || true' EXIT
+          for i in $(seq 1 40); do curl -fsS http://127.0.0.1:5175/ >/dev/null && break; sleep 0.5; done
+          node scripts/check-browser.cjs
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build

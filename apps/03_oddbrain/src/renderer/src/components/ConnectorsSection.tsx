@@ -73,7 +73,8 @@ export default function ConnectorsSection(): React.JSX.Element {
     } catch { setNote('Could not change the Ollama runtime. Check the installation and try again.') }
     finally { setBusy(false) }
   }
-  const address = '127.0.0.1:11434'
+  // The door the check actually asks — the base URL in settings — not a guess.
+  const address = (engine.settings.baseUrl || 'http://localhost:11434').replace(/^https?:\/\//, '').replace(/\/+$/, '')
   return <div className="ob-connectors">
     <div className="ob-section-actions"><p className="ob-control-scope">Install engines separately, then connect them here.</p><button type="button" className="ob-small-button" onClick={checkAll} disabled={(isDemo && !sampleEnabled()) || busy || runtime.checking || engine.detection.loading}><RefreshCw size={13} />{runtime.checking || engine.detection.loading ? 'Checking…' : 'Check all'}</button></div>
     {ENGINES.map(({ id, label, url, command }) => {
