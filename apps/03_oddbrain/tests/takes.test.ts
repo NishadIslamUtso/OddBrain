@@ -41,8 +41,8 @@ test("the app asks the user's shell for the real PATH, with the old prepend as f
 test('the quick window is a smaller door into the ONE send path, not a second engine', () => {
   const main = read('src/main/index.ts')
   const app = read('src/renderer/src/App.tsx')
-  assert.match(app, /has\('quick'\)\) return <QuickMode \/>/, 'the renderer renders the quick surface only in a quick window')
-  assert.match(app, /void engine\.send\(prompt\)/, 'the quick surface sends through the engine store — the one send path')
+  assert.match(app, /has\('quick'\)\) return <LookContext[\s\S]*?<QuickMode \/>/, 'the renderer renders the quick surface only in a quick window')
+  assert.match(app, /await engine\.send\(prompt\)/, 'the quick surface sends through the engine store — the one send path')
   const preload = read('src/preload/index.ts')
   assert.match(preload, /'quick:shortcut'/, 'the hotkey is a setting, movable in the UI')
 })

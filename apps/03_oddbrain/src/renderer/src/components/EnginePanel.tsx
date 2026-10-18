@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { useEffect, useState } from 'react'
+import { useLook } from '../ui/LookContext'
+import { THINKING_OPEN_EVENT, setThinkingOpen, thinkingOpenNow } from '@shared/lib/thinkingOpen'
 import { Copy, Eye, Handshake, ListOrdered, Minimize2, Pencil, Wrench, FilePen, Terminal, Search, CircleCheck, TriangleAlert, Square, X } from 'lucide-react'
 import { buildHandoff, handoffFileName } from '@shared/lib/handoff'
-import { PHASE_LABEL, pairingAt, pairingMotion, phaseFromTurn, WAITING_LOADER, type MotionRole } from '@shared/lib/motionKit'
+import { PHASE_LABEL, phaseFromTurn, WAITING_LOADER, type MotionRole } from '@shared/lib/motionKit'
 import { Mascot } from '../motion/Mascot'
 import { BRIEF_ORDER } from '@shared/lib/compact'
-import { modelLabel } from '@shared/lib/engine'
-import { THINKING_OPEN_EVENT, setThinkingOpen, thinkingOpenNow } from '@shared/lib/thinkingOpen'
 import { bridge } from '@/platform/bridge'
 import { useEngine, type EngineItem } from '@/state/engine'
 import { cancelBrief, clearCompactNotice, finishCompact, useCompact, writeBrief } from '@/state/compact'
@@ -37,57 +36,11 @@ export default function EnginePanel() {
       if (answer.ok) setKept(answer.checkpoints.slice(0, 3))
     })
   }, [finished])
-  // The kit's status words, driven by the turn's REAL phase: the word turns
-  // over while the engine works and always carries the animation it was
-  // measured for. Flavour, never a substitute for the honest phase name in
-  // the header beside it.
-  const running = turn?.state === 'running'
   const phase: MotionRole = turn ? phaseFromTurn(turn) : 'resting'
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    if (!running) return
-    const timer = setInterval(() => setTick((n) => n + 1), 5_500)
-    return () => clearInterval(timer)
-  }, [running])
-  const [seed] = useState(() => Math.floor(Math.random() * 97))
-  const pairing = pairingAt(phase, tick, seed)
-  // When a turn closes, its done scene plays once — a short, quiet end.
-  const [doneTick, setDoneTick] = useState<number | null>(null)
-  const wasRunning = useRef(false)
-  useEffect(() => {
-    if (running) {
-      wasRunning.current = true
-      return
-    }
-    if (wasRunning.current) {
-      wasRunning.current = false
-      setDoneTick(Date.now() % 100000)
-      const timer = setTimeout(() => setDoneTick(null), 6_500)
-      return () => clearTimeout(timer)
-    }
-  }, [running])
   const [compacting, setCompacting] = useState(false)
   const compact = useCompact()
   const review = useReview()
   const [copied, setCopied] = useState(false)
-  // The strip above the composer is collapsible, as the owner asked. It
-  // always unfolds itself while a permission question waits — Allow/Deny
-  // must never hide behind a fold. Remembered, so it stays as he left it.
-  const [panelOpen, setPanelOpen] = useState(() => {
-    try {
-      return localStorage.getItem('ai-assistant.engine-panel-open') !== '0'
-    } catch {
-      return true
-    }
-  })
-  const setPanel = (open: boolean): void => {
-    setPanelOpen(open)
-    try {
-      localStorage.setItem('ai-assistant.engine-panel-open', open ? '1' : '0')
-    } catch {
-      /* storage refused — the fold lives only for this visit */
-    }
-  }
   // No live turn: the card waits, but the record of earlier sessions still
   // shows — a fresh window should know what happened here before it opened.
   if (!turn) {
@@ -101,7 +54,6 @@ export default function EnginePanel() {
             aria-label="Engine working in another window"
             className="mx-auto mb-3 flex w-full max-w-[var(--chat-width)] items-center gap-2 rounded-xl border border-line bg-card px-4 py-2"
           >
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warn" aria-hidden />
             <p className="text-[12px] text-muted">
               The engine is working in another window — <span className="text-ink">{engine.ambient.note || 'working'}</span>.
               Its cards are answered there; this window watches.
@@ -109,7 +61,7 @@ export default function EnginePanel() {
           </section>
         ) : null}
         {engine.journal.length ? (
-          <details aria-label="Earlier sessions" className="mx-auto mb-3 w-full max-w-[var(--chat-width)] rounded-xl border border-line bg-card px-4 py-2.5">
+          <details aria-label="Earlier sessions" className="ob-earlier-sessions mx-auto mb-3 w-full max-w-[var(--chat-width)]">
             <summary className="cursor-pointer text-[12px] font-medium text-muted">
               Earlier sessions on this machine ({engine.journal.length} {engine.journal.length === 1 ? 'turn' : 'turns'})
             </summary>
@@ -157,30 +109,19 @@ export default function EnginePanel() {
     <>
     <section
       aria-label="Engine work"
-      className="mx-auto mb-3 w-full max-w-[var(--chat-width)] rounded-xl border border-line bg-card px-4 py-3"
+      className="ob-engine-work mx-auto mb-3 w-full max-w-[var(--chat-width)] px-0 py-3"
     >
+      <p className="ob-turn-prompt">
+        {turn.prompt}
+        {turn.pictures ? <span className="text-muted"> + {turn.pictures} picture{turn.pictures === 1 ? '' : 's'}</span> : null}
+      </p>
       <header className="flex items-center gap-2">
-        <button
-          type="button"
-          onClick={() => setPanel(!panelOpen)}
-          aria-expanded={panelOpen}
-          aria-label={panelOpen ? 'Collapse the engine strip' : 'Expand the engine strip'}
-          title={panelOpen ? 'Collapse' : 'Expand'}
-          className="shrink-0 text-muted hover:text-ink"
-        >
-          {panelOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
-        </button>
-        <span
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-            turn.state === 'running' ? 'bg-warn' : turn.state === 'error' ? 'bg-warn' : 'bg-ok'
-          }`}
-        />
-        <h2 className="text-[12px] font-medium text-muted">
-          Engine · {engine.settings.id} · {modelLabel(engine.settings.model)}
+        <details className="ob-task-meta"><summary>Task details</summary><p>
+          Engine · {engine.settings.id} · {engine.settings.model}
           {' · ' + (engine.settings.workspace ? engine.settings.workspace.split(/[\\/]/).filter(Boolean).at(-1) : 'vault')}
           {turn.state === 'running' ? ` · ${PHASE_LABEL[phase]}…` : turn.state === 'error' ? ' · stopped' : ' · done'}
           {` · ${formatTotals(engine.totals)}`}
-        </h2>
+                </p></details>
         {turn.state === 'running' ? (
           <button
             type="button"
@@ -213,7 +154,8 @@ export default function EnginePanel() {
           <button
             type="button"
             onClick={() => void runReview()}
-            title="Review: the engine checks its own work and is asked to report only — a report, not a technical lock"
+            disabled={review.running}
+            title="Review the completed text with a tool-free model call. No app actions or approvals are available."
             className="flex items-center gap-1 rounded-lg border border-line px-2 py-0.5 text-[11px] text-muted hover:text-ink"
           >
             <Eye size={10} /> Review
@@ -242,7 +184,6 @@ export default function EnginePanel() {
         ) : null}
       </header>
 
-      {(panelOpen || turn.permissions.length > 0) ? (<>
       {review.error ? (
         <p className="mt-1.5 text-[11.5px] text-warn">
           {review.error}
@@ -255,6 +196,9 @@ export default function EnginePanel() {
           {review.verdict?.kind === 'issues' ? (
             <span className="mt-1 block whitespace-pre-wrap text-muted">{review.verdict.lines.join('\n')}</span>
           ) : null}
+      {review.running ? <p className="ob-control-scope" role="status">A text-only review is running. It cannot run app tools or answer approvals.</p> : null}
+      {review.record ? <details className="ob-review-report"><summary>Review report · {review.record.model || 'not sent'} · {review.record.state}<span>{review.record.prompt}</span></summary><pre>{review.record.text || review.record.error}</pre><p className="ob-control-scope">Text evidence only; files and tests were not independently inspected.{review.record.clipped ? ' This report covers a bounded excerpt.' : ''}</p></details> : null}
+
         </p>
       ) : null}
 
@@ -284,32 +228,17 @@ export default function EnginePanel() {
         </p>
       ) : null}
 
-      <p className="mt-1.5 line-clamp-3 text-[12.5px] text-muted">
-        ▸ {turn.prompt}
-        {turn.pictures ? <span className="text-muted"> + {turn.pictures} picture{turn.pictures === 1 ? '' : 's'}</span> : null}
-      </p>
+
 
       <ul className="mt-2 flex flex-col gap-1.5">
-  {turn.state === 'running' ? (
-          <li className="flex items-center gap-2" aria-live="polite">
-            <Mascot motion={pairingMotion(pairing)} size={44} seed={seed} active />
-            <span className="text-[12.5px] text-muted">{pairing.word}…</span>
-          </li>
-        ) : null}
         {turn.items.map((item, index) => {
           // The thinking block that is still being written stays unfolded;
           // once the answer starts (or the turn ends) it folds away.
           const live = turn.state === 'running' && item.kind === 'thinking' && index === turn.items.length - 1
-          return <EngineItemRow key={`${index}-${live ? 'live' : 'kept'}`} item={item} live={live} />
+          return <EngineItemRow key={`${index}-${live ? 'live' : 'kept'}`} item={item} live={live} pending={turn.state === 'running'} />
         })}
       </ul>
 
-      {doneTick !== null && turn.state !== 'running' ? (
-        <div className="flex items-center gap-2" role="status">
-          <Mascot motion={pairingMotion(pairingAt('done', doneTick, seed))} size={36} seed={seed} active={false} />
-          <span className="text-[12px] text-muted">{pairingAt('done', doneTick, seed).word}</span>
-        </div>
-      ) : null}
       {handed ? <p className="mt-1 text-[11px] text-muted">{handed}</p> : null}
       {finished && kept.length > 0 ? (
         <div className="mt-2 rounded-lg border border-line bg-bg p-2">
@@ -354,7 +283,7 @@ export default function EnginePanel() {
       ) : null}
 
       {turn.permissions.length > 0 ? (
-        <div className="mt-2.5 rounded-lg border border-line bg-bg p-2.5">
+        <div className="ob-permission-request mt-2.5 rounded-lg border border-line bg-bg p-2.5" tabIndex={-1} role="region" aria-label="Permission request">
           <p className="flex items-center gap-2 text-[12.5px] text-ink">
             <Mascot motion={WAITING_LOADER} size={20} />
             <span>
@@ -389,10 +318,9 @@ export default function EnginePanel() {
           </div>
         </div>
       ) : null}
-      </>) : null}
     </section>
     {engine.journal.length ? (
-      <details aria-label="Earlier sessions" className="mx-auto mb-3 w-full max-w-[var(--chat-width)] rounded-xl border border-line bg-card px-4 py-2.5">
+      <details aria-label="Earlier sessions" className="ob-earlier-sessions mx-auto mb-3 w-full max-w-[var(--chat-width)]">
         <summary className="cursor-pointer text-[12px] font-medium text-muted">
           Earlier sessions on this machine ({engine.journal.length} {engine.journal.length === 1 ? 'turn' : 'turns'})
         </summary>
@@ -416,9 +344,11 @@ export default function EnginePanel() {
 }
 
 /** One line of the engine's story, with the icon that matches the act. */
-function EngineItemRow({ item, live = false }: { item: EngineItem; live?: boolean }) {
-  // The owner's rule, same as the chat brain: collapsed unless he opened
-  // one anywhere — once opened, every thinking block shows open.
+function EngineItemRow({ item, live = false, pending = false }: { item: EngineItem; live?: boolean; pending?: boolean }) {
+  const look = useLook()
+  // The owner's rule: collapsed unless he opened one anywhere — and then every
+  // thinking block shows open. The explicit Thinking switch (More chat tools)
+  // can hold them open too; neither one hides the live block being written.
   const [open, setOpen] = useState(live || thinkingOpenNow())
   useEffect(() => {
     const follow = (): void => setOpen(live || thinkingOpenNow())
@@ -429,13 +359,13 @@ function EngineItemRow({ item, live = false }: { item: EngineItem; live?: boolea
     return (
       <li>
         <details
-          open={open || undefined}
+          open={open || look.showThinking || undefined}
           onToggle={(event) => {
             const now = (event.target as HTMLDetailsElement).open
             setOpen(now)
             if (!live) setThinkingOpen(now)
           }}
-          className="rounded-lg border border-line bg-panel/60 px-3 py-2"
+          className="ob-thinking-block py-2"
         >
           <summary className="cursor-pointer text-[12px] text-muted">
             Thinking{live ? ', still going' : ''}
@@ -448,7 +378,8 @@ function EngineItemRow({ item, live = false }: { item: EngineItem; live?: boolea
     )
   }
   if (item.kind === 'text') {
-    return <li className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-ink">{item.text}</li>
+    if (pending && !look.streamReplies) return null
+    return <li className="whitespace-pre-wrap break-words text-[length:var(--transcript-size,14.5px)] leading-[1.65] text-ink [font-family:var(--transcript-font)]">{item.text}</li>
   }
   if (item.kind === 'error') {
     return (

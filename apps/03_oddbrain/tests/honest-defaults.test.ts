@@ -56,15 +56,23 @@ test('the engine picker states installation in words, not a green dot', () => {
   assert.match(composer, /not installed/)
 })
 
-test('the title-bar dot is alive only while a turn is live', () => {
-  const app = readFileSync(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8')
-  assert.match(app, /engineAlive=\{engineStore\(\)\.turn\?\.state === 'running'\}/)
+test('the title bar paints no status ornament at all', () => {
+  // The old dot is gone, and nothing replaced it: no lamp, chip or badge.
+  const title = readFileSync(new URL('../src/renderer/src/components/TitleBar.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(title, /bg-(ok|warn|danger)/)
+  assert.doesNotMatch(title, /animate-pulse|rounded-full[^\n]*bg-/)
+  assert.match(title, /ob-brand-name/)
 })
 
-test('the engine strip is collapsible and never hides a permission question', () => {
+test('no fold can hide a permission question', () => {
+  // The compact strip is EngineActivity; the turn card's detail is always
+  // present, so Allow/Deny can never sit behind a collapsed panel.
   const panel = readFileSync(new URL('../src/renderer/src/components/EnginePanel.tsx', import.meta.url), 'utf8')
-  assert.match(panel, /ai-assistant\.engine-panel-open/)
-  assert.match(panel, /panelOpen \|\| turn\.permissions\.length > 0/)
+  assert.doesNotMatch(panel, /panelOpen \|\| turn\.permissions\.length/)
+  assert.match(panel, /turn\.permissions\.length > 0 \?/)
+  const strip = readFileSync(new URL('../src/renderer/src/ui/EngineActivity.tsx', import.meta.url), 'utf8')
+  assert.match(strip, /ob-engine-activity/)
+  assert.match(strip, /role="status"/)
 })
 
 test('thinking follows the owner once he opens it', () => {

@@ -3,12 +3,12 @@ import useProjects from '@/state/projects'
 import { PanelLeftClose, PanelLeftOpen, Plus, Search, X } from 'lucide-react'
 import type { Chat } from '@shared/types'
 import { searchChats } from '@shared/lib/search'
-import { initials } from '@shared/lib/profile'
-import { Mascot } from '../motion/Mascot'
 import { groupChats } from '@/state/useChats'
-import { bridge } from '@/platform/bridge'
-import usePersistentState from '@/hooks/usePersistentState'
 import AppNav, { type View } from './AppNav'
+import type { SectionId } from './SettingsView'
+import type { SidebarPreferences } from '../state/look'
+import ProfileButton from '../ui/ProfileButton'
+import { usePermissionsWaiting } from '../state/engine'
 
 /**
  * The list of conversations, and the app's own sections above them.
@@ -28,17 +28,6 @@ const MIN_WIDTH = 200
 const MAX_WIDTH = 420
 const RAIL_WIDTH = 56
 
-type SidebarPrefs = { collapsed: boolean; width: number }
-
-function normalizePrefs(value: unknown): SidebarPrefs {
-  const raw = (value || {}) as Partial<SidebarPrefs>
-  const width = Number(raw.width)
-  return {
-    collapsed: raw.collapsed === true,
-    width: Number.isFinite(width) ? Math.min(Math.max(width, MIN_WIDTH), MAX_WIDTH) : 260,
-  }
-}
-
 export default function Sidebar({
   chats,
   currentChat,
@@ -46,8 +35,10 @@ export default function Sidebar({
   onNew,
   onDelete,
   onOpenSettings,
-  onOpenMemory,
   profileName,
+  prefs,
+  onPrefsChange: setPrefs,
+  preview = false,
   /** The chat-row menu's "Move to group" needs the real list. */
   onSetChatProject,
   /** Pin and rename go through the one chat state the app holds — a second
@@ -66,11 +57,13 @@ export default function Sidebar({
   onNew: () => void
   onDelete: (chatId: string) => void
   /** The profile row at the bottom is the way in to Settings, as in the mockup. */
-  onOpenSettings: (section?: 'models' | 'connectors') => void
+  onOpenSettings: (section?: SectionId) => void
   /** Browsing Maps: what was read and when, drawn from the vault. */
-  onOpenMemory: () => void
   /** The marketplace: apps, extensions, skills — what the app can reach. */
   profileName: string
+  prefs: SidebarPreferences
+  onPrefsChange: (value: SidebarPreferences | ((previous: SidebarPreferences) => SidebarPreferences)) => void
+  preview?: boolean
   onSetChatProject: (chatId: string, projectId: string | null) => void
   onPin: (chatId: string, pinned: boolean) => void
   onRenameChat: (chatId: string, title: string) => void
@@ -83,8 +76,8 @@ export default function Sidebar({
   artifactCount: number
 }) {
   const [query, setQuery] = useState('')
-  const { projects } = useProjects(true)
-  const [prefs, setPrefs] = usePersistentState<SidebarPrefs>('ai-assistant.sidebar', { collapsed: false, width: 260 }, normalizePrefs)
+  const { projects } = useProjects(!preview)
+  const pending = usePermissionsWaiting()
   const [dragging, setDragging] = useState(false)
   const aside = useRef<HTMLElement | null>(null)
 
@@ -139,24 +132,9 @@ export default function Sidebar({
         >
           <Plus size={15} />
         </button>
-        {/* Collapsed means conversations only: every other option is hidden. */}
+        <AppNav view={view} onView={onView} collapsed waiting={preview ? 0 : pending} />
         <span className="flex-1" />
-        <button
-          type="button"
-          onClick={() => onOpenSettings()}
-          aria-label="Settings"
-          title="Settings"
-          className="flex h-9 w-9 items-center justify-center rounded-full text-muted transition-colors hover:bg-white/[0.06] hover:text-ink"
-        >
-          <span className="flex h-7 w-7 items-center justify-center rounded-full bg-brand/25 text-[11px] font-semibold text-brand">
-            <span className="relative" title="OddBrain is on this machine">
-              {initials(profileName)}
-              <span className="absolute -top-3 -right-2" aria-hidden>
-                <Mascot role="idle" size={22} seed={3} periodMs={8000} />
-              </span>
-            </span>
-          </span>
-        </button>
+        <ProfileButton name={profileName} onOpen={() => onOpenSettings('you')} compact />
       </aside>
     )
   }
@@ -164,7 +142,7 @@ export default function Sidebar({
   return (
     <aside
       ref={aside}
-      className="relative flex shrink-0 flex-col border-r border-line bg-panel"
+      className="ob-sidebar relative flex shrink-0 flex-col border-r border-line bg-panel"
       style={{ width: prefs.width }}
     >
       <div className="flex flex-col gap-1.5 p-2.5">
@@ -216,23 +194,17 @@ export default function Sidebar({
       {/* One scroll: the sections and the conversations share it, so the list
           is always reachable no matter how much sits above it. */}
       <nav className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2" aria-label="Conversations">
-        <AppNav view={view} onView={onView} artifactCount={artifactCount} />
-        {view === 'artifacts' ? (
-          <p className="px-1 py-2 text-[12px] leading-relaxed text-muted">
-            {artifactCount
-              ? 'Search narrows the library. The conversations themselves are on the Chat screen.'
-              : 'The library is empty so far. Anything you make in a chat appears on the Artifacts screen.'}
-          </p>
-        ) : searching ? (
+        <AppNav view={view} onView={onView} artifactCount={artifactCount} waiting={preview ? 0 : pending} />
+        {view === 'artifacts' ? null : searching ? (
           <SearchResults results={results} currentChat={currentChat} onOpen={onOpen} />
         ) : chats.length === 0 ? (
           <p className="px-1 py-2 text-[12px] leading-relaxed text-muted">
-            No conversations yet. Your first one appears here.
+            No conversations yet.
           </p>
         ) : (
           groups.map(group => (
             <section key={group.label} className="mb-3">
-              <h2 className="px-1 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted">
+              <h2 className="px-1 pb-1 pt-1.5 text-[11px] font-medium text-muted">
                 {group.label}
               </h2>
               {group.chats.map(chat => (
@@ -253,29 +225,13 @@ export default function Sidebar({
         )}
       </nav>
 
-      <button
-        type="button"
-        onClick={onOpenMemory}
-        aria-label="Browsing Maps"
-        title="What was read and when"
-        className="flex w-full items-center gap-2.5 border-t border-line px-3 py-2 text-left text-muted hover:bg-white/[0.06] hover:text-ink"
-      >
-        <svg width="15" height="15" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" className="shrink-0">
-          <circle cx="9" cy="9" r="6" />
-          <path d="M6.6 9h4.8M9 6.6v4.8" />
-        </svg>
-        <span className="text-[12px]">Browsing Maps</span>
-      </button>
-
-      <UserMenu
-        profileName={profileName}
-        onOpenSettings={onOpenSettings}
-        onOpenMemory={onOpenMemory}
-      />
+      <ProfileButton name={profileName} onOpen={() => onOpenSettings('you')} />
 
       {/* The grip on the edge. Invisible until pointed at, so the sidebar does
           not look like it is wearing a handle. */}
       <div
+        role="separator" tabIndex={0} aria-orientation="vertical" aria-label="Sidebar width" aria-valuemin={MIN_WIDTH} aria-valuemax={MAX_WIDTH} aria-valuenow={prefs.width}
+        onKeyDown={event => { if (['ArrowLeft', 'ArrowRight', 'Home'].includes(event.key)) { event.preventDefault(); setPrefs(previous => ({ ...previous, width: event.key === 'Home' ? 260 : Math.max(MIN_WIDTH, Math.min(MAX_WIDTH, previous.width + (event.key === 'ArrowLeft' ? -10 : 10))) })) } }}
         onPointerDown={event => {
           event.preventDefault()
           setDragging(true)
@@ -534,7 +490,7 @@ function SearchResults({
   }
   return (
     <div className="mb-3">
-      <h2 className="px-1 pb-1 pt-1.5 text-[10px] font-medium uppercase tracking-wide text-muted">
+      <h2 className="px-1 pb-1 pt-1.5 text-[11px] font-medium text-muted">
         Matches
       </h2>
       {results.map(result => (
@@ -560,83 +516,3 @@ function SearchResults({
 }
 
 
-/**
- * The user menu, as the approved 191608 screen shows it — adapted to what is
- * honestly true here: there is no account and no plan, so there is nothing to
- * log out of and nothing to upgrade. Everything in the menu opens a real
- * thing, and every one of them is local.
- */
-function UserMenu({
-  profileName,
-  onOpenSettings,
-  onOpenMemory,
-}: {
-  profileName: string
-  onOpenSettings: (section?: 'models' | 'connectors') => void
-  onOpenMemory: () => void
-}) {
-  const [open, setOpen] = useState(false)
-  const ref = useRef<HTMLDivElement | null>(null)
-  useEffect(() => {
-    if (!open) return
-    // Escape closes, like every other menu in the app — leaving it open traps
-    // the corner of the screen it covers.
-    const dismiss = (event: KeyboardEvent): void => {
-      if (event.key === 'Escape') setOpen(false)
-    }
-    const away = (event: PointerEvent): void => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false)
-    }
-    window.addEventListener('keydown', dismiss)
-    window.addEventListener('pointerdown', away)
-    return () => {
-      window.removeEventListener('keydown', dismiss)
-      window.removeEventListener('pointerdown', away)
-    }
-  }, [open])
-  return (
-    <div className="relative border-t border-line" ref={ref}>
-      {open ? (
-        <div role="menu" aria-label="Account" className="absolute bottom-[52px] left-2 right-2 z-30 rounded-lg border border-line bg-card p-1 shadow-xl">
-          <p className="truncate px-2 pb-1 pt-1.5 text-[11px] text-muted">This machine · everything local</p>
-          <UserMenuItem label="Settings" hint="Ctrl+," onClick={() => { setOpen(false); onOpenSettings() }} />
-          <UserMenuItem label="Get API keys" onClick={() => { setOpen(false); onOpenSettings('models') }} />
-          <UserMenuItem label="Install apps and extensions" onClick={() => { setOpen(false); onOpenSettings('connectors') }} />
-          <UserMenuItem label="Browsing Maps" onClick={() => { setOpen(false); onOpenMemory() }} />
-          <div className="my-0.5 border-t border-line" />
-          <UserMenuItem
-            label="Learn more"
-            onClick={() => { setOpen(false); void bridge.app?.openExternal?.('https://github.com/NishadIslamUtso/OddBrain') }}
-          />
-        </div>
-      ) : null}
-      <button
-        type="button"
-        onClick={() => setOpen(value => !value)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        className="flex w-full items-center gap-2.5 p-2.5 text-left hover:bg-white/[0.06]"
-      >
-        <span className="flex h-8 w-8 items-center justify-center rounded-full bg-brand/25 text-[12px] font-semibold text-brand">
-          {initials(profileName)}
-        </span>
-        <span className="min-w-0 flex-1 truncate text-[13px]">{profileName}</span>
-        <span className="rounded-full border border-line px-2 py-0.5 text-[10px] text-muted">Local</span>
-      </button>
-    </div>
-  )
-}
-
-function UserMenuItem({ label, hint, onClick }: { label: string; hint?: string; onClick: () => void }) {
-  return (
-    <button
-      type="button"
-      role="menuitem"
-      onClick={onClick}
-      className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-[12.5px] text-muted hover:bg-white/[0.06] hover:text-ink"
-    >
-      <span className="flex-1">{label}</span>
-      {hint ? <span className="text-[10.5px] text-muted/70">{hint}</span> : null}
-    </button>
-  )
-}

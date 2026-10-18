@@ -15,6 +15,8 @@ import { DEFAULT_PERMISSIONS, normalizePermissions, type Permissions } from '../
 import { DEFAULT_ENGINE, normalizeEngine, type EngineSettings } from '../shared/lib/engine'
 
 export type AppSettings = {
+  /** Optional explicit memory directory, chosen only by the native picker. */
+  memoryFolder?: string
   /**
    * The vault the user chose. Empty means "work it out from the checkout and the
    * environment", which is what a fresh install or a fresh clone does.
@@ -61,6 +63,7 @@ export function readSettings(file: string): AppSettings {
         baseUrl: text(cloud.baseUrl, 2048),
         model: text(cloud.model, 300),
       },
+      ...(typeof parsed.memoryFolder === 'string' && parsed.memoryFolder.length <= 4096 && !/[\r\n]/.test(parsed.memoryFolder) ? { memoryFolder: parsed.memoryFolder } : {}),
       permissions: normalizePermissions(parsed.permissions),
       engine: normalizeEngine(parsed.engine),
     }
@@ -77,6 +80,7 @@ export function writeSettings(file: string, settings: AppSettings): AppSettings 
       baseUrl: String(cloud.baseUrl || '').trim().slice(0, 2048),
       model: String(cloud.model || '').trim().slice(0, 300),
     },
+    ...(typeof settings.memoryFolder === 'string' && settings.memoryFolder && settings.memoryFolder.length <= 4096 && !/[\r\n]/.test(settings.memoryFolder) ? { memoryFolder: settings.memoryFolder } : {}),
     permissions: normalizePermissions(settings.permissions),
     engine: normalizeEngine(settings.engine),
   }

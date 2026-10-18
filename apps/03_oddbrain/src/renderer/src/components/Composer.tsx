@@ -1,6 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronDown, CookingPot, Cpu, FolderOpen, Layers, ListOrdered, Map, Mic, MicOff, Paperclip, Play, ScrollText, Square, Swords, X } from 'lucide-react'
+import { useContext, useEffect, useRef, useState } from 'react'
 import { modelLabel } from '@shared/lib/engine'
+import { ArrowUp, ChevronDown, CookingPot, Cpu, FolderOpen, Layers, ListOrdered, Map, MoreHorizontal, Mic, MicOff, Paperclip, Play, ScrollText, Square, Swords, X } from 'lucide-react'
 import type { Project } from '@shared/lib/projects'
 import type { Attachment } from '@shared/types'
 import type { Recipe } from '@shared/lib/recipes'
@@ -11,6 +11,9 @@ import { getEngineApi } from '@/platform/bridge'
 import { vaultGet, type VaultReply } from '@shared/lib/vault'
 import { useEngine, type EngineTurn } from '@/state/engine'
 import useDismiss from '@/hooks/useDismiss'
+import BriefContext from '../ui/BriefContext'
+import ComposerSurface from '../ui/ComposerSurface'
+import { LookActions, useLook } from '../ui/LookContext'
 
 /**
  * The composer.
@@ -62,6 +65,10 @@ export default function Composer({
   const box = useRef<HTMLTextAreaElement | null>(null)
   const [boxOpen, setBoxOpen] = useState<'engine' | 'models' | null>(null)
   const [cook, setCook] = useState(false)
+  const [tools, setTools] = useState(false)
+  const toolsRef = useRef<HTMLDivElement | null>(null)
+  const look = useLook(), changeLook = useContext(LookActions)
+  useDismiss(toolsRef, () => setTools(false), tools)
   const [listening, setListening] = useState(false)
   const fileInput = useRef<HTMLInputElement | null>(null)
   const recognition = useRef<{ stop: () => void } | null>(null)
@@ -147,8 +154,9 @@ export default function Composer({
   }
 
   return (
-    <div className="shrink-0 px-6 pb-4">
-      <div className="rounded-2xl border border-line bg-card focus-within:border-accent/50">
+    <div className="ob-composer-host shrink-0 px-6 pb-4">
+      <BriefContext />
+      <ComposerSurface>
         <textarea
           ref={box}
           value={value}
@@ -156,7 +164,7 @@ export default function Composer({
           onKeyDown={keydown}
           onPaste={paste}
           rows={1}
-          placeholder="How can I help you today?"
+          placeholder="Ask anything"
           aria-label="Message"
           className="block max-h-[200px] w-full resize-none bg-transparent px-4 pt-3.5 text-[14px] leading-relaxed text-ink outline-none placeholder:text-muted"
         />
@@ -177,7 +185,6 @@ export default function Composer({
           </ul>
         ) : null}
         <div className="flex items-center gap-1.5 px-2.5 pb-2 pt-1" ref={pickerRef}>
-          <ProjectDropdown projects={projects} project={project} onProject={onProject} />
           <input
             ref={fileInput}
             type="file"
@@ -209,11 +216,22 @@ export default function Composer({
           >
             {listening ? <MicOff size={13} /> : <Mic size={13} />}
           </button>
-          <RecipeButton />
-          <MapButton onInsert={(map) => onChange(value.trim() ? `${value.trimEnd()}\n\n${map}\n` : `${map}\n`)} />
           <span className="ml-auto" />
           <EngineChip open={boxOpen === 'engine'} onToggle={() => setBoxOpen(boxOpen === 'engine' ? null : 'engine')} />
           <ModelChip open={boxOpen === 'models'} onToggle={() => setBoxOpen(boxOpen === 'models' ? null : 'models')} />
+          <div className="ob-more-tools" ref={toolsRef}>
+            <button type="button" className="ob-icon-button" onClick={() => setTools(v => !v)} aria-label="More chat tools" aria-expanded={tools} title="More chat tools"><MoreHorizontal size={15} /></button>
+            {tools ? <div className="ob-tools-popup" role="dialog" aria-label="Chat tools">
+              <ProjectDropdown projects={projects} project={project} onProject={onProject} />
+              <RecipeButton />
+              <MapButton onInsert={map => onChange(value.trim() ? `${value.trimEnd()}\n\n${map}\n` : `${map}\n`)} />
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { setCook(true); setTools(false) }}><CookingPot size={14} />Cook context</button>
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:battle', { detail: value })); setTools(false) }}><Swords size={14} />Brain battle</button>
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:split', { detail: value })); setTools(false) }}><ListOrdered size={14} />Split a task</button>
+              <button type="button" aria-pressed={look.showThinking} onClick={() => changeLook({ showThinking: !look.showThinking })}><ScrollText size={14} />Thinking details<span>{look.showThinking ? 'On' : 'Off'}</span></button>
+              <button type="button" onClick={() => { window.dispatchEvent(new Event('app:show-journal')); setTools(false) }}><ListOrdered size={14} />Turn journal</button>
+            </div> : null}
+          </div>
           <span className="ml-auto flex items-center gap-2">
             {busy ? (
               <button
@@ -240,41 +258,8 @@ export default function Composer({
             </button>
           </span>
         </div>
-      </div>
-
-      {value.trim() && !busy ? (
-        <div className="relative px-1 pt-1.5">
-          <button
-            type="button"
-            onClick={() => setCook(open => !open)}
-            aria-expanded={cook}
-            title="Cook this prompt: pull matching vault notes in as [Title: line] context, preview, then send"
-            className="flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <CookingPot size={11} aria-hidden />
-            Cook This Prompt
-          </button>
-          {cook ? <CookDialog draft={value} onDone={(next) => { if (next !== null) onChange(next); setCook(false) }} /> : null}
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent('app:battle', { detail: value }))}
-            title="Battle: run this prompt on two brains and pick the better answer (blind, private tally)"
-            className="ml-1.5 flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <Swords size={11} aria-hidden />
-            Battle
-          </button>
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent('app:split', { detail: value }))}
-            title="Split: the engine breaks this work order into steps, then the app runs them one by one"
-            className="ml-1.5 flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <ListOrdered size={11} aria-hidden />
-            Split
-          </button>
-        </div>
-      ) : null}
+      </ComposerSurface>
+      {cook ? <CookDialog draft={value} onDone={next => { if (next !== null) onChange(next); setCook(false) }} /> : null}
       {preview ? <p className="px-1 pt-2 text-[12px] text-muted">{preview}</p> : null}
       {notice ? <p className="px-1 pt-2 text-[12px] text-warn">{notice}</p> : null}
     </div>

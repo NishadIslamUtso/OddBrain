@@ -109,7 +109,16 @@ export function readStored<T>(
         return { value: fallback, warning: '' }
       }
     }
-    return { value: normalize(JSON.parse(raw)), warning: '' }
+    // A plain string was historically stored raw (the open conversation's id),
+    // so JSON.parse would throw and the app would warn that it "could not read"
+    // perfectly good data. Read it as the string it is.
+    let parsed: unknown
+    try {
+      parsed = JSON.parse(raw)
+    } catch {
+      parsed = raw
+    }
+    return { value: normalize(parsed), warning: '' }
   } catch {
     return { value: fallback, warning: `Could not read ${key}. The original data has not been cleared.` }
   }

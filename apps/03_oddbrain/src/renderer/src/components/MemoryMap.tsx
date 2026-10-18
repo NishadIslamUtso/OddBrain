@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { vaultGet } from '@shared/lib/vault'
+import CopyText from '../ui/CopyText'
 import { isDemo } from '../platform/bridge'
 
 /**
@@ -98,7 +99,7 @@ function size(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export default function MemoryMap({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function MemoryMap({ open, onClose, embedded = false }: { open: boolean; onClose: () => void; embedded?: boolean }) {
   const [entries, setEntries] = useState<Entry[]>([])
   const [summary, setSummary] = useState<MapReply['summary'] | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'missing' | 'offline'>('loading')
@@ -149,12 +150,13 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
 
   useEffect(() => {
     if (!open) return
+    if (embedded) return
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, onClose, embedded])
 
   // Days, from the entries themselves — the summary lists them, and each day's
   // rows are the ones the server sent, nothing regrouped behind its back.
@@ -174,8 +176,8 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
   const busiest = topHosts[0]?.count || 1
 
   return (
-    <div className="absolute inset-0 z-40 flex flex-col bg-bg" role="dialog" aria-modal="true" aria-label="Browsing Maps">
-      <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
+    <div className={embedded ? "ob-embedded-map flex flex-col bg-bg" : "absolute inset-0 z-40 flex flex-col bg-bg"} role={embedded ? undefined : "dialog"} aria-modal={embedded ? undefined : true} aria-label="Browsing Maps">
+      {!embedded ? <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
         <h1 className="text-[15px] font-medium">Browsing Maps</h1>
         {summary ? (
           <span className="text-[12px] text-muted">
@@ -193,7 +195,7 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
             <path d="M5 5l10 10M15 5 5 15" />
           </svg>
         </button>
-      </header>
+      </header> : null}
 
       {isDemo ? (
         <div className="p-5">
@@ -348,7 +350,7 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
                           </button>
                           {opened === entry.id ? (
                             <div className="px-1 pb-2 pl-[82px] text-[11.5px] leading-relaxed text-muted">
-                              {entry.url ? <div className="break-all">{entry.url}</div> : null}
+                              {entry.url ? <div className="break-all">{entry.url}</div> : null}<CopyText text={JSON.stringify(entry, null, 2)} label="Copy source details" />
                               <div className="break-all">{entry.path}</div>
                               <div>
                                 {size(entry.bytes) ? `${size(entry.bytes)} · ` : ''}
