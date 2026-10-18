@@ -161,8 +161,8 @@ export default function Composer({
   }
 
   return (
-    <div className="shrink-0 px-6 pb-4">
-      <div className="rounded-2xl border border-line bg-card focus-within:border-accent/50">
+    <div className="ob-composer-host shrink-0 px-6 pb-4">
+      <div className="ob-composer-surface rounded-2xl border border-line bg-card focus-within:border-accent/50">
         <textarea
           ref={box}
           value={value}

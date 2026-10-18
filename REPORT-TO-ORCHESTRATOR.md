@@ -1,6 +1,14 @@
-# Report to orchestrator — audio/video/image intake
+# Report to orchestrator — AV intake and renderer UI port
 
-**Status: IN PROGRESS.** Ruling #4 answers the registry question and approves the current decoder boundary until the shared door lands. This continuation adds visible per-model image-capability disclosure. Local typecheck, tests, and build pass; Electron install/smoke failed in the sandbox, and CI for these latest changes is pending. No completion claim.
+**Status: AV intake preserved; renderer/UI port IN PROGRESS.** The active task now ports selected renderer/UI slices from `origin/arena/cc83a507-oddbrain` onto the fixed branch, while preserving backend/security contracts and AV behavior. Ruling #4 still governs AV ownership and the shared intake door. The first shell/navigation slice is implemented and locally verified; it has not yet been pushed, so there is no CI result for that slice. The earlier local Electron install/smoke failure remains unpassed, not a CI failure.
+
+## Renderer UI port — 2026-10-18
+
+- Reference: read-only `origin/arena/cc83a507-oddbrain` at `df4226a`. The reference branch has broad non-UI changes; only selected renderer files are being ported, not merged wholesale.
+- First slice adds `src/renderer/src/styles/desktop.css`, imports it from renderer `main.tsx`, and connects the shell/content/title-bar/sidebar/chat/composer class hooks. It ports the reference `AppNav` horizontal mode and approval-count badge, and exposes destinations in the collapsed sidebar. Added `tests/app-nav.test.ts` for these UI states.
+- Changes to `App.tsx` and `Composer.tsx` are structural/presentation-only; the shared intake `App.addFiles` path, send path, AV disclosure/processing, and bridge behavior were not changed. No main, preload, shared backend, security, AV decoder, dependency, or lockfile files were changed.
+- Current worktree gate in `apps/03_oddbrain`: `npm test` passed **105 files / 755 tests**; `npm run build` passed, including typecheck; `npm run build:web` passed. Both builds show existing CSS optimizer warnings for `::highlight(ob-find)` and `::highlight(ob-find-current)`; web build also shows the existing large-chunk advisory. A browser preview is running on port 5174.
+- Next renderer slices: look/appearance state and selectable shell layouts, then chat/home/composer and graph presentation. Keep every shared file hunk-compatible with current bridge, AV and security contracts.
 
 ## What exists
 
@@ -30,26 +38,26 @@
 - `apps/03_oddbrain/src/shared/types.ts`
 - The pre-brief dictation hunk in `apps/03_oddbrain/src/renderer/src/components/Composer.tsx`; AV-only Composer changes do not touch it.
 
-Other accepted out-of-allowlist ancestry from `c17cf31` is unchanged in this continuation: `package.json` / `package-lock.json`, `src/main/index.ts`, renderer `App.tsx`, `ChatView.tsx`, `useChat.ts`, and other non-AV hunks. The `App.addFiles` door was not edited. In `attachments.ts`, only AV decoder work belongs to this lane; document extraction remains frozen. `media.ts` and `videoFrames.ts` are AV decoder paths under Ruling #4. No visual redesign or work on the visual-UI owner's branch was done.
+Other accepted out-of-allowlist ancestry from `c17cf31` remains unchanged. The `App.addFiles` door was not edited; the current UI work only wraps existing rendered content. In `attachments.ts`, only AV decoder work belongs to the AV lane; document extraction remains frozen. `media.ts` and `videoFrames.ts` remain the AV decoder paths under Ruling #4. The earlier AV-only continuation did not include visual redesign; the selected reference is now being ported renderer-only as documented above.
 
 ## session-v2
 
 **Ported: none.** `reference/session-v2/OddBrain-App-UI.patch` is reference-only and declares baseline `2f05dac9`, not this branch's `a6c7807`; the brief disallows applying it wholesale. No session-v2 code was copied.
 
-## Gate evidence for this local update
+## Gate evidence for the current worktree
 
-Commands were run in order in `apps/03_oddbrain`:
+Commands were run in `apps/03_oddbrain`:
 
-1. `npm ci --ignore-scripts && node node_modules/electron/install.js`: installed 483 packages; audit reported 14 vulnerabilities (11 moderate, 1 high, 2 critical). Electron install then failed with `TypeError: fetch failed`.
-2. `npx tsc --noEmit`: pass, 0 errors.
-3. `npx vitest run`: **104 files / 752 tests passed**.
-4. `npm run build`: pass; two existing CSS optimizer warnings for `::highlight(ob-find)` and `::highlight(ob-find-current)`.
-5. `npm run smoke`: failed before launch because Electron was not installed. The Electron mirror retry was not run in this sandbox. Do not count local smoke as passed.
+1. `npm test`: **105 files / 755 tests passed**.
+2. `npm run build`: passed, including TypeScript; two CSS optimizer warnings remain for `::highlight(ob-find)` and `::highlight(ob-find-current)`.
+3. `npm run build:web`: passed; the same CSS warnings and the existing >500 kB chunk advisory were reported.
+4. `npm run smoke` was not run during this UI slice. In the earlier sandbox attempt, `npm ci --ignore-scripts && node node_modules/electron/install.js` installed 483 packages, reported 14 audit vulnerabilities (11 moderate, 1 high, 2 critical), then failed to fetch Electron with `TypeError: fetch failed`; the subsequent smoke failed before launch. Do not count local smoke as passed.
 
-The prior AV commit `9f4e5e1` had green Linux/Windows CI in run `39125432706`; this Composer update is not included in that run. CI for the current update is pending its push.
+GitHub Actions run `39128942052` succeeded for base commit `3bfba4e`. This renderer UI slice has not yet been pushed and has no CI result yet.
 
 ## Remaining / unproven
 
+- UI work is only at the shell/navigation foundation. Look/layout preferences, the new appearance/settings surface, chat home/composer refinements, and graph appearance from the reference remain unported.
 - Per-model audio and Claude Code image capability remains unverified because the available model lists do not expose modality capability data. The composer names that uncertainty before send; AGY's image refusal is explicit. No live provider request was made.
 - The owner's 8 GB RAM / 4 GB VRAM device's decode peak, available memory, and model fit were not measured. Fixed decode bounds remain; only exact prepared payload bytes are shown.
 - No physical-device media corpus, codec matrix, or encrypted/DRM fixture was run. The shared door's integration is deferred until `arena/6d6aabbf` lands, per Ruling #4.

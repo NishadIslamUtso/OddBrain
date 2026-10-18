@@ -10,7 +10,7 @@ import { Brain, Database, FolderOpen, MessageSquare, Shapes, Sun } from 'lucide-
 
 export type View = 'chat' | 'artifacts' | 'today' | 'projects' | 'vault' | 'brain' | 'code'
 
-const ITEMS: Array<{ id: View; label: string; Icon: typeof MessageSquare }> = [
+export const NAV_ITEMS: Array<{ id: View; label: string; Icon: typeof MessageSquare }> = [
   { id: 'chat', label: 'Chat', Icon: MessageSquare },
   { id: 'artifacts', label: 'Artifacts', Icon: Shapes },
   { id: 'today', label: 'Today', Icon: Sun },
@@ -31,15 +31,19 @@ export default function AppNav({
   onView,
   collapsed = false,
   artifactCount = 0,
+  horizontal = false,
+  waiting = 0,
 }: {
   view: View
   onView: (view: View) => void
   collapsed?: boolean
   artifactCount?: number
+  horizontal?: boolean
+  waiting?: number
 }) {
   return (
-    <nav aria-label="Sections" className={collapsed ? 'flex flex-col items-center gap-1 py-1' : 'mb-1 flex flex-col gap-0.5 pb-1'}>
-      {ITEMS.map(({ id, label, Icon }) => {
+    <nav aria-label="Sections" className={horizontal ? 'ob-horizontal-nav' : collapsed ? 'flex flex-col items-center gap-1 py-1' : 'mb-1 flex flex-col gap-0.5 pb-1'}>
+      {NAV_ITEMS.map(({ id, label, Icon }) => {
         const active = view === id
         return (
           <button
@@ -50,7 +54,7 @@ export default function AppNav({
             aria-label={label}
             title={label}
             className={
-              collapsed
+              horizontal ? `ob-nav-tab ${active ? 'is-current' : ''}` : collapsed
                 ? `flex h-9 w-9 items-center justify-center rounded-lg transition-colors ${
                     active ? 'bg-white/[0.08] text-ink' : 'text-muted hover:bg-white/[0.06] hover:text-ink'
                   }`
@@ -60,7 +64,8 @@ export default function AppNav({
             }
           >
             <Icon size={13} className="shrink-0" />
-            {collapsed ? null : <span className="flex-1">{label}</span>}
+            {collapsed ? null : <span className={horizontal ? '' : 'flex-1'}>{label}</span>}
+            {id === 'chat' && waiting > 0 ? <span className="ob-approval-count" aria-label={`${waiting} approvals waiting`}>{waiting}</span> : null}
             {collapsed || id !== 'artifacts' || !artifactCount ? null : (
               <span className="text-[11px] text-muted">{artifactCount}</span>
             )}

@@ -36,7 +36,7 @@ export default function TitleBar({
   return (
     <>
       <FindBar />
-      <header className="flex h-11 shrink-0 items-center gap-2.5 border-b border-line px-3.5">
+      <header className="ob-titlebar flex h-11 shrink-0 items-center gap-2.5 border-b border-line px-3.5">
         <BrainMark size={20} />
         <span className="text-[13px] font-medium tracking-tight">OddBrain</span>
 

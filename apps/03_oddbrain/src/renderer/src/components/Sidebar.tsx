@@ -9,6 +9,7 @@ import { groupChats } from '@/state/useChats'
 import { bridge } from '@/platform/bridge'
 import usePersistentState from '@/hooks/usePersistentState'
 import AppNav, { type View } from './AppNav'
+import { usePermissionsWaiting } from '../state/engine'
 
 /**
  * The list of conversations, and the app's own sections above them.
@@ -85,6 +86,7 @@ export default function Sidebar({
   const [query, setQuery] = useState('')
   const { projects } = useProjects(true)
   const [prefs, setPrefs] = usePersistentState<SidebarPrefs>('ai-assistant.sidebar', { collapsed: false, width: 260 }, normalizePrefs)
+  const pending = usePermissionsWaiting()
   const [dragging, setDragging] = useState(false)
   const aside = useRef<HTMLElement | null>(null)
 
@@ -118,7 +120,7 @@ export default function Sidebar({
     return (
       <aside
         ref={aside}
-        className="flex shrink-0 flex-col items-center gap-1.5 border-r border-line bg-panel py-3"
+        className="ob-sidebar ob-nav-rail flex shrink-0 flex-col items-center gap-1.5 border-r border-line bg-panel py-3"
         style={{ width: RAIL_WIDTH }}
       >
         <button
@@ -139,7 +141,7 @@ export default function Sidebar({
         >
           <Plus size={15} />
         </button>
-        {/* Collapsed means conversations only: every other option is hidden. */}
+        <AppNav view={view} onView={onView} collapsed waiting={pending} />
         <span className="flex-1" />
         <button
           type="button"
@@ -164,7 +166,7 @@ export default function Sidebar({
   return (
     <aside
       ref={aside}
-      className="relative flex shrink-0 flex-col border-r border-line bg-panel"
+      className="ob-sidebar relative flex shrink-0 flex-col border-r border-line bg-panel"
       style={{ width: prefs.width }}
     >
       <div className="flex flex-col gap-1.5 p-2.5">
@@ -216,7 +218,7 @@ export default function Sidebar({
       {/* One scroll: the sections and the conversations share it, so the list
           is always reachable no matter how much sits above it. */}
       <nav className="min-h-0 flex-1 overflow-y-auto px-2.5 pb-2" aria-label="Conversations">
-        <AppNav view={view} onView={onView} artifactCount={artifactCount} />
+        <AppNav view={view} onView={onView} artifactCount={artifactCount} waiting={pending} />
         {view === 'artifacts' ? (
           <p className="px-1 py-2 text-[12px] leading-relaxed text-muted">
             {artifactCount
