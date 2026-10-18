@@ -40,6 +40,8 @@ describe('a damaged memory state', () => {
     expect(thrown).toBeInstanceOf(Error)
     expect((thrown as Error).message).toContain('needs repair')
     expect((thrown as Error).message).toContain(expected)
+    // The message has to say which file, or "repair the state" is a riddle.
+    expect((thrown as Error).message).toContain('06 Review/Organizer/state.json')
     expect((thrown as Error).name).not.toBe('TypeError')
   })
 

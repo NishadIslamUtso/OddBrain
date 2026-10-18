@@ -11,9 +11,11 @@ export function createMemoryWorkspace(files: VaultFiles, clock: () => string = (
     const raw = files.read(STATE)
     if (!raw) return emptyMemory()
     let s: MemoryWorkspace
-    try { s = JSON.parse(raw) } catch { throw Error('Memory state is not readable as JSON. It was not replaced or reset.') }
+    // Name the file: "repair the state" is not actionable on its own, and this
+    // folder is one the person can open.
+    try { s = JSON.parse(raw) } catch { throw Error(`Memory state is not readable as JSON (${STATE}). It was not replaced or reset.`) }
     const problem = memoryStateProblem(s)
-    if (problem) throw Error(`Memory state needs repair: ${problem}. It was not replaced or reset.`)
+    if (problem) throw Error(`Memory state needs repair: ${problem} (${STATE}). It was not replaced or reset.`)
     s.discoveryWarnings ||= []
     return s
   }
