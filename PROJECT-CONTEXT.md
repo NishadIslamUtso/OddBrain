@@ -5,7 +5,7 @@
 
 ## Active goal
 
-Port the selected desktop UI/UX from `origin/arena/cc83a507-oddbrain` onto the fixed working branch `arena/9a3a5c88-oddbrain`, in small, reviewable renderer-only slices. The selected reference snapshot is `df4226a` (`Refine desktop navigation, graph appearance, and isolated sample workspace`). The UI branch is a design/code reference, **not** a merge target: its 174-file diff also changes main/preload, media, automation, dictation, and other runtime behavior.
+Port the selected desktop UI/UX from `origin/arena/cc83a507-oddbrain` onto the fixed working branch `arena/9a3a5c88-oddbrain`, in small, reviewable renderer-only slices. The selected reference snapshot is `df4226a` (`Refine desktop navigation, graph appearance, and isolated sample workspace`). Use `origin/clean-build` at `6835309` as a read-only corrected-build reference, not a wholesale merge target: it descends from the UI reference but also deletes operational docs and includes non-renderer changes.
 
 ## Scope and invariants
 
@@ -20,7 +20,8 @@ Port the selected desktop UI/UX from `origin/arena/cc83a507-oddbrain` onto the f
 ## UI reference
 
 - Read-only remote ref: `origin/arena/cc83a507-oddbrain` at `df4226a`.
-- Use the reference for its shell, navigation, appearance/look system, chat and settings presentation, and graph appearance where dependencies allow.
+- Use the selected UI reference for its shell, navigation, appearance/look system, chat and settings presentation, and graph appearance where dependencies allow.
+- `origin/clean-build` (`6835309`) is a descendant of that UI reference and a build comparison. Do not apply its broad doc deletions or merge it wholesale. The reviewed non-renderer app delta includes a Windows PDF.js font-data path correction and Node-20 Promise compatibility configuration; keep those outside this renderer-only slice unless scope is explicitly broadened.
 - Port in slices; do not copy unrelated main/preload, backend, media, automation, dictation, sample-runtime, or security changes just because they share a commit with UI work.
 
 ## Port sequence
@@ -41,13 +42,14 @@ Port the selected desktop UI/UX from `origin/arena/cc83a507-oddbrain` onto the f
 
 ## Current progress
 
-**First renderer shell/navigation slice ported** from the selected reference on top of `3bfba4e`:
+**Renderer shell/navigation slice:** committed as `a56a486` on top of `3bfba4e`; documentation follow-up is `cfe79e9`. The slice adds the shared desktop shell styling, horizontal navigation, approval counts, and collapsed-sidebar destinations while preserving the existing send, bridge, and AV contracts. No main-process, preload, shared backend, security, AV decoder, dependency, or lockfile changes were made.
 
-- Added `apps/03_oddbrain/src/renderer/src/styles/desktop.css` and imported it in the renderer entry point.
-- Added the shared shell/content/title-bar/sidebar/chat/composer presentation hooks in `App.tsx`, `TitleBar.tsx`, `Sidebar.tsx`, `ChatView.tsx`, and `Composer.tsx`. The App and Composer edits are wrapper/class-only; the `App.addFiles` path, send path, AV handling/disclosure, and bridge behavior were not changed.
-- Ported the reference navigation API: horizontal-tab styling and a pending-approval count. The collapsed sidebar now keeps section destinations reachable. Added `tests/app-nav.test.ts` for the count/horizontal nav presentation.
-- No main-process, preload, shared backend, security, AV decoder, dependency, or lockfile paths were changed.
+**Build-warning and initial-load follow-up (current uncommitted work):**
 
-**Verification:** `npm test` passed **105 files / 755 tests**; `npm run build` passed (including TypeScript); `npm run build:web` passed. Both builds report the existing CSS optimizer warnings for `::highlight(ob-find)` and `::highlight(ob-find-current)`; the web build also reports its existing >500 kB chunk advisory. GitHub Actions run `39133043196` passed Linux and Windows, including their Electron smoke steps, for code commit `a56a486`. The browser UI preview is running on port 5174. Local Electron smoke was not re-run; the earlier sandbox install failure remains recorded above. This is the current shell/navigation milestone; later UI slices are still pending.
+- Moved CSS Highlight API rules from `globals.css` to `lib/findHighlightStyles.ts`, injected before React renders, and updated tests to protect both highlight styling and the optimizer-safe CSS source.
+- Lazy-loaded route views, conditional overlays, and `EnginePanel` behind React `Suspense` fallbacks. Motion SVGs now load as per-scene async chunks with caching and in-flight request sharing; motion timing is gated on the asset being ready.
+- The corrected-build reference `origin/clean-build` at `6835309` was reviewed read-only. Its PDF.js Windows font-data path change is outside the renderer-only scope and was not imported. Its documentation deletions were not copied; `PROJECT-CONTEXT.md` remains the one authoritative context file while operational docs are retained.
+- Latest `npm run build:web`: **no CSS Highlight optimizer warnings and no >500 kB chunk advisory**. The web entry JS is **477.36 kB (146.42 kB gzip)**; the PDF chunk is 455.17 kB. Scene assets are emitted separately. `npm test` passed **106 files / 756 tests**; `npm run typecheck`, `npm run build`, `npm run build:web`, and `git diff --check` all passed. Vitest still prints its unrelated Vite CJS Node API deprecation notice.
+- Preview remains on port 5174. Local Electron smoke has not been rerun; the earlier sandbox Electron download failure remains recorded above. CI run `39133252677` passed Linux and Windows for `cfe79e9`, but does not cover this current uncommitted follow-up.
 
-**Next:** port appearance/look preferences and selectable shell layouts; then update chat/home/composer and graph presentation in compatible slices. Keep this section current with exact checks, any new CI run, and the branch HEAD after the next milestone.
+**Next:** visually recheck the live preview, review/commit this build-cleanup slice on the fixed branch, then continue appearance/look preferences and selectable shell layouts. Keep chat/home/composer and graph ports renderer-only and behavior-compatible.

@@ -55,8 +55,11 @@ test('find in the conversation: an overlay that never mutates the React tree', (
   assert.match(bar, /'Escape'/, 'Escape closes')
   const chat = read('src/renderer/src/components/ChatView.tsx')
   assert.match(chat, /data-find-root/, 'the transcript marks its scroller as the find root')
-  const globals = read('src/renderer/src/styles/globals.css')
-  assert.match(globals, /::highlight\(ob-find\)/, 'the highlight colour ships in the stylesheet')
+  const highlightStyles = read('src/renderer/src/lib/findHighlightStyles.ts')
+  assert.match(highlightStyles, /::highlight\(ob-find\)/, 'the runtime style preserves the highlight color')
+  const entry = read('src/renderer/src/main.tsx')
+  assert.match(entry, /installFindHighlightStyles\(\)/, 'the CSS Highlight API rules load before React renders')
+  assert.doesNotMatch(read('src/renderer/src/styles/globals.css'), /::highlight\(/, 'Lightning CSS sees no unsupported pseudo-element warning')
 })
 
 test('an artifact can leave the chat: its own window, and a PDF in the vault', () => {

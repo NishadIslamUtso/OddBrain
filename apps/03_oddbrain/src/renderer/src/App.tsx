@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PanelRightOpen } from 'lucide-react'
 import { DEFAULT_MODEL } from '@shared/lib/storage'
 import { DEFAULT_PROFILE, normalizeProfile } from '@shared/lib/profile'
 import TitleBar from './components/TitleBar'
-import EnginePanel from './components/EnginePanel'
 import ArtifactsRail from './components/ArtifactsRail'
 import { chatArtifacts } from './state/artifactView'
 import { restoredInPlace, withNewVersion } from './state/artifactEdits'
@@ -11,17 +10,10 @@ import type { Artifact } from '@shared/types'
 import type { ElementPick } from '@shared/lib/artifacts'
 import Sidebar from './components/Sidebar'
 import { type View } from './components/AppNav'
-import ChatView from './components/ChatView'
 import { engineStore, useEngine } from '@/state/engine'
 import { seedWrap } from '@/state/compact'
-import ArtifactsView from './components/ArtifactsView'
-import TodayView from './components/TodayView'
-import ProjectsView from './components/ProjectsView'
 import FirstRunView from './components/FirstRunView'
 import useProjects from './state/projects'
-import BrainView from './components/BrainView'
-import VaultView from './components/VaultView'
-import CodeView from './components/CodeView'
 import useArtifactLibrary, { adoptionRecords } from './state/artifactLibrary'
 import type { ArtifactSummary } from '../../main/artifacts/store'
 import useChat from './hooks/useChat'
@@ -33,8 +25,7 @@ import { parseCloudModel } from '@shared/lib/providers'
 import { extractFrames } from './lib/videoFrames'
 import usePersistentState from './hooks/usePersistentState'
 import useVault from './hooks/useVault'
-import SettingsView, { type SectionId } from './components/SettingsView'
-import MemoryMap from './components/MemoryMap'
+import type { SectionId } from './components/SettingsView'
 import {
   APPEARANCE_KEY,
   DEFAULT_APPEARANCE,
@@ -49,6 +40,17 @@ import { vaultPost } from '@shared/lib/vault'
 import { setMotionMode } from './motion/motionMode'
 import { setOsReducedMotion } from './motion/motionMode'
 import { conversationCapture } from '@shared/lib/capture'
+
+const ChatView = lazy(() => import('./components/ChatView'))
+const ArtifactsView = lazy(() => import('./components/ArtifactsView'))
+const TodayView = lazy(() => import('./components/TodayView'))
+const ProjectsView = lazy(() => import('./components/ProjectsView'))
+const BrainView = lazy(() => import('./components/BrainView'))
+const VaultView = lazy(() => import('./components/VaultView'))
+const CodeView = lazy(() => import('./components/CodeView'))
+const SettingsView = lazy(() => import('./components/SettingsView'))
+const MemoryMap = lazy(() => import('./components/MemoryMap'))
+const EnginePanel = lazy(() => import('./components/EnginePanel'))
 
 /**
  * The app.
@@ -82,7 +84,9 @@ function QuickMode(): React.JSX.Element {
         <span className="ml-auto text-[10.5px] text-muted">the same engine, the same cards</span>
       </header>
       <div className="min-h-0 flex-1 overflow-y-auto">
-        <EnginePanel />
+        <Suspense fallback={<div className="ob-shell-loading" role="status">Loading engine…</div>}>
+          <EnginePanel />
+        </Suspense>
       </div>
       <div className="mt-2 flex items-end gap-1.5">
         <textarea
@@ -666,164 +670,171 @@ export default function App() {
           profileName={profile.name}
         />
         <div className="ob-shell-content">
-          {view === 'code' ? (
-            <CodeView focusFolder={codeFocus} onClearFocus={() => setCodeFocus('')} />
-          ) : view === 'brain' ? (
-            <BrainView vault={vault} isDemo={isDemo} onOpenVault={() => setView('vault')} />
-          ) : view === 'vault' ? (
-            <VaultView
-              onAddToComposer={(path, content) => {
-                // A note becomes context: quoted, capped, and named — never a
-                // silent paste of a whole file into the draft.
-                const quoted = content.length > 4000 ? `${content.slice(0, 4000)}\n… (the rest stays in ${path})` : content
-                setDraft(previous => (previous ? `${previous}\n\nFrom the vault (${path}):\n${quoted}\n` : `From the vault (${path}):\n${quoted}\n`))
-                setView('chat')
-                setNotice(`${path} added to the composer`)
+          <Suspense fallback={<div className="ob-shell-loading" role="status">Opening workspace…</div>}>
+            {view === 'code' ? (
+              <CodeView focusFolder={codeFocus} onClearFocus={() => setCodeFocus('')} />
+            ) : view === 'brain' ? (
+              <BrainView vault={vault} isDemo={isDemo} onOpenVault={() => setView('vault')} />
+            ) : view === 'vault' ? (
+              <VaultView
+                onAddToComposer={(path, content) => {
+                  // A note becomes context: quoted, capped, and named — never a
+                  // silent paste of a whole file into the draft.
+                  const quoted = content.length > 4000 ? `${content.slice(0, 4000)}\n… (the rest stays in ${path})` : content
+                  setDraft(previous => (previous ? `${previous}\n\nFrom the vault (${path}):\n${quoted}\n` : `From the vault (${path}):\n${quoted}\n`))
+                  setView('chat')
+                  setNotice(`${path} added to the composer`)
+                }}
+              />
+            ) : view === 'projects' ? (
+              <ProjectsView
+                chats={chats.chats}
+                onOpenChat={chats.open}
+                onNewChatInProject={(projectId) => {
+                  setPendingProject(projectId)
+                  chats.create()
+                  setView('chat')
+                  setNotice('')
+                }}
+                onWorkHere={(folder) => {
+                  void bridge.engine.setWorkspace(folder).then((answer) => {
+                    setNotice(answer.ok ? `The engine now works in ${folder}` : answer.answer)
+                  })
+                }}
+                onViewBoard={(folder) => {
+                  setCodeFocus(folder)
+                  void bridge.engine.setWorkspace(folder).then((answer) => {
+                    if (answer.ok) setNotice(`The engine now works in ${folder}`)
+                    setView('code')
+                  })
+                }}
+              />
+            ) : view === 'today' ? (
+              <TodayView
+                chats={chats.chats}
+                artifacts={library.items}
+                artifactsLoading={library.loading}
+                onOpenChat={chats.open}
+                onNew={() => {
+                  chats.create()
+                  setView('chat')
+                  setNotice('')
+                }}
+                onView={setView}
+              />
+            ) : view === 'artifacts' ? (
+              <ArtifactsView
+                items={library.items}
+                loading={library.loading}
+                error={library.error}
+                where={library.where}
+                query={artifactQuery}
+                note={libraryNote}
+                onRename={library.rename}
+                onDuplicate={library.duplicate}
+                onRemove={library.remove}
+                onRestore={library.restore}
+                onImport={library.importFile}
+                onOpenInChat={openArtifactInChat}
+              />
+            ) : (
+            <ChatView
+              mascotWords={appearance.mascotWords}
+              chat={chat}
+              draft={draft}
+              setDraft={setDraft}
+              onSend={() => void send()}
+              onStop={() => {
+                if (chatApi.busyChatId) chatApi.stop()
+                else void engine.stop()
               }}
-            />
-          ) : view === 'projects' ? (
-            <ProjectsView
-              chats={chats.chats}
-              onOpenChat={chats.open}
-              onNewChatInProject={(projectId) => {
-                setPendingProject(projectId)
-                chats.create()
-                setView('chat')
-                setNotice('')
+              busy={engine.turn?.state === 'running' || chatApi.busyChatId !== null}
+              live={chatApi.live}
+              highlightId={highlight}
+              notice={notice}
+              profileName={profile.name}
+              projects={projects}
+              project={pendingProject}
+              onProject={setPendingProject}
+              attachments={attachments}
+              onFiles={(files) => void addFiles(files)}
+              onDetach={(id) => setAttachments(current => current.filter(entry => entry.id !== id))}
+              audioModels={models.models.filter(entry => entry.cloud && entry.provider === 'openai').map(entry => ({ name: entry.name }))}
+              audioModel={models.model}
+              onAudioModel={(name) => {
+                models.select(name)
+                setNotice(`Audio will be sent only to ${name}. The provider list does not confirm audio support; that exact model may refuse. No fallback.`)
               }}
-              onWorkHere={(folder) => {
-                void bridge.engine.setWorkspace(folder).then((answer) => {
-                  setNotice(answer.ok ? `The engine now works in ${folder}` : answer.answer)
-                })
-              }}
-              onViewBoard={(folder) => {
-                setCodeFocus(folder)
-                void bridge.engine.setWorkspace(folder).then((answer) => {
-                  if (answer.ok) setNotice(`The engine now works in ${folder}`)
-                  setView('code')
-                })
-              }}
+              onRefreshAudioModels={models.refresh}
+              onRewrite={runRewrite}
+              onRestore={(artifact, index) => restoreVersion(artifact.id, index)}
+              busyArtifactId={rewrite.busyId || ''}
+              rewriteStage={rewrite.stage}
+              rewriteError={rewrite.error}
+              rewriteErrorFor={rewrite.errorFor}
+              preview={
+                isDemo
+                  ? 'Browser preview, this window is the interface only. Models, files and your vault live on your own machine, in the desktop app.'
+                  : ''
+              }
             />
-          ) : view === 'today' ? (
-            <TodayView
-              chats={chats.chats}
-              artifacts={library.items}
-              artifactsLoading={library.loading}
-              onOpenChat={chats.open}
-              onNew={() => {
-                chats.create()
-                setView('chat')
-                setNotice('')
-              }}
-              onView={setView}
-            />
-          ) : view === 'artifacts' ? (
-            <ArtifactsView
-              items={library.items}
-              loading={library.loading}
-              error={library.error}
-              where={library.where}
-              query={artifactQuery}
-              note={libraryNote}
-              onRename={library.rename}
-              onDuplicate={library.duplicate}
-              onRemove={library.remove}
-              onRestore={library.restore}
-              onImport={library.importFile}
-              onOpenInChat={openArtifactInChat}
-            />
-          ) : (
-          <ChatView
-            mascotWords={appearance.mascotWords}
-            chat={chat}
-            draft={draft}
-            setDraft={setDraft}
-            onSend={() => void send()}
-            onStop={() => {
-              if (chatApi.busyChatId) chatApi.stop()
-              else void engine.stop()
-            }}
-            busy={engine.turn?.state === 'running' || chatApi.busyChatId !== null}
-            live={chatApi.live}
-            highlightId={highlight}
-            notice={notice}
-            profileName={profile.name}
-            projects={projects}
-            project={pendingProject}
-            onProject={setPendingProject}
-            attachments={attachments}
-            onFiles={(files) => void addFiles(files)}
-            onDetach={(id) => setAttachments(current => current.filter(entry => entry.id !== id))}
-            audioModels={models.models.filter(entry => entry.cloud && entry.provider === 'openai').map(entry => ({ name: entry.name }))}
-            audioModel={models.model}
-            onAudioModel={(name) => {
-              models.select(name)
-              setNotice(`Audio will be sent only to ${name}. The provider list does not confirm audio support; that exact model may refuse. No fallback.`)
-            }}
-            onRefreshAudioModels={models.refresh}
-            onRewrite={runRewrite}
-            onRestore={(artifact, index) => restoreVersion(artifact.id, index)}
-            busyArtifactId={rewrite.busyId || ''}
-            rewriteStage={rewrite.stage}
-            rewriteError={rewrite.error}
-            rewriteErrorFor={rewrite.errorFor}
-            preview={
-              isDemo
-                ? 'Browser preview, this window is the interface only. Models, files and your vault live on your own machine, in the desktop app.'
-                : ''
-            }
-          />
-          )}
-          {view === 'chat' && artifacts.length > 0 && railOpen ? (
-            <ArtifactsRail
-              items={artifacts}
-              onJump={item => jumpToArtifact(item.id)}
-              onClose={() => setRailOpen(false)}
-            />
-          ) : null}
-          {view === 'chat' && artifacts.length > 0 && !railOpen ? (
-            <button
-              type="button"
-              onClick={() => setRailOpen(true)}
-              aria-label="Show the artifacts panel"
-              title="Show this conversation's artifacts"
-              className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-card text-muted transition-colors hover:text-ink"
-            >
-              <PanelRightOpen size={14} />
-            </button>
-          ) : null}
+            )}
+            {view === 'chat' && artifacts.length > 0 && railOpen ? (
+              <ArtifactsRail
+                items={artifacts}
+                onJump={item => jumpToArtifact(item.id)}
+                onClose={() => setRailOpen(false)}
+              />
+            ) : null}
+            {view === 'chat' && artifacts.length > 0 && !railOpen ? (
+              <button
+                type="button"
+                onClick={() => setRailOpen(true)}
+                aria-label="Show the artifacts panel"
+                title="Show this conversation's artifacts"
+                className="absolute right-3 top-3 z-10 flex h-8 w-8 items-center justify-center rounded-lg border border-line bg-card text-muted transition-colors hover:text-ink"
+              >
+                <PanelRightOpen size={14} />
+              </button>
+            ) : null}
 
+          </Suspense>
         </div>
 
         {/* What was read and when, from the vault. One surface at a time: opening
             the map closes Settings, so the window is never two overlays deep. */}
-        <MemoryMap
-          open={memoryOpen && !settingsOpen}
-          onClose={() => setMemoryOpen(false)}
-        />
+        {memoryOpen && !settingsOpen ? (
+          <Suspense fallback={null}>
+            <MemoryMap open onClose={() => setMemoryOpen(false)} />
+          </Suspense>
+        ) : null}
 
-        <SettingsView
-          open={settingsOpen}
-          initialSection={settingsSection}
-          onClose={() => setSettingsOpen(false)}
-          permissions={permissions}
-          onPermissionsChange={(next: Permissions) => {
-            setPermissions(next)
-            // Re-read from the main process, so what the window shows is what the
-            // machine recorded rather than what this component hoped for.
-            setPermissionsRevision(revision => revision + 1)
-          }}
-          vault={vault}
-          onChanged={() => setVaultRevision(revision => revision + 1)}
-          onOpenBrain={() => {
-            setSettingsOpen(false)
-            setView('brain')
-          }}
-          appearance={appearance}
-          onAppearanceChange={setAppearance}
-          inference={inference}
-          onInferenceChange={setInference}
-          />
+        {settingsOpen ? (
+          <Suspense fallback={<div className="ob-shell-loading" role="status">Opening settings…</div>}>
+            <SettingsView
+              open={settingsOpen}
+              initialSection={settingsSection}
+              onClose={() => setSettingsOpen(false)}
+              permissions={permissions}
+              onPermissionsChange={(next: Permissions) => {
+                setPermissions(next)
+                // Re-read from the main process, so what the window shows is what the
+                // machine recorded rather than what this component hoped for.
+                setPermissionsRevision(revision => revision + 1)
+              }}
+              vault={vault}
+              onChanged={() => setVaultRevision(revision => revision + 1)}
+              onOpenBrain={() => {
+                setSettingsOpen(false)
+                setView('brain')
+              }}
+              appearance={appearance}
+              onAppearanceChange={setAppearance}
+              inference={inference}
+              onInferenceChange={setInference}
+            />
+          </Suspense>
+        ) : null}
       </div>
     </div>
   )

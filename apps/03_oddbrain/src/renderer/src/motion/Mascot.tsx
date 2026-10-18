@@ -16,17 +16,40 @@ import { durationScaleFor, motionPaused, pairingAt, type MotionPairing, type Mot
 import { prepareMotionSvg } from '@shared/lib/motionSvg'
 import { getMotionMode, subscribeMotionMode } from './motionMode'
 
-const RAW = import.meta.glob('../assets/motion/*.svg', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
+const RAW = import.meta.glob('../assets/motion/*.svg', {
+  query: '?raw',
+  import: 'default',
+}) as Record<string, () => Promise<string>>
 
-/** scene id → pristine SVG string, read once. */
-const PRISTINE: Record<string, string> = {}
-for (const [path, svg] of Object.entries(RAW)) {
-  const id = path.split('/').at(-1)?.replace(/\.svg$/, '') ?? ''
-  if (id) PRISTINE[id] = svg
-}
+/** Scene SVGs are split into small async chunks and cached after first use. */
+const PRISTINE = new Map<string, string>()
+const PENDING = new Map<string, Promise<string | null>>()
 
 export function motionAsset(id: string): string | null {
-  return PRISTINE[id] ?? null
+  return PRISTINE.get(id) ?? null
+}
+
+function loadMotionAsset(id: string): Promise<string | null> {
+  const cached = PRISTINE.get(id)
+  if (cached) return Promise.resolve(cached)
+  const pending = PENDING.get(id)
+  if (pending) return pending
+
+  const loader = RAW[`../assets/motion/${id}.svg`]
+  if (!loader) return Promise.resolve(null)
+
+  const request = loader()
+    .then(svg => {
+      PRISTINE.set(id, svg)
+      PENDING.delete(id)
+      return svg
+    })
+    .catch(() => {
+      PENDING.delete(id)
+      return null
+    })
+  PENDING.set(id, request)
+  return request
 }
 
 /** How many scenes may animate at once on one screen (the brief's bound). */
@@ -112,7 +135,25 @@ export function Mascot({ motion, role, size, withWord = false, periodMs = 5500, 
 
   const current: MotionPairing | null = role ? pairingAt(role, tick, seed) : null
   const sceneId = motion ?? (current ? current.motionIds[0] : null)
-  const pristine = sceneId ? PRISTINE[sceneId] : null
+  const [asset, setAsset] = useState<{ id: string | null; svg: string | null }>({ id: null, svg: null })
+  useEffect(() => {
+    if (!sceneId) {
+      setAsset({ id: null, svg: null })
+      return
+    }
+    const cached = motionAsset(sceneId)
+    if (cached) {
+      setAsset({ id: sceneId, svg: cached })
+      return
+    }
+    let active = true
+    setAsset({ id: sceneId, svg: null })
+    void loadMotionAsset(sceneId).then(svg => {
+      if (active) setAsset({ id: sceneId, svg })
+    })
+    return () => { active = false }
+  }, [sceneId])
+  const pristine = asset.id === sceneId ? asset.svg : sceneId ? motionAsset(sceneId) : null
 
   const overBudget = used >= INSTANCE_BUDGET
   const paused = pausedByMode || !onScreen || overBudget
@@ -126,10 +167,10 @@ export function Mascot({ motion, role, size, withWord = false, periodMs = 5500, 
   const [shotDone, setShotDone] = useState(false)
   useEffect(() => {
     setShotDone(false)
-    if (!isOneShot || paused) return
+    if (!isOneShot || paused || !pristine) return
     const timer = window.setTimeout(() => setShotDone(true), motionDuration(sceneId ?? ''))
     return () => window.clearTimeout(timer)
-  }, [isOneShot, paused, sceneId])
+  }, [isOneShot, paused, sceneId, pristine])
 
   // Budget accounting: a mounted, visible, animating instance holds a slot.
   const holdsSlot = !pausedByMode && onScreen && !overBudget && !shotDone
