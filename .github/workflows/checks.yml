@@ -30,7 +30,12 @@ jobs:
         timeout-minutes: 5
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64
-          xvfb-run -a npm run smoke
+          if ! xvfb-run -a npm run smoke > smoke.log 2>&1; then
+            cat smoke.log
+            tail -n 24 smoke.log | while IFS= read -r line; do echo "::error title=Native smoke::$line"; done
+            exit 1
+          fi
+          cat smoke.log
 
   windows:
     runs-on: windows-latest
@@ -49,11 +54,25 @@ jobs:
         run: npm run typecheck && npm run format:check
       - name: Tests
         working-directory: apps/03_oddbrain
-        run: npm test
+        shell: pwsh
+        run: |
+          npm test 2>&1 | Tee-Object -FilePath test.log
+          $status = $LASTEXITCODE
+          if ($status -ne 0) {
+            Get-Content test.log -Tail 28 | ForEach-Object { Write-Host "::error title=Windows tests::${_}" }
+            exit $status
+          }
       - name: Build desktop and browser preview
         working-directory: apps/03_oddbrain
         run: npm run build && npm run build:web
       - name: Native window smoke
         working-directory: apps/03_oddbrain
         timeout-minutes: 5
-        run: npm run smoke
+        shell: pwsh
+        run: |
+          npm run smoke 2>&1 | Tee-Object -FilePath smoke.log
+          $status = $LASTEXITCODE
+          if ($status -ne 0) {
+            Get-Content smoke.log -Tail 24 | ForEach-Object { Write-Host "::error title=Native smoke::${_}" }
+            exit $status
+          }
