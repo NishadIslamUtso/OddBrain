@@ -1,3 +1,4 @@
+import type { AutomationBridge, AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   CloudModelsAnswer,
@@ -5,6 +6,8 @@ import type {
   CloudView,
 } from '../shared/lib/providers'
 import type { Permissions } from '../shared/lib/permissions'
+import type { MediaOperation, MediaProviderOption, MediaRequest, MediaVisualRequest, MediaAnswer } from '../shared/lib/media'
+import type { ClaudeMarketplaceListing, ClaudeMarketplacePreview, ClaudeMarketplaceResult, ClaudePluginAction } from '../shared/lib/engineMarketplace'
 import type { ApprovalMode, EngineAvailability, EngineEvent, EngineId, EngineModelEntry, EngineSettings } from '../shared/lib/engine'
 import type { HouseRules } from '../shared/lib/houseRules'
 import type { Project } from '../shared/lib/projects'
@@ -72,9 +75,11 @@ const engineApi = {
   setThinking: (mode: 'default' | 'extended'): Promise<{ ok: boolean; answer: string }> =>
     ipcRenderer.invoke('engine:thinking', mode),
   memory: {
+    chooseFolder: (): Promise<{ ok: boolean; answer: string; folder?: string; canceled?: boolean }> => ipcRenderer.invoke('memory:choose-folder'),
+    defaultFolder: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:default-folder'),
     list: (): Promise<{ ok: boolean; folder?: string; files?: Array<{ name: string; path: string; updated: string; content: string; clipped: boolean }> }> =>
       ipcRenderer.invoke('memory:list'),
-    remove: (name: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:remove', name),
+    remove: (name: string, expectedFolder?: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:remove', name, expectedFolder),
   },
   journal: {
     list: (): Promise<{ ok: boolean; entries: Array<{ at: string; prompt: string; answer: string; sessionId: string | null; usage: string; workspace: string }> }> =>
@@ -169,8 +174,19 @@ const engineApi = {
   },
 }
 
+const automationApi: AutomationBridge = {
+  read: () => ipcRenderer.invoke('automation:read'),
+  update: (patch: Partial<AutomationPreferences>) => ipcRenderer.invoke('automation:update', patch),
+  models: () => ipcRenderer.invoke('automation:models'),
+  review: (input: ReviewInput) => ipcRenderer.invoke('automation:review', input),
+  cancel: () => ipcRenderer.invoke('automation:cancel'),
+  onChanged: listener => { const hear = (_event: unknown, view: AutomationView): void => listener(view); ipcRenderer.on('automation:changed', hear); return () => ipcRenderer.removeListener('automation:changed', hear) },
+}
 const api = {
+  automation: automationApi,
   app: {
+    previewHtml: (): Promise<{ ok: boolean; html?: string; error?: string }> => ipcRenderer.invoke('app:preview-html'),
+    claimLaunch: (): Promise<boolean> => ipcRenderer.invoke('app:claim-launch'),
     /** Which build is running. Used by the About panel and bug reports. */
     version: process.env['npm_package_version'] ?? '0.1.0',
     platform: process.platform,
@@ -212,6 +228,7 @@ const api = {
     forgetSession: (workspace: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('engine:sessions-forget', workspace),
     openFolder: (folder: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('app:open-folder', folder),
     checkpoints: {
+      inspect: (copy: string): Promise<{ ok: boolean; content?: string; clipped?: boolean; answer?: string }> => ipcRenderer.invoke('engine:checkpoint:inspect', copy),
       list: (): Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }> =>
         ipcRenderer.invoke('engine:checkpoints:list'),
       restore: (copy: string, original?: string): Promise<{ ok: boolean; answer: string }> =>
@@ -248,6 +265,16 @@ const api = {
    * interface can ask is which providers are enabled, which models they offer,
    * and whether one of them answers — never the key itself.
    */
+  media: {
+    /** The selected engine's actual picture capability, verified by main. */
+    vision: (): Promise<{ supported: boolean; reason: string }> => ipcRenderer.invoke('media:vision'),
+    /** Model names only; no attachment bytes leave the device during discovery. */
+    providers: (operation: MediaOperation): Promise<{ options: MediaProviderOption[]; reason: string }> =>
+      ipcRenderer.invoke('media:providers', operation),
+    /** Only called by the explicit per-file consent UI. Keys stay in main. */
+    transcribe: (input: MediaRequest): Promise<MediaAnswer> => ipcRenderer.invoke('media:transcribe', input),
+    describe: (input: MediaVisualRequest): Promise<MediaAnswer> => ipcRenderer.invoke('media:describe', input),
+  },
   cloud: {
     /** The providers and whether a key is saved for each. Never the key. */
     providers: (): Promise<CloudView> => ipcRenderer.invoke('cloud:providers'),
@@ -273,6 +300,10 @@ const api = {
     installFromFile: (): Promise<{ ok: boolean; answer: string; pack?: unknown; prompts?: Array<{ name: string; body: string }>; themes?: Array<{ name: string; appearance: Record<string, string>; css?: string }>; folder?: string }> =>
       ipcRenderer.invoke('mods:install-from-file'),
     list: (): Promise<Array<{ pack: unknown; folder: string; installedAt: string }>> => ipcRenderer.invoke('mods:list'),
+    claudeList: (): Promise<ClaudeMarketplaceListing> => ipcRenderer.invoke('mods:claude-list'),
+    claudePreview: (action: ClaudePluginAction, value: string): Promise<ClaudeMarketplacePreview> => ipcRenderer.invoke('mods:claude-preview', action, value),
+    claudeExecute: (action: ClaudePluginAction, value: string, command: string, sha256?: string): Promise<ClaudeMarketplaceResult> =>
+      ipcRenderer.invoke('mods:claude-execute', action, value, command, sha256),
     remove: (id: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('mods:remove', id),
     indexAdd: (kind: string, locator: string): Promise<{ ok: boolean; answer: string }> =>
       ipcRenderer.invoke('mods:index-add', { kind, locator }),
@@ -363,6 +394,8 @@ const api = {
   },
 
   artifacts: {
+    trashList: (): Promise<{ ok: boolean; items: import('../main/artifacts/store').TrashItem[]; error?: string }> => ipcRenderer.invoke('artifacts:trash-list'),
+    trashRestore: (key: string): Promise<ItemAnswer> => ipcRenderer.invoke('artifacts:trash-restore', key),
     list: (): Promise<ListAnswer> => ipcRenderer.invoke('artifacts:list'),
     /** One document. `version` is 1-based, the number the chips show. */
     read: (id: string, version?: number): Promise<ReadAnswer> => ipcRenderer.invoke('artifacts:read', id, version),

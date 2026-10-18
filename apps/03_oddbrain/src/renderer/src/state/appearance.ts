@@ -114,8 +114,8 @@ export const DEFAULT_APPEARANCE: Appearance = Object.freeze({
   textSize: 'medium',
   font: 'sans',
   motion: 'system',
-  mascotWords: true,
-  rowExplanations: true,
+  mascotWords: false,
+  rowExplanations: false,
   packCss: '',
   designSystem: '',
 })
@@ -196,7 +196,7 @@ export function appearanceVariables(appearance: Appearance): Record<string, stri
 }
 
 type StyledRoot = {
-  style: { setProperty(name: string, value: string): void }
+  style: { setProperty(name: string, value: string): void; removeProperty?(name: string): void }
   setAttribute?(name: string, value: string): void
   removeAttribute?(name: string, value?: string): void
 }
@@ -211,7 +211,10 @@ export function applyAppearance(
     // The design system owns the accent, the ink on it and the reading
     // type — inline styles beat stylesheets, so those keys stay OFF the
     // root while a system is active, or its own choices could never land.
-    if (active && (name === '--color-accent' || name === '--accent-ink' || name === '--transcript-font' || name === '--transcript-size')) continue
+    if (active && (name === '--color-accent' || name === '--accent-ink' || name === '--transcript-font' || name === '--transcript-size')) {
+      root.style.removeProperty?.(name)
+      continue
+    }
     root.style.setProperty(name, value)
   }
   applyPackStyle(active ? '' : (appearance.packCss ?? ''))
@@ -227,7 +230,9 @@ export function applyAppearance(
   // `[data-theme='light']`, so `System` is the attribute's absence and the OS's
   // preference answers. The accent stays inline — it is chosen separately and
   // works on both palettes.
-  if (appearance.theme === 'light' || appearance.theme === 'dark') {
+  if (active) {
+    // The token set owns its light/dark scheme, even if an old app preference says Light.
+  } else if (appearance.theme === 'light' || appearance.theme === 'dark') {
     if (typeof root.setAttribute === 'function') root.setAttribute('data-theme', appearance.theme)
   } else if (typeof root.removeAttribute === 'function') {
     // With a design system active the attribute was pinned 'dark' above —

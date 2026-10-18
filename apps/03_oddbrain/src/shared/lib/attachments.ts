@@ -1,6 +1,7 @@
 import type { Attachment, Message, ModelCapabilities, OllamaMessage, StoredAttachment } from '../types'
 import { newId } from './storage'
 import { BRIDGE_TAG } from './vision'
+import { DOCUMENT_EXTENSIONS, readDocumentText } from './documentReader'
 
 const TEXT_EXTENSIONS = /\.(?:txt|md|csv|json|js|jsx|ts|tsx|html?|css|py|xml|ya?ml|log|sql|sh|bat|c|cpp|h|java|rs)$/i
 
@@ -37,9 +38,13 @@ export async function readAttachment(
     // `seenBy` is what the app will actually use to read this picture.
     return { ...common, kind: 'image', data, seenBy: capabilities.vision ? 'direct' : options.bridge }
   }
+  if (DOCUMENT_EXTENSIONS.test(file.name)) {
+    const text = await readDocumentText(file)
+    return { ...common, kind: 'text', text }
+  }
   if (!TEXT_EXTENSIONS.test(file.name) && !/^text\//.test(file.type)) {
     throw new Error(
-      `${file.name}: only text/code files and supported images are available. PDF/Word parsing is not implemented; export them as text.`
+      `${file.name}: this file has no safe local text decoder. Attach a supported document, image, audio or video instead. Legacy .doc and encrypted files must be converted first.`
     )
   }
   if (file.size > 64 * 1024) throw new Error(`${file.name}: maximum text file size is 64 KB.`)

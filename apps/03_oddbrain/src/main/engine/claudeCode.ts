@@ -48,6 +48,8 @@ export type StartSessionInput = {
   images?: Array<{ mime: string; data: string }>
   /** Where kept copies go, when the app asked for checkpoints at all. */
   checkpointDir?: string
+  /** Read at each approval: a live session must honor Auto-keep changes. */
+  shouldCheckpoint?: () => boolean
   /**
    * A provider key from Models, resolved by the door that received the send.
    * Present only when the chosen brain is a provider brain; the engine is
@@ -169,7 +171,13 @@ export function brainEnvironment(baseUrl: string, apiKey?: string): Record<strin
 }
 
 export function startClaudeCodeSession(input: StartSessionInput): EngineSession {
-  const args = engineArguments(input.settings.model, input.settings.approval, input.resumeId)
+  // Model-list entries include `anthropic/` so the picker can identify the
+  // authorized provider. The Claude CLI expects the provider's raw model id
+  // on --model; passing our UI prefix there made every such launch fail.
+  const chosenModel = input.auth?.provider === 'anthropic' && input.settings.model.startsWith('anthropic/')
+    ? input.settings.model.slice('anthropic/'.length)
+    : input.settings.model
+  const args = engineArguments(chosenModel, input.settings.approval, input.resumeId)
 
   // Permission questions still waiting on a person, with what they would touch.
   const pending = new Map<string, { tool: string; file: string }>()
@@ -317,7 +325,7 @@ export function startClaudeCodeSession(input: StartSessionInput): EngineSession 
           })}\n`,
         )
       }
-      if (allow && asked && checkpointWorthTaking(asked.tool) && asked.file && input.checkpointDir) {
+      if (allow && asked && checkpointWorthTaking(asked.tool) && asked.file && input.checkpointDir && input.shouldCheckpoint?.() !== false) {
         // Fail CLOSED: the promise is "the old self is kept before the Allow
         // travels". If keeping it fails, the Allow must not travel — the
         // engine gets an honest deny and the person sees why.

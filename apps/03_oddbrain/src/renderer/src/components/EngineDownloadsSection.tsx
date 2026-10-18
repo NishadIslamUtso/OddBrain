@@ -195,9 +195,10 @@ export default function EngineDownloadsSection() {
             </div>
           </div>
         ) : null}
-      {busy && tick ? (
+      {busy && tick && tick.engine === busy ? (
         <p className="mt-1 text-[11px] text-muted" role="status">
-          {tick.engine}: {tick.total ? `${Math.round((tick.got / tick.total) * 100)}%` : `${Math.round(tick.got / 1024)} KB`}
+          {tick.engine}: {tick.phase === 'unpacking' ? `Unpacking ${tick.answer ?? ''}` : 'Downloading'}
+          {tick.total ? ` · ${Math.round((tick.got / tick.total) * 100)}%` : ` · ${Math.round(tick.got / 1024)} KB`}
         </p>
       ) : null}
       {lines.length ? (

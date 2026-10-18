@@ -6,17 +6,13 @@ import { describePermissions, type Pack } from '@shared/lib/packs'
 import { readStored, writeStored } from '@shared/lib/storage'
 import { savePrompt } from '@shared/lib/prompts'
 import type { Appearance } from '../state/appearance'
+import ClaudeMarketplacesSection from './ClaudeMarketplacesSection'
 
 /**
- * Settings > Extensions — mods, Phase 1.
- *
- * A pack is a folder with a manifest.json. This screen installs one from a
- * folder the person picks, says in plain words what it may do BEFORE it
- * lands, keeps every installed pack visible with its real path, and removes
- * one by undoing exactly what the install wrote. Skills deploy to every
- * engine; prompts join the prompt library; a theme becomes a look in Appearance.
- * No index, no server, no account — that is Phase 2's work, and it will be
- * the same list with a new source.
+ * Settings > Plugins: OddBrain packs and each engine's own verified store.
+ * OddBrain installs checksum-pinned packs; Claude Code installs its plugins
+ * through its own CLI. They are separate sources on one page, never silently
+ * treated as the same format or copied into each other's folders.
  */
 
 type Listed = { pack: Pack; folder: string; installedAt: string; via?: string }
@@ -140,17 +136,18 @@ export default function ModsSection({
   if (isDemo) {
     return (
       <p className="text-[12px] leading-relaxed text-muted">
-        Mods are installed by the desktop app, this preview has no machine behind it.
+        OddBrain packs and Claude Code marketplaces are managed by the desktop app. This browser preview has no engine or filesystem to browse.
       </p>
     )
   }
 
   return (
     <div className="flex flex-col gap-3">
+      <h3 className="text-[14px] font-semibold text-ink">OddBrain packs</h3>
       <p className="text-[12px] leading-relaxed text-muted">
-        A mod is a folder with a <span className="font-mono">manifest.json</span>, skills for the engines, prompts for the
-        prompt library, a theme for the app. Nothing here comes from a server: you pick the folder, the app reads it in front of
-        you, and every installed pack stays visible below with its real path.
+        A pack is a folder with a <span className="font-mono">manifest.json</span>: skills, prompts and themes.
+        You can install one from a folder or an index you added yourself. The pack's source and checksum stay visible;
+        it does not become a Claude Code plugin.
       </p>
 
       <button
@@ -211,14 +208,14 @@ themes/paper.json`}
                           className="ml-2 rounded-md border border-line px-1.5 py-0.5 text-[10px] text-muted"
                           title={via === 'index' ? 'Installed from a store whose index pinned the checksum, verified at install.' : 'Shipped with the app.'}
                         >
-                          {via === 'index' ? 'store · checksum verified' : 'shipped'}
+                          {via === 'index' ? 'OddBrain store · checksum verified' : 'OddBrain · shipped'}
                         </span>
                       ) : (
                         <span
                           className="ml-2 rounded-md border border-warn/50 px-1.5 py-0.5 text-[10px] text-warn"
                           title="Not from a store's index, you installed it from a folder yourself."
                         >
-                          unverified
+                          OddBrain · local folder, unverified
                         </span>
                       )}
                     </p>
@@ -287,6 +284,7 @@ themes/paper.json`}
       )}
 
       <CommunityPacks installed={packs.map(item => ({ id: item.pack.id, version: item.pack.version }))} onInstalled={refresh} />
+      <ClaudeMarketplacesSection />
     </div>
   )
 }
@@ -634,6 +632,7 @@ function CommunityPacks({ installed, onInstalled }: {
                             <span className="ml-2 rounded-md border border-warn/50 px-1.5 py-0.5 text-[10px] text-warn">not installable</span>
                           )}
                         </p>
+                        <p className="mt-0.5 text-[10.5px] text-muted">OddBrain pack index · {result.name}</p>
                         {entry.description ? <p className="mt-0.5 text-[11.5px] text-muted">{entry.description}</p> : null}
                         {!entry.verified && entry.problem ? <p className="mt-0.5 text-[11px] text-warn">{entry.problem}</p> : null}
                         {entry.downloadable ? <p className="mt-0.5 text-[11px] text-muted">Downloads beside its index, then must match the pinned checksum byte for byte before anything installs.</p> : null}

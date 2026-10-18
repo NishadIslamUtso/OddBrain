@@ -100,6 +100,19 @@ test('the launch line pins the two permission flags — without them no card can
   assert.match(engineArguments('gemma4:cloud').join(' '), /--model gemma4:cloud/, 'a named brain is passed verbatim')
 })
 
+test('a provider-labelled model is passed to the real Claude CLI without the UI provider prefix', () => {
+  const fake = fakeEngine()
+  const { spawn, args } = spawnCapturing(fake.child)
+  startClaudeCodeSession({
+    cwd: '.',
+    settings: { ...DEFAULT_ENGINE, model: 'anthropic/claude-sonnet-4-5', cloudProvider: 'anthropic' },
+    auth: { provider: 'anthropic', apiKey: 'test-only-key' },
+    onEvent: () => undefined,
+    spawnProcess: spawn as typeof import('node:child_process').spawn,
+  })
+  assert.deepEqual(args.slice(args.indexOf('--model'), args.indexOf('--model') + 2), ['--model', 'claude-sonnet-4-5'])
+})
+
 test('the wire: init, words, a tool, and a result become readable events', () => {
   const parser = createEngineParser()
   const events = parser.feed(
@@ -653,6 +666,10 @@ test('the socket: agy routes to its own adapter and an engine switch starts fres
   assert.deepEqual(started[0].args.slice(0, 4), ['--input-format', 'stream-json', '--output-format', 'stream-json'])
   assert.ok(started[0].args.includes('gemini-3-pro'))
 
+  // A busy worker must not be killed by another sender changing gear.
+  const refused = socket.send('not yet', { cwd: '.', platform: 'linux', settings: { ...DEFAULT_ENGINE, id: 'claude-code', model: 'm' }, onEvent: rec.on, spawnProcess: fake })
+  assert.equal(refused.ok, false); assert.equal(started.length, 1); assert.equal(children[0].killed, false)
+  children[0].stdout.emit('data', Buffer.from(JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: 'finished' } }) + '\n'))
   // an engine switch sets the old process aside and starts the chosen engine
   socket.send('y', {
     cwd: '.',

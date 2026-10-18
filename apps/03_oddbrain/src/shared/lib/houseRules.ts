@@ -90,7 +90,7 @@ const HEADING: Record<EngineId, string> = {
  * Compile the canonical rulebook for one engine: the body is the same — that
  * is the whole point — only the file name and heading are native to it.
  */
-export function compileFor(engine: EngineId, rules: HouseRules = DEFAULT_HOUSE_RULES): string {
+export function compileFor(engine: EngineId, rules: HouseRules = DEFAULT_HOUSE_RULES, memoryFolder = ''): string {
   if (!HOUSE_RULES_FILENAME[engine]) {
     throw new Error(`no house-rules channel for engine: ${String(engine)}`)
   }
@@ -99,7 +99,7 @@ export function compileFor(engine: EngineId, rules: HouseRules = DEFAULT_HOUSE_R
     ['Artifacts', rules.artifacts],
     ['Approvals', rules.permissions],
     ['Memory and searching', rules.memory],
-    ['What you keep', REMEMBERING_SECTION],
+    ['What you keep', memoryFolder ? REMEMBERING_SECTION.replace('at 06 Review/Memory/engine-notes.md in your working folder', 'at ' + JSON.stringify(memoryFolder.replace(/\\/g, '/') + '/engine-notes.md') + ' in the explicit memory directory chosen by the owner') : REMEMBERING_SECTION],
     ['How you write', rules.style],
   ]
   const body = sections
@@ -156,8 +156,8 @@ export function modelHints(model: string): string {
 }
 
 /** The full instruction block for a turn: rules, then the brain's footnote. */
-export function instructionBlock(engine: EngineId, model: string, rules: HouseRules = DEFAULT_HOUSE_RULES): string {
+export function instructionBlock(engine: EngineId, model: string, rules: HouseRules = DEFAULT_HOUSE_RULES, memoryFolder = ''): string {
   const hints = modelHints(model)
-  const base = compileFor(engine, rules)
+  const base = compileFor(engine, rules, memoryFolder)
   return hints ? `${base}\n## Notes for this brain\n\n${hints}\n` : base
 }

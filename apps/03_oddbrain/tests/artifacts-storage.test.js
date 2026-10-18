@@ -55,7 +55,7 @@ test('corrupt storage is preserved and a recovery copy is made before an edit', 
 test('text files are decoded honestly; unsupported or oversized files are refused', async () => {
   const file = (name, text, size = text.length) => ({ name, size, type: 'text/plain', text: async () => text })
   assert.equal((await readAttachment(file('notes.md', 'Source notes'), {})).text, 'Source notes')
-  await assert.rejects(readAttachment({ ...file('book.pdf', 'PDF'), type: 'application/pdf' }, {}), /not implemented/)
+  await assert.rejects(readAttachment({ ...file('book.pdf', 'PDF'), type: 'application/pdf', arrayBuffer: async () => new TextEncoder().encode('PDF').buffer }, {}), /not a valid PDF/)
   await assert.rejects(readAttachment(file('huge.txt', 'a'.repeat(12001)), {}), /No content has been silently truncated/)
   await assert.rejects(readAttachment(file('binary.txt', 'bad\0data'), {}), /not a readable/)
   await assert.rejects(readAttachment({ name: 'photo.png', type: 'image/png', size: 20 }, {}), /verified vision/)

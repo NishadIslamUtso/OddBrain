@@ -92,7 +92,6 @@ export function designSystemCss(id: string): string {
   --font-sans: var(--font-body, var(--font-display));
   --transcript-font: var(--font-body, var(--font-display));
   --transcript-size: var(--text-sm, 14.5px);
-  --font-mono: var(--font-mono, ui-monospace, monospace);
 }
 .rounded-lg { border-radius: var(--radius-md, 0.5rem); }
 .rounded-xl { border-radius: var(--radius-lg, 0.75rem); }

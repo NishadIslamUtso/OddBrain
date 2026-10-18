@@ -10,12 +10,14 @@
  */
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, open, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { createHash, randomUUID } from 'node:crypto'
+import { unzipRuntimeZip } from './runtimeZip'
 import { inflateRawSync } from 'node:zlib'
-import { ENGINE_DOWNLOADS, MAX_DOWNLOAD_BYTES, humanBytes, isOfficialDownloadHost, isOfficialUrl, parseShaLine } from '../../shared/lib/engineDownloads'
+import { ENGINE_DOWNLOADS, MAX_DOWNLOAD_BYTES, humanBytes, isOfficialDownloadHost, isOfficialUrl } from '../../shared/lib/engineDownloads'
 
-export type DownloadTick = { engine: string; got: number; total: number | null; phase: 'downloading' | 'staged' | 'error'; answer?: string }
+export type DownloadTick = { engine: string; got: number; total: number | null; phase: 'downloading' | 'unpacking' | 'staged' | 'error'; answer?: string }
 
 export type InstallRecord = {
   engine: string
@@ -25,7 +27,7 @@ export type InstallRecord = {
   at: string
 }
 
-type FetchLike = (url: string) => Promise<{ ok: boolean; status?: number; headers?: { get(name: string): string | null }; arrayBuffer?: () => Promise<ArrayBuffer>; body?: unknown }>
+type FetchLike = (url: string) => Promise<{ ok: boolean; status?: number; headers?: { get(name: string): string | null }; arrayBuffer?: () => Promise<ArrayBuffer>; body?: AsyncIterable<Uint8Array> | null }>
 
 export type DownloadManager = {
   start(engine: string): Promise<{ ok: boolean; answer: string }>
@@ -52,9 +54,10 @@ async function answering(): Promise<boolean> {
   try {
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), 700)
-    const reply = await fetch('http://127.0.0.1:11434/api/version', { signal: controller.signal })
-    clearTimeout(timer)
-    return reply.ok
+    try {
+      const reply = await fetch('http://127.0.0.1:11434/api/version', { signal: controller.signal })
+      return reply.ok
+    } finally { clearTimeout(timer) }
   } catch {
     return false
   }
@@ -78,6 +81,7 @@ export function createDownloadManager(options: {
       status: reply.status,
       headers: { get: (name: string) => reply.headers.get(name) },
       arrayBuffer: () => reply.arrayBuffer(),
+      body: reply.body as AsyncIterable<Uint8Array> | null,
     }
   })
 
@@ -91,7 +95,7 @@ export function createDownloadManager(options: {
   const fetchOfficial = async (
     engine: string,
     url: string
-  ): Promise<{ ok: boolean; status?: number; headers?: { get(name: string): string | null }; arrayBuffer?: () => Promise<ArrayBuffer>; body?: unknown; refusal?: string }> => {
+  ): Promise<{ ok: boolean; status?: number; headers?: { get(name: string): string | null }; arrayBuffer?: () => Promise<ArrayBuffer>; body?: AsyncIterable<Uint8Array> | null; refusal?: string }> => {
     let current = url
     for (let hop = 0; hop <= OFFICIAL_HOP_LIMIT; hop++) {
       const reply = await doFetch(current)
@@ -111,6 +115,7 @@ export function createDownloadManager(options: {
     return { ok: false, refusal: 'The official endpoint redirected too many times. Nothing was downloaded.' }
   }
   const onTick = options.onTick ?? (() => undefined)
+  const inProgress = new Set<string>()
 
   const recordPath = (engine: string): string => join(root, engine, 'install-record.json')
   const stagedPath = (engine: string): string | null => {
@@ -137,82 +142,97 @@ export function createDownloadManager(options: {
     async start(engine: string): Promise<{ ok: boolean; answer: string }> {
       const info = ENGINE_DOWNLOADS[engine]
       if (!info) return { ok: false, answer: `No download is known for ${engine}.` }
-      if (info.kind === 'page') {
-        return { ok: false, answer: `${engine} has no verified direct endpoint. Open ${info.page} and install from Google itself; the app will find it on the next check.` }
-      }
-      if (!isOfficialUrl(engine, info.windows)) {
-        // Code, not promise: a tampered endpoint table cannot send you anywhere else.
-        return { ok: false, answer: 'That endpoint is not the official one. Nothing was downloaded.' }
-      }
-      onTick({ engine, got: 0, total: null, phase: 'downloading' })
-      let reply: Awaited<ReturnType<typeof fetchOfficial>>
+      if (info.kind === 'page') return { ok: false, answer: `${engine} has no verified direct endpoint. Open ${info.page} and install from Google itself; the app will find it on the next check.` }
+      if (!isOfficialUrl(engine, info.windows)) return { ok: false, answer: 'That endpoint is not the official one. Nothing was downloaded.' }
+      if (inProgress.has(engine)) return { ok: false, answer: `A ${engine} download is already running.` }
+      inProgress.add(engine)
+      let temporary = '', unpacking = ''
       try {
-        reply = await fetchOfficial(engine, info.windows)
-      } catch (failure) {
-        onTick({ engine, got: 0, total: null, phase: 'error', answer: `Could not reach ${info.host}: ${(failure as Error).message}` })
-        return { ok: false, answer: `Could not reach ${info.host}. Nothing was downloaded.` }
-      }
-      if ('refusal' in reply && reply.refusal) {
-        onTick({ engine, got: 0, total: null, phase: 'error', answer: reply.refusal })
-        return { ok: false, answer: reply.refusal }
-      }
-      if (!reply.ok) {
-        const answer = `${info.host} answered ${reply.status ?? 'with an error'}. The endpoint may have moved; nothing was downloaded.`
-        onTick({ engine, got: 0, total: null, phase: 'error', answer })
-        return { ok: false, answer }
-      }
-      const declared = Number(reply.headers?.get('content-length') ?? '0')
-      if (declared > MAX_DOWNLOAD_BYTES) {
-        const answer = `${info.host} offered more than the ${humanBytes(MAX_DOWNLOAD_BYTES)} cap. Nothing was downloaded.`
-        onTick({ engine, got: 0, total: null, phase: 'error', answer })
-        return { ok: false, answer }
-      }
-      let bytes: Uint8Array
-      try {
-        bytes = new Uint8Array((await reply.arrayBuffer?.()) ?? new ArrayBuffer(0))
-      } catch (failure) {
-        const answer = `The download broke midway: ${(failure as Error).message}`
-        onTick({ engine, got: 0, total: null, phase: 'error', answer })
-        return { ok: false, answer }
-      }
-      if (!bytes.length) {
-        const answer = `${info.host} sent nothing. Nothing was installed.`
-        onTick({ engine, got: 0, total: null, phase: 'error', answer })
-        return { ok: false, answer }
-      }
-      if (bytes.length > MAX_DOWNLOAD_BYTES) {
-        const answer = 'The download exceeded the size cap. Nothing was installed.'
-        onTick({ engine, got: 0, total: null, phase: 'error', answer })
-        return { ok: false, answer }
-      }
-      onTick({ engine, got: bytes.length, total: bytes.length, phase: 'downloading' })
-      const target = stagedPath(engine) ?? join(root, engine, 'download.bin')
-      await mkdir(join(root, engine), { recursive: true })
-      await writeFile(target, bytes)
-      const digest = parseShaLine(await import('node:crypto').then(crypto => crypto.createHash('sha256').update(bytes).digest('hex')))
-      const record: InstallRecord = {
-        engine,
-        file: target,
-        endpoint: info.windows,
-        sha256: digest,
-        at: new Date().toISOString(),
-      }
-      await writeRecords(engine, record)
-      // A zip for the app's own runtime is unpacked right away; an installer
-      // script waits for its own run permission.
-      if (info.kind === 'zip') {
-        const unpacked = await unzipArchive(bytes, join(root, engine, 'app'))
-        if (!unpacked.ok) {
-          const answer = `The archive could not be unpacked: ${unpacked.answer}`
-          onTick({ engine, got: 0, total: null, phase: 'error', answer })
-          return { ok: false, answer }
+        onTick({ engine, got: 0, total: null, phase: 'downloading' })
+        const reply = await fetchOfficial(engine, info.windows).catch((error: Error) => {
+          throw Error(`Could not reach ${info.host}: ${error.message}. Nothing was downloaded.`)
+        })
+        if ('refusal' in reply && reply.refusal) throw Error(reply.refusal)
+        if (!reply.ok) throw Error(`${info.host} answered ${reply.status ?? 'with an error'}. The endpoint may have moved; nothing was downloaded.`)
+        const lengthHeader = reply.headers?.get('content-length')
+        const declared = lengthHeader === null || lengthHeader === undefined ? null : Number(lengthHeader)
+        if (declared !== null && (!Number.isSafeInteger(declared) || declared < 0)) throw Error('The download declared an invalid size.')
+        if (declared !== null && declared > MAX_DOWNLOAD_BYTES) throw Error(`${info.host} offered more than the ${humanBytes(MAX_DOWNLOAD_BYTES)} cap. Nothing was downloaded.`)
+        const target = stagedPath(engine)!
+        const folder = join(root, engine)
+        await mkdir(folder, { recursive: true })
+        temporary = `${target}.${randomUUID()}.part`
+        const digest = createHash('sha256')
+        let got = 0, lastReport = Date.now()
+        const staged = await open(temporary, 'wx', 0o600)
+        try {
+          // Real fetch responses stream to disk. The small arrayBuffer fallback
+          // exists only for older injected test transports, never for a 1.5 GB
+          // runtime: buffering the entire zip used to exhaust the app's memory.
+          if (!reply.body && (declared === null || declared > 8 * 1024 * 1024)) throw Error('This download cannot be streamed. Nothing was staged.')
+          const chunks = reply.body || (async function* () {
+            if (!reply.arrayBuffer) throw Error('The download had no readable body.')
+            yield new Uint8Array(await reply.arrayBuffer())
+          })()
+          for await (const chunk of chunks) {
+            if (!(chunk instanceof Uint8Array)) throw Error('The download sent an invalid chunk.')
+            got += chunk.length
+            if (got > MAX_DOWNLOAD_BYTES) throw Error('The download exceeded the size cap. Nothing was staged.')
+            await staged.writeFile(chunk)
+            digest.update(chunk)
+            if (Date.now() - lastReport > 200) {
+              onTick({ engine, got, total: declared, phase: 'downloading' })
+              lastReport = Date.now()
+            }
+          }
+        } finally { await staged.close() }
+        if (!got) throw Error(`${info.host} sent nothing. Nothing was installed.`)
+        if (declared !== null && got !== declared) throw Error('The download ended at a different size than the publisher declared.')
+        onTick({ engine, got, total: got, phase: 'downloading' })
+        const record: InstallRecord = { engine, file: target, endpoint: info.windows, sha256: digest.digest('hex'), at: new Date().toISOString() }
+        if (info.kind === 'zip') {
+          // Use runtime-sized limits *only* here. Pack/attachment limits stay
+          // small. Unpack to a fresh sibling, verify CRC, then swap it into
+          // place; failure must not erase an older working copy.
+          unpacking = join(folder, `app-${randomUUID()}.part`)
+          const unpacked = await unzipRuntimeZip(temporary, unpacking, progress => onTick({ engine, got: progress.got, total: progress.total, phase: 'unpacking', answer: `${progress.files}/${progress.totalFiles} files` }))
+          if (!unpacked.ok) throw Error(`The archive could not be unpacked: ${unpacked.answer}`)
+          const current = join(folder, 'app')
+          const old = join(folder, `app-${randomUUID()}.previous`)
+          const hadOld = existsSync(current)
+          if (hadOld) await rename(current, old)
+          try {
+            await rename(unpacking, current)
+            unpacking = ''
+            await rename(temporary, target)
+            temporary = ''
+            await writeRecords(engine, record)
+          } catch (error) {
+            // A failed swap never leaves a partly installed binary selected.
+            if (existsSync(current)) await rm(current, { recursive: true, force: true })
+            if (hadOld) await rename(old, current)
+            throw error
+          }
+          if (hadOld) await rm(old, { recursive: true, force: true }).catch(() => undefined)
+        } else {
+          await rename(temporary, target)
+          temporary = ''
+          await writeRecords(engine, record)
         }
+        const answer = info.kind === 'zip'
+          ? 'Downloaded from the official endpoint and unpacked into the app’s own engines folder. SHA-256 and per-file CRC were checked; the official source is pinned by URL.'
+          : 'Staged. Running the official installer is a separate permission, shown in full before it runs.'
+        onTick({ engine, got, total: got, phase: 'staged', answer })
+        return { ok: true, answer }
+      } catch (failure) {
+        const answer = (failure as Error).message || 'The download failed. Nothing was installed.'
+        onTick({ engine, got: 0, total: null, phase: 'error', answer })
+        return { ok: false, answer }
+      } finally {
+        if (temporary) await rm(temporary, { force: true }).catch(() => undefined)
+        if (unpacking) await rm(unpacking, { recursive: true, force: true }).catch(() => undefined)
+        inProgress.delete(engine)
       }
-      const answer = info.kind === 'zip'
-        ? 'Downloaded from the official endpoint and unpacked into the app\u2019s own engines folder. (The file\u2019s SHA-256 is recorded below; the official source is pinned by URL.)'
-        : 'Staged. Running the official installer is a separate permission, shown in full before it runs.'
-      onTick({ engine, got: bytes.length, total: bytes.length, phase: 'staged', answer })
-      return { ok: true, answer }
     },
 
     async status() {
@@ -260,13 +280,8 @@ export function createDownloadManager(options: {
     },
 
     ollamaBinary() {
-      // The staged copy first; then the Ollama the OWNER installed (the
-      // desktop app puts it in Programs/Ollama; winget the same) — then any
-      // ollama.exe sitting on the PATH. His install, started by the app: no
-      // second copy downloaded for nothing.
-      for (const candidate of [join(root, 'ollama', 'app', 'ollama.exe'), join(root, 'ollama', 'app', 'ollama')]) {
-        if (existsSync(candidate)) return candidate
-      }
+      // Prefer the owner's existing install (Programs/Ollama or PATH). The
+      // app-managed copy is a fallback, not a replacement for their install.
       const env = process.env
       const programs = env['LOCALAPPDATA'] ? join(env['LOCALAPPDATA'], 'Programs', 'Ollama', 'ollama.exe') : ''
       if (programs && existsSync(programs)) return programs
@@ -278,6 +293,9 @@ export function createDownloadManager(options: {
         } catch {
           /* a hostile PATH entry throws — skip it */
         }
+      }
+      for (const candidate of [join(root, 'ollama', 'app', 'ollama.exe'), join(root, 'ollama', 'app', 'ollama')]) {
+        if (existsSync(candidate)) return candidate
       }
       return null
     },
