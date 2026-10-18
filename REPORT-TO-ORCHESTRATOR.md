@@ -45,7 +45,9 @@ same tree passed smoke at 11:38, failed it at 11:56 and again at 12:09.
 workflow file may be broken", so a fresh sample needs a push. The commit this
 report rides in will produce one.
 
-I am not claiming a green smoke on this tip.
+I am not claiming a green smoke on that tip. The next push settled it: commit
+`fbd9a10` (this report's parent) passed all four jobs, smoke included, on
+byte-identical source. Four runs of one tree: pass, fail, fail, pass.
 
 ## Gate, from the runs just executed (12:49 UTC)
 
