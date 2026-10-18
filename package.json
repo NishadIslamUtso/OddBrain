@@ -1,0 +1,31 @@
+{
+  "name": "oddbrain-workspace",
+  "version": "0.9.0",
+  "private": true,
+  "description": "OddBrain desktop application and browser extension",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.13"
+  },
+  "workspaces": [
+    "apps/desktop"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/desktop",
+    "dev:web": "npm run dev:web --workspace apps/desktop",
+    "typecheck": "npm run typecheck --workspace apps/desktop",
+    "test": "node --test scripts/repository.test.mjs && npm run test --workspace apps/desktop",
+    "build": "npm run build --workspace apps/desktop",
+    "build:web": "npm run build:web --workspace apps/desktop",
+    "test:ui": "npm run test:ui --workspace apps/desktop",
+    "test:media-runtime": "npm run test:media-runtime --workspace apps/desktop",
+    "smoke": "npm run smoke --workspace apps/desktop",
+    "dist:win": "npm run dist:win --workspace apps/desktop",
+    "dist:win:dir": "npm run dist:win:dir --workspace apps/desktop",
+    "check": "npm run typecheck && npm test && npm run build && npm run build:web",
+    "test:ui:production": "npm run test:ui:production --workspace apps/desktop"
+  },
+  "overrides": {
+    "@electron/get": "^5.1.0"
+  }
+}

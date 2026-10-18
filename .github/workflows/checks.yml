@@ -1,211 +1,84 @@
-# The gate, on every push, on both operating systems. Linux always ran it;
-# Windows (the target OS) joined 2026-10-17 as allow-failure until it ran
-# green once — and when it did, the training wheels came off the same day.
-# A red X here fails the push now. It earned that.
 name: checks
 on: [push, pull_request]
+permissions:
+  contents: read
+concurrency:
+  group: checks-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
-  linux:
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
+  application:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install
-        working-directory: apps/03_oddbrain
-        run: npm install --no-audit --no-fund
-      - name: Types
-        working-directory: apps/03_oddbrain
-        run: npx tsc --noEmit -p tsconfig.json
-      - name: Tests
-        working-directory: apps/03_oddbrain
-        run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-linux.xml
-      - name: Linux speaks
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const p = 'apps/03_oddbrain/junit-linux.xml';
-            if (fs.existsSync(p)) {
-              const raw = fs.readFileSync(p, 'utf8');
-              const lines = [];
-              for (const suite of raw.split(/(?=<testsuite )/)) {
-                const head = suite.match(/<testsuite name="([^"]+)"[^>]*failures="(\d+)" errors="(\d+)"/);
-                if (!head || (head[2] === '0' && head[3] === '0')) continue;
-                lines.push('FAILED SUITE ' + head[1] + ' (' + head[2] + ' failures, ' + head[3] + ' errors)');
-                for (const m of suite.matchAll(/<testcase classname="[^"]*" name="([^"]*)"[^>]*>\s*<failure message="([^"]*)"/g)) {
-                  lines.push('  - ' + m[1] + ' — ' + m[2].slice(0, 800));
-                }
-              }
-              if (lines.length) {
-                let body = lines.join('\n');
-                if (body.length > 40000) body = body.slice(0, 40000) + '\n...truncated';
-                await github.rest.repos.createCommitComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  commit_sha: context.sha,
-                  body: 'linux failures, in its own words:\n\n' + body
-                });
-              }
-            }
-      - name: Build
-        working-directory: apps/03_oddbrain
-        run: npm run build
-      - name: Renderer checks — the real interface in Chromium
-        working-directory: apps/03_oddbrain
-        timeout-minutes: 10
-        shell: bash
-        run: |
-          set -euo pipefail
-          phase() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> renderer-phases.log; }
-          trap 'rc=$?; phase "exit=$rc"' EXIT
-          phase 'playwright install start (240s deadline)'
-          timeout --kill-after=10s 240s npx playwright-core install --with-deps chromium >> ui-checks.log 2>&1
-          phase 'playwright install done; vite start'
-          nohup npx vite --config vite.web.config.ts > vite-ui.log 2>&1 &
-          phase 'server readiness start (90s deadline)'
-          timeout --kill-after=5s 90s bash -c 'until curl --connect-timeout 2 --max-time 3 -sf http://127.0.0.1:5174/ >/dev/null; do sleep 1; done'
-          phase 'server ready; renderer checks start (240s deadline)'
-          timeout --kill-after=10s 240s npm run test:ui >> ui-checks.log 2>&1
-          phase 'renderer checks passed'
-      - name: Renderer acceptance evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: ui-acceptance-linux
-          path: |
-            apps/03_oddbrain/qa-ui
-            apps/03_oddbrain/ui-checks.log
-            apps/03_oddbrain/renderer-phases.log
-            apps/03_oddbrain/vite-ui.log
-          if-no-files-found: ignore
-      - name: Renderer checks speak their failure
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const parts = [];
-            for (const p of ['apps/03_oddbrain/renderer-phases.log', 'apps/03_oddbrain/ui-checks.log', 'apps/03_oddbrain/vite-ui.log']) {
-              if (!fs.existsSync(p)) continue;
-              let body = fs.readFileSync(p, 'utf8');
-              if (body.length > 36000) body = body.slice(0, 10000) + '\n...truncated...\n' + body.slice(-25000);
-              parts.push('--- ' + p + ' ---\n' + body);
-            }
-            if (!parts.length) parts.push('(no renderer log was written — the step died before tee started)');
-            await github.rest.repos.createCommitComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.sha,
-              body: 'renderer checks, in their own words:\n\n```\n' + parts.join('\n\n').replace(/```/g, "'''") + '\n```',
-            });
-      - name: Smoke — the window opens and the console is clean
-        working-directory: apps/03_oddbrain
-        timeout-minutes: 5
-        env:
-          ELECTRON_DISABLE_SANDBOX: 1
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64
-          xvfb-run -a npx electron . --smoke
-      - name: Built-app QA — every screen, every section, real IPC
-        working-directory: apps/03_oddbrain
-        timeout-minutes: 12
-        shell: bash
-        env:
-          ELECTRON_DISABLE_SANDBOX: 1
-        run: |
-          set -euo pipefail
-          phase() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> built-qa-phases.log; }
-          trap 'rc=$?; phase "exit=$rc"' EXIT
-          phase 'apt update start (60s deadline)'
-          timeout --kill-after=10s 60s sudo apt-get -o DPkg::Lock::Timeout=30 update -qq >> built-qa.log 2>&1
-          phase 'apt install start (90s deadline)'
-          timeout --kill-after=10s 90s sudo apt-get -o DPkg::Lock::Timeout=30 install -y -qq xvfb libnss3 libnspr4 libasound2t64 >> built-qa.log 2>&1
-          phase 'built driver start (540s deadline)'
-          timeout --kill-after=10s 540s xvfb-run -a node scripts/check-ui-built.cjs >> built-qa.log 2>&1
-          phase 'built driver passed'
-      - name: Built QA evidence
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: built-qa-linux
-          path: |
-            apps/03_oddbrain/qa-ui/built-app-results.json
-            apps/03_oddbrain/qa-ui/built-app-final.png
-            apps/03_oddbrain/built-qa.log
-            apps/03_oddbrain/built-qa-phases.log
-          if-no-files-found: ignore
-      - name: Built QA speaks its failure
-        if: failure()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const p = 'apps/03_oddbrain/built-qa.log';
-            if (!fs.existsSync(p)) return;
-            let body = (fs.existsSync('apps/03_oddbrain/built-qa-phases.log') ? fs.readFileSync('apps/03_oddbrain/built-qa-phases.log', 'utf8') + '\n' : '') + fs.readFileSync(p, 'utf8');
-            if (body.length > 36000) body = body.slice(0, 10000) + '\n...truncated...\n' + body.slice(-25000);
-            await github.rest.repos.createCommitComment({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              commit_sha: context.sha,
-              body: 'built-app QA, in its own words:\n\n```\n' + body.replace(/```/g, "'''") + '\n```',
-            });
-
-  windows:
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-      - name: Install
-        working-directory: apps/03_oddbrain
+          cache: npm
+      - name: Install locked dependencies
+        timeout-minutes: 8
         run: npm ci --no-audit --no-fund
-      - name: Types
-        working-directory: apps/03_oddbrain
-        run: npx tsc --noEmit -p tsconfig.json
-      - name: Tests
-        working-directory: apps/03_oddbrain
-        run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-windows.xml
-      - name: Windows speaks
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const p = 'apps/03_oddbrain/junit-windows.xml';
-            if (fs.existsSync(p)) {
-              const raw = fs.readFileSync(p, 'utf8');
-              const lines = [];
-              for (const suite of raw.split(/(?=<testsuite )/)) {
-                const head = suite.match(/<testsuite name="([^"]+)"[^>]*failures="(\d+)" errors="(\d+)"/);
-                if (!head || (head[2] === '0' && head[3] === '0')) continue;
-                lines.push('FAILED SUITE ' + head[1] + ' (' + head[2] + ' failures, ' + head[3] + ' errors)');
-                for (const m of suite.matchAll(/<testcase classname="[^"]*" name="([^"]*)"[^>]*>\s*<failure message="([^"]*)"/g)) {
-                  lines.push('  - ' + m[1] + ' — ' + m[2].slice(0, 800));
-                }
-              }
-              if (lines.length) {
-                let body = lines.join('\n');
-                if (body.length > 40000) body = body.slice(0, 40000) + '\n...truncated';
-                await github.rest.repos.createCommitComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  commit_sha: context.sha,
-                  body: 'windows failures, in its own words:\n\n' + body
-                });
-              }
-            }
-      - name: Build
-        working-directory: apps/03_oddbrain
-        run: npm run build
-      - name: Smoke — the window opens and the console is clean
-        working-directory: apps/03_oddbrain
+      - name: TypeScript
+        run: npm run typecheck
+      - name: Repository and application regressions
+        timeout-minutes: 6
+        run: npm test
+      - name: Production builds
         timeout-minutes: 5
-        shell: pwsh
-        run: npx electron . --smoke
+        run: npm run build && npm run build:web
+      - name: Install browser and Linux display dependencies
+        if: runner.os == 'Linux'
+        timeout-minutes: 5
+        run: timeout --kill-after=10s 240s npx playwright-core install --with-deps chromium
+      - name: Full browser acceptance including isolated engine and graph fixtures
+        if: runner.os == 'Linux'
+        timeout-minutes: 6
+        shell: bash
+        env:
+          ODDBRAIN_UI_URL: http://127.0.0.1:5174/
+          ODDBRAIN_QA_DIR: qa-ui/development
+        run: |
+          set -euo pipefail
+          npm run dev:web > browser-server.log 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          timeout 45s bash -c 'until curl --connect-timeout 2 --max-time 3 -fsS http://127.0.0.1:5174/ >/dev/null; do sleep 1; done'
+          timeout --kill-after=10s 300s npm run test:ui
+      - name: Production browser acceptance without source-module injection
+        if: runner.os == 'Linux'
+        timeout-minutes: 6
+        shell: bash
+        env:
+          ODDBRAIN_UI_URL: http://127.0.0.1:4174/
+          ODDBRAIN_QA_DIR: qa-ui/production
+        run: |
+          set -euo pipefail
+          npm run preview:web --workspace apps/desktop > production-server.log 2>&1 &
+          server=$!
+          trap 'kill "$server" 2>/dev/null || true' EXIT
+          timeout 45s bash -c 'until curl --connect-timeout 2 --max-time 3 -fsS http://127.0.0.1:4174/ >/dev/null; do sleep 1; done'
+          timeout --kill-after=10s 300s npm run test:ui:production
+      - name: Linux desktop smoke
+        if: runner.os == 'Linux'
+        timeout-minutes: 3
+        env:
+          ELECTRON_DISABLE_SANDBOX: 1
+        run: xvfb-run -a npm run smoke
+      - name: Windows desktop smoke
+        if: runner.os == 'Windows'
+        timeout-minutes: 3
+        run: npm run smoke
+      - name: Browser evidence
+        if: always() && runner.os == 'Linux'
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-acceptance
+          path: |
+            apps/desktop/qa-ui
+            browser-server.log
+            production-server.log
+          if-no-files-found: ignore

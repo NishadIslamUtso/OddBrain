@@ -1,57 +1,32 @@
-# The installer, made by machines: every push to v3 or main packages the
-# Windows exe on a real Windows runner and uploads it as an artifact anyone
-# (the owner, a judge) can download from the run page - no local build needed.
-# Push a tag v* and the exe + its sha256 attach to a GitHub Release.
-name: installer
+name: Windows installer
 on:
-  push:
-    branches: [v3, main]
-    tags: ['v*']
   workflow_dispatch:
-concurrency:
-  group: installer-${{ github.ref }}
-  cancel-in-progress: true
-
+permissions:
+  contents: read
 jobs:
-  windows-installer:
+  installer:
     runs-on: windows-latest
-    permissions:
-      contents: write
-    timeout-minutes: 40
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install
-        working-directory: apps/03_oddbrain
+          cache: npm
+      - name: Install locked dependencies
+        timeout-minutes: 8
         run: npm ci --no-audit --no-fund
-      - name: Build and package the installer
-        working-directory: apps/03_oddbrain
+      - name: TypeScript and regressions
+        timeout-minutes: 6
+        run: npm run typecheck && npm test
+      - name: Build unsigned installer
+        timeout-minutes: 10
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: 'false'
         run: npm run dist:win
-      - name: Prove it - sha256 into the summary
-        working-directory: apps/03_oddbrain
-        shell: pwsh
-        run: |
-          $h = (Get-FileHash dist/OddBrain-Setup-0.9.0.exe -Algorithm SHA256).Hash.ToLower()
-          "$h  OddBrain-Setup-0.9.0.exe" | Out-File -Encoding ascii dist/OddBrain-Setup-0.9.0.exe.sha256
-          Add-Content $env:GITHUB_STEP_SUMMARY "## Installer built"
-          Add-Content $env:GITHUB_STEP_SUMMARY '```'
-          Add-Content $env:GITHUB_STEP_SUMMARY "sha256: $h"
-          Add-Content $env:GITHUB_STEP_SUMMARY '```'
-      - name: Upload the artifact (30 days)
+      - name: Installer artifact (not a published release)
         uses: actions/upload-artifact@v4
         with:
-          name: OddBrain-Setup-${{ github.sha }}
-          path: |
-            apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe
-            apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe.sha256
-          retention-days: 30
+          name: OddBrain-Windows-unsigned
+          path: apps/desktop/dist/OddBrain-Setup-*.exe
           if-no-files-found: error
-      - name: Attach to the release (on a version tag only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: pwsh
-        run: |
-          gh release create "$env:GITHUB_REF_NAME" --generate-notes --title "OddBrain $env:GITHUB_REF_NAME" dist/OddBrain-Setup-0.9.0.exe dist/OddBrain-Setup-0.9.0.exe.sha256

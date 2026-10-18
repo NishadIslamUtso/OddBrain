@@ -1,100 +1,42 @@
-# OddBrain master repo .gitignore
-
-# Dependencies
+# Dependencies and generated builds
 node_modules/
-.pnp
-.pnp.js
-
-# Builds
-dist/
-/dist-web/
-/apps/*/dist-web/
-build/
 out/
-
-# The app's own mark is source and lives in resources/, which is tracked like any
-# other source file. It used to sit in build/ with a negation to keep it — but that
-# directory name is excluded from this project's workspace snapshots, so the icon
-# kept vanishing from the working tree.
-.next/
-.nuxt/
-.output/
-.parcel-cache/
-.svelte-kit/
-.turbo/
+dist/
+dist-web/
+build/
 coverage/
-target/
+qa-ui/
+*.tsbuildinfo
 
-# Caches
-.cache/
-.local/
-.mypy_cache/
-.pytest_cache/
-.ruff_cache/
-.nox/
-.tox/
-.venv/
-__pycache__/
-*.pyc
-*.pyo
+# Renderer exports and reconstructed runtime Markdown (source: bundled-markdown.json)
+apps/desktop/resources/oddbrain-preview.html
+apps/desktop/src/renderer/public/oddbrain-preview.html
+apps/desktop/store/packs/**/*.md
 
-# Env
-.env
-.env.local
-.env.development.local
-.env.test.local
-.env.production.local
-
-# OS
-.DS_Store
-Thumbs.db
-desktop.ini
-
-# Logs
-*.log
-npm-debug.log*
-yarn-debug.log*
-yarn-error.log*
-pnpm-debug.log*
-logs/
-
-# Editor
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-
-# Ollama models (don't commit large models)
+# Local application data and downloaded models
+apps/desktop/vault/
 ollama/
 models/
 
-# Vault private data (optional — user may want to keep vault private, but starter is OK)
-# Uncomment if you don't want to push real vault data:
-# vault/Brain/02 Sources/
-# vault/Brain/03 Memory/
-# vault/Brain/08 Journal/
-# vault/Brain/09 Activity & Undo/
+# Secrets and local configuration
+.env
+.env.*
+!.env.example
+*.pem
+*.key
 
-# Archive zips — don't push nested zips to avoid recursion, keep reference only
-archive_zips/
-*.zip
-!apps/*/archive_zips/
-
-# Keep living docs, .ai/, spec/, extension/, apps/ source
-# Don't ignore:
-# !00_LIVING_DOCS/
-# !.ai/
-# !spec/
-# !extension/
-# !vault/Brain/00 System/
-# !vault/Brain/01 Inbox/README.md
-# etc
-
-# Temporary
+# Temporary files, logs, test reports and editor state
+*.log
+junit-*.xml
+playwright-report/
+test-results/
+.cache/
+.venv/
+__pycache__/
+*.pyc
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
 tmp/
 temp/
-*.tmp
-
-# CI failure reports (posted as commit comments, never committed)
-junit-*.xml

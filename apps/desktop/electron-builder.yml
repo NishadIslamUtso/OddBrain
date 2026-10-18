@@ -1,0 +1,58 @@
+appId: com.oddbrain.desktop
+productName: OddBrain
+
+directories:
+  output: dist
+  buildResources: resources
+
+files:
+  - out/**/*
+  - package.json
+
+# Chrome requires the extension as real files outside the application archive.
+# The store includes assets materialized by scripts/prepare-assets.mjs.
+extraResources:
+  - from: resources/oddbrain-preview.html
+    to: oddbrain-preview.html
+  - from: ../../extension
+    to: extension
+    filter:
+      - manifest.json
+      - background.js
+      - content-scripts/**
+      - lib/**
+      - popup/**
+      - icons/**
+  - from: store
+    to: store
+    filter:
+      - index.json
+      - packs/**
+
+electronLanguages:
+  - en-US
+compression: maximum
+# Canvas binaries are supplied by platform-specific optional dependencies.
+npmRebuild: false
+asar: true
+afterPack: scripts/apply-fuses.cjs
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: resources/icon.ico
+
+# Unsigned per-user installer. User settings and vaults survive uninstall.
+nsis:
+  installerIcon: resources/icon.ico
+  uninstallerIcon: resources/icon.ico
+  oneClick: true
+  perMachine: false
+  runAfterFinish: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: OddBrain
+  artifactName: OddBrain-Setup-${version}.exe
+  deleteAppDataOnUninstall: false
