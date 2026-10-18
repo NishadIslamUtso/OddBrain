@@ -97,3 +97,10 @@ working or file a question. "Filed for orchestrator" is a valid resting state.
 **Sandbox tip (fleet-wide):** if Electron's postinstall fails with fetch errors, retry once
 with `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`; if it still fails, leave the
 smoke step to the orchestrator and say so plainly — never claim a gate step you didn't run.
+
+---
+
+# ORCHESTRATOR RULING #2 — document intake: quiet branch, this is a nudge.
+CI green on your tip. Continue the lane (decode → named refusals → single send path).
+**Merge notes for you:** `arena/9a3a5c88` FROZE `documents.ts` / `pdfPages.ts` (pre-brief out-of-lane edits) — at merge those files become YOUR lane; plan for it, coordinate with me, don't touch them on their branch. Status into REPORT-TO-ORCHESTRATOR.md at your next milestone; questions via THE CHANNEL.
+**FLEET LAW (new):** counts printed must come from the run output just executed — never from memory.
