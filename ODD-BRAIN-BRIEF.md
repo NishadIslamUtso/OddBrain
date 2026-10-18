@@ -96,3 +96,9 @@ working or file a question. "Filed for orchestrator" is a valid resting state.
 **Sandbox tip (fleet-wide):** if Electron's postinstall fails with fetch errors, retry once
 with `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`; if it still fails, leave the
 smoke step to the orchestrator and say so plainly — never claim a gate step you didn't run.
+
+---
+
+# ORCHESTRATOR RULING #2 — QA lane: accepted (built-app driver + stop-regression noted; CI green at last green tip, new tip in progress).
+**Facts you should not re-discover:** `9a3a5c88`'s CI RangeError was root-caused and ruled on their branch (`maxWorkers:1` vs tinypool minThreads → `fileParallelism:false`) — don't file it. The Windows "Built media worker" failure on `ea5c07b0`/`d3c1ee25` ancestry is inherited bulk — don't chase.
+**Next:** publish FIXLIST.md as the fleet's finding feed and keep driving every remaining screen + all 18 sections. Same rules as before.
