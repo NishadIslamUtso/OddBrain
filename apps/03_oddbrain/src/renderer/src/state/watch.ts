@@ -101,9 +101,18 @@ const maybeFire = (names: string[]): void => {
   lastEventAt = Date.now()
   for (const name of names) gathered.add(name)
   if (quiet) clearTimeout(quiet)
-  quiet = setTimeout(() => {
+  const fireWhenQuiet = (): void => {
     quiet = null
     if (!state.active) return
+    // A timer can wake before the wall clock crosses the requested boundary.
+    // Keep the gathered batch until quiet is real; otherwise a 1ms-early wake
+    // discards a legitimate change forever. No extra run, changed filters or
+    // bypass of the busy/cooldown gates.
+    const remaining = watchDebounceMs() - (Date.now() - lastEventAt)
+    if (remaining > 0) {
+      quiet = setTimeout(fireWhenQuiet, remaining + 1)
+      return
+    }
     const batch = [...gathered]
     gathered = new Set()
     const store = engineStore()
@@ -131,7 +140,8 @@ const maybeFire = (names: string[]): void => {
       }
       patch({ runs: state.runs + 1, lastFired: decision.names.join(', ') })
     })()
-  }, watchDebounceMs())
+  }
+  quiet = setTimeout(fireWhenQuiet, watchDebounceMs())
 }
 
 /** Start watching a folder; the order is saved and said back in full. */
