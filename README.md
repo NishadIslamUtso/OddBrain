@@ -89,8 +89,8 @@ resources/       app mark and generated icons
 | Engine | Wire | State |
 | --- | --- | --- |
 | `claude-code` | `claude` CLI, stream-json | full turn path; permission prompts and denies are forwarded |
-| `agy` | Google Antigravity CLI, stream-json | wire implemented against the real binary; a signed-in turn has not been driven |
-| Ollama | local HTTP at `127.0.0.1:11434` | local brain server, not an engine |
+| `agy` | Google Antigravity CLI, stream-json | wire implemented against the real binary; no permission cards; a signed-in turn has not been driven |
+| Ollama | local HTTP at `127.0.0.1:11434` | local brain server, not an engine; 0.14 or newer for the Anthropic-compatible door Claude Code uses |
 
 Rules the code enforces:
 
@@ -100,11 +100,13 @@ Rules the code enforces:
 - Spawning passes an argument vector, never a shell string. On Windows the
   executable path is quoted by `shellSafeCommand`; the app never builds a command
   line out of model output.
-- Every file-touching step from an engine needs your approval. "Full speed" is
+- Every file-touching step from Claude Code needs your approval. "Full speed" is
   the single switch that turns approval cards off, and it says so on the switch.
+  agy raises no permission cards here — its CLI has no stdio prompt door, so agy's
+  own settings throttle it instead, and the Engine bay says so where you pick it.
 - Before an Allow is forwarded, a checkpoint is taken. If the checkpoint cannot
   be taken, the change is denied rather than allowed blind.
-- A Deny reaches the engine as a real deny, not as silence.
+- A Deny reaches Claude Code as a real deny, not as silence.
 - Downloads come only from each publisher's official host and its declared
   redirect hosts, capped in size, written to the app's own engines folder,
   hashed with SHA-256, and — on Windows — run only after a second, explicit
@@ -211,7 +213,16 @@ receives a forward-slash data directory on both platforms, and a test pins it.
 ## Known limits
 
 - The owner's first real signed-in session, on both engines, has not happened.
-- The agy wire is implemented but unproven against a live signed-in turn.
+- The app does not sign engines in. It detects them, and tells you to run
+  `claude` (or `agy`) in a terminal once; credentials stay with the engine.
+- Claude Code's subscription models are not enumerated in the picker. Leave the
+  model empty to use the engine's own default, choose an Ollama brain, or save
+  an Anthropic key to have its real model list appear.
+- The agy wire is implemented but unproven against a live signed-in turn, and
+  agy has no catalog adapter: the Plugins screen offers Claude Code marketplaces
+  and OddBrain packs, and says plainly that agy has neither.
+- MCP connector entries are exposed as the two browser-control presets (Chrome
+  DevTools, Playwright). There is no general MCP server editor yet.
 - No signed installer; SmartScreen will warn.
 - OCR is not built in. Scanned PDFs without a text layer are reported as having
   no extractable text, and a vision provider or OCR export is the way through.
