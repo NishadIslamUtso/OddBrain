@@ -189,7 +189,7 @@ export default function Composer({
             ref={fileInput}
             type="file"
             multiple
-            accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py"
+            accept="image/png,image/jpeg,image/webp,image/gif,image/bmp,image/svg+xml,image/avif,video/mp4,video/webm,audio/mpeg,audio/wav,audio/flac,audio/ogg,audio/mp4,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py,.pdf,.docx,.pptx,.xlsx,.odt,.ods,.odp,.rtf,.epub,.rtf,.gz,.tiff,.heic"
             className="hidden"
             onChange={event => {
               const files = Array.from(event.target.files ?? [])
@@ -201,7 +201,7 @@ export default function Composer({
             type="button"
             onClick={() => fileInput.current?.click()}
             aria-label="Attach"
-            title="Attach a picture, a video (its frames), or a text file"
+            title="Attach a picture, a video (its frames), a document, audio, or a text file"
             className="flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:text-ink"
           >
             <Paperclip size={13} />

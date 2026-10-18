@@ -57,6 +57,9 @@ const engineApi = {
   /** Save the rulebook and deploy it to every engine's global file. */
   writeHouseRules: (rules: HouseRules): Promise<{ ok: boolean; written: string[] }> =>
     ipcRenderer.invoke('houserules:write', rules),
+  /** Read any picked file honestly: real text, or the real reason not. */
+  ingest: (name: string, mime: string, data: Uint8Array): Promise<{ ok: boolean; text?: string; reason?: string }> =>
+    ipcRenderer.invoke('ingest:decode', name, mime, data),
   /** Pull progress ticks, in the same shape `parsePullLine` produces. */
   onPullEvent: (listener: (tick: unknown) => void): (() => void) => {
     const channel = 'engine:pull-event'

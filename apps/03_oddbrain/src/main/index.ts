@@ -5,7 +5,7 @@ import { createTextReviewer } from './automation/reviewer'
 import type { AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
 import { readUiPreview } from './uiPreview'
 import { createLaunchGate } from './uiLaunch'
-import { app, BrowserWindow, dialog, Menu, safeStorage, shell, globalShortcut } from 'electron'
+import { app, BrowserWindow, dialog, Menu, safeStorage, screen, shell, globalShortcut } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { loadAppFlags, saveAppFlags } from './appFlags'
@@ -43,6 +43,7 @@ import { createFolderWatcher, type WatchTick } from './watcher'
 import { createJournalManager } from './journal'
 import { createMemoryManager } from './memoryFiles'
 import { createDownloadManager, type DownloadTick } from './engine/downloads'
+import { decodeAttachment } from './ingest/decode'
 import { agyModelSource, detectEngine } from './engine/availability'
 import { enginePath } from './engine/enginePath'
 import { pdfSafeName } from '../shared/lib/artifacts'
@@ -636,6 +637,13 @@ function registerBridges(): void {
   handle('engine:download:run', (_event, engine: string) => downloads.runInstaller(typeof engine === 'string' ? engine : ''))
   handle('engine:download:execute', (_event, engine: string) => downloads.executeInstaller(typeof engine === 'string' ? engine : ''))
   handle('engine:download:remove', (_event, engine: string) => downloads.remove(typeof engine === 'string' ? engine : ''))
+  // The honest file reader: real text out, or the REAL reason it cannot be
+  // read (no decoder / corrupt / password / DRM / oversize). Never a guess.
+  handle('ingest:decode', (_event, name: unknown, mime: unknown, data: unknown) => {
+    if (typeof name !== 'string' || typeof mime !== 'string') return { ok: false, reason: 'The attachment arrived malformed — nothing was read.' }
+    if (!(data instanceof Uint8Array)) return { ok: false, reason: `${name}: the file bytes did not arrive — nothing was read.` }
+    return decodeAttachment(data, name, mime)
+  })
   // The staged Ollama runtime, started and stopped HERE — the download
   // module's copy says this, so the doors must exist to make it true.
   downloadManager = downloads
@@ -907,6 +915,7 @@ function registerBridges(): void {
       // navigation locked (the PDF window below does the same).
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
     })
+    clampToWorkArea(win)
     lockNavigation(win.webContents)
     void win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(payload.html))
     return { ok: true }
@@ -921,6 +930,7 @@ function registerBridges(): void {
       mkdirSync(dir, { recursive: true })
       const target = join(dir, safe)
       const win = new BrowserWindow({ show: false, width: 820, height: 1160, webPreferences: { sandbox: true } })
+      clampToWorkArea(win)
       try {
         await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(payload.html))
         const bytes = await win.webContents.printToPDF({ printBackground: true })
@@ -1636,6 +1646,7 @@ function createQuickWindow(): void {
       nodeIntegration: false,
     },
   })
+  clampToWorkArea(quickWindow)
   const devServer = process.env['ELECTRON_RENDERER_URL']
   if (devServer) void quickWindow.loadURL(`${devServer}/?quick=1`)
   else if (api?.url) void quickWindow.loadURL(`${api.url}/?quick=1`)
@@ -1693,6 +1704,20 @@ function windowIcon(): string | undefined {
   return undefined
 }
 
+// The owner's target display is 1920x1080 at 125% — a 1536x864 logical
+// desktop, minus the taskbar. Every window clamps itself into the work area
+// of the display it reports, so nothing ever opens under the taskbar or
+// off-screen on any monitor arrangement.
+function clampToWorkArea(window: BrowserWindow): void {
+  const bounds = window.getBounds()
+  const area = screen.getDisplayMatching(bounds).workArea
+  const width = Math.min(bounds.width, area.width)
+  const height = Math.min(bounds.height, area.height)
+  const x = Math.min(Math.max(bounds.x, area.x), area.x + area.width - width)
+  const y = Math.min(Math.max(bounds.y, area.y), area.y + area.height - height)
+  window.setBounds({ x, y, width, height })
+}
+
 function createWindow(): BrowserWindow {
   const icon = windowIcon()
   const window = new BrowserWindow({
@@ -1713,6 +1738,7 @@ function createWindow(): BrowserWindow {
       nodeIntegration: false,
     },
   })
+  clampToWorkArea(window)
 
   // Electron changed this event's payload shape across versions; read both.
   window.webContents.on('console-message', (...args: unknown[]) => {

@@ -4,6 +4,11 @@ import { BRIDGE_TAG } from './vision'
 
 const TEXT_EXTENSIONS = /\.(?:txt|md|csv|json|js|jsx|ts|tsx|html?|css|py|xml|ya?ml|log|sql|sh|bat|c|cpp|h|java|rs)$/i
 
+/** True when the file is a kind the composer reads as text/code directly. */
+export function readsAsTextFile(file: { name: string; type?: string }): boolean {
+  return TEXT_EXTENSIONS.test(file.name) || /^text\//.test(file.type ?? '')
+}
+
 export const MAX_ATTACHMENTS = 4
 export const MAX_TEXT_LENGTH = 12_000
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { PanelRightOpen } from 'lucide-react'
 import { buildSeededPrompt } from '@shared/lib/compact'
-import { DEFAULT_MODEL } from '@shared/lib/storage'
+import { DEFAULT_MODEL, newId } from '@shared/lib/storage'
 import { DEFAULT_PROFILE, normalizeProfile } from '@shared/lib/profile'
 import TitleBar from './components/TitleBar'
 import EnginePanel from './components/EnginePanel'
@@ -29,8 +29,9 @@ import useChat from './hooks/useChat'
 import useArtifactRewrite from './hooks/useArtifactRewrite'
 import useModels from './hooks/useModels'
 import type { Attachment } from '@shared/types'
-import { readAttachment } from '@shared/lib/attachments'
+import { readAttachment, readsAsTextFile } from '@shared/lib/attachments'
 import { extractFrames } from './lib/videoFrames'
+import { coerceImage } from './lib/imageCoerce'
 import usePersistentState from './hooks/usePersistentState'
 import useVault from './hooks/useVault'
 import SettingsView, { SECTIONS, type SectionId } from './components/SettingsView'
@@ -42,7 +43,7 @@ import {
 } from './state/appearance'
 import { DEFAULT_INFERENCE, INFERENCE_KEY, normalizeInference } from './state/performance'
 import { useChats } from './state/useChats'
-import { bridge, isDemo } from './platform/bridge'
+import { bridge, isDemo, getEngineApi } from './platform/bridge'
 import { DEFAULT_PERMISSIONS, normalizePermissions, type Permissions } from '@shared/lib/permissions'
 import { vaultPost } from '@shared/lib/vault'
 import { setMotionMode, setMascotPause } from './motion/motionMode'
@@ -477,10 +478,32 @@ export default function App() {
           for (const frame of frames) {
             taken.push(await readAttachment(frame, { verified: true, vision: true, thinking: false }))
           }
-        } else {
+        } else if (/^image\//.test(file.type) || /\.(png|jpe?g|gif|bmp|ico|svg|webp|avif|tiff?|heic)$/i.test(file.name)) {
           // The engine sees pictures itself; the chat vision bridge's gate is
-          // about the chat brain, not the engine's own eyes.
+          // about the chat brain, not the engine's own eyes. Formats this
+          // window can decode are re-encoded to png here; the rest fail with
+          // the format named.
+          taken.push(await readAttachment(await coerceImage(file), { verified: true, vision: true, thinking: false }))
+        } else if (readsAsTextFile(file)) {
           taken.push(await readAttachment(file, { verified: true, vision: true, thinking: false }))
+        } else {
+          // Everything else goes through the honest desktop reader: real
+          // extracted text, or the REAL reason (no decoder / corrupt /
+          // password / DRM / oversize). A refusal never attaches a guess.
+          const bytes = new Uint8Array(await file.arrayBuffer())
+          const answer = await getEngineApi().ingest(file.name, file.type, bytes)
+          if (!answer.ok) {
+            setNotice(answer.reason ?? `${file.name}: could not be read.`)
+            break
+          }
+          taken.push({
+            id: newId(),
+            name: file.name,
+            size: file.size,
+            mime: file.type || 'application/octet-stream',
+            kind: 'text',
+            text: answer.text ?? '',
+          })
         }
       } catch (failure) {
         setNotice((failure as Error).message)

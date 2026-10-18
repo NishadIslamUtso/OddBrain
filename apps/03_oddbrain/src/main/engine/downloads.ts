@@ -12,10 +12,10 @@ import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
-import { inflateRawSync } from 'node:zlib'
 import { ENGINE_DOWNLOADS, MAX_DOWNLOAD_BYTES, humanBytes, isOfficialDownloadHost, isOfficialUrl, parseShaLine } from '../../shared/lib/engineDownloads'
+import { iterZipEntries, ZipRefusal } from '../ingest/zipEntries'
 
-export type DownloadTick = { engine: string; got: number; total: number | null; phase: 'downloading' | 'staged' | 'error'; answer?: string }
+export type DownloadTick = { engine: string; got: number; total: number | null; phase: 'downloading' | 'unpacking' | 'staged' | 'error'; answer?: string }
 
 export type InstallRecord = {
   engine: string
@@ -78,6 +78,7 @@ export function createDownloadManager(options: {
       status: reply.status,
       headers: { get: (name: string) => reply.headers.get(name) },
       arrayBuffer: () => reply.arrayBuffer(),
+      body: reply.body,
     }
   })
 
@@ -169,7 +170,40 @@ export function createDownloadManager(options: {
       }
       let bytes: Uint8Array
       try {
-        bytes = new Uint8Array((await reply.arrayBuffer?.()) ?? new ArrayBuffer(0))
+        const body = reply.body as { getReader?: () => { read(): Promise<{ done: boolean; value?: Uint8Array }>; cancel(): Promise<void> } } | null | undefined
+        if (body && typeof body.getReader === 'function') {
+          // Stream the real bytes: a 1.47 GB file is minutes of silence
+          // otherwise, and a lie about progress is still a lie.
+          const reader = body.getReader()
+          const chunks: Uint8Array[] = []
+          let got = 0
+          let lastTick = 0
+          for (;;) {
+            const step = await reader.read()
+            if (step.done) break
+            const piece = step.value
+            if (piece) {
+              chunks.push(piece)
+              got += piece.byteLength
+            }
+            if (got > MAX_DOWNLOAD_BYTES) {
+              await reader.cancel()
+              const answer = 'The download exceeded the size cap mid-stream. Nothing was installed.'
+              onTick({ engine, got: 0, total: null, phase: 'error', answer })
+              return { ok: false, answer }
+            }
+            const now = Date.now()
+            if (got === 0 || now - lastTick >= 200) {
+              lastTick = now
+              onTick({ engine, got, total: declared || null, phase: 'downloading' })
+            }
+          }
+          bytes = new Uint8Array(got)
+          let at = 0
+          for (const piece of chunks) { bytes.set(piece, at); at += piece.byteLength }
+        } else {
+          bytes = new Uint8Array((await reply.arrayBuffer?.()) ?? new ArrayBuffer(0))
+        }
       } catch (failure) {
         const answer = `The download broke midway: ${(failure as Error).message}`
         onTick({ engine, got: 0, total: null, phase: 'error', answer })
@@ -201,7 +235,8 @@ export function createDownloadManager(options: {
       // A zip for the app's own runtime is unpacked right away; an installer
       // script waits for its own run permission.
       if (info.kind === 'zip') {
-        const unpacked = await unzipArchive(bytes, join(root, engine, 'app'))
+        onTick({ engine, got: bytes.length, total: bytes.length, phase: 'unpacking' })
+        const unpacked = await unzipArchive(bytes, join(root, engine, 'app'), RUNTIME_ZIP_LIMITS)
         if (!unpacked.ok) {
           const answer = `The archive could not be unpacked: ${unpacked.answer}`
           onTick({ engine, got: 0, total: null, phase: 'error', answer })
@@ -360,77 +395,43 @@ export function createDownloadManager(options: {
 }
 
 /**
+ * The runtime unpack gate, sized against the MEASURED official archive:
+ * Ollama's real zip is 1.47 GB, unpacks to 1.94 GB, 87 entries, biggest
+ * single file 692 MB (measured 2026-10-17). The caps exist to stop a lie —
+ * they admit the truth and refuse more.
+ */
+export const RUNTIME_ZIP_LIMITS = {
+  files: 512,
+  perFile: 1.5 * 1024 * 1024 * 1024,
+  totalUncompressed: 4 * 1024 * 1024 * 1024,
+} as const
+
+/**
  * The small zip reader: central directory, stored (0) and deflate (8)
  * entries, a strict zip-slip refusal, per-file and total caps. Enough for
  * one trusted archive from one trusted host; nothing more is claimed.
+ * Callers with narrower material pass narrower limits (the store's packs do);
+ * the default is the runtime gate above.
  */
 export async function unzipArchive(
   bytes: Uint8Array,
   destination: string,
-  limits = { files: 200, perFile: 200 * 1024 * 1024, totalUncompressed: 400 * 1024 * 1024 },
+  limits: { files: number; perFile: number; totalUncompressed: number } = RUNTIME_ZIP_LIMITS,
   fs: { mkdir(path: string, options?: { recursive?: boolean }): Promise<unknown>; writeFile(path: string, data: Uint8Array): Promise<unknown> } = { mkdir, writeFile },
 ): Promise<{ ok: boolean; answer: string }> {
-  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
-  // End of central directory: signature 0x06054b50, scan back past any comment.
-  let end = -1
-  for (let i = bytes.length - 22; i >= 0 && i > bytes.length - 22 - 65_536; i -= 1) {
-    if (view.getUint32(i, true) === 0x06054b50) { end = i; break }
-  }
-  if (end < 0) return { ok: false, answer: 'not a zip' }
-  const count = view.getUint16(end + 10, true)
-  if (count > limits.files) return { ok: false, answer: 'too many files' }
-  let offset = view.getUint32(end + 16, true)
-  const decoder = new TextDecoder()
-  let totalDeclared = 0
-  let totalActual = 0
   await fs.mkdir(destination, { recursive: true })
-  for (let index = 0; index < count; index += 1) {
-    if (view.getUint32(offset, true) !== 0x02014b50) return { ok: false, answer: 'damaged central directory' }
-    const method = view.getUint16(offset + 10, true)
-    const compressedSize = view.getUint32(offset + 20, true)
-    // The central directory DECLARES the uncompressed size — check it before
-    // inflating a single byte, or a hostile archive spends the memory first
-    // and answers for it afterwards. Also tracked: the aggregate, so ten
-    // "small" entries cannot add up to a disk-eater.
-    const declaredSize = view.getUint32(offset + 24, true)
-    totalDeclared += declaredSize
-    if (declaredSize > limits.perFile) return { ok: false, answer: 'a file inside is too big' }
-    if (totalDeclared > limits.totalUncompressed) return { ok: false, answer: 'the archive unpacks to more than the cap' }
-    const nameLength = view.getUint16(offset + 28, true)
-    const extraLength = view.getUint16(offset + 30, true)
-    const commentLength = view.getUint16(offset + 32, true)
-    const localOffset = view.getUint32(offset + 42, true)
-    const name = decoder.decode(bytes.subarray(offset + 46, offset + 46 + nameLength))
-    if (name.includes('..') || /^[A-Za-z]:/.test(name) || name.startsWith('/')) {
-      return { ok: false, answer: `unsafe path in archive: ${name}` }
+  let count = 0
+  try {
+    for (const entry of iterZipEntries(bytes, limits)) {
+      const out = join(destination, entry.name)
+      const cut = Math.max(out.lastIndexOf('/'), out.lastIndexOf('\\'))
+      await fs.mkdir(cut > 0 ? out.slice(0, cut) : destination, { recursive: true })
+      await fs.writeFile(out, entry.content)
+      count += 1
     }
-    const localNameLength = view.getUint16(localOffset + 26, true)
-    const localExtraLength = view.getUint16(localOffset + 28, true)
-    const dataStart = localOffset + 30 + localNameLength + localExtraLength
-    const raw = bytes.subarray(dataStart, dataStart + compressedSize)
-    let content: Uint8Array
-    if (method === 0) content = raw
-    else if (method === 8) {
-      try {
-        content = new Uint8Array(inflateRawSync(raw, { maxOutputLength: limits.perFile }))
-      } catch {
-        return { ok: false, answer: 'a file inside is bigger than it declared, or damaged' }
-      }
-    }
-    else return { ok: false, answer: `unsupported compression method ${method}` }
-    if (content.length > limits.perFile) return { ok: false, answer: 'a file inside is too big' }
-    // The declared total was checked up front, but declarations are attacker
-    // data: a forged zero here means the REAL bytes above were never counted.
-    // The cap that matters is the one measured on what actually inflated.
-    totalActual += content.length
-    if (totalActual > limits.totalUncompressed) {
-      return { ok: false, answer: 'the archive unpacks to more than the cap' }
-    }
-    const out = join(destination, name)
-    const cut = Math.max(out.lastIndexOf('/'), out.lastIndexOf('\\'))
-    await fs.mkdir(cut > 0 ? out.slice(0, cut) : destination, { recursive: true })
-    await fs.writeFile(out, content)
-    offset += 46 + nameLength + extraLength + commentLength
+  } catch (failure) {
+    if (failure instanceof ZipRefusal) return { ok: false, answer: failure.answer }
+    throw failure
   }
   return { ok: true, answer: `${count} files` }
 }

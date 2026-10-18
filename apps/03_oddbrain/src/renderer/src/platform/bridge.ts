@@ -434,6 +434,8 @@ export type EngineBridge = {
   deleteModel: (name: string) => Promise<{ ok: boolean; answer: string }>
   /** Pull progress ticks; returns the unsubscribe. */
   onPullEvent: (listener: (tick: unknown) => void) => () => void
+  /** Read any picked file honestly: real text, or the real reason not. */
+  ingest: (name: string, mime: string, data: Uint8Array) => Promise<{ ok: boolean; text?: string; reason?: string }>
   readHouseRules: () => Promise<{ rules: HouseRules; defaults: HouseRules }>
   writeHouseRules: (rules: HouseRules) => Promise<{ ok: boolean; written: string[] }>
   setModel: (model: string, provider?: 'anthropic') => Promise<{ ok: boolean; answer: string }>
@@ -517,6 +519,7 @@ const demoEngineBridge: EngineBridge = {
   pull: async () => ({ ok: false, answer: 'Pulling brains needs the desktop app.' }),
   deleteModel: async () => ({ ok: false, answer: 'Removing brains needs the desktop app.' }),
   onPullEvent: () => () => undefined,
+  ingest: async (name) => ({ ok: false, reason: `${name}: the browser preview reads text and pictures only — file decoding lives in the desktop app.` }),
   readHouseRules: async () => ({ rules: { ...DEFAULT_HOUSE_RULES }, defaults: { ...DEFAULT_HOUSE_RULES } }),
   writeHouseRules: async () => ({
     ok: false,
