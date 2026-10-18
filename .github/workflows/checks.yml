@@ -105,6 +105,44 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64
           xvfb-run -a npx electron . --smoke
+      - name: Built-app QA — every screen, every section, real IPC
+        working-directory: apps/03_oddbrain
+        timeout-minutes: 15
+        shell: bash
+        env:
+          ELECTRON_DISABLE_SANDBOX: 1
+        run: |
+          set -o pipefail
+          {
+            sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64
+            xvfb-run -a node scripts/check-ui-built.cjs
+          } 2>&1 | tee built-qa.log
+      - name: Built QA evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: built-qa-linux
+          path: |
+            apps/03_oddbrain/qa-ui/built-app-results.json
+            apps/03_oddbrain/qa-ui/built-app-final.png
+            apps/03_oddbrain/built-qa.log
+          if-no-files-found: ignore
+      - name: Built QA speaks its failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const p = 'apps/03_oddbrain/built-qa.log';
+            if (!fs.existsSync(p)) return;
+            let body = fs.readFileSync(p, 'utf8');
+            if (body.length > 36000) body = body.slice(0, 10000) + '\n...truncated...\n' + body.slice(-25000);
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: 'built-app QA, in its own words:\n\n```\n' + body.replace(/```/g, "'''") + '\n```',
+            });
 
   windows:
     runs-on: windows-latest
