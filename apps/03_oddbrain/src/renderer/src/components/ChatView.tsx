@@ -50,6 +50,10 @@ export default function ChatView({
   attachments = [],
   onFiles,
   onDetach,
+  audioModels = [],
+  audioModel = '',
+  onAudioModel,
+  onRefreshAudioModels,
   mascotWords = true,
 }: {
   chat: Chat | null
@@ -78,6 +82,10 @@ export default function ChatView({
   attachments?: Attachment[]
   onFiles?: (files: File[]) => void
   onDetach?: (id: string) => void
+  audioModels?: Array<{ name: string }>
+  audioModel?: string
+  onAudioModel?: (name: string) => void
+  onRefreshAudioModels?: () => void
   /** The approved greeting uses the owner's name; capture names the capsule. */
   profileName?: string
   /** The project picker, passed through to the composer untouched. */
@@ -155,6 +163,10 @@ export default function ChatView({
         attachments={attachments}
         onFiles={onFiles}
         onDetach={onDetach}
+        audioModels={audioModels}
+        audioModel={audioModel}
+        onAudioModel={onAudioModel}
+        onRefreshAudioModels={onRefreshAudioModels}
       />
     </main>
   )

@@ -41,6 +41,10 @@ export default function Composer({
   attachments = [],
   onFiles,
   onDetach,
+  audioModels = [],
+  audioModel = '',
+  onAudioModel,
+  onRefreshAudioModels,
 }: {
   value: string
   onChange: (value: string) => void
@@ -58,9 +62,14 @@ export default function Composer({
   /** Hand the app the files a person picked or pasted; it reads and refuses honestly. */
   onFiles?: (files: File[]) => void
   onDetach?: (id: string) => void
+  /** Explicitly enabled OpenAI models offered for audio input; never auto-selected. */
+  audioModels?: Array<{ name: string }>
+  audioModel?: string
+  onAudioModel?: (name: string) => void
+  onRefreshAudioModels?: () => void
 }) {
   const box = useRef<HTMLTextAreaElement | null>(null)
-  const [boxOpen, setBoxOpen] = useState<'engine' | 'models' | null>(null)
+  const [boxOpen, setBoxOpen] = useState<'engine' | 'models' | 'audio-model' | null>(null)
   const [cook, setCook] = useState(false)
   const [listening, setListening] = useState(false)
   const fileInput = useRef<HTMLInputElement | null>(null)
@@ -69,9 +78,9 @@ export default function Composer({
   useDismiss(pickerRef, () => setBoxOpen(null), boxOpen !== null)
 
   /**
-   * Dictation: the window's own speech recognition (Chromium's), words into
-   * the draft. Where the machine has no microphone or no listener, the button
-   * says so instead of pretending. The notice rides the app's own channel.
+   * Dictation: one utterance through the window's own speech recognition
+   * (Chromium's), words into the draft. It is neither wake-word nor continuous
+   * listening. Where no listener exists, the button says so.
    */
   const toggleDictation = (): void => {
     if (listening) {
@@ -97,7 +106,7 @@ export default function Composer({
       const ear = new Ctor()
       ear.lang = navigator.language || 'en-US'
       ear.interimResults = false
-      ear.continuous = true
+      ear.continuous = false
       ear.onresult = (event) => {
         let said = ''
         for (let i = 0; i < event.results.length; i += 1) said += `${event.results[i][0].transcript} `
@@ -182,7 +191,7 @@ export default function Composer({
             ref={fileInput}
             type="file"
             multiple
-            accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py"
+            accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,audio/wav,audio/mpeg,audio/mp4,audio/aac,audio/ogg,audio/flac,.wav,.mp3,.m4a,.aac,.ogg,.opus,.flac,.wma,.pdf,.docx,.pptx,.xlsx,.odt,.odp,.ods,.txt,.md,.markdown,.csv,.tsv,.json,.jsonl,.log,.xml,.yaml,.yml,.toml,.html,.htm,.rtf,.js,.jsx,.ts,.tsx,.css,.py,.sql,.sh,.bat,.c,.cpp,.h,.java,.rs"
             className="hidden"
             onChange={event => {
               const files = Array.from(event.target.files ?? [])
@@ -194,7 +203,7 @@ export default function Composer({
             type="button"
             onClick={() => fileInput.current?.click()}
             aria-label="Attach"
-            title="Attach a picture, a video (its frames), or a text file"
+            title="Attach a picture, sampled video frames, an audio file, a document, or a text file"
             className="flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:text-ink"
           >
             <Paperclip size={13} />
@@ -214,6 +223,16 @@ export default function Composer({
           <span className="ml-auto" />
           <EngineChip open={boxOpen === 'engine'} onToggle={() => setBoxOpen(boxOpen === 'engine' ? null : 'engine')} />
           <ModelChip open={boxOpen === 'models'} onToggle={() => setBoxOpen(boxOpen === 'models' ? null : 'models')} />
+          {attachments.some(entry => entry.kind === 'audio') && onAudioModel ? (
+            <AudioModelChip
+              open={boxOpen === 'audio-model'}
+              onToggle={() => setBoxOpen(boxOpen === 'audio-model' ? null : 'audio-model')}
+              models={audioModels}
+              selected={audioModel}
+              onSelect={onAudioModel}
+              onRefresh={onRefreshAudioModels}
+            />
+          ) : null}
           <span className="ml-auto flex items-center gap-2">
             {busy ? (
               <button
@@ -642,6 +661,71 @@ function ModelChip({ open, onToggle }: { open: boolean; onToggle: () => void }) 
               </button>
             ))
           )}
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
+function AudioModelChip({
+  open,
+  onToggle,
+  models,
+  selected,
+  onSelect,
+  onRefresh,
+}: {
+  open: boolean
+  onToggle: () => void
+  models: Array<{ name: string }>
+  selected: string
+  onSelect: (name: string) => void
+  onRefresh?: () => void
+}) {
+  const selectedLabel = selected.startsWith('openai/') ? selected.slice('openai/'.length) : ''
+  return (
+    <div className="relative">
+      <button
+        type="button"
+        onClick={onToggle}
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-label={selectedLabel ? `Audio model: openai/${selectedLabel}` : 'Choose an OpenAI audio model'}
+        title={selectedLabel
+          ? `Audio goes only to the selected OpenAI model openai/${selectedLabel}. The model may refuse audio; nothing is switched.`
+          : 'Choose an enabled OpenAI model for this audio. No model is chosen automatically.'}
+        className={`flex h-7 min-w-0 items-center gap-1.5 rounded-lg px-2 text-[11.5px] ${selectedLabel ? 'text-ink' : 'text-warn hover:text-ink'}`}
+      >
+        <Mic size={11} aria-hidden />
+        <span className="min-w-0 max-w-[120px] truncate">{selectedLabel ? `Audio · ${selectedLabel}` : 'Choose audio model'}</span>
+        <ChevronDown size={11} />
+      </button>
+      {open ? (
+        <div role="menu" aria-label="OpenAI models for audio input" className="absolute bottom-9 right-0 z-20 max-h-[300px] w-[300px] overflow-y-auto rounded-xl border border-line bg-card p-1.5 shadow-xl">
+          <p className="px-2.5 py-2 text-[11.5px] leading-relaxed text-muted">
+            Audio is sent only to the OpenAI model you choose here. The provider list does not report audio support, so a selected model may refuse it; there is no fallback.
+          </p>
+          {models.length ? models.map(model => (
+            <button
+              key={model.name}
+              type="button"
+              role="menuitemradio"
+              aria-checked={model.name === selected}
+              onClick={() => { onSelect(model.name); onToggle() }}
+              className={`flex w-full items-center rounded-lg px-2.5 py-1.5 text-left text-[12px] ${model.name === selected ? 'bg-white/[0.06] text-ink' : 'text-muted hover:text-ink'}`}
+            >
+              <span className="min-w-0 flex-1 truncate">{model.name}</span>
+            </button>
+          )) : (
+            <p className="px-2.5 py-2 text-[11.5px] leading-relaxed text-muted">
+              No enabled OpenAI models are available. Add an OpenAI key in Settings &gt; Models, enable OpenAI in Agent access, then refresh. This audio stays attached here.
+            </p>
+          )}
+          {onRefresh ? (
+            <button type="button" role="menuitem" onClick={onRefresh} className="mt-1 w-full border-t border-line px-2.5 py-2 text-left text-[11.5px] text-muted hover:text-ink">
+              Refresh available models
+            </button>
+          ) : null}
         </div>
       ) : null}
     </div>

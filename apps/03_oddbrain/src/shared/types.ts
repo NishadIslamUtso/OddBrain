@@ -35,7 +35,7 @@ export type Artifact = {
   versions: ArtifactVersion[]
 }
 
-export type AttachmentKind = 'image' | 'text'
+export type AttachmentKind = 'image' | 'text' | 'audio'
 
 export type Attachment = {
   id: string
@@ -47,14 +47,19 @@ export type Attachment = {
   /** Base64 image bytes, with no `data:` prefix. Images only, and not kept in
    *  the transcript — it lives in IndexedDB and is loaded when it is needed. */
   data?: string
+  /** Base64 audio payload, held in IndexedDB and sent only to a selected audio-capable provider model. */
+  audioData?: string
+  audioFormat?: 'wav' | 'mp3'
   /** What will actually read this picture: 'direct', or the bridge model's name. */
   seenBy?: string
   /** Plain text of a text/code attachment, already read. */
   text?: string
+  /** Safe extraction note, such as the fact a video was reduced to sampled frames. */
+  sourceNote?: string
 }
 
 /** An attachment as it is kept in a message: the bytes are stored separately. */
-export type StoredAttachment = Omit<Attachment, 'data'>
+export type StoredAttachment = Omit<Attachment, 'data' | 'audioData'>
 
 /** The bridge's description of an image, kept so follow-up turns still work. */
 export type BridgeRecord = {
@@ -192,7 +197,13 @@ export type ModelCapabilities = {
 }
 
 /** One turn as the model API expects it. */
-export type OllamaMessage = { role: string; content: string; images?: string[] }
+export type OllamaMessage = {
+  role: string
+  content: string
+  images?: string[]
+  imageMimes?: string[]
+  audios?: Array<{ data: string; format: 'wav' | 'mp3' }>
+}
 
 /** One record from the streaming path (Ollama locally, translated providers in the cloud). */
 export type OllamaRecord = {

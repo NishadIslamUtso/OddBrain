@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, Menu, safeStorage, shell, globalShortcut } from 'electron'
+import { app, BrowserWindow, dialog, Menu, safeStorage, shell, globalShortcut, screen } from 'electron'
 import { randomBytes } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { loadAppFlags, saveAppFlags } from './appFlags'
@@ -39,6 +39,7 @@ import { createDownloadManager, type DownloadTick } from './engine/downloads'
 import { agyModelSource, detectEngine } from './engine/availability'
 import { enginePath } from './engine/enginePath'
 import { pdfSafeName } from '../shared/lib/artifacts'
+import { windowBoundsFor } from './windowBounds'
 import { parsePullLine, validateModelName } from './engine/pull'
 import { deployMcp, deploySkill, scanClaudeSkills, type McpServer, type VaultSkill } from './engine/deploy'
 import { installCatalogSkill } from './engine/skillCatalogInstall'
@@ -514,23 +515,31 @@ function registerBridges(): void {
   handle(
     'engine:send',
     (_event, prompt: string, cwd: string, pictures: unknown = []): { ok: boolean; answer: string } => {
-      const text = typeof prompt === 'string' ? prompt.trim().slice(0, 20000) : ''
+      const text = typeof prompt === 'string' ? prompt.trim() : ''
       if (!text) return { ok: false, answer: 'Write what the engine should do first.' }
+      if (text.length > 20000) {
+        return { ok: false, answer: 'This request exceeds the 20,000-character engine limit. Nothing was truncated or sent; split the request.' }
+      }
+      if (!Array.isArray(pictures)) return { ok: false, answer: 'The picture list could not be read. Nothing was sent.' }
+      if (pictures.length > ENGINE_IMAGE_LIMIT) {
+        return { ok: false, answer: `This task has more than ${ENGINE_IMAGE_LIMIT} pictures. Remove some first; nothing was sent.` }
+      }
       // Pictures: only what the wire can carry, only a few, only small. A bad
       // list is refused with the reason, never silently dropped.
       const images: Array<{ mime: string; data: string }> = []
-      if (Array.isArray(pictures)) {
-        for (const entry of pictures.slice(0, ENGINE_IMAGE_LIMIT)) {
-          const mime = (entry as Record<string, unknown>)?.mime
-          const data = (entry as Record<string, unknown>)?.data
-          if (typeof mime !== 'string' || typeof data !== 'string' || !ENGINE_IMAGE_MIMES.includes(mime as never)) {
-            return { ok: false, answer: 'One of the pictures is not a PNG, JPEG or WebP. Nothing was sent.' }
-          }
-          if (data.length > ENGINE_IMAGE_CHARS || !data) {
-            return { ok: false, answer: 'One of the pictures is larger than 2 MB. Nothing was sent.' }
-          }
-          images.push({ mime, data })
+      for (const entry of pictures) {
+        const mime = (entry as Record<string, unknown>)?.mime
+        const data = (entry as Record<string, unknown>)?.data
+        if (typeof mime !== 'string' || typeof data !== 'string' || !ENGINE_IMAGE_MIMES.includes(mime as never)) {
+          return { ok: false, answer: 'One of the pictures is not a PNG, JPEG or WebP. Nothing was sent.' }
         }
+        if (data.length > ENGINE_IMAGE_CHARS || !data) {
+          return { ok: false, answer: 'One of the pictures is larger than 2 MB. Nothing was sent.' }
+        }
+        if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) {
+          return { ok: false, answer: 'One of the pictures could not be decoded safely. Nothing was sent.' }
+        }
+        images.push({ mime, data })
       }
       if (!engine) return { ok: false, answer: 'The engine is still waking up, try again in a moment.' }
       // The working folder is the app's decision, never the window's: the
@@ -1609,11 +1618,9 @@ function windowIcon(): string | undefined {
 
 function createWindow(): BrowserWindow {
   const icon = windowIcon()
+  const bounds = windowBoundsFor(screen.getPrimaryDisplay().workAreaSize)
   const window = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 940,
-    minHeight: 620,
+    ...bounds,
     show: false,
     ...(icon ? { icon } : {}),
     // The window paints this before the renderer draws, so there is never a white flash.

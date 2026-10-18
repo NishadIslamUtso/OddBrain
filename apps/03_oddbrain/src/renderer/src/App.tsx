@@ -28,7 +28,8 @@ import useChat from './hooks/useChat'
 import useArtifactRewrite from './hooks/useArtifactRewrite'
 import useModels from './hooks/useModels'
 import type { Attachment } from '@shared/types'
-import { readAttachment } from '@shared/lib/attachments'
+import { promptWithTextAttachments, readAttachment, readAudioAttachment } from '@shared/lib/attachments'
+import { parseCloudModel } from '@shared/lib/providers'
 import { extractFrames } from './lib/videoFrames'
 import usePersistentState from './hooks/usePersistentState'
 import useVault from './hooks/useVault'
@@ -440,7 +441,7 @@ export default function App() {
     }
   }
 
-  /** Read picked/pasted files into attachments; a video becomes its frames. */
+  /** Read picked/pasted files into bounded, non-executable attachments. */
   const addFiles = async (files: File[]): Promise<void> => {
     const room = Math.max(0, 4 - attachments.length)
     if (room === 0) {
@@ -448,26 +449,88 @@ export default function App() {
       return
     }
     const taken: Attachment[] = []
-    for (const file of files.slice(0, room)) {
+    const isAudioFile = (file: File): boolean => /^audio\//i.test(file.type) || /\.(?:wav|mp3|m4a|aac|ogg|opus|flac|wma)$/i.test(file.name)
+    const batch = files.slice(0, room)
+    let intakeNotice = files.length > room
+      ? `Only ${room} attachment${room === 1 ? '' : 's'} fit this task. Extra files were not read or sent.`
+      : ''
+    const addIntakeNotice = (message: string): void => {
+      if (message && !intakeNotice.includes(message)) intakeNotice = intakeNotice ? `${intakeNotice} ${message}` : message
+    }
+    const audioFiles = batch.filter(isAudioFile)
+    if (attachments.some(entry => entry.kind === 'audio') && audioFiles.length) {
+      setNotice('Only one audio file can ride with a task. Remove the earlier clip first; nothing was sent.')
+      return
+    }
+    if (audioFiles.length > 1) {
+      setNotice('Only one audio file can ride with a task. Choose one clip; nothing was sent.')
+      return
+    }
+    let preparedAudio: Attachment | null = null
+    if (audioFiles.length === 1) {
       try {
-        if (/^video\/(?:mp4|webm)$/.test(file.type)) {
+        preparedAudio = await readAudioAttachment(audioFiles[0])
+      } catch (failure) {
+        setNotice((failure as Error).message)
+        return
+      }
+      const selected = parseCloudModel(models.model)
+      addIntakeNotice(selected?.provider.id === 'openai' && models.available
+        ? `${audioFiles[0].name} was decoded locally. If you send it, it goes only to ${models.model}; the provider list does not confirm audio support, so that exact model may refuse. No fallback.`
+        : `${audioFiles[0].name} was decoded locally but not sent. Choose an enabled OpenAI model from Audio model before Send; nothing will be switched automatically.`)
+    }
+    const audioTurn = attachments.some(entry => entry.kind === 'audio') || preparedAudio !== null
+    for (const file of batch) {
+      if (taken.length >= room) {
+        addIntakeNotice(`${file.name} was not read or attached because this task has room for four attachments.`)
+        break
+      }
+      try {
+        const isAudio = isAudioFile(file)
+        if (isAudio) {
+          if (!preparedAudio) throw new Error(`${file.name}: audio was not decoded safely. Nothing was sent.`)
+          taken.push(preparedAudio)
+        } else if (engineStore().settings.id === 'agy' && !audioTurn && /^(?:image|video)\//i.test(file.type)) {
+          throw new Error(`${file.name}: the selected agy engine cannot receive images or video frames. Choose an engine that accepts images first; no provider or model will be switched automatically.`)
+        } else if (/^video\/(?:mp4|webm)$/i.test(file.type)) {
           // A video rides as evenly spaced still frames: the engine reads
           // pictures natively, and frames carry the story a clip would.
           const frames = await extractFrames(file, room - taken.length)
+          addIntakeNotice(`${file.name}: attached as ${frames.length} sampled still frame${frames.length === 1 ? '' : 's'}. Its audio track is not extracted or sent; no provider or model is switched.`)
           for (const frame of frames) {
-            taken.push(await readAttachment(frame, { verified: true, vision: true, thinking: false }))
+            const prepared = await readAttachment(frame, { verified: true, vision: true, thinking: false })
+            for (const attachment of Array.isArray(prepared) ? prepared : [prepared]) {
+              taken.push({
+                ...attachment,
+                sourceNote: `Video ${JSON.stringify(file.name)} is represented by ${frames.length} sampled still frames; its audio track was not decoded or sent.`,
+              })
+            }
           }
         } else {
           // The engine sees pictures itself; the chat vision bridge's gate is
           // about the chat brain, not the engine's own eyes.
-          taken.push(await readAttachment(file, { verified: true, vision: true, thinking: false }))
+          const prepared = await readAttachment(
+            file,
+            { verified: true, vision: true, thinking: false },
+            { maxPdfPages: room - taken.length },
+          )
+          if (Array.isArray(prepared)) {
+            if (engineStore().settings.id === 'agy' && !audioTurn) {
+              throw new Error(`${file.name}: this scanned PDF becomes page images, which the selected agy engine cannot receive. No provider or model was switched.`)
+            }
+            if (prepared[0]?.sourceNote) addIntakeNotice(`${prepared[0].sourceNote} Split the PDF to include other pages.`)
+            taken.push(...prepared)
+          } else {
+            taken.push(prepared)
+          }
         }
       } catch (failure) {
-        setNotice((failure as Error).message)
+        addIntakeNotice((failure as Error).message)
         break
       }
     }
     if (taken.length) setAttachments(current => [...current, ...taken].slice(0, 4))
+    if (intakeNotice) setNotice(intakeNotice)
   }
 
   // The window wires the engine up once, cold: settings, events, the
@@ -490,14 +553,53 @@ export default function App() {
   const send = async (): Promise<void> => {
     const text = draft
     if (!text.trim() && attachments.length === 0) return
-    // The only path: the engine. The text is a work order. The same
-    // keep-the-draft-on-refusal rule applies, so nothing is ever typed twice.
+    // Audio has no verified local engine input. It uses the explicitly selected,
+    // enabled OpenAI model through the app's provider bridge; no engine/model
+    // fallback or substitution is allowed.
+    const audioAttachments = attachments.filter(entry => entry.kind === 'audio')
+    if (audioAttachments.length) {
+      const selected = parseCloudModel(models.model)
+      if (selected?.provider.id !== 'openai') {
+        setNotice('Audio is not sent to the selected engine. Choose an enabled OpenAI model using Audio model; nothing has been sent or switched.')
+        return
+      }
+      if (!models.available) {
+        setNotice(models.error || `The selected model ${models.model} is not available through its enabled OpenAI key. Nothing was sent.`)
+        return
+      }
+      const audioOrder = seedWrap(text.trim() || 'Please listen to the attached audio and tell me what it contains.')
+      const accepted = await chatApi.send({ content: audioOrder, attachments, projectId: pendingProject })
+      if (accepted) {
+        setDraft('')
+        setAttachments([])
+        setNotice('')
+        if (pendingProject) setPendingProject(null)
+      }
+      return
+    }
+
+    // Non-audio work continues through the chosen agent engine as before.
     // After a Compact, the brief rides along with exactly one send.
     const order = seedWrap(text.trim() || (attachments.length ? 'Read what I attached and tell me what you see.' : ''))
-    const answer = await engineStore().send(
-      order,
-      attachments.filter(entry => entry.kind === 'image' && entry.data).map(entry => ({ mime: entry.mime || 'image/png', data: entry.data || '' })),
-    )
+    let completeOrder: string
+    try {
+      completeOrder = promptWithTextAttachments(order, attachments)
+    } catch (failure) {
+      setNotice((failure as Error).message)
+      return
+    }
+    const imageAttachments = attachments.filter(entry => entry.kind === 'image')
+    if (imageAttachments.some(entry => !entry.data)) {
+      setNotice('An attached image is missing its decoded data. Reattach it; nothing was sent.')
+      return
+    }
+    const pictures = imageAttachments
+      .map(entry => ({ mime: entry.mime || 'image/png', data: entry.data || '' }))
+    if (pictures.length && engineStore().settings.id === 'agy') {
+      setNotice('The selected agy engine cannot receive images. Choose an engine that accepts them first; this image stays attached and no provider or model is switched.')
+      return
+    }
+    const answer = await engineStore().send(completeOrder, pictures)
     if (answer.ok) {
       setDraft('')
       setAttachments([])
@@ -508,7 +610,7 @@ export default function App() {
     } else if (answer.answer.startsWith('The engine is already working')) {
       // Busy is not a refusal here: the owner typed a work order, so it
       // waits in the line and runs the moment the engine is free.
-      engineStore().enqueue(order)
+      engineStore().enqueue(completeOrder, pictures)
       setDraft('')
       setAttachments([])
       setNotice('Added to the line. It runs when the current work finishes; the card shows the queue.')
@@ -636,8 +738,11 @@ export default function App() {
           draft={draft}
           setDraft={setDraft}
           onSend={() => void send()}
-          onStop={() => void engine.stop()}
-          busy={engine.turn?.state === 'running'}
+          onStop={() => {
+            if (chatApi.busyChatId) chatApi.stop()
+            else void engine.stop()
+          }}
+          busy={engine.turn?.state === 'running' || chatApi.busyChatId !== null}
           live={chatApi.live}
           highlightId={highlight}
           notice={notice}
@@ -648,6 +753,13 @@ export default function App() {
           attachments={attachments}
           onFiles={(files) => void addFiles(files)}
           onDetach={(id) => setAttachments(current => current.filter(entry => entry.id !== id))}
+          audioModels={models.models.filter(entry => entry.cloud && entry.provider === 'openai').map(entry => ({ name: entry.name }))}
+          audioModel={models.model}
+          onAudioModel={(name) => {
+            models.select(name)
+            setNotice(`Audio will be sent only to ${name}. The provider list does not confirm audio support; that exact model may refuse. No fallback.`)
+          }}
+          onRefreshAudioModels={models.refresh}
           onRewrite={runRewrite}
           onRestore={(artifact, index) => restoreVersion(artifact.id, index)}
           busyArtifactId={rewrite.busyId || ''}

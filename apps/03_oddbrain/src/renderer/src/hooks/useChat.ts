@@ -6,6 +6,7 @@ import type {
   Chat,
   Message,
   ModelCapabilities,
+  OllamaMessage,
 } from '@shared/types'
 import { newId } from '@shared/lib/storage'
 import { loadImage, persistAttachments, toOllamaMessages } from '@shared/lib/attachments'
@@ -18,6 +19,7 @@ import {
   needsBridge,
 } from '@shared/lib/vision'
 import { askLocal } from '@shared/lib/ask'
+import { parseCloudModel } from '@shared/lib/providers'
 import { extractCitations } from '@shared/lib/citations'
 import { wantsChart } from '@shared/lib/chart'
 import type { InferenceSettings } from '@shared/lib/inference'
@@ -77,6 +79,8 @@ type RunArgs = {
   assistant: Message
   requested: boolean
   wantsBridge: boolean
+  directProviderImages: boolean
+  directProviderAudio: boolean
   thinking: boolean
   controller: AbortController
   history: Message[]
@@ -224,7 +228,13 @@ export default function useChat({
     setBusyChatId(chatId)
     try {
       const requested = wantsArtifact(content, artifactMode)
-      const wantsBridge = needsBridge(models.capabilities, attachments)
+      // A cloud model is an explicit destination selected in the model picker.
+      // Pass images to that exact provider wire; never route them through an
+      // unselected vision model as a hidden fallback.
+      const selectedCloud = parseCloudModel(models.model)
+      const directProviderImages = selectedCloud !== null
+      const directProviderAudio = selectedCloud?.provider.id === 'openai'
+      const wantsBridge = !directProviderImages && needsBridge(models.capabilities, attachments)
       if (wantsBridge && !vision.bridgeModel) {
         throw new Error(
           `Images need a model that can see. ${models.model} cannot, and no other installed model has reported "vision" through Ollama's own metadata — names are never trusted for this. Nothing is downloaded automatically: run "ollama pull qwen3-vl:4b" on this machine if you want a local vision model, then refresh the model list.`
@@ -267,7 +277,7 @@ export default function useChat({
       // No capture here: the reply is still streaming, and a half-written turn is
       // not evidence. The conversation is kept when the turn ends — complete,
       // stopped or failed — a few lines below.
-      void run({ chat, userMessage, assistant, requested, wantsBridge, thinking, controller, history })
+      void run({ chat, userMessage, assistant, requested, wantsBridge, directProviderImages, directProviderAudio, thinking, controller, history })
       // Return once the send is accepted, so the composer clears immediately.
       return true
     } catch (error) {
@@ -285,6 +295,8 @@ export default function useChat({
     assistant,
     requested,
     wantsBridge,
+    directProviderImages,
+    directProviderAudio,
     thinking,
     controller,
     history,
@@ -332,9 +344,12 @@ export default function useChat({
       }
 
       // 2 — the answering model.
-      const requestMessages: Array<{ role: string; content: string; images?: string[] }> = [
+      const requestMessages: OllamaMessage[] = [
         { role: 'system', content: systemPrompt(requested, wantsChart(userMessage.content)) },
-        ...(await toOllamaMessages(history, models.capabilities)),
+        ...(await toOllamaMessages(history, models.capabilities, {
+          allowDirectProviderImages: directProviderImages,
+          allowDirectProviderAudio: directProviderAudio,
+        })),
       ]
       const size = requestMessages.reduce((total, message) => total + message.content.length, 0)
       if (size > 12_000) {
@@ -502,6 +517,8 @@ export default function useChat({
       controller,
       requested: wantsArtifact(userMessage.content, false),
       wantsBridge: false,
+      directProviderImages: parseCloudModel(models.model) !== null,
+      directProviderAudio: parseCloudModel(models.model)?.provider.id === 'openai',
       thinking: Boolean(assistant.thinking),
       history: [...before],
     })
@@ -562,6 +579,8 @@ export default function useChat({
       controller,
       requested: wantsArtifact(text, false),
       wantsBridge: false,
+      directProviderImages: parseCloudModel(models.model) !== null,
+      directProviderAudio: parseCloudModel(models.model)?.provider.id === 'openai',
       thinking: false,
       history: [...before, edited],
     })

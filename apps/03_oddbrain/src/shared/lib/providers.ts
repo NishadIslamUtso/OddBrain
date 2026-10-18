@@ -14,6 +14,7 @@
  */
 
 import type { OllamaMessage } from '../types'
+import { ENGINE_IMAGE_MIMES, inspectAudioBytes, MAX_ENGINE_ATTACHMENTS, MAX_ENGINE_IMAGE_CHARS, MAX_AUDIO_BASE64_CHARS } from './media'
 
 export type WireFormat = 'anthropic' | 'openai'
 
@@ -230,6 +231,73 @@ export function splitSystem(messages: OllamaMessage[]): { system: string; rest: 
   return { system: system.join('\n\n'), rest }
 }
 
+type ProviderImage = { mime: (typeof ENGINE_IMAGE_MIMES)[number]; data: string }
+
+function detectImageMime(data: string): ProviderImage['mime'] | null {
+  try {
+    const bytes = Array.from(atob(data.slice(0, 32)), character => character.charCodeAt(0))
+    if (bytes[0] === 0x89 && bytes[1] === 0x50 && bytes[2] === 0x4e && bytes[3] === 0x47) return 'image/png'
+    if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) return 'image/jpeg'
+    if (bytes[0] === 0x52 && bytes[1] === 0x49 && bytes[2] === 0x46 && bytes[3] === 0x46 &&
+      bytes[8] === 0x57 && bytes[9] === 0x45 && bytes[10] === 0x42 && bytes[11] === 0x50) return 'image/webp'
+  } catch {
+    return null
+  }
+  return null
+}
+
+function providerImages(message: OllamaMessage): ProviderImage[] {
+  const images = message.images || []
+  if (!images.length) return []
+  if (images.length > MAX_ENGINE_ATTACHMENTS) {
+    throw new Error(`This request has more than ${MAX_ENGINE_ATTACHMENTS} images. Nothing was sent.`)
+  }
+  const mimes = message.imageMimes
+  if (mimes && (!Array.isArray(mimes) || mimes.length !== images.length)) {
+    throw new Error('The image type list does not match the attached images. Nothing was sent.')
+  }
+  return images.map((data, index) => {
+    if (typeof data !== 'string' || !data || data.length > MAX_ENGINE_IMAGE_CHARS ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) {
+      throw new Error('An attached image could not be decoded within the safe limit. Nothing was sent.')
+    }
+    const detected = detectImageMime(data)
+    const declared = mimes?.[index]
+    const mime = (declared || detected) as ProviderImage['mime'] | undefined
+    if (!mime || !detected || !ENGINE_IMAGE_MIMES.includes(mime as never) || detected !== mime) {
+      throw new Error('An attached image has an unsupported or mismatched type. Nothing was sent.')
+    }
+    return { mime, data }
+  })
+}
+
+type ProviderAudio = { data: string; format: 'wav' | 'mp3' }
+
+function providerAudios(message: OllamaMessage, provider: CloudProvider): ProviderAudio[] {
+  const audios = message.audios || []
+  if (!audios.length) return []
+  if (message.role !== 'user') throw new Error('Audio input must be attached to a user message. Nothing was sent.')
+  if (provider.id !== 'openai') {
+    throw new Error(`The selected ${provider.label} route has no verified audio-input format. Choose an audio-capable model there; nothing was sent or switched.`)
+  }
+  if (audios.length > 1) throw new Error('Only one audio clip can be sent in a message. Nothing was sent.')
+  return audios.map(audio => {
+    if (!audio.data || audio.data.length > MAX_AUDIO_BASE64_CHARS ||
+      !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(audio.data) ||
+      (audio.format !== 'wav' && audio.format !== 'mp3')) {
+      throw new Error('The audio clip could not be decoded within the safe limit. Nothing was sent.')
+    }
+    try {
+      const binary = atob(audio.data)
+      const bytes = Uint8Array.from(binary, character => character.charCodeAt(0))
+      inspectAudioBytes(bytes, audio.format)
+    } catch (failure) {
+      throw new Error(`The audio container is invalid or exceeds the safe limit (${(failure as Error).message}). Nothing was sent.`)
+    }
+    return { data: audio.data, format: audio.format }
+  })
+}
+
 export function buildChatRequest(input: {
   provider: CloudProvider
   model: string
@@ -254,10 +322,22 @@ export function buildChatRequest(input: {
         max_tokens: input.maxTokens,
         stream: true,
         ...(system ? { system } : {}),
-        messages: rest.map(message => ({
-          role: message.role === 'assistant' ? 'assistant' : 'user',
-          content: message.content,
-        })),
+        messages: rest.map(message => {
+          const images = providerImages(message)
+          const audios = providerAudios(message, input.provider)
+          const content = [
+            ...(message.content ? [{ type: 'text', text: message.content }] : []),
+            ...images.map(image => ({
+              type: 'image',
+              source: { type: 'base64', media_type: image.mime, data: image.data },
+            })),
+            ...audios.map(audio => ({ type: 'audio', source: { type: 'base64', media_type: audio.format === 'wav' ? 'audio/wav' : 'audio/mpeg', data: audio.data } })),
+          ]
+          return {
+            role: message.role === 'assistant' ? 'assistant' : 'user',
+            content: images.length || audios.length ? content : message.content,
+          }
+        }),
       }),
     }
   }
@@ -271,7 +351,25 @@ export function buildChatRequest(input: {
       max_tokens: input.maxTokens,
       messages: [
         ...(system ? [{ role: 'system', content: system }] : []),
-        ...rest.map(message => ({ role: message.role, content: message.content })),
+        ...rest.map(message => {
+          const images = providerImages(message)
+          const audios = providerAudios(message, input.provider)
+          const mediaContent = [
+            ...(message.content ? [{ type: 'text', text: message.content }] : []),
+            ...images.map(image => ({
+              type: 'image_url',
+              image_url: { url: `data:${image.mime};base64,${image.data}` },
+            })),
+            ...audios.map(audio => ({
+              type: 'input_audio',
+              input_audio: { data: audio.data, format: audio.format },
+            })),
+          ]
+          return {
+            role: message.role,
+            content: images.length || audios.length ? mediaContent : message.content,
+          }
+        }),
       ],
     }),
   }

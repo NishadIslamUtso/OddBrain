@@ -101,7 +101,8 @@ export type ContextTotals = {
   costUsd: number
 }
 
-export type LineItem = { id: number; prompt: string }
+export type EnginePicture = { mime: string; data: string }
+export type LineItem = { id: number; prompt: string; pictures: EnginePicture[] }
 
 export type JournalEntry = {
   at: string
@@ -116,7 +117,7 @@ type EngineStore = EngineState & {
   /** Wire the bridge up once: read the settings, listen for events. */
   init(): Promise<void>
   setOn(value: boolean): void
-  send(prompt: string, pictures?: Array<{ mime: string; data: string }>): Promise<{ ok: boolean; answer: string }>
+  send(prompt: string, pictures?: EnginePicture[]): Promise<{ ok: boolean; answer: string }>
   answer(allow: boolean): Promise<void>
   stop(): Promise<void>
   /** Fold one wire event into the turn. Public so tests can drive it directly. */
@@ -134,7 +135,7 @@ type EngineStore = EngineState & {
   /** The engine's own thinking budget; persists. */
   setThinking(mode: 'default' | 'extended'): Promise<void>
   /** Park a work order for when the current turn closes. */
-  enqueue(prompt: string): LineItem
+  enqueue(prompt: string, pictures?: EnginePicture[]): LineItem
   removeFromLine(id: number): void
   clearLine(): void
   /** "Open a folder": pick where the engine works; persists. */
@@ -217,7 +218,7 @@ const drainLine = (): void => {
   const next = state.line[0]
   if (!next) return
   setState({ line: state.line.slice(1) })
-  void store.send(next.prompt)
+  void store.send(next.prompt, next.pictures)
 }
 
 let subscribed = false
@@ -467,7 +468,7 @@ const store: EngineStore = {
     if (state.on) void store.init()
   },
 
-  async send(prompt: string, pictures: Array<{ mime: string; data: string }> = []): Promise<{ ok: boolean; answer: string }> {
+  async send(prompt: string, pictures: EnginePicture[] = []): Promise<{ ok: boolean; answer: string }> {
     if (state.turn?.state === 'running') {
       return { ok: false, answer: 'The engine is already working on the last task.' }
     }
@@ -532,9 +533,9 @@ const store: EngineStore = {
     if (answer.ok) setState({ settings: { ...state.settings, thinking: mode } })
   },
 
-  enqueue(prompt: string): LineItem {
+  enqueue(prompt: string, pictures: EnginePicture[] = []): LineItem {
     lineId += 1
-    const item: LineItem = { id: lineId, prompt }
+    const item: LineItem = { id: lineId, prompt, pictures }
     state.line = [...state.line, item]
     emit()
     // Nothing running? The line is a straight pass-through.

@@ -13,6 +13,7 @@ import {
   readModelNames,
   translateSseEvent,
 } from '../src/shared/lib/providers'
+import { MAX_AUDIO_BASE64_CHARS } from '../src/shared/lib/media'
 
 /**
  * The provider layer, tested without a network.
@@ -98,6 +99,85 @@ test('Anthropic gets a system field and its own headers; OpenAI gets a system me
   const openaiBody = JSON.parse(openai.body || '{}')
   assert.deepEqual(openaiBody.messages.map((m: { role: string }) => m.role), ['system', 'user', 'assistant'])
   assert.equal(openaiBody.stream, true)
+})
+
+test('images go to exactly the selected cloud model in that provider’s native message shape', () => {
+  const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p5sAAAAASUVORK5CYII='
+  const messages = [{ role: 'user', content: 'Describe this.', images: [png], imageMimes: ['image/png'] }]
+  const anthropic = JSON.parse(buildChatRequest({
+    provider: providerById('anthropic')!, model: 'claude-sonnet-4-5', apiKey: 'key',
+    baseUrl: 'https://api.anthropic.com/v1', messages, maxTokens: 100,
+  }).body || '{}')
+  assert.deepEqual(anthropic.messages[0].content, [
+    { type: 'text', text: 'Describe this.' },
+    { type: 'image', source: { type: 'base64', media_type: 'image/png', data: png } },
+  ])
+
+  const openai = JSON.parse(buildChatRequest({
+    provider: providerById('openai')!, model: 'gpt-4o-mini', apiKey: 'key',
+    baseUrl: 'https://api.openai.com/v1', messages, maxTokens: 100,
+  }).body || '{}')
+  assert.deepEqual(openai.messages[0].content, [
+    { type: 'text', text: 'Describe this.' },
+    { type: 'image_url', image_url: { url: `data:image/png;base64,${png}` } },
+  ])
+})
+
+test('a cloud image with an unknown, mismatched, or oversized encoding is refused whole', () => {
+  const base = {
+    provider: providerById('openai')!, model: 'chosen/model', apiKey: 'key',
+    baseUrl: 'https://api.openai.com/v1', maxTokens: 100,
+  }
+  assert.throws(() => buildChatRequest({ ...base, messages: [{ role: 'user', content: 'look', images: ['bm90IGFuIGltYWdl'], imageMimes: ['image/png'] }] }), /mismatched type/)
+  assert.throws(() => buildChatRequest({ ...base, messages: [{ role: 'user', content: 'look', images: ['a'.repeat(3_000_000)], imageMimes: ['image/png'] }] }), /safe limit/)
+})
+
+test('audio is sent only to the selected OpenAI model in its input-audio wire format', () => {
+  const wav = Buffer.alloc(46)
+  wav.write('RIFF', 0, 'ascii')
+  wav.writeUInt32LE(38, 4)
+  wav.write('WAVE', 8, 'ascii')
+  wav.write('fmt ', 12, 'ascii')
+  wav.writeUInt32LE(16, 16)
+  wav.writeUInt16LE(1, 20)
+  wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(8_000, 24)
+  wav.writeUInt32LE(16_000, 28)
+  wav.writeUInt16LE(2, 32)
+  wav.writeUInt16LE(16, 34)
+  wav.write('data', 36, 'ascii')
+  wav.writeUInt32LE(2, 40)
+  wav.writeUInt16LE(0, 44)
+  const data = wav.toString('base64')
+  const base = { model: 'gpt-4o-audio-preview', apiKey: 'key', baseUrl: 'https://api.openai.com/v1', maxTokens: 100 }
+  const openai = JSON.parse(buildChatRequest({
+    ...base, provider: providerById('openai')!, messages: [{ role: 'user', content: 'Transcribe this.', audios: [{ data, format: 'wav' }] }],
+  }).body || '{}')
+  assert.equal(openai.model, 'gpt-4o-audio-preview', 'the selected model is preserved exactly')
+  assert.deepEqual(openai.messages[0].content, [
+    { type: 'text', text: 'Transcribe this.' },
+    { type: 'input_audio', input_audio: { data, format: 'wav' } },
+  ])
+  assert.throws(() => buildChatRequest({
+    ...base, provider: providerById('anthropic')!, baseUrl: 'https://api.anthropic.com/v1',
+    messages: [{ role: 'user', content: 'Transcribe this.', audios: [{ data, format: 'wav' }] }],
+  }), /has no verified audio-input format.*nothing was sent or switched/i)
+  assert.throws(() => buildChatRequest({
+    ...base, provider: providerById('openai')!,
+    messages: [{ role: 'assistant', content: 'not an input turn', audios: [{ data, format: 'wav' }] }],
+  }), /must be attached to a user message.*Nothing was sent/)
+  assert.throws(() => buildChatRequest({
+    ...base, provider: providerById('openai')!,
+    messages: [{ role: 'user', content: '', audios: [{ data, format: 'wav' }, { data, format: 'wav' }] }],
+  }), /Only one audio clip.*Nothing was sent/)
+  assert.throws(() => buildChatRequest({
+    ...base, provider: providerById('openai')!,
+    messages: [{ role: 'user', content: '', audios: [{ data: 'A'.repeat(MAX_AUDIO_BASE64_CHARS + 4), format: 'wav' }] }],
+  }), /safe limit.*Nothing was sent/)
+  assert.throws(() => buildChatRequest({
+    ...base, provider: providerById('openai')!,
+    messages: [{ role: 'user', content: '', audios: [{ data: Buffer.from('not audio').toString('base64'), format: 'wav' }] }],
+  }), /audio container is invalid.*Nothing was sent/)
 })
 
 test('the model list is read from what the provider sent, never from a catalogue', () => {

@@ -97,6 +97,7 @@ test('extended thinking sets the engine\u2019s own env at launch; default sets n
 type CoreFake = {
   listener: ((event: EngineEvent) => void) | null
   sent: string[]
+  sentPictures: unknown[]
   journalKept: Array<{ prompt: string; answer: string }>
   thinking: string | null
   usage: EngineUsage | null
@@ -104,7 +105,7 @@ type CoreFake = {
 }
 
 function withCoreFake(): CoreFake {
-  const fake: CoreFake = { listener: null, sent: [], journalKept: [], thinking: null, usage: { inTokens: 100, outTokens: 50, durationMs: 300, costUsd: 0.002 }, busyHold: false }
+  const fake: CoreFake = { listener: null, sent: [], sentPictures: [], journalKept: [], thinking: null, usage: { inTokens: 100, outTokens: 50, durationMs: 300, costUsd: 0.002 }, busyHold: false }
   ;(window as unknown as Record<string, unknown>).api = {}
   ;(window as unknown as Record<string, unknown>).engineApi = {
     read: async () => ({
@@ -119,8 +120,9 @@ function withCoreFake(): CoreFake {
       fake.thinking = mode
       return { ok: true, answer: mode }
     },
-    send: async (prompt: string) => {
+    send: async (prompt: string, _cwd?: string, pictures?: unknown) => {
       fake.sent.push(prompt)
+      fake.sentPictures.push(pictures)
       if (!fake.busyHold) {
         setTimeout(() => {
           if (fake.usage) fake.listener?.({ kind: 'delta', text: 'the answer' } as EngineEvent)
@@ -185,7 +187,8 @@ test('the line: busy sends park, drain in order when the engine frees, holds sto
   const store = engineStore()
   await store.send('the running task')
   const one = store.enqueue('parked one')
-  const two = store.enqueue('parked two')
+  const queuedPictures = [{ mime: 'image/png', data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p5sAAAAASUVORK5CYII=' }]
+  const two = store.enqueue('parked two', queuedPictures)
   assert.equal(store.line.length, 2)
   assert.equal(fake.sent.length, 1, 'parked work orders are not sent while the engine works')
   store.removeFromLine(one.id)
@@ -207,6 +210,7 @@ test('the line: busy sends park, drain in order when the engine frees, holds sto
   await new Promise(resolve => setTimeout(resolve, 800))
   assert.equal(fake.sent.length, 3, 'the parked order ran after the engine freed up')
   assert.match(fake.sent[2] ?? '', /parked two/)
+  assert.deepEqual(fake.sentPictures[2], queuedPictures, 'pictures survive the busy queue and ride with their work order')
   assert.equal(store.line.length, 0)
 })
 

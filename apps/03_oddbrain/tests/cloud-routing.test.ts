@@ -22,25 +22,32 @@ const sse = (response: import('node:http').ServerResponse): void => {
   response.writeHead(200, { 'content-type': 'text/event-stream', 'cache-control': 'no-cache' })
 }
 
-async function fakeProvider(): Promise<{ url: string; asked: string[]; close: () => Promise<void> }> {
+async function fakeProvider(): Promise<{ url: string; asked: string[]; bodies: string[]; close: () => Promise<void> }> {
   const asked: string[] = []
+  const bodies: string[] = []
   const server: Server = createServer((request, response) => {
     asked.push(request.url || '')
     if ((request.url || '').endsWith('/models')) {
       response.writeHead(200, { 'content-type': 'application/json' })
-      response.end('{"data":[{"id":"gpt-4o-mini"}]}')
+      response.end('{"data":[{"id":"gpt-4o-mini"},{"id":"gpt-4o-audio-preview"}]}')
       return
     }
-    sse(response)
-    response.write('data: {"choices":[{"delta":{"content":"Hello "}}]}\n\n')
-    response.write('data: {"choices":[{"delta":{"content":"from the provider"}}]}\n\n')
-    response.write('data: [DONE]\n\n')
-    response.end()
+    let body = ''
+    request.setEncoding('utf8')
+    request.on('data', chunk => { body += chunk })
+    request.on('end', () => {
+      bodies.push(body)
+      sse(response)
+      response.write('data: {"choices":[{"delta":{"content":"Hello "}}]}\n\n')
+      response.write('data: {"choices":[{"delta":{"content":"from the provider"}}]}\n\n')
+      response.write('data: [DONE]\n\n')
+      response.end()
+    })
   })
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const address = server.address()
   const port = typeof address === 'object' && address ? address.port : 0
-  return { url: `http://127.0.0.1:${port}`, asked, close: () => new Promise<void>(done => server.close(() => done())) }
+  return { url: `http://127.0.0.1:${port}`, asked, bodies, close: () => new Promise<void>(done => server.close(() => done())) }
 }
 
 function keys(withKey: boolean): ReturnType<typeof createKeyStore> {
@@ -84,6 +91,49 @@ test('a chat with a provider model streams the provider’s answer as NDJSON rec
     assert.equal(records.map(record => record.message?.content || '').join(''), 'Hello from the provider')
     assert.deepEqual(records.at(-1), { done: true }, 'the stream ends the way Ollama’s does')
     assert.deepEqual(provider.asked, ['/chat/completions'], 'one request, to the provider, and nothing else')
+  } finally {
+    await api.close()
+    await provider.close()
+  }
+})
+
+test('selected OpenAI audio reaches that exact provider model and not the local engine', async () => {
+  const provider = await fakeProvider()
+  const api = await start(provider.url, true)
+  const wav = Buffer.alloc(46)
+  wav.write('RIFF', 0, 'ascii')
+  wav.writeUInt32LE(38, 4)
+  wav.write('WAVE', 8, 'ascii')
+  wav.write('fmt ', 12, 'ascii')
+  wav.writeUInt32LE(16, 16)
+  wav.writeUInt16LE(1, 20)
+  wav.writeUInt16LE(1, 22)
+  wav.writeUInt32LE(8_000, 24)
+  wav.writeUInt32LE(16_000, 28)
+  wav.writeUInt16LE(2, 32)
+  wav.writeUInt16LE(16, 34)
+  wav.write('data', 36, 'ascii')
+  wav.writeUInt32LE(2, 40)
+  wav.writeUInt16LE(0, 44)
+  const data = wav.toString('base64')
+  try {
+    const response = await fetch(`${api.url}/api/ollama/chat`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model: 'openai/gpt-4o-audio-preview',
+        messages: [{ role: 'user', content: 'Listen to this.', audios: [{ data, format: 'wav' }] }],
+        stream: true,
+      }),
+    })
+    assert.equal(response.status, 200)
+    const payload = JSON.parse(provider.bodies[0])
+    assert.equal(payload.model, 'gpt-4o-audio-preview')
+    assert.deepEqual(payload.messages[0].content, [
+      { type: 'text', text: 'Listen to this.' },
+      { type: 'input_audio', input_audio: { data, format: 'wav' } },
+    ])
+    assert.deepEqual(provider.asked, ['/chat/completions'], 'no local request or alternate provider was used')
   } finally {
     await api.close()
     await provider.close()

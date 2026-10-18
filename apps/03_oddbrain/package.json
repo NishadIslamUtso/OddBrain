@@ -22,7 +22,9 @@
     "dist:linux": "npm run build && electron-builder --linux"
   },
   "dependencies": {
+    "fflate": "^0.8.3",
     "lucide-react": "^0.469.0",
+    "pdfjs-dist": "^5.4.296",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "yaml": "^2.9.1",

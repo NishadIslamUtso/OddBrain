@@ -36,6 +36,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    // The suite contains live filesystem watchers, ports and child processes.
+    // Serial files avoid starving their short, real-time deadlines on small CI machines.
+    maxWorkers: 1,
     // Top level only: tests/pending/ holds the tests whose subject is not ported
     // yet, and it is listed in tests/pending/README.md. Nothing there runs or counts.
     include: ['tests/*.test.{js,cjs,ts}'],
