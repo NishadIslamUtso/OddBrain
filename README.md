@@ -228,9 +228,9 @@ npm run build                         exit 0 (main, preload, renderer, preview)
 ```
 
 CI runs the same gate in `.github/workflows/checks.yml` on every push: Linux
-(install, types, tests, build) and Windows (npm ci, types, tests with a JUnit
-report and a commit comment naming failures, build, and a five-minute
-`electron . --smoke`). `.github/workflows/installer.yml` builds the NSIS
+(install, types, tests, build, and the browser preview's own build) and Windows
+(npm ci, types, tests with a JUnit report and a commit comment naming failures,
+build, and a five-minute `electron . --smoke`). `.github/workflows/installer.yml` builds the NSIS
 installer, its checksum, and publishes them on a tag.
 
 The Windows PDF failure that this branch inherited is fixed here: pdf.js now

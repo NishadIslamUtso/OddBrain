@@ -50,6 +50,11 @@ jobs:
             }
       - name: Build
         run: npm run build
+      - name: Build the browser preview too
+        # The preview is how the owner looks at the interface without installing
+        # anything. It is a different build (vite.web.config.ts) and nothing else
+        # in this workflow touches it, so it could break unnoticed.
+        run: npm run build:web
       - name: Smoke — the window opens and the console is clean
         timeout-minutes: 5
         env:
