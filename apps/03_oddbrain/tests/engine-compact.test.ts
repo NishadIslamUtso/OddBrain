@@ -25,6 +25,8 @@ import {
   compactState,
   finishCompact,
   seedWrap,
+  peekSeed,
+  consumeSeed,
   useCompact,
   writeBrief,
 } from '../src/renderer/src/state/compact'
@@ -223,6 +225,25 @@ test('compaction end to end: the brief turn, the shown brief, the save, the fres
   assert.match(seeded, /\[The task\]\nnow push it/)
   assert.equal(seedWrap('another task'), 'another task', 'the seed rides exactly once')
   assert.match(compactState().notice, /rides along|rode along/)
+})
+
+test('a refused send cannot consume a queued brief; only an accepted send consumes that same brief', async () => {
+  withFakeCompactEngine()
+  resetEngineForTests()
+  const store = engineStore()
+  await store.send('work worth keeping')
+  await settleStore()
+  assert.ok(await writeBrief())
+  assert.ok(await finishCompact())
+  const pending = peekSeed()
+  assert.ok(pending)
+  const order = buildSeededPrompt(pending, 'next task')
+  assert.match(order, /\[The task\]\nnext task/)
+  assert.equal(peekSeed(), pending, 'preparing an order is not an accepted send')
+  assert.equal(consumeSeed('not the saved brief'), false, 'a changed brief cannot be consumed by an older send')
+  assert.equal(peekSeed(), pending, 'a refused send still has its context')
+  assert.equal(consumeSeed(pending), true)
+  assert.equal(peekSeed(), null)
 })
 
 test('a failed brief turn changes nothing: no save, no fresh, the session stands', async () => {

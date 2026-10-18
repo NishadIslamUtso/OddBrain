@@ -19,22 +19,26 @@ export function createMemoryManager(vaultRoot: () => string, customFolder: () =>
   const folder = (): string => customFolder() || join(vaultRoot(), MEMORY_DIR)
 
   const list = async (): Promise<MemoryListAnswer> => {
+    const selected = folder()
     let names: string[]
     try {
-      names = (await readdir(folder())).filter(entry => entry.endsWith('.md')).sort()
-    } catch {
-      // No folder yet: the engine has remembered nothing. That is honest.
-      return { ok: true, folder: folder(), files: [] }
+      names = (await readdir(selected)).filter(entry => entry.endsWith('.md')).sort()
+    } catch (failure) {
+      // A missing *default* folder means no memory yet. A vanished selected
+      // folder or an unreadable directory is not an empty memory folder.
+      if ((failure as NodeJS.ErrnoException).code === 'ENOENT' && !customFolder()) return { ok: true, folder: selected, files: [] }
+      return { ok: false, folder: selected, answer: `The memory folder could not be read: ${(failure as Error).message}` }
     }
     const files: MemoryFile[] = []
+    let skipped = 0
     for (const name of names) {
-      const full = join(folder(), name)
+      const full = join(selected, name)
       try {
         // A symlink inside the memory folder is NOT memory — it can point
         // anywhere on the disk, so listing follows only real files (the vault
         // service makes the same refusal with the same reasoning).
         const info = await lstat(full)
-        if (info.isSymbolicLink()) continue
+        if (!info.isFile() || info.isSymbolicLink()) { skipped++; continue }
         const raw = await readFile(full, 'utf8')
         files.push({
           name,
@@ -44,10 +48,10 @@ export function createMemoryManager(vaultRoot: () => string, customFolder: () =>
           clipped: raw.length > MEMORY_READ_CAP,
         })
       } catch {
-        continue
+        skipped++
       }
     }
-    return { ok: true, folder: folder(), files }
+    return { ok: true, folder: selected, files, ...(skipped ? { answer: `${skipped} markdown file${skipped === 1 ? ' was' : 's were'} not read (link, directory or read failure). No other path was followed.` } : {}) }
   }
 
   /**
@@ -55,20 +59,19 @@ export function createMemoryManager(vaultRoot: () => string, customFolder: () =>
    * lexical; this one is the filesystem's own truth — a symlink that slipped
    * in resolves to somewhere else and is refused before it is read or removed.
    */
-  const realFolder = async (): Promise<string> => realpath(folder())
-
-  const contained = async (full: string): Promise<boolean> => {
-    const realFile = await realpath(full)
-    return realFile === (await realFolder()) || realFile.startsWith(`${await realFolder()}${sep}`)
+  const contained = async (full: string, selected: string): Promise<boolean> => {
+    const realFile = await realpath(full), realFolder = await realpath(selected)
+    return realFile.startsWith(`${realFolder}${sep}`)
   }
 
   const remove = async (name: string, expectedFolder?: string): Promise<{ ok: boolean; answer: string }> => {
-    if (expectedFolder && expectedFolder !== folder()) return { ok: false, answer: 'The memory folder changed. Refresh before removing a file.' }
+    const selected = folder()
+    if (expectedFolder && expectedFolder !== selected) return { ok: false, answer: 'The memory folder changed. Refresh before removing a file.' }
     const checked = safeMemoryRelative(name)
     if (!checked.ok) return checked
-    const full = join(folder(), checked.rel.slice(MEMORY_DIR.length + 1))
+    const full = join(selected, checked.rel.slice(MEMORY_DIR.length + 1))
     try {
-      if (!(await contained(full))) return { ok: false, answer: 'That path is not really inside the memory folder.' }
+      if (!(await contained(full, selected)) || selected !== folder()) return { ok: false, answer: 'The memory folder changed or that path is outside it. Refresh before removing.' }
       await rm(full, { force: false })
       return { ok: true, answer: `Removed ${checked.rel}. The lines are gone; nothing was kept in secret.` }
     } catch (failure) {
@@ -79,11 +82,12 @@ export function createMemoryManager(vaultRoot: () => string, customFolder: () =>
   }
 
   const read = async (name: string): Promise<{ ok: boolean; content?: string; answer?: string }> => {
+    const selected = folder()
     const checked = safeMemoryRelative(name)
     if (!checked.ok) return checked
-    const full = join(folder(), checked.rel.slice(MEMORY_DIR.length + 1))
+    const full = join(selected, checked.rel.slice(MEMORY_DIR.length + 1))
     try {
-      if (!(await contained(full))) return { ok: false, answer: 'That path is not really inside the memory folder.' }
+      if (!(await contained(full, selected)) || selected !== folder()) return { ok: false, answer: 'The memory folder changed or that path is outside it. Refresh before reading.' }
       return { ok: true, content: await readFile(full, 'utf8') }
     } catch (failure) {
       const code = (failure as NodeJS.ErrnoException).code

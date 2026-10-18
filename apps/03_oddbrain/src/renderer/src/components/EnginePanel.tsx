@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useLook } from '../ui/LookContext'
-import { Copy, Eye, Handshake, ListOrdered, Minimize2, Pencil, Wrench, FilePen, Terminal, Search, CircleCheck, TriangleAlert, Square, X } from 'lucide-react'
+import { Eye, Handshake, ListOrdered, Minimize2, Pencil, Wrench, FilePen, Terminal, Search, CircleCheck, TriangleAlert, Square, X } from 'lucide-react'
 import { buildHandoff, handoffFileName } from '@shared/lib/handoff'
 import { PHASE_LABEL, phaseFromTurn, WAITING_LOADER, type MotionRole } from '@shared/lib/motionKit'
 import { Mascot } from '../motion/Mascot'
@@ -13,6 +13,7 @@ import { useEngine, type EngineItem } from '@/state/engine'
 import ReadAloudButton from './ReadAloudButton'
 import { cancelBrief, clearCompactNotice, finishCompact, useCompact, writeBrief } from '@/state/compact'
 import { formatTotals, turnCopyText } from '@shared/lib/turnCopy'
+import CopyText from '../ui/CopyText'
 import { clearReviewError, runReview, useReview } from '@/state/review'
 
 /**
@@ -43,7 +44,6 @@ export default function EnginePanel() {
   const [compacting, setCompacting] = useState(false)
   const compact = useCompact()
   const review = useReview()
-  const [copied, setCopied] = useState(false)
   // The strip above the composer is collapsible, as the owner asked. It
   // always unfolds itself while a permission question waits — Allow/Deny
   // must never hide behind a fold. Remembered, so it stays as he left it.
@@ -146,7 +146,7 @@ export default function EnginePanel() {
           Engine · {engine.settings.id} · {modelLabel(engine.settings.model)}
           {' · ' + (engine.settings.workspace ? engine.settings.workspace.split(/[\\/]/).filter(Boolean).at(-1) : 'vault')}
           {turn.state === 'running' ? ` · ${PHASE_LABEL[phase]}…` : turn.state === 'error' ? ' · stopped' : ' · done'}
-          {` · ${formatTotals(engine.totals)}`}
+          {` · ${engine.totals.turns ? formatTotals(engine.totals).replace('this window', 'with reported usage this window') : 'token usage not reported this window'}`}
                 </p></details>
         {turn.state === 'running' ? (
           <button
@@ -187,17 +187,7 @@ export default function EnginePanel() {
             <Eye size={10} /> Review
           </button>
         ) : null}
-        {turn.state !== 'running' ? (
-          <button
-            type="button"
-            onClick={() => { void navigator.clipboard?.writeText(turnCopyText(turn.prompt, turn.items)).catch(() => undefined); setCopied(true) }}
-            title="Copy this turn: the work order and the engine's words"
-            aria-label="Copy this turn"
-            className="flex items-center gap-1 rounded-lg border border-line px-2 py-0.5 text-[11px] text-muted hover:text-ink"
-          >
-            <Copy size={10} /> {copied ? 'Copied' : 'Copy'}
-          </button>
-        ) : null}
+        {turn.state !== 'running' ? <CopyText text={turnCopyText(turn.prompt, turn.items)} label="Copy this turn" /> : null}
         {turn.state !== 'running' ? (
           <button
             type="button"

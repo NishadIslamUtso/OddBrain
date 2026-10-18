@@ -231,7 +231,7 @@ export default function ProjectsView({
                         type="button"
                         onClick={() => startEdit(project.id, project.instruction, project.folder)}
                         className="block w-full rounded-lg px-2 py-1.5 text-left text-[12.5px] text-muted transition-colors hover:bg-white/[0.04]"
-                        title="Edit the instruction and folder"
+                        title="Edit project name, instruction and folder"
                       >
                         {project.instruction || 'Add an instruction for this project…'}
                       </button>

@@ -42,8 +42,19 @@ const patch = (part: Partial<MemoryState>): void => {
   emit()
 }
 
-export async function loadMemory(): Promise<void> {
-  try { const answer = await getEngineApi().memory.list(); if (!answer.ok) throw Error(answer.answer || 'Memory could not be read.'); patch({ files: answer.files ?? [], folder: answer.folder ?? '', loaded: true, error: '' }) } catch (failure) { patch({ error: String((failure as Error).message || failure), loaded: true }) }
+export async function loadMemory(): Promise<boolean> {
+  try {
+    const answer = await getEngineApi().memory.list()
+    if (!answer.ok) {
+      patch({ files: [], folder: answer.folder ?? state.folder, loaded: true, error: answer.answer || 'Memory could not be read.' })
+      return false
+    }
+    patch({ files: answer.files ?? [], folder: answer.folder ?? '', loaded: true, error: answer.answer || '' })
+    return true
+  } catch (failure) {
+    patch({ files: [], error: String((failure as Error).message || failure), loaded: true })
+    return false
+  }
 }
 
 /**
@@ -69,7 +80,10 @@ export async function runMemoryPass(): Promise<boolean> {
     if (store.turn !== owned) { off?.(); off = undefined; patch({ running: false, status: 'The displayed task changed; refresh memory to see the files.' }); return }
     if (owned?.state === 'running') return
     off?.(); off = undefined
-    void loadMemory().then(() => patch({ running: false, status: 'The memory pass finished; the actual files were refreshed.' }))
+    void loadMemory().then(refreshed => patch({
+      running: false,
+      status: refreshed ? 'The pass ended; current files were refreshed. Check the turn to confirm what was written.' : 'The pass ended, but memory could not be refreshed.',
+    }))
   }
   off = subscribeEngine(finished)
   patch({ status: 'The pass was sent. Writes still use the normal approval policy.' })
@@ -83,8 +97,8 @@ export async function removeMemory(name: string): Promise<boolean> {
     patch({ error: answer.answer })
     return false
   }
-  await loadMemory()
-  patch({ status: answer.answer, error: '' })
+  const refreshed = await loadMemory()
+  patch({ status: refreshed ? answer.answer : `${answer.answer} The folder could not be refreshed.` })
   return true
 }
 
@@ -111,5 +125,7 @@ export async function chooseMemoryFolder(useDefault = false): Promise<boolean> {
   if (!method) { patch({ error: 'This build has no memory-folder picker.' }); return false }
   const result = await method()
   if (!result.ok) { if (!('canceled' in result && result.canceled)) patch({ error: result.answer }); return false }
-  await loadMemory(); patch({ status: result.answer, error: '' }); return true
+  const refreshed = await loadMemory()
+  patch({ status: refreshed ? result.answer : `${result.answer} This folder could not be read.` })
+  return refreshed
 }

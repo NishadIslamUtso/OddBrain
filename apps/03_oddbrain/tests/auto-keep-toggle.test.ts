@@ -10,6 +10,20 @@ import type { spawn } from 'node:child_process'
 const wait = async (check: () => boolean): Promise<void> => { for (let n = 0; n < 100 && !check(); n++) await new Promise(r => setTimeout(r, 5)); expect(check()).toBe(true) }
 function child() { const c: any = new EventEmitter(); c.stdout = new EventEmitter(); c.stderr = new EventEmitter(); c.written = []; c.stdin = { write: (s: string) => { c.written.push(s); return true }, on: () => {} }; c.exitCode = null; c.signalCode = null; c.killed = false; c.kill = () => { c.killed = true }; return c }
 function permission(c: any, id: string, file: string) { c.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'control_request', request_id: id, request: { subtype: 'can_use_tool', tool_name: 'Write', input: { file_path: file, content: 'new' } } }) + '\n')) }
+test('a saved-key provider model uses its raw model id when the approved CLI session launches', () => {
+  const c = child(), args: string[] = []
+  const spawnProcess = ((_command: string, commandArgs: string[]) => {
+    args.push(...commandArgs)
+    return c
+  }) as unknown as typeof spawn
+  startClaudeCodeSession({
+    cwd: '.', settings: { ...DEFAULT_ENGINE, model: 'anthropic/claude-3-5-sonnet-20241022' },
+    auth: { provider: 'anthropic', apiKey: 'test-key' },
+    onEvent: () => {}, spawnProcess,
+  })
+  expect(args[args.indexOf('--model') + 1]).toBe('claude-3-5-sonnet-20241022')
+})
+
 test('Auto-keep On/Off is read at each approval in the same live session; old copies still restore', async () => {
   const root = mkdtempSync(join(tmpdir(), 'keep-toggle-')), file = join(root, 'note.md'), dir = join(root, 'copies'), c = child(); let on = true
   writeFileSync(file, 'before')

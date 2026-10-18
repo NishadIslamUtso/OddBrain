@@ -15,7 +15,7 @@ const emit = (): void => { version++; for (const notify of listeners) notify() }
 function describe(record?: ReviewRecord): string {
   if (!record || record.state !== 'done') return ''
   const outcome = record.verdict?.kind === 'clean' ? 'the model said CLEAN' : `${record.verdict?.kind === 'issues' ? record.verdict.lines.length : 0} findings`
-  return `Review (${record.model}): ${outcome} for “${record.prompt.slice(0, 80)}”. Text evidence only; no app tools or approvals were available.`
+  return `Review (${record.model}): ${outcome} for “${record.prompt.slice(0, 80)}”. Text evidence only; no app tools or approvals were available.${record.clipped ? ' Evidence was cut to the first 2,000 request characters and 10,000 result characters.' : ''}`
 }
 export async function runReview(): Promise<boolean> {
   if (running || automationState().current) return false

@@ -200,6 +200,7 @@ function recoverRecord(root: string, id: string): ArtifactRecord | null {
   const folder = itemDir(root, id)
   let names: string[]
   try {
+    checkedActiveFolder(root, id)
     names = readdirSync(folder)
   } catch {
     return null
@@ -209,7 +210,8 @@ function recoverRecord(root: string, id: string): ArtifactRecord | null {
   for (const name of names.sort((a, b) => Number(a.slice(1).split('.')[0]) - Number(b.slice(1).split('.')[0]))) {
     const match = VERSION_FILE_PATTERN.exec(name)
     if (!match) continue
-    const stats = statSync(join(folder, name))
+    const file = join(folder, name), stats = lstatSync(file)
+    if (!stats.isFile() || stats.isSymbolicLink() || !realpathSync(file).startsWith(realpathSync(folder) + sep)) continue
     versions.push({ file: name, savedAt: stats.mtime.toISOString() })
     type = match[2] === 'svg' ? 'svg' : 'html'
   }
@@ -232,6 +234,7 @@ function readIndex(root: string): { index: Index; recovered: boolean } {
   let raw = ''
   let broken = false
   try {
+    if (existsSync(indexFile(root)) && lstatSync(indexFile(root)).isSymbolicLink()) throw Error('Index links are not followed.')
     raw = readFileSync(indexFile(root), 'utf8')
   } catch {
     // No index at all. The folders are still the truth.
@@ -299,18 +302,41 @@ function readIndex(root: string): { index: Index; recovered: boolean } {
 function writeIndex(root: string, index: Index): void {
   mkdirSync(root, { recursive: true })
   const file = indexFile(root)
-  const temporary = `${file}.tmp`
-  writeFileSync(temporary, `${JSON.stringify(index, null, 2)}\n`, 'utf8')
-  renameSync(temporary, file)
+  const temporary = `${file}.${randomUUID()}.tmp`
+  try {
+    writeFileSync(temporary, `${JSON.stringify(index, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' })
+    renameSync(temporary, file)
+  } finally {
+    if (existsSync(temporary)) rmSync(temporary, { force: true })
+  }
 }
 
 function versionPath(root: string, record: ArtifactRecord, version: number): string {
   return join(itemDir(root, record.id), record.versions[version].file)
 }
 
+function checkedActiveFolder(root: string, id: string): string {
+  const active = join(root, ITEMS_DIR), folder = itemDir(root, id)
+  if (existsSync(active) && lstatSync(active).isSymbolicLink()) throw Error('The artifact library is a symbolic link.')
+  if (existsSync(folder) && (lstatSync(folder).isSymbolicLink() || !realpathSync(folder).startsWith(realpathSync(active) + sep))) {
+    throw Error('Artifact folder links or paths outside the library are not followed.')
+  }
+  return folder
+}
+
+function checkedActiveVersion(root: string, record: ArtifactRecord, version: number): string {
+  const folder = checkedActiveFolder(root, record.id), file = versionPath(root, record, version)
+  const info = lstatSync(file)
+  if (!info.isFile() || info.isSymbolicLink() || !realpathSync(file).startsWith(realpathSync(folder) + sep)) {
+    throw Error('Artifact version links or paths outside its folder are not followed.')
+  }
+  return file
+}
+
 function sizeOf(path: string): number {
   try {
-    return statSync(path).size
+    const info = lstatSync(path)
+    return info.isFile() && !info.isSymbolicLink() ? info.size : 0
   } catch {
     return 0
   }
@@ -318,9 +344,8 @@ function sizeOf(path: string): number {
 
 function summarize(root: string, record: ArtifactRecord): ArtifactSummary {
   const { versions, ...rest } = record
-  const bytes = versions[record.current]
-    ? sizeOf(join(itemDir(root, record.id), versions[record.current].file))
-    : 0
+  let bytes = 0
+  if (versions[record.current]) try { bytes = sizeOf(checkedActiveVersion(root, record, record.current)) } catch { /* Unreadable versions have no claimed size. */ }
   return { ...rest, versionCount: versions.length, bytes }
 }
 
@@ -343,19 +368,21 @@ export function read(root: string, id: unknown, version?: unknown): ReadAnswer {
   if (!record) return { ok: false, error: 'That artifact is not in the library any more.' }
   const wanted = Number.isInteger(version) ? Math.min(Math.max((version as number) - 1, 0), record.versions.length - 1) : record.current
   try {
-    const content = readFileSync(versionPath(root, record, wanted), 'utf8')
+    const content = readFileSync(checkedActiveVersion(root, record, wanted), 'utf8')
     return { ok: true, item: summarize(root, record), content, version: wanted + 1 }
   } catch {
-    return { ok: false, error: `Version ${wanted + 1} of that artifact could not be read from disk.` }
+    return { ok: false, error: `Version ${wanted + 1} of that artifact could not be read safely from disk.` }
   }
 }
 
 function writeVersion(root: string, record: ArtifactRecord, content: string, savedAt: string, note?: string): void {
   const next = record.versions.length + 1
   const folder = itemDir(root, record.id)
+  checkedActiveFolder(root, record.id)
   mkdirSync(folder, { recursive: true })
+  checkedActiveFolder(root, record.id)
   const file = `v${next}.${record.type}`
-  writeFileSync(join(folder, file), content, 'utf8')
+  writeFileSync(join(folder, file), content, { encoding: 'utf8', flag: 'wx' })
   record.versions.push({ file, savedAt, ...(note ? { note: note.slice(0, 300) } : {}) })
   record.current = record.versions.length - 1
 }
@@ -380,12 +407,11 @@ export function save(root: string, input: SaveInput): ItemAnswer {
   const existing = validId(input.id) ? index.items.find(item => item.id === input.id) : undefined
 
   if (existing) {
-    const currentFile = versionPath(root, existing, existing.current)
     let current = ''
     try {
-      current = readFileSync(currentFile, 'utf8')
+      current = readFileSync(checkedActiveVersion(root, existing, existing.current), 'utf8')
     } catch {
-      current = ''
+      return { ok: false, error: 'The current artifact version could not be read safely. Nothing was written.' }
     }
     if (current === input.content) {
       return { ok: true, item: summarize(root, existing), unchanged: true }
@@ -393,11 +419,13 @@ export function save(root: string, input: SaveInput): ItemAnswer {
     if (existing.versions.length >= MAX_VERSIONS) {
       return { ok: false, error: `That artifact has ${MAX_VERSIONS} saved versions. Duplicate it to carry on from here.` }
     }
-    writeVersion(root, existing, input.content, at, input.note)
-    existing.updatedAt = at
-    if (input.retitle && input.title) existing.title = cleanTitle(input.title, existing.title)
-    writeIndex(root, index)
-    return { ok: true, item: summarize(root, existing) }
+    try {
+      writeVersion(root, existing, input.content, at, input.note)
+      existing.updatedAt = at
+      if (input.retitle && input.title) existing.title = cleanTitle(input.title, existing.title)
+      writeIndex(root, index)
+      return { ok: true, item: summarize(root, existing) }
+    } catch (error) { return { ok: false, error: `The library could not confirm the save. Check its folder before retrying: ${(error as Error).message}` } }
   }
 
   // The id is the artifact's own; one from a chat is reused so a mirror of the
@@ -418,10 +446,12 @@ export function save(root: string, input: SaveInput): ItemAnswer {
   }
   if (typeof input.chatId === 'string' && input.chatId) record.chatId = input.chatId.slice(0, 64)
   if (typeof input.messageId === 'string' && input.messageId) record.messageId = input.messageId.slice(0, 64)
-  writeVersion(root, record, input.content, at, input.note)
-  index.items.push(record)
-  writeIndex(root, index)
-  return { ok: true, item: summarize(root, record) }
+  try {
+    writeVersion(root, record, input.content, at, input.note)
+    index.items.push(record)
+    writeIndex(root, index)
+    return { ok: true, item: summarize(root, record) }
+  } catch (error) { return { ok: false, error: `The library could not confirm the save. Check its folder before retrying: ${(error as Error).message}` } }
 }
 
 /** Append the version currently being viewed, so "restore" is also a change. */
@@ -473,15 +503,28 @@ export function remove(root: string, id: unknown): RemoveAnswer {
   const stamp = new Date().toISOString().replace(/[:.]/g, '-')
   // The key says where the files went, so it speaks the vault's dialect.
   const destination = toPosix(join(TRASH_DIR, `${id}-${stamp}`))
+  const source = itemDir(root, id), trash = join(root, TRASH_DIR), target = join(root, destination)
+  const metadata = join(source, '.oddbrain-trash.json')
+  let metadataCreated = false
   try {
-    mkdirSync(join(root, TRASH_DIR), { recursive: true })
-    writeFileSync(join(itemDir(root, id), '.oddbrain-trash.json'), JSON.stringify(record), 'utf8')
-    renameSync(itemDir(root, id), join(root, destination))
+    mkdirSync(trash, { recursive: true })
+    checkedActiveFolder(root, id)
+    if (lstatSync(trash).isSymbolicLink() || lstatSync(source).isSymbolicLink()) throw Error('Artifact/trash links are not followed.')
+    if (existsSync(target)) throw Error('A trash entry with this name already exists.')
+    // Exclusive creation rejects pre-existing files and symlinks atomically.
+    writeFileSync(metadata, JSON.stringify(record), { encoding: 'utf8', flag: 'wx' })
+    metadataCreated = true
+    renameSync(source, target)
   } catch (error) {
+    if (metadataCreated && existsSync(source)) try { rmSync(metadata, { force: true }) } catch { /* No active version file is changed. */ }
     return { ok: false, error: `The files could not be moved aside: ${(error as Error).message}` }
   }
   index.items = index.items.filter(item => item.id !== id)
-  writeIndex(root, index)
+  try { writeIndex(root, index) }
+  catch (error) {
+    try { renameSync(target, source); rmSync(metadata, { force: true }) } catch { /* The moved files remain in Trash if rollback itself fails. */ }
+    return { ok: false, error: `The library index could not be updated: ${(error as Error).message}. Check Trash before retrying.` }
+  }
   return { ok: true, movedTo: destination }
 }
 
@@ -495,7 +538,18 @@ export function remove(root: string, id: unknown): RemoveAnswer {
  */
 export function adopt(root: string, records: unknown): { ok: true; adopted: number; skipped: number; refused: number } {
   const { index } = readIndex(root)
+  const trash = join(root, TRASH_DIR)
+  if (existsSync(trash) && lstatSync(trash).isSymbolicLink())
+    return { ok: true, adopted: 0, skipped: 0, refused: Array.isArray(records) ? records.length : 0 }
   const known = new Set([...index.items.map(item => item.id), ...listTrash(root).items.map(item => item.originalId)])
+  // Even a damaged Trash entry remains a deletion marker. Its version data
+  // might be unreadable, but adopting a stale chat copy cannot undo Remove.
+  try {
+    for (const key of readdirSync(trash)) {
+      const id = /^(.*)-\d{4}-\d\d-\d\dT\d\d-\d\d-\d\d-\d{3}Z$/.exec(key)?.[1]
+      if (validId(id)) known.add(id)
+    }
+  } catch { /* No trash yet. */ }
   let adopted = 0
   let skipped = 0
   let refused = 0

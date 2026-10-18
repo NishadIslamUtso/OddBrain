@@ -276,7 +276,11 @@ function registerBridges(): void {
     if (engine?.turnBusy()) return { ok: false, error: 'Wait for normal work to finish before reviewing it.' }
     return automation.review(input)
   })
-  handle('automation:cancel', async () => { await automation?.cancel(); return { ok: true } })
+  handle('automation:cancel', async () => {
+    if (!automation) return { ok: false }
+    await automation.cancel()
+    return { ok: true }
+  })
 
 
   handle(
@@ -579,8 +583,9 @@ function registerBridges(): void {
   handle(
     'engine:send',
     async (_event, prompt: string, cwd: string, pictures: unknown = []): Promise<{ ok: boolean; answer: string }> => {
-      const text = typeof prompt === 'string' ? prompt.trim().slice(0, 20000) : ''
+      const text = typeof prompt === 'string' ? prompt.trim() : ''
       if (!text) return { ok: false, answer: 'Write what the engine should do first.' }
+      if (text.length > 20000) return { ok: false, answer: 'The task exceeds 20,000 characters. Nothing was cut or sent.' }
       // Pictures: only what the wire can carry, only a few, only small. A bad
       // list is refused with the reason, never silently dropped.
       const images: Array<{ mime: string; data: string }> = []
@@ -659,6 +664,9 @@ function registerBridges(): void {
       })
       if (!sent.ok) automation?.rejectWork()
       return sent
+      } catch (error) {
+        automation?.rejectWork()
+        return { ok: false, answer: `The work could not be started: ${String((error as Error).message || error)}` }
       } finally { dispatchingWork = false }
     },
   )
@@ -862,8 +870,8 @@ function registerBridges(): void {
   handle('engine:checkpoints:list', async () => {
     try {
       return { ok: true, checkpoints: await listCheckpoints(join(app.getPath('userData'), 'checkpoints'), Number.MAX_SAFE_INTEGER) }
-    } catch {
-      return { ok: true, checkpoints: [] }
+    } catch (error) {
+      return { ok: false, checkpoints: [], error: `Kept copies could not be listed: ${(error as Error).message}` }
     }
   })
   handle('engine:checkpoint:inspect', (_event, copy: string) => inspectCheckpoint(join(app.getPath('userData'), 'checkpoints'), typeof copy === 'string' ? copy : ''))
@@ -1455,7 +1463,7 @@ function registerBridges(): void {
     }
     writeFileSync(houseRulesFile, JSON.stringify(clean), 'utf8')
     const home = process.env['USERPROFILE'] || process.env['HOME'] || ''
-    const written = deployHouseRules(settings.engine.id, settings.engine.model, home, clean)
+    const written = deployHouseRules(settings.engine.id, settings.engine.model, home, clean, settings.memoryFolder || '')
     return { ok: true, written }
   })
 

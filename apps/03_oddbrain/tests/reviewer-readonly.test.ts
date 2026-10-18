@@ -41,6 +41,14 @@ test('turning local access off blocks even a local review before metadata or tas
 test('a model-side tool request is refused as a report, never dispatched or approved', async () => {
   const f = fake(false, true); await expect(f.reviewer.run(task, DEFAULT_AUTOMATION, new AbortController().signal)).rejects.toThrow('Nothing was executed')
 })
+test('a single-object function request is also refused, even if the response says CLEAN', async () => {
+  const request = (async (url: string | URL | Request) => new Response(JSON.stringify(
+    String(url).endsWith('/api/tags') ? { models: [{ name: 'qwen:3b' }] }
+      : String(url).endsWith('/api/show') ? {} : { done: true, message: { content: 'CLEAN', function_call: { name: 'Bash' } } }
+  ))) as typeof fetch
+  const reviewer = createTextReviewer({ fetchImpl: request, engine: () => task.engine, permissions: () => DEFAULT_PERMISSIONS, cloud: () => null })
+  await expect(reviewer.run(task, DEFAULT_AUTOMATION, new AbortController().signal)).rejects.toThrow('Nothing was executed')
+})
 test('agy is not falsely treated as a technically read-only agent; an explicit safe reviewer works', async () => {
   const f = fake(), agy = { ...task, engine: { ...task.engine, id: 'agy' as const } }
   await expect(f.reviewer.run(agy, DEFAULT_AUTOMATION, new AbortController().signal)).rejects.toThrow('tool-free')

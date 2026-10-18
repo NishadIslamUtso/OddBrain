@@ -1,4 +1,4 @@
-import { DEFAULT_AUTOMATION, normalizeAutomation, type AutomationBridge, type AutomationView } from '@shared/lib/automation'
+import { DEFAULT_AUTOMATION, type AutomationBridge, type AutomationView } from '@shared/lib/automation'
 /**
  * The one place the interface talks to the machine.
  *
@@ -96,7 +96,7 @@ export type DesktopBridge = {
     openFolder: (folder: string) => Promise<{ ok: boolean }>
     checkpoints: {
       inspect: (copy: string) => Promise<{ ok: boolean; content?: string; clipped?: boolean; answer?: string }>
-      list: () => Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }>
+      list: () => Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string; existed?: boolean }>; error?: string }>
       restore: (copy: string, original?: string) => Promise<{ ok: boolean; answer: string }>
     }
   }
@@ -258,18 +258,15 @@ declare global {
 export const hasDesktopBridge = (): boolean =>
   typeof window !== 'undefined' && typeof window.api === 'object' && window.api !== null
 
-/** Empty, and honest about it. See rule 2 above. */
-let demoAutomationPreferences = { ...DEFAULT_AUTOMATION }
-try { if (typeof localStorage !== 'undefined') demoAutomationPreferences = normalizeAutomation(JSON.parse(localStorage.getItem('oddbrain.automation-preview') || 'null')) } catch {}
-const demoAutomationListeners = new Set<(view: AutomationView) => void>()
-const demoAutomationView = (): AutomationView => ({ preferences: { ...demoAutomationPreferences }, current: null, reports: [], queued: 0, desktop: false })
+/** No simulation: the browser-only preview has neither saved preferences nor a reviewer. */
+const demoAutomationView = (): AutomationView => ({ preferences: { ...DEFAULT_AUTOMATION }, current: null, reports: [], queued: 0, desktop: false })
 const demoAutomation: AutomationBridge = {
   read: async () => demoAutomationView(),
-  update: async patch => { demoAutomationPreferences = normalizeAutomation({ ...demoAutomationPreferences, ...patch }); try { localStorage.setItem('oddbrain.automation-preview', JSON.stringify(demoAutomationPreferences)) } catch {} const view = demoAutomationView(); for (const notify of demoAutomationListeners) notify(view); return { ok: true, view } },
+  update: async () => ({ ok: false, view: demoAutomationView(), error: 'Automation preferences need the installed app. Nothing was saved.' }),
   models: async () => ({ ok: false, models: [], error: 'Reviewer models are listed by the installed app.' }),
-  review: async () => ({ ok: false, error: 'Report-only review uses the installed app and its model service. No review was sent from this preview.' }),
-  cancel: async () => ({ ok: true }),
-  onChanged: listener => { demoAutomationListeners.add(listener); return () => demoAutomationListeners.delete(listener) },
+  review: async () => ({ ok: false, error: 'Report-only review needs the installed app. Nothing was sent.' }),
+  cancel: async () => ({ ok: false }),
+  onChanged: () => () => undefined,
 }
 const demoBridge: DesktopBridge = {
   automation: demoAutomation,
@@ -474,7 +471,7 @@ export type EngineBridge = {
   pickWorkspace: () => Promise<{ ok: boolean; answer: string }>
   send: (prompt: string, cwd: string, pictures?: Array<{ mime: string; data: string }>) => Promise<{ ok: boolean; answer: string }>
   checkpoints: {
-    list: () => Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }>
+    list: () => Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string; existed?: boolean }>; error?: string }>
     restore: (copy: string, original?: string) => Promise<{ ok: boolean; answer: string }>
   }
   watch: {
@@ -558,7 +555,7 @@ const demoEngineBridge: EngineBridge = {
   memory: {
     chooseFolder: async () => ({ ok: false, answer: 'Choosing a memory folder uses the installed app.' }),
     defaultFolder: async () => ({ ok: false, answer: 'Memory locations are saved by the installed app.' }),
-    list: async () => ({ ok: true, files: [] }),
+    list: async () => ({ ok: false, answer: 'Memory files can only be read in the installed app.' }),
     remove: async () => ({ ok: false, answer: 'Memories live in the desktop app.' }),
   },
   journal: {

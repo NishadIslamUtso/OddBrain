@@ -80,7 +80,10 @@ export function createTextReviewer(options: {
       if (isRemoteModel(model, metadata) && !prefs.allowExternalReview) throw Error('This model runs elsewhere. External review is off; no task text was sent.')
       const data = await json(base + '/api/chat', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ model, messages, stream: false, think: false, options: { num_ctx: 4096, num_predict: 768, temperature: 0 } }) }, signal)
       if (data.error) throw Error(String(data.error))
-      if (data.message?.tool_calls?.length || data.tool_calls?.length) throw Error('The reviewer returned a tool request. Nothing was executed.')
+      // Some endpoints use arrays, others put a single function/tool object
+      // here. No shape of tool request is review text, even alongside CLEAN.
+      if (data.message && typeof data.message === 'object' && ('tool_calls' in data.message || 'function_call' in data.message) ||
+        'tool_calls' in data || 'function_call' in data) throw Error('The reviewer returned a tool request. Nothing was executed.')
       if (data.done !== true) throw Error('The review did not finish. Partial text is not a verdict.')
       const text = String(data.message?.content || data.response || '').trim()
       if (!text || text.length > 16000) throw Error('The reviewer returned an empty or oversized report.')

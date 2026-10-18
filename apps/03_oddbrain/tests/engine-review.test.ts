@@ -10,9 +10,8 @@ import { clearReviewError, reviewState, runReview } from '../src/renderer/src/st
 /**
  * The adversary reviewer: the engine checks its own finished work, REPORT
  * ONLY. CLEAN is CLEAN only as its own word; a shrug is a finding; the
- * review is a normal turn through the one send path — visible, stoppable,
- * cards awake. No second brain is faked: the label says whose words these
- * are, and a real second verdict is a Battle away.
+ * review uses a separate tool-free text endpoint, not the engine's executable
+ * turn path. The label names the reviewer and leaves the work turn unchanged.
  */
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8')
@@ -34,7 +33,7 @@ type FakeApi = {
 function withFakeReviewEngine(): FakeApi {
   const fake: FakeApi = { listener: null, sent: [], answer: 'REVIEW: the second step was claimed, not shown.\nREVIEW: nothing verified the file exists.' }
   ;(window as unknown as Record<string, unknown>).api = { automation: {
-    read: async () => ({ preferences: { autoKeep: true, autoReview: false, reviewModel: '', allowExternalReview: false }, current: null, reports: [], queued: 0, desktop: true }),
+    read: async () => ({ preferences: { autoKeep: true, allowCloudInference: true, autoReview: false, reviewModel: '', allowExternalReview: false }, current: null, reports: [], queued: 0, desktop: true }),
     onChanged: () => () => {},
     review: async (input: { prompt: string; answer: string }) => {
       const verdict = parseVerdict(fake.answer)
@@ -43,7 +42,7 @@ function withFakeReviewEngine(): FakeApi {
   } }
   ;(window as unknown as Record<string, unknown>).engineApi = {
     read: async () => ({
-      engine: { id: 'claude-code', model: 'gemma4:cloud', baseUrl: '', workspace: '', approval: 'ask' },
+      engine: { id: 'claude-code', model: 'qwen2.5-coder:3b', baseUrl: '', workspace: '', approval: 'ask' },
       running: true,
       history: [],
     }),

@@ -96,7 +96,7 @@ const engineApi = {
     ipcRenderer.invoke('engine:send', prompt, cwd, pictures),
   /** What the app kept before allowed writes, and the way back. */
   checkpoints: {
-    list: (): Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }> =>
+    list: (): Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string; existed?: boolean }>; error?: string }> =>
       ipcRenderer.invoke('engine:checkpoints:list'),
     restore: (copy: string, original?: string): Promise<{ ok: boolean; answer: string }> =>
       ipcRenderer.invoke('engine:checkpoint:restore', copy, original),
@@ -229,7 +229,7 @@ const api = {
     openFolder: (folder: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('app:open-folder', folder),
     checkpoints: {
       inspect: (copy: string): Promise<{ ok: boolean; content?: string; clipped?: boolean; answer?: string }> => ipcRenderer.invoke('engine:checkpoint:inspect', copy),
-      list: (): Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }> =>
+      list: (): Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string; existed?: boolean }>; error?: string }> =>
         ipcRenderer.invoke('engine:checkpoints:list'),
       restore: (copy: string, original?: string): Promise<{ ok: boolean; answer: string }> =>
       ipcRenderer.invoke('engine:checkpoint:restore', copy, original),

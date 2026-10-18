@@ -95,7 +95,7 @@ export default function MemorySection() {
             </div>
           </li>
         ))}
-        {memory.loaded && memory.files.length === 0 ? (
+        {memory.loaded && memory.files.length === 0 && !memory.error ? (
           <li className="rounded-xl border border-line bg-card px-3 py-3 text-[12.5px] text-muted">
             Nothing remembered yet. Run a pass after some real work, and what matters lands here — visibly.
           </li>
@@ -103,8 +103,8 @@ export default function MemorySection() {
       </ul>
 
       <p className="mt-4 text-[11.5px] leading-relaxed text-muted">
-        The lines are markdown in your vault: edit them in any notes app, and the engine appends under dated headings without ever rewriting what
-        is already there.
+        The lines are markdown in the folder shown above. Edit them in any notes app. The engine is instructed to append under dated headings
+        without rewriting earlier lines; check the completed turn and file to confirm what happened.
       </p>
     </div>
   )

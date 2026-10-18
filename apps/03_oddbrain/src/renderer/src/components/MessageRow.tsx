@@ -56,7 +56,8 @@ export default function MessageRow({
       <div className="flex justify-end">
         <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-[14px_14px_4px_14px] bg-card px-3.5 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
           {message.content}
-          <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div>
+          {message.content && <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div>}
+          {message.context && <div className="ob-message-actions"><CopyText text={message.context} label="Copy source context" /></div>}
           {message.editedAt && <span className="mt-1 block text-[11px] text-muted">edited</span>}
           {(message.attachments || []).length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5">
@@ -66,6 +67,7 @@ export default function MessageRow({
                   className="rounded-md border border-line px-1.5 py-0.5 text-[11px] text-muted"
                 >
                   {file.name}
+                  {file.kind === 'text' && typeof file.text === 'string' ? <span className="ob-message-actions"><CopyText text={file.text} label={`Copy ${file.name}`} /></span> : null}
                 </li>
               ))}
             </ul>
@@ -89,7 +91,7 @@ export default function MessageRow({
         <BrainMark size={18} />
       </span>
       <div className="min-w-0 flex-1">
-        {message.thinking ? (
+        {message.thinking && (look.streamReplies || !streaming) ? (
           <details
             open={thinkingOpen || undefined}
             onToggle={(event) => setThinkingOpen((event.target as HTMLDetailsElement).open)}
@@ -113,10 +115,13 @@ export default function MessageRow({
             {message.content}
           </div>
         ) : null}
-        {message.content && message.status !== 'streaming' ? <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div> : null}
+        {message.content && message.status !== 'streaming' ? <div className="ob-message-actions"><CopyText text={message.content} label="Copy reply" /></div> : null}
         {message.content && message.status !== 'streaming' ? <ReadAloudButton text={message.content} /> : null}
 
-        {streaming && !message.content && !message.stage ? (
+        {streaming && !look.streamReplies ? (
+          <p className="text-[12px] text-muted">Reply in progress; the final text appears when it finishes.</p>
+        ) : null}
+        {streaming && look.streamReplies && !message.content && !message.stage ? (
           <p className="text-[13px] text-muted">Thinking…</p>
         ) : null}
         {streaming && message.content && look.streamReplies ? (
