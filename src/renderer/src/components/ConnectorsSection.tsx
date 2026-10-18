@@ -86,7 +86,7 @@ export default function ConnectorsSection(): React.JSX.Element {
           {found?.found && engine.settings.id !== id ? <button type="button" disabled={busy} onClick={() => void engine.pick(id)}>Use this engine</button> : null}
           <button type="button" disabled={isDemo || busy} onClick={() => void executable(id)}>{overrides[id] ? 'Change executable…' : 'Choose executable…'}</button>
           {overrides[id] ? <button type="button" disabled={busy} onClick={() => void executable(id, true)}>Use automatic detection</button> : null}
-          <button type="button" disabled={isDemo || signIn.checking} onClick={() => checkAuth(id)}>{signIn.checking ? 'Asking…' : 'Check sign-in'}</button>
+          <button type="button" disabled={(isDemo && !sampleEnabled()) || signIn.checking} onClick={() => checkAuth(id)}>{signIn.checking ? 'Asking…' : 'Check sign-in'}</button>
           {id === 'claude-code' && signIn.ok && !signIn.loggedIn ? <button type="button" disabled={(isDemo && !sampleEnabled()) || busy} onClick={() => void startSignIn()}>Sign in…</button> : null}
           <a href={url} target="_blank" rel="noopener noreferrer">Setup guide <ExternalLink size={12} /></a>
         </div>

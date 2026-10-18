@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { bridge, isDemo } from '@/platform/bridge'
+import { sampleEnabled } from '@shared/lib/sampleWorkspace'
 import {
   describeMcpServer,
   mcpServerProblem,
@@ -27,14 +28,23 @@ export default function McpServersSection(): React.JSX.Element {
   const [args, setArgs] = useState('')
   const [url, setUrl] = useState('')
   const [note, setNote] = useState('')
+  const [problem, setProblem] = useState('')
   const [busy, setBusy] = useState(false)
 
+  // The labelled sample is browser storage, and says so on every save. Anything
+  // else in a browser has no list at all, so it says that instead of drawing an
+  // empty list next to an Add button.
+  const sample = isDemo && sampleEnabled()
   useEffect(() => {
-    if (isDemo) { setLoaded(true); return }
+    if (isDemo && !sample) { setLoaded(true); return }
     void bridge.mcp.read()
-      .then((reply) => { setServers(normalizeMcpServers(reply.servers).servers); setLoaded(true) })
-      .catch(() => { setNote('Could not read the tool server list.'); setLoaded(true) })
-  }, [])
+      .then((reply) => {
+        setServers(normalizeMcpServers(reply.servers).servers)
+        setProblem(reply.problem ?? '')
+        setLoaded(true)
+      })
+      .catch(() => { setProblem('Could not read the tool server list. Nothing was changed.'); setLoaded(true) })
+  }, [isDemo, sample])
 
   const save = async (next: McpServerEntry[]): Promise<boolean> => {
     setBusy(true); setNote('')
@@ -78,7 +88,7 @@ export default function McpServersSection(): React.JSX.Element {
                 <strong>{server.name}</strong>
                 <code className="block truncate text-[11px] text-muted" title={describeMcpServer(server)}>{describeMcpServer(server)}</code>
               </span>
-              <button type="button" disabled={busy || isDemo} aria-label={`Remove ${server.name}`} title={`Remove ${server.name}`}
+              <button type="button" disabled={busy || (isDemo && !sample)} aria-label={`Remove ${server.name}`} title={`Remove ${server.name}`}
                 onClick={() => void save(servers.filter((entry) => entry.name !== server.name))}>
                 <Trash2 size={12} />
               </button>
@@ -88,7 +98,7 @@ export default function McpServersSection(): React.JSX.Element {
       ) : null}
       <div className="ob-form-column">
         <div className="ob-form-line">
-          <input aria-label="Server name" placeholder="name (letters, digits, . _ -)" value={name} onChange={(event) => setName(event.target.value)} />
+          <input aria-label="Server name" placeholder="name (lowercase letters, digits, - _)" value={name} onChange={(event) => setName(event.target.value)} />
           <select aria-label="Transport" value={kind} onChange={(event) => setKind(event.target.value === 'http' ? 'http' : 'stdio')}>
             <option value="stdio">Local command</option>
             <option value="http">Remote URL</option>
@@ -103,10 +113,12 @@ export default function McpServersSection(): React.JSX.Element {
           <input aria-label="Server URL" placeholder="https://example.com/mcp" value={url} onChange={(event) => setUrl(event.target.value)} />
         )}
         <div className="ob-inline-actions">
-          <button type="button" disabled={busy || isDemo || !name.trim()} onClick={() => void add()}>Add server</button>
+          <button type="button" disabled={busy || (isDemo && !sample) || !name.trim()} onClick={() => void add()}>Add server</button>
         </div>
       </div>
-      {isDemo ? <p className="ob-control-scope">Writing tool servers needs the desktop app.</p> : null}
+      {problem ? <p role="status" className="ob-control-scope text-warn">{problem}</p> : null}
+      {sample ? <p className="ob-control-scope">Sample workspace: this list is browser storage and is never written into an engine config.</p> : null}
+      {isDemo && !sample ? <p className="ob-control-scope">Reading and writing tool servers needs the desktop app.</p> : null}
       {note ? <p role="status" className="ob-control-scope">{note}</p> : null}
     </section>
   )

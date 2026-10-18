@@ -3,6 +3,7 @@ import type { ArtifactSummary, SaveInput } from '../../../main/artifacts/store'
 import { DEFAULT_ENGINE, type EngineEvent, type EngineSettings } from '@shared/lib/engine'
 import { DEFAULT_PERMISSIONS } from '@shared/lib/permissions'
 import { normalizeProjects } from '@shared/lib/projects'
+import { normalizeMcpServers, type McpServerEntry } from '@shared/lib/mcp'
 import { getSampleFiles, readSample, sampleEnabled, sampleLinks, sampleProjects, SAMPLE_ROOT, sampleTime, writeSample } from '@shared/lib/sampleWorkspace'
 
 type SampleArtifact = { item: ArtifactSummary; contents: string[] }
@@ -52,6 +53,22 @@ export function installSampleBridge(bridge: DesktopBridge, engine: EngineBridge)
     remove: async id => { const list = artifacts(), a = list.find(a => a.item.id === id); if (!a) return missing; writeSample('trash', [...readSample<SampleArtifact[]>('trash', []), a]); writeSample('artifacts', list.filter(a => a.item.id !== id)); return { ok: true, movedTo: 'Sample trash' } },
     trashList: async () => ({ ok: true, items: readSample<SampleArtifact[]>('trash', []).map(a => ({ key: a.item.id, originalId: a.item.id, recoveredMetadata: false, title: a.item.title, type: a.item.type, versionCount: a.contents.length, removedAt: sampleTime() })) }),
     trashRestore: async key => { const trash = readSample<SampleArtifact[]>('trash', []), a = trash.find(a => a.item.id === key); if (!a) return missing; if (artifacts().some(item => item.item.id === key)) return { ok: false, error: 'A sample with this ID already exists.' }; writeSample('artifacts', [...artifacts(), a]); writeSample('trash', trash.filter(a => a.item.id !== key)); return { ok: true, item: a.item } },
+  })
+  replace(bridge.mcp, {
+    read: async () => ({ servers: readSample<McpServerEntry[]>('mcp', []), problem: '' }),
+    write: async servers => {
+      const normalized = normalizeMcpServers(servers)
+      if (normalized.problems.length) return { ok: false as const, written: [], answer: normalized.problems[0] }
+      writeSample('mcp', normalized.servers)
+      return { ok: true as const, written: ['Sample workspace/.mcp.json', 'Sample workspace/.agents/mcp_config.json'], answer: `${normalized.servers.length} tool server${normalized.servers.length === 1 ? '' : 's'} written to the sample workspace only. No engine config was touched.` }
+    },
+  })
+  replace(engine, {
+    authStatus: async id => id === 'agy'
+      ? { ok: true, loggedIn: false, method: '', provider: '', answer: 'agy does not report a sign-in state. This sample runs no CLI, so there is nothing to ask.' }
+      : { ok: true, loggedIn: true, method: 'sample', provider: 'sample', answer: 'Sample answer: signed in with sample (sample). No CLI was run and no credential was read.' },
+    ollamaVersion: async () => ({ ok: true, version: '0.15.2', compatible: true, answer: 'Sample answer: Ollama 0.15.2 is new enough for Claude Code\u2019s local door. Nothing was contacted.' }),
+    openLogin: async () => ({ ok: false, answer: 'This sample has no terminal to open. The installed app opens Claude Code\u2019s own sign-in there.' }),
   })
   replace(bridge.engine, {
     sessions: async () => readSample('sessions', sampleProjects().slice(0, 2).map((p, i) => ({ workspace: p.folder, sessionId: `sample-session-${i}` }))),

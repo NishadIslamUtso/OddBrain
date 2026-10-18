@@ -69,6 +69,9 @@ export default function EngineBay() {
   // accepts; empty still means "engine default". Nothing is invented here.
   const [typedModel, setTypedModel] = useState('')
   const [modelNote, setModelNote] = useState('')
+  // What a swap actually did. Choosing an engine is a saved decision, not a
+  // promise that a running turn changes hands — it cannot, and says so.
+  const [swapNote, setSwapNote] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
   useDismiss(menuRef, () => setMenuOpen(false), menuOpen)
@@ -80,6 +83,18 @@ export default function EngineBay() {
     void engine.checkEngines()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
+
+  const label = (id: EngineId): string => ENGINES.find(entry => entry.id === id)?.label ?? id
+  const choose = (id: EngineId, missing: boolean): void => {
+    const previous = engine.settings.id
+    const midTurn = engine.turn?.state === 'running'
+    void engine.pick(id)
+    setSwapNote(missing
+      ? `${label(id)} is not installed on this machine. A turn will refuse with its install command until it is.`
+      : midTurn && previous !== id
+        ? `This turn stays on ${label(previous)} until it ends; the next one uses ${label(id)}.`
+        : '')
+  }
 
   const models: EngineModels = engine.models
   const workspaceLabel = engine.settings.workspace ? leaf(engine.settings.workspace) : 'Vault (default)'
@@ -122,7 +137,7 @@ export default function EngineBay() {
               role="radio"
               aria-checked={active}
               title={title}
-              onClick={() => void engine.pick(entry.id)}
+              onClick={() => choose(entry.id, missing)}
               className={`rounded-lg border px-2 py-1.5 text-left text-[12px] transition-colors ${
                 active ? 'border-accent text-ink' : 'border-line text-muted hover:text-ink'
               } ${missing ? 'opacity-60' : ''}`}
@@ -144,6 +159,7 @@ export default function EngineBay() {
           </p>
         ) : null}
       </div>
+      {swapNote ? <p role="status" className="px-1 pt-1 text-[11px] leading-relaxed text-muted">{swapNote}</p> : null}
 
       {/* The brain, chosen from the engine's own list. */}
       <div className="relative mt-1.5" ref={menuRef}>

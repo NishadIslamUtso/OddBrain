@@ -17,8 +17,8 @@ import { loadAppFlags, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
 import { registerStagingRoot, setBinaryOverride, binaryOverride } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
-import { dirname, join, resolve } from 'node:path'
-import { existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
+import { copyFileSync, existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
 import { createVaultService, resolveVaultRoot } from './vault/service'
@@ -56,7 +56,7 @@ import { openLogin, readAuthStatus } from './engine/authStatus'
 import { readOllamaVersion } from './engine/ollamaVersion'
 import { deployMcp, deploySkill, scanClaudeSkills, type McpServer, type VaultSkill } from './engine/deploy'
 import { installCatalogSkill } from './engine/skillCatalogInstall'
-import { normalizeMcpServers } from '../shared/lib/mcp'
+import { normalizeMcpServers, readMcpList } from '../shared/lib/mcp'
 import { installPackFromFolder, listPacks, removePack } from './engine/packs'
 import { exportPack } from './engine/exportPack'
 import { installFromIndex, readIndex } from './engine/storeIndex'
@@ -1127,11 +1127,14 @@ function registerBridges(): void {
   })
 
   // The one MCP list, stored once, deployed to every engine's config.
-  handle('mcp:read', () => {
+  //
+  // A list that cannot be parsed is reported, not shown as empty: an empty
+  // screen next to a Save button is how a hand-edited list would disappear.
+  handle('mcp:read', (): { servers: McpServer[]; problem: string } => {
     try {
-      return JSON.parse(readFileSync(mcpFile, 'utf8')) as { servers: McpServer[] }
+      return readMcpList(readFileSync(mcpFile, 'utf8'))
     } catch {
-      return { servers: [] as McpServer[] }
+      return { servers: [], problem: '' } // No file yet: an empty list, honestly empty.
     }
   })
 
@@ -1142,14 +1145,30 @@ function registerBridges(): void {
     if (normalized.problems.length) {
       return { ok: false, written: [], answer: normalized.problems[0] }
     }
-    writeFileSync(mcpFile, JSON.stringify({ servers: normalized.servers }), 'utf8')
-    const written = deployMcp(normalized.servers, settings.engine.workspace || vaultRoot())
+    // A list this app could not fully read is kept before it is replaced. One
+    // it could read was on screen, so replacing it is the person's decision.
+    let kept = ''
+    if (existsSync(mcpFile)) {
+      const existing = readMcpList(readFileSync(mcpFile, 'utf8'))
+      const copy = `${mcpFile}.original`
+      if (existing.problem && !existsSync(copy)) {
+        try { copyFileSync(mcpFile, copy); kept = copy } catch { kept = '' }
+      }
+    }
+    // Written beside it and renamed: a crash mid-write leaves the old list, not half a list.
+    writeFileSync(`${mcpFile}.tmp`, JSON.stringify({ servers: normalized.servers }), 'utf8')
+    renameSync(`${mcpFile}.tmp`, mcpFile)
+    const deployed = deployMcp(normalized.servers, settings.engine.workspace || vaultRoot())
+    const keptCopies = [...(kept ? [kept] : []), ...deployed.kept]
+    const keptNote = keptCopies.length
+      ? ` The list that was there before is kept beside it (${keptCopies.map(path => basename(path)).join(', ')}).`
+      : ''
     return {
       ok: true,
-      written,
-      answer: normalized.servers.length
-        ? `${normalized.servers.length} tool server${normalized.servers.length === 1 ? '' : 's'} written to ${written.length} engine file${written.length === 1 ? '' : 's'}.`
-        : 'The tool server list is empty; both engine configs were rewritten empty.',
+      written: deployed.written,
+      answer: (normalized.servers.length
+        ? `${normalized.servers.length} tool server${normalized.servers.length === 1 ? '' : 's'} written to ${deployed.written.length} engine file${deployed.written.length === 1 ? '' : 's'}.`
+        : 'The tool server list is empty; both engine configs were rewritten empty.') + keptNote,
     }
   })
 

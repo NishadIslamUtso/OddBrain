@@ -10,6 +10,11 @@ green on this tree (numbers below), the installer is unsigned, and the owner's
 first signed-in session with a model has not happened yet. Everything in this
 file describes what the code does today, not what a roadmap wishes it did.
 
+The machine this is built for is the owner's laptop: Ryzen 7, 8 GB RAM, an RTX
+3050 with 4 GB of VRAM, Windows 11, and a 1920×1080 panel at 125% — 1536×864 of
+logical space. The performance profiles and the interface's size table are built
+for that, and say so where they refer to it.
+
 This is the only Markdown file in the repository. The `store/packs` files ending
 in `.md` are product data the app reads at runtime — skill prompts and prompt
 starters — not documentation.
@@ -111,6 +116,12 @@ Rules the code enforces:
   the one list into each engine's own config file; the app never runs the
   command itself. Names, transports and URLs are validated in the window and
   again in the main process before anything is written.
+- **Nothing a person wrote is overwritten without a copy.** The first time the
+  app writes engine configs into a folder it keeps whatever was already there,
+  beside it, as `.oddbrain-original`, and leaves a marker so later saves make no
+  more copies. A saved tool-server list that cannot be read is reported as such
+  — never drawn as an empty list next to a Save button — and is copied aside
+  before it is replaced.
 - Downloads come only from each publisher's official host and its declared
   redirect hosts, capped in size, written to the app's own engines folder,
   hashed with SHA-256, and — on Windows — run only after a second, explicit
@@ -125,6 +136,10 @@ Rules the code enforces:
   reads nothing back. agy has no such command and says so.
 - Connectors also asks Ollama's door for its version and states whether it can
   serve Claude Code's local brain route; 0.14 or newer is required.
+- **A swap is saved, not teleported.** Choosing the other engine persists the
+  choice immediately. If a turn is running it keeps the engine it started on and
+  the bay says so in one sentence; the next turn uses the new one. Picking an
+  engine that is not installed says a turn will refuse until it is.
 
 ## Security walls
 
@@ -208,7 +223,7 @@ Run on this tree, on 2026-10-18:
 
 ```
 npx tsc --noEmit -p tsconfig.json     exit 0
-npx vitest run                        128 files passed, 879 tests passed
+npx vitest run                        131 files passed, 893 tests passed
 npm run build                         exit 0 (main, preload, renderer, preview)
 ```
 
@@ -222,6 +237,39 @@ The Windows PDF failure that this branch inherited is fixed here: pdf.js now
 receives a forward-slash data directory on both platforms, and a test pins it.
 The branch also carries clean-build's Node-20 test shim, so the suite runs in
 older sandboxes without touching app code.
+
+The browser acceptance scripts (`npm run test:ui`, and the screenshots they
+take) need a real browser, so they remain a person's run, not a CI step. What
+they prove about the settings rail — eighteen destinations open, each with its
+own heading and no button nested in another — is now also a jsdom test
+(`tests/settings-sections.test.ts`), which CI does run.
+
+## Proven against the real CLI
+
+Run on 2026-10-18 in this checkout against Claude Code **2.1.302** — the package
+the app's own downloader would stage — with a throwaway `HOME`, so nothing on a
+real machine was touched. These are the engine's own JSON lines, cut to the
+fields that decide anything:
+
+| What the app runs | What the engine answered |
+|---|---|
+| `claude auth status` | `{"loggedIn":false,"authMethod":"none","apiProvider":"firstParty"}` — printed on **stderr** |
+| `claude plugin marketplace add anthropics/claude-code --json` | `{"command":"marketplace-add","outcome":"ok","marketplace":"claude-code-plugins"}` |
+| `claude plugin marketplace list --json` | `[{"name":"claude-code-plugins","source":"github","repo":"anthropics/claude-code"}]` |
+| `claude plugin install code-review --marketplace anthropics/claude-code --scope user --json` | `{"command":"install","outcome":"ok","plugin":"code-review@claude-code-plugins","scope":"user"}` |
+| `claude plugin disable code-review@claude-code-plugins --scope user --json` | `{"command":"disable","outcome":"ok","scope":"user"}` |
+| `claude plugin enable code-review@claude-code-plugins --scope user --json` | `{"command":"enable","outcome":"ok","scope":"user"}` |
+| `claude plugin update code-review@claude-code-plugins --scope user --json` | `{"command":"update","outcome":"ok","updateOutcome":"up_to_date"}` |
+| `claude plugin uninstall code-review@claude-code-plugins --scope user --keep-data --json` | `{"command":"uninstall","outcome":"ok","keptData":true}` |
+
+Those are the exact argument vectors `marketplaceArgs` builds, so the store path
+the audit asked about — find a catalog, add it, install, disable, update,
+remove — ran end to end, not only in a unit test. A plugin whose install runs a
+marketplace-declared command still refuses without `-y`; the app never passes
+it, and the permission card shows the command instead.
+
+Still unproven: the same path on a signed-in Windows machine, a signed-in agy
+turn, and the installer on the owner's laptop.
 
 ## Known limits
 

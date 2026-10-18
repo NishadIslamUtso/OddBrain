@@ -47,13 +47,31 @@ export function authSentence(status: { loggedIn: boolean; method: string; provid
 /** The one-step way to let the CLI run its own login, without the app holding a key. */
 export type LoginLaunch = { ok: boolean; command: string[]; answer: string }
 
+/**
+ * Quote an executable path for `cmd.exe`.
+ *
+ * `shellSafeCommand` quotes only on whitespace, which is right for the argv it
+ * builds elsewhere. This line is read by cmd, where `&`, `|`, `^` and brackets
+ * are operators even without a space — `C:\R&D\claude.exe` would split into
+ * two commands. So anything that is not a plain path character is quoted, and
+ * a path that cannot be quoted safely is refused rather than escaped.
+ */
+export function cmdQuote(command: string): string | null {
+  if (/[\u0000\r\n"]/.test(command)) return null
+  return /^[A-Za-z0-9._:\\/-]+$/.test(command) ? command : `"${command}"`
+}
+
 export function loginLaunch(platform: NodeJS.Platform = process.platform, command = resolveEngineCommand('claude-code')): LoginLaunch {
   if (platform === 'win32') {
+    const quoted = cmdQuote(command)
+    if (quoted === null) {
+      return { ok: false, command: [], answer: 'That executable path cannot be opened safely in a terminal. Run `claude` yourself; nothing was changed.' }
+    }
     return {
       ok: true,
       // `start` opens a real console; `cmd /k` keeps it open after the login.
       // Everything except the already-resolved executable path is constant.
-      command: ['cmd.exe', '/c', 'start', 'OddBrain sign-in', 'cmd.exe', '/k', shellSafeCommand(command, platform)],
+      command: ['cmd.exe', '/c', 'start', 'OddBrain sign-in', 'cmd.exe', '/k', quoted],
       answer: 'A terminal should have opened. Finish the sign-in there; OddBrain never sees the credentials.',
     }
   }

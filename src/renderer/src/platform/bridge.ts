@@ -157,7 +157,7 @@ export type DesktopBridge = {
   }
   /** The engine's tool servers (MCP). Browser control is one entry in this list. */
   mcp: {
-    read: () => Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }> }>
+    read: () => Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>; problem?: string }>
     write: (servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>) => Promise<{ ok: boolean; written: string[]; answer: string }>
   }
   structure: {
@@ -320,7 +320,7 @@ const demoBridge: DesktopBridge = {
     communityIndex: async () => ({ ok: false }),
   },
   mcp: {
-    read: async () => ({ servers: [] }),
+    read: async () => ({ servers: [], problem: '' }),
     write: async () => ({ ok: false, written: [], answer: 'Tool servers are written by the installed app.' }),
   },
   structure: {

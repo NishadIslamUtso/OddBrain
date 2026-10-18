@@ -114,3 +114,23 @@ export function describeMcpServer(server: McpServerEntry): string {
   if (server.url) return `${server.url}`
   return [server.command, ...(server.args ?? [])].filter(Boolean).join(' ')
 }
+
+/**
+ * Read the list back from its file.
+ *
+ * Three outcomes, and they are not the same: a usable list, an empty one, and
+ * a file this app cannot read. The third must never look like the second — an
+ * empty screen beside a Save button is how a hand-edited list disappears.
+ */
+export function readMcpList(raw: string): { servers: McpServerEntry[]; problem: string } {
+  let parsed: unknown
+  try { parsed = JSON.parse(raw) } catch {
+    return { servers: [], problem: 'The saved tool-server list could not be read. Saving again keeps a copy of it first.' }
+  }
+  const record = parsed && typeof parsed === 'object' ? parsed as { servers?: unknown } : {}
+  const normalized = normalizeMcpServers(record.servers)
+  return {
+    servers: normalized.servers,
+    problem: normalized.problems.length ? `The saved list has entries this app cannot use: ${normalized.problems[0]}` : '',
+  }
+}

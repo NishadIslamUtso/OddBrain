@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest'
-import { describeMcpServer, mcpServerProblem, normalizeMcpServers, parseMcpArgs } from '../src/shared/lib/mcp'
+import { describeMcpServer, mcpServerProblem, normalizeMcpServers, parseMcpArgs, readMcpList } from '../src/shared/lib/mcp'
 
 test('a local tool server needs a name and a command, and accepts plain arguments', () => {
   expect(mcpServerProblem({ name: 'files', command: 'npx', args: ['-y', 'files-mcp'] })).toBe('')
@@ -35,4 +35,20 @@ test('the stored list rejects duplicates and unusable entries instead of writing
   expect(normalizeMcpServers('not a list').problems).toHaveLength(1)
   expect(describeMcpServer({ name: 'one', command: 'npx', args: ['-y', 'pkg'] })).toBe('npx -y pkg')
   expect(describeMcpServer({ name: 'remote', url: 'https://example.com/mcp' })).toBe('https://example.com/mcp')
+})
+
+test('an unreadable saved list is reported, never shown as an empty one', () => {
+  expect(readMcpList('{"servers":[{"name":"files","command":"npx"}]}')).toEqual({ servers: [{ name: 'files', command: 'npx' }], problem: '' })
+  expect(readMcpList('{"servers":[]}').problem).toBe('')
+  expect(readMcpList('{ not json').servers).toEqual([])
+  expect(readMcpList('{ not json').problem).toContain('could not be read')
+  expect(readMcpList('{"servers":"files"}').problem).toContain('cannot use')
+  expect(readMcpList('{"servers":[{"name":"FILES","command":"npx"}]}').problem).toContain('cannot use')
+})
+
+test('the name rule matches what the engines will actually be given', () => {
+  // Deploy normalises names; a name that would change on the way is refused here.
+  expect(mcpServerProblem({ name: 'my.server', command: 'npx' })).toContain('lowercase')
+  expect(mcpServerProblem({ name: 'My Server', command: 'npx' })).toContain('lowercase')
+  expect(mcpServerProblem({ name: 'mcp_files-1', command: 'npx' })).toBe('')
 })

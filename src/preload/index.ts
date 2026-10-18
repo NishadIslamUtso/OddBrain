@@ -331,7 +331,7 @@ const api = {
   },
   mcp: {
     /** The one MCP server list, and which engine configs it was deployed to. */
-    read: (): Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }> }> =>
+    read: (): Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>; problem: string }> =>
       ipcRenderer.invoke('mcp:read'),
     write: (
       servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>,

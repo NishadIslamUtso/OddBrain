@@ -1,5 +1,5 @@
 import { test, expect } from 'vitest'
-import { authSentence, openLogin, parseClaudeAuth, readAuthStatus } from '../src/main/engine/authStatus'
+import { authSentence, cmdQuote, openLogin, parseClaudeAuth, readAuthStatus } from '../src/main/engine/authStatus'
 
 const runner = (stdout: string, error: unknown = null, stderr = '') =>
   (_command: string, _args: string[], done: (error: unknown, stdout: string, stderr: string) => void): void => done(error, stdout, stderr)
@@ -85,6 +85,22 @@ test('a terminal that refuses to open is reported, not swallowed', () => {
     command: 'claude.cmd',
     spawnImpl: (() => { throw new Error('EACCES') }) as never,
   })
+  expect(reply.ok).toBe(false)
+  expect(reply.answer).toContain('nothing was changed')
+})
+
+test('a cmd operator in the executable path cannot become a second command', () => {
+  // `cmd` reads & | ^ ( ) as operators even without a space: R&D would split.
+  expect(cmdQuote('C:\\R&D\\claude.exe')).toBe('"C:\\R&D\\claude.exe"')
+  expect(cmdQuote('C:\\Program Files\\Claude\\claude.exe')).toBe('"C:\\Program Files\\Claude\\claude.exe"')
+  expect(cmdQuote('claude.cmd')).toBe('claude.cmd')
+  // A path that cannot be quoted safely is refused, not escaped into something else.
+  expect(cmdQuote('C:\\bad"name\\claude.exe')).toBeNull()
+  expect(cmdQuote('C:\\bad\nname\\claude.exe')).toBeNull()
+})
+
+test('a login is refused when the path cannot be quoted safely', () => {
+  const reply = openLogin({ platform: 'win32', command: 'C:\\bad"name\\claude.exe', spawnImpl: (() => { throw new Error('should not spawn') }) as never })
   expect(reply.ok).toBe(false)
   expect(reply.answer).toContain('nothing was changed')
 })
