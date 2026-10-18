@@ -25,10 +25,19 @@ fs.mkdirSync(QA, { recursive: true })
 const ROOT = fs.mkdtempSync(path.join(QA + path.sep, 'built-qa-'))
 
 const VIEWS = ['Chat', 'Artifacts', 'Today', 'Projects', 'Vault', 'Brain', 'Code']
+// If anything hangs, say so loudly and exit before the step timeout —
+// a killed pipe loses buffered output and leaves an empty log.
+const watchdog = setTimeout(() => {
+  console.error('[built-qa] WATCHDOG: still running after 8 minutes')
+  process.exit(2)
+}, 8 * 60 * 1000)
+watchdog.unref()
+const say = (msg) => { console.error('[built-qa] ' + msg) }
 
 ;(async () => {
   let app
   const report = { phase: 'setup', errors: [], consoleErrors: [], views: [], sections: [], spec2: {}, ipc: {}, checks: [] }
+say('starting')
   const note = (msg) => { report.checks.push(msg) }
 
   // Fixtures: a claude stand-in that answers --version, and an ollama
@@ -76,6 +85,7 @@ HTTPServer(('127.0.0.1', 11434), H).serve_forever()
         PATH: bin + path.delimiter + process.env.PATH,
       },
     })
+    say('electron launched')
     const p = await app.firstWindow()
     p.setDefaultTimeout(15000)
     p.on('pageerror', (e) => report.errors.push(e.message))
@@ -90,6 +100,7 @@ HTTPServer(('127.0.0.1', 11434), H).serve_forever()
     await p.waitForFunction(() => !!window.engineApi?.read)
     await p.waitForTimeout(3200) // the opening finishes on its own clock
 
+    say('window ready, seeded, reloaded')
     const native = await app.evaluate(({ app }) => ({ userData: app.getPath('userData'), version: app.getVersion() }))
     report.native = native
 
@@ -129,6 +140,7 @@ HTTPServer(('127.0.0.1', 11434), H).serve_forever()
 
     // ---- A. every main screen --------------------------------------------
     report.phase = 'views'
+    say('views')
     for (const view of VIEWS) {
       await p.keyboard.press('Control+k')
       await p.getByRole('textbox', { name: 'Search chats and screens', exact: true }).fill(view)
@@ -156,6 +168,7 @@ HTTPServer(('127.0.0.1', 11434), H).serve_forever()
 
     // ---- B. all 18 settings sections -------------------------------------
     report.phase = 'sections'
+    say('sections')
     await p.keyboard.press('Control+,')
     const sectionButtons = p.locator('.ob-settings-navigation button[aria-label^="Section:"]')
     const count = await sectionButtons.count()
@@ -192,6 +205,7 @@ HTTPServer(('127.0.0.1', 11434), H).serve_forever()
 
     // ---- D. engine:pick-binary through the real IPC layer -----------------
     report.phase = 'ipc-pick'
+    say('ipc-pick')
     await app.evaluate(({ dialog }, file) => {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [file] })
     }, claudeFixture)
@@ -216,6 +230,7 @@ HTTPServer(('127.0.0.1', 11434), H).serve_forever()
 
     // ---- E. serve start/stop through the real IPC layer --------------------
     report.phase = 'ipc-serve'
+    say('ipc-serve')
     const portBusy = await new Promise((resolve) => {
       const req = http.get('http://127.0.0.1:11434/api/version', (res) => { res.resume(); resolve(true) })
       req.on('error', () => resolve(false))
@@ -259,6 +274,7 @@ HTTPServer(('127.0.0.1', 11434), H).serve_forever()
       }
     }
 
+    say('all phases passed, screenshotting')
     await p.screenshot({ path: path.join(QA, 'built-app-final.png') })
     assert.equal(report.errors.length, 0, 'zero page errors across every driven screen and section')
     report.ok = true
@@ -268,9 +284,11 @@ HTTPServer(('127.0.0.1', 11434), H).serve_forever()
     console.error(e.stack || e)
     process.exitCode = 1
   } finally {
-    if (app) await app.close().catch(() => {})
-    try { fs.rmSync(ROOT, { recursive: true, force: true }) } catch { /* keep QA evidence */ }
-    fs.writeFileSync(path.join(QA, 'built-app-results.json'), JSON.stringify(report, null, 2))
+    clearTimeout(watchdog)
+    try { fs.writeFileSync(path.join(QA, 'built-app-results.json'), JSON.stringify(report, null, 2)) } catch { /* evidence best-effort */ }
     console.log(JSON.stringify(report, null, 2))
+    say('report written; closing app')
+    if (app) await Promise.race([app.close().catch(() => {}), new Promise((r) => setTimeout(r, 10000).unref())])
+    try { fs.rmSync(ROOT, { recursive: true, force: true }) } catch { /* keep QA evidence */ }
   }
 })()
