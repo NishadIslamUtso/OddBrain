@@ -114,8 +114,14 @@ export const DEFAULT_APPEARANCE: Appearance = Object.freeze({
   textSize: 'medium',
   font: 'sans',
   motion: 'system',
-  mascotWords: true,
-  rowExplanations: true,
+  // Off by default: the owner asked for the decorative furniture to go — no
+  // status words floating over the interface, no explanations on every row.
+  // Both stay available as choices in Appearance; they are simply not imposed.
+  mascotWords: false,
+  rowExplanations: false,
+  // Kept from the design-system work: a pack theme's own stylesheet and the
+  // active design system. Empty means "the app's own look", and one rules at
+  // a time — a system retires a pack style, a pack retires a system.
   packCss: '',
   designSystem: '',
 })

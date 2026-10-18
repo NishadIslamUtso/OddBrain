@@ -56,9 +56,21 @@ test('the engine picker states installation in words, not a green dot', () => {
   assert.match(composer, /not installed/)
 })
 
-test('the title-bar dot is alive only while a turn is live', () => {
+test('the title bar paints no liveness lamp at all', () => {
+  // The law behind this pin was the owner's "fake green dots": a lamp that
+  // reads alive while nothing is running. It used to be satisfied by driving
+  // the dot from the live turn instead of from process aliveness. The compact
+  // header went further and paints no status ornament whatsoever, which is the
+  // stronger answer — so the pin now claims that, and still refuses the
+  // original lie if a lamp is ever put back.
+  const titleBar = readFileSync(new URL('../src/renderer/src/components/TitleBar.tsx', import.meta.url), 'utf8')
+  assert.ok(!/bg-ok|bg-warn/.test(titleBar), 'no coloured lamp in the title bar')
+  assert.ok(!titleBar.includes('rounded-full'), 'no dot shape in the title bar')
   const app = readFileSync(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8')
-  assert.match(app, /engineAlive=\{engineStore\(\)\.turn\?\.state === 'running'\}/)
+  assert.ok(!app.includes('engineAlive={engineStore().alive}'), 'process aliveness is never a liveness claim')
+  // State stays in words: the engine strip says the phase, "stopped" or "done".
+  const panel = readFileSync(new URL('../src/renderer/src/components/EnginePanel.tsx', import.meta.url), 'utf8')
+  assert.match(panel, /PHASE_LABEL\[phase\]/)
 })
 
 test('the engine strip is collapsible and never hides a permission question', () => {

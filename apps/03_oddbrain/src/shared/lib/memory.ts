@@ -17,10 +17,10 @@ export function memoryVaultPath(): string {
 }
 
 /** The work order for a memory pass. The engine writes through its own tools. */
-export function buildMemoryOrder(): string {
+export function buildMemoryOrder(folder = ''): string {
   return [
     `Memory pass. Look back over this conversation and note what matters for future sessions: decisions made, preferences shown, facts learned, work left open.`,
-    `Write them as short dated lines into your memory file at ${memoryVaultPath()} inside the current workspace (create the folder and file if they do not exist). Append under a line like '## 2026-10-16' for today; never delete or rewrite lines that are already there.`,
+    `Write them as short dated lines into your memory file at ${folder ? JSON.stringify(folder.replace(/\\/g, '/') + '/' + MEMORY_FILE) : memoryVaultPath() + ' inside the current workspace'} (create the folder and file if they do not exist). Append under a line like '## 2026-10-16' for today; never delete or rewrite lines that are already there.`,
     `One line per item, plain words. Nothing sensitive beyond what this conversation already holds. If there is truly nothing worth keeping, say so and write nothing.`,
   ].join(' ')
 }
