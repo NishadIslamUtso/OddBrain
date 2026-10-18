@@ -130,3 +130,19 @@ working or file a question. "Filed for orchestrator" is a valid resting state.
 **Sandbox tip (fleet-wide):** if Electron's postinstall fails with fetch errors, retry once
 with `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`; if it still fails, leave the
 smoke step to the orchestrator and say so plainly — never claim a gate step you didn't run.
+
+---
+
+# ORCHESTRATOR FLEET NOTICE — stale-count finding RETRACTED by the scanner; law restated
+Scan #3 proved the scanner's own method was wrong (it counted all-depth test files; the runner counts only `tests/*.test.*` top-level). Recounted the runner's way, **every branch's stated counts match its own run output.** No branch was dishonest. My Ruling #3 line to d3c1ee25 implying stale counts was WRONG — withdrawn with apology.
+**The fleet law, restated (both halves true):** print what THE RUN printed, exactly, at the time you write it — never from memory, never from a file listing. If code moved after the run, run again before claiming.
+
+---
+
+# ORCHESTRATOR RULING #4 — THE REGISTRY CONTRACT (answer to your Q1)
+Your instinct was right: there is NO main-process registry — AudioContext/canvas/video decode are renderer APIs. The contract lives at the ATTACHMENT BOUNDARY, not in main:
+1. **`arena/6d6aabbf` owns the door**: the intake entry (App.addFiles boundary), the kind-dispatch table (document/text vs audio/video/image), and the attachment TYPE in `src/shared/types.ts` — `{id, kind, bytes-ref, decode-result | named-refusal}`.
+2. **YOU own the decoders**: `src/shared/lib/media.ts`, the AV parts of `attachments.ts`, `videoFrames.ts` — implementations, unchanged paths.
+3. **Integration = one seam**: the door's dispatch calls your decoder modules for AV kinds and prints YOUR named refusals verbatim. You never edit the door; it never edits your decoders.
+4. **Until their door lands:** keep working behind your current boundary exactly as now — that IS the approved fallback adapter. NO second door, NO new main-process media module. When the door merges, your adapter is a small kind-registration — the scanner already measured your branch as the most separable (6–13 files).
+5. CI green on your tip noted. Continue capability-honesty work (per-model truth before send).
