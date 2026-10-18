@@ -65,7 +65,7 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
 export const REMEMBERING_SECTION =
   'You keep a memory file at 06 Review/Memory/engine-notes.md in your working folder. ' +
   'When you learn something worth keeping for future sessions — a decision made, a preference shown, a fact learned, work left open — ' +
-  'append it under a heading like \'## 2026-10-16\' for today, one short line per item. ' +
+  'append it under a heading like \'## YYYY-MM-DD\' using the current local date, one short line per item. ' +
   'Never delete or rewrite lines that are already there; if nothing is worth keeping, write nothing. ' +
   'Your writes go through the usual approval channel, so the owner sees every change before it lands.'
 

@@ -1825,8 +1825,24 @@ function createWindow(): BrowserWindow {
 function runSmoke(window: BrowserWindow): void {
   const started = Date.now()
   window.webContents.once('did-finish-load', () => {
-    setTimeout(async () => {
+    void (async () => {
       try {
+        // capturePage() can be empty for an initially hidden window under
+        // Xvfb. Show the real app, then wait for its scroller and two painted
+        // frames instead of assuming 1500 ms was enough to render it.
+        if (!window.isVisible()) window.show()
+        await window.webContents.executeJavaScript(`new Promise(resolve => {
+          let finished = false
+          const timeout = setTimeout(() => { finished = true; resolve(false) }, 10000)
+          const check = () => {
+            if (finished) return
+            if (!document.querySelector('[data-find-scroll]')) { requestAnimationFrame(check); return }
+            finished = true
+            clearTimeout(timeout)
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve(true)))
+          }
+          check()
+        })`, true)
         // The real machine reported a chat that would not scroll. Photograph
         // alone cannot see that, so the smoke run now proves the scroll
         // chain on the built app: force overflow in the message scroller and
@@ -1852,13 +1868,23 @@ function runSmoke(window: BrowserWindow): void {
         } catch (probeError) {
           scrollLine = `SCROLL FAILED ${(probeError as Error).message}`
         }
-        const image = await window.webContents.capturePage()
+        // Never accept an empty capture. Give the compositor another frame
+        // while it is producing no pixels; the gate still requires a real
+        // nonempty screenshot or exits with BLANK after the deadline.
+        const captureDeadline = Date.now() + 10000
+        let image = await window.webContents.capturePage()
+        while (image.isEmpty() && Date.now() < captureDeadline) {
+          await window.webContents.executeJavaScript('new Promise(resolve => requestAnimationFrame(() => resolve(true)))', true)
+          image = await window.webContents.capturePage()
+        }
         if (smokeOut) writeFileSync(smokeOut, image.toPNG())
         const bounds = window.getBounds()
+        const pixels = image.getSize()
         const title = window.getTitle()
         const blank = image.isEmpty()
         console.log(
           `SMOKE ${blank ? 'BLANK' : 'OK'} ${scrollLine} title="${title}" size=${bounds.width}x${bounds.height} ` +
+            `capture=${pixels.width}x${pixels.height} visible=${window.isVisible()} ` +
             `in ${Date.now() - started}ms errors=${consoleErrors.length} warnings=${consoleWarnings.length}`
         )
         for (const line of consoleErrors.slice(0, 10)) console.log(`  ERROR: ${line}`)
@@ -1866,13 +1892,13 @@ function runSmoke(window: BrowserWindow): void {
         // The rule the owner set: a WARNING is already a failure. The smoke
         // run is the console-clean gate, so it enforces the whole sentence.
         const failed =
-          consoleErrors.length > 0 || consoleWarnings.length > 0 || blank || scrollLine.startsWith('SCROLL BROKEN')
+          consoleErrors.length > 0 || consoleWarnings.length > 0 || blank || scrollLine !== 'SCROLL OK'
         app.exit(failed ? 1 : 0)
       } catch (error) {
         console.log(`SMOKE FAILED: ${(error as Error).message}`)
         app.exit(1)
       }
-    }, 1500)
+    })()
   })
 }
 

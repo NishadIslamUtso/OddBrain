@@ -1,4 +1,4 @@
-import { test, expect } from 'vitest'
+import { test, expect, vi } from 'vitest'
 import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -140,6 +140,17 @@ test('the selected memory directory survives settings writes and does not become
     expect(readSettings(file).memoryFolder).toBe(selected)
     expect(readSettings(file).vaultPath).toBe(EMPTY_SETTINGS.vaultPath)
   } finally { rmSync(root, { recursive: true, force: true }) }
+})
+
+test('a memory pass uses the current local date, including after midnight', () => {
+  vi.useFakeTimers()
+  try {
+    vi.setSystemTime(new Date(2026, 9, 18, 10, 0, 0))
+    expect(buildMemoryOrder()).toContain("'## 2026-10-18'")
+    vi.setSystemTime(new Date(2026, 9, 19, 10, 0, 0))
+    expect(buildMemoryOrder()).toContain("'## 2026-10-19'")
+    expect(buildMemoryOrder()).not.toContain('2026-10-16')
+  } finally { vi.useRealTimers() }
 })
 
 test('selected memory folder appears in both rules and pass without mutating the owner rules', () => {
