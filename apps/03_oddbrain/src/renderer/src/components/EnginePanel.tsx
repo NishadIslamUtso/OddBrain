@@ -1,3 +1,4 @@
+import { sampleEnabled } from '@shared/lib/sampleWorkspace'
 import { useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import ReadAloudButton from '../ui/ReadAloudButton'
@@ -84,7 +85,7 @@ export default function EnginePanel() {
         {engine.journal.length ? (
           <details aria-label="Earlier sessions" className="mx-auto mb-3 w-full max-w-[var(--chat-width)] rounded-xl border border-line bg-card px-4 py-2.5">
             <summary className="cursor-pointer text-[12px] font-medium text-muted">
-              Earlier sessions on this machine ({engine.journal.length} {engine.journal.length === 1 ? 'turn' : 'turns'})
+              {sampleEnabled() ? 'Sample sessions' : 'Earlier sessions on this machine'} ({engine.journal.length} {engine.journal.length === 1 ? 'turn' : 'turns'})
             </summary>
             <ul className="mt-2 space-y-1.5">
               {engine.journal.slice(0, 10).map((entry, index) => (
@@ -354,7 +355,7 @@ export default function EnginePanel() {
     {engine.journal.length ? (
       <details aria-label="Earlier sessions" className="mx-auto mb-3 w-full max-w-[var(--chat-width)] rounded-xl border border-line bg-card px-4 py-2.5">
         <summary className="cursor-pointer text-[12px] font-medium text-muted">
-          Earlier sessions on this machine ({engine.journal.length} {engine.journal.length === 1 ? 'turn' : 'turns'})
+          {sampleEnabled() ? 'Sample sessions' : 'Earlier sessions on this machine'} ({engine.journal.length} {engine.journal.length === 1 ? 'turn' : 'turns'})
         </summary>
         <ul className="mt-2 space-y-1.5">
           {engine.journal.slice(0, 10).map((entry, index) => (

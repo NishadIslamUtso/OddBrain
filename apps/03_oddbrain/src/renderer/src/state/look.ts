@@ -131,7 +131,7 @@ export function lookTokens(appearance: Appearance, look: LookPreferences, osDark
   const base = PALETTES.find(p => p.id === look.palette) || PALETTES[0]
   const dark = look.paletteTheme ? base.dark : appearance.theme === 'dark' || (appearance.theme === 'system' && osDark)
   let t: Record<string, string> = { bg: base.paper, panel: base.panel, card: base.card, ink: base.ink, muted: base.muted, line: base.line, brand: base.pink, ok: base.green, warn: base.amber }
-  if (base.id === 'app' && !dark) t = { ...t, bg: '#f4f2ec', panel: '#ebe8df', card: '#fbfaf6', ink: '#262420', muted: '#67625a', line: '#dcd7ca', brand: '#b04a6a', ok: '#15803d', warn: '#b45309' }
+  if (base.id === 'app' && !dark) t = { ...t, bg: '#f6f6f7', panel: '#ededf0', card: '#ffffff', ink: '#202124', muted: '#62646b', line: '#d8dade', brand: '#b04a6a', ok: '#15803d', warn: '#b45309' }
   else if (dark !== base.dark) t = dark
     ? { ...t, bg: mix('#141417', base.accent, .045), panel: mix('#1a1a1f', base.accent, .065), card: mix('#202027', base.accent, .08), ink: '#ececef', muted: '#aaa8b1', line: mix('#3a3941', base.accent, .1) }
     : { ...t, bg: mix('#ffffff', base.accent, .045), panel: mix('#ffffff', base.accent, .1), card: mix('#ffffff', base.accent, .014), ink: mix('#202024', base.accent, .08), muted: '#66616a', line: mix('#ffffff', base.accent, .25) }

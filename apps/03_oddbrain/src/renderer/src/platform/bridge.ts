@@ -17,9 +17,9 @@ import { DEFAULT_AUTOMATION, normalizeAutomation, type AutomationBridge, type Au
  *      resolves. A capability that is missing is a value the UI can show as
  *      "not available here", never an exception in the console.
  *   2. Nothing here pretends to be real. `isDemo` is true in the browser, and
- *      the demo layer never returns invented vault contents, chat history or
- *      model output — it returns empty, or a sentence saying what is missing,
- *      so the UI's own empty state is what the person sees.
+ *      the empty preview returns empty data or a capability refusal. The browser
+ *      entry can install the labelled sample-workspace adapter separately;
+ *      it never replaces a native preload or calls real services.
  */
 import type { CloudModelsAnswer, CloudTestAnswer, CloudView } from '@shared/lib/providers'
 import {

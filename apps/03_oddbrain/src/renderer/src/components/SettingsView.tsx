@@ -1,3 +1,5 @@
+import SampleWorkspaceControls from '../ui/SampleWorkspaceControls'
+import { captureSamplePage, sampleEnabled } from '@shared/lib/sampleWorkspace'
 import { useEffect, useState } from 'react'
 import type { ReactNode } from 'react'
 import { bridge, isDemo } from '../platform/bridge'
@@ -28,7 +30,7 @@ import { DEFAULT_PERMISSIONS, type Permissions } from '@shared/lib/permissions'
 import { DEFAULT_APPEARANCE, type Appearance } from '../state/appearance'
 import { DEFAULT_LOOK, DEFAULT_SIDEBAR, type LookPreferences, type SidebarPreferences } from '../state/look'
 import AppearancePanel from '../ui/AppearancePanel'
-import { replayOpening } from '../ui/LaunchOverlay'
+import WatchSection from './WatchSection'
 import MemoryMap from './MemoryMap'
 import { useQuickPreference, setQuickPreference } from '../state/quickPreference'
 import {
@@ -138,7 +140,7 @@ function AgentAccessCard({ isDemo }: { isDemo: boolean }): ReactNode {
   )
 }
 
-export type SectionId = 'media' | 'you' | 'windows' | 'maps' | 'about' | 'agents' | 'hooks' | 'memory' | 'house' | 'skills' | 'recipes' | 'extensions' | 'engine' | 'system' | 'connectors' | 'appearance' | 'models' | 'performance' | 'vault'
+export type SectionId = 'media' | 'windows' | 'maps' | 'about' | 'agents' | 'hooks' | 'memory' | 'house' | 'skills' | 'recipes' | 'extensions' | 'engine' | 'system' | 'connectors' | 'appearance' | 'models' | 'performance' | 'vault'
 
 type Row = {
   /** What the row is called, and what the rail's search matches on. */
@@ -151,33 +153,32 @@ type Row = {
 }
 
 export const SECTIONS: readonly { id: SectionId; title: string; group: string; resettable?: boolean }[] = [
-  { id: 'you', title: 'You', group: 'Your space' },
   { id: 'appearance', title: 'Appearance', group: 'Your space', resettable: true },
   { id: 'windows', title: 'Windows & shortcuts', group: 'Your space' },
-  { id: 'maps', title: 'Browsing maps', group: 'Your space' },
-  { id: 'engine', title: 'Engine', group: 'The work' },
-  { id: 'models', title: 'Models', group: 'The work' },
-  { id: 'media', title: 'Voice & files', group: 'The work' },
-  { id: 'performance', title: 'Performance', group: 'The work', resettable: true },
-  { id: 'agents', title: 'Agent access', group: 'The work', resettable: true },
-  { id: 'connectors', title: 'Connectors', group: 'The work' },
-  { id: 'memory', title: 'Memory', group: 'Memory & tools' },
-  { id: 'vault', title: 'Vault', group: 'Memory & tools' },
-  { id: 'house', title: 'House rules', group: 'Memory & tools' },
-  { id: 'skills', title: 'Skills', group: 'Memory & tools' },
-  { id: 'recipes', title: 'Recipes', group: 'Memory & tools' },
-  { id: 'hooks', title: 'Hooks', group: 'Memory & tools' },
-  { id: 'extensions', title: 'Plugins', group: 'Memory & tools' },
-  { id: 'system', title: 'System', group: 'This app' },
-  { id: 'about', title: 'About & help', group: 'This app' },
+  { id: 'engine', title: 'Engine', group: 'Models & runtime' },
+  { id: 'models', title: 'Models & API keys', group: 'Models & runtime' },
+  { id: 'performance', title: 'Performance', group: 'Models & runtime', resettable: true },
+  { id: 'agents', title: 'Agent access', group: 'Access & connections', resettable: true },
+  { id: 'connectors', title: 'Connectors', group: 'Access & connections' },
+  { id: 'extensions', title: 'Plugins', group: 'Access & connections' },
+  { id: 'media', title: 'Voice & files', group: 'Files & memory' },
+  { id: 'vault', title: 'Vault', group: 'Files & memory' },
+  { id: 'memory', title: 'Memory', group: 'Files & memory' },
+  { id: 'maps', title: 'Browsing maps', group: 'Files & memory' },
+  { id: 'house', title: 'House rules', group: 'Agent behavior' },
+  { id: 'skills', title: 'Skills', group: 'Agent behavior' },
+  { id: 'recipes', title: 'Recipes', group: 'Agent behavior' },
+  { id: 'hooks', title: 'Hooks', group: 'Agent behavior' },
+  { id: 'system', title: 'System', group: 'Application' },
+  { id: 'about', title: 'About & help', group: 'Application' },
 ]
-const GROUPS = ['Your space', 'The work', 'Memory & tools', 'This app'] as const
+const GROUPS = [...new Set(SECTIONS.map(section => section.group))]
+const COMPOSED_SECTIONS = new Set<SectionId>(['appearance', 'maps', 'engine', 'connectors', 'extensions', 'media', 'house', 'skills', 'recipes', 'hooks', 'memory', 'vault'])
 
 /** Four glyphs, drawn here rather than pulled from a font or a package. */
 function SectionIcon({ id }: { id: SectionId }) {
   const paths: Record<SectionId, ReactNode> = {
     media: <><rect x="7" y="2" width="6" height="11" rx="3" /><path d="M4 9a6 6 0 0 0 12 0M10 15v3M6 18h8" /></>,
-    you: <><circle cx="10" cy="6" r="3" /><path d="M4 17v-2a6 6 0 0 1 12 0v2" /></>,
     windows: <><rect x="2" y="3" width="16" height="13" rx="2" /><path d="M2 7h16" /></>,
     maps: <><path d="m2 4 5-2 6 3 5-2v13l-5 2-6-3-5 2ZM7 2v13M13 5v13" /></>,
     about: <><circle cx="10" cy="10" r="8" /><path d="M10 9v6M10 5v.1" /></>,
@@ -350,12 +351,9 @@ export default function SettingsView({
   inference: InferenceSettings
   onInferenceChange: (next: InferenceSettings) => void
 }) {
-  const [section, setSection] = useState<SectionId>(initialSection ?? 'you')
-  useEffect(() => { onSectionChange?.(section) }, [section, onSectionChange])
-  /** A caller that names a pane while the sheet is closed gets it on open. */
-  useEffect(() => {
-    if (open && initialSection) setSection(initialSection)
-  }, [open, initialSection])
+  const [localSection, setLocalSection] = useState<SectionId>(initialSection ?? 'appearance')
+  const section = initialSection ?? localSection
+  const setSection = (next: SectionId): void => { setLocalSection(next); onSectionChange?.(next) }
   const [providers, setProviders] = useState<CloudProviderView[]>([])
   const [providersError, setProvidersError] = useState('')
   const [keyEncryption, setKeyEncryption] = useState<'os' | 'none'>('none')
@@ -369,11 +367,13 @@ export default function SettingsView({
   const [extension, setExtension] = useState({ listening: false, port: 8765, url: '', error: '' })
   const [permissionProblem, setPermissionProblem] = useState('')
   const [query, setQuery] = useState('')
-  const [nameDraft, setNameDraft] = useState(profileName)
-  const [appearanceTarget, setAppearanceTarget] = useState<'none' | 'gallery'>('none')
   const [helpNote, setHelpNote] = useState('')
-  const [resetPreview, setResetPreview] = useState(false)
-  useEffect(() => setNameDraft(profileName), [profileName])
+  // Back may change the controlled section while a search is open. Internal
+  // selections already updated localSection, so they keep their search text.
+  const restoringSection = initialSection !== undefined && initialSection !== localSection
+  useEffect(() => {
+    if (initialSection && restoringSection) { setLocalSection(initialSection); setQuery('') }
+  }, [initialSection, restoringSection])
 
   useEffect(() => {
     if (!open) return
@@ -544,30 +544,23 @@ export default function SettingsView({
   const keyedProviders = providers.filter(provider => provider.hasKey)
 
   const rowsById: Record<SectionId, Row[]> = {
-    you: [
-      { label: 'Your name', terms: 'profile name person account', body: <form className="ob-form-line" onSubmit={e => { e.preventDefault(); onProfileNameChange(nameDraft.trim().slice(0, 40)) }}><input aria-label="Your name" maxLength={40} value={nameDraft} onChange={e => setNameDraft(e.target.value)} /><button className="ob-small-button" type="submit">Save</button></form> },
-      { label: 'Your space', terms: 'get api keys install apps extensions plugins community browsing maps smaller quick window shortcuts learn more help', body: <div className="ob-settings-links">{([
-        ['Models & API keys', 'models'], ['Apps & extensions', 'connectors'], ['Plugins & community', 'extensions'], ['Browsing maps', 'maps'], ['Smaller window & shortcuts', 'windows'], ['Learn more', 'about'], ['Appearance', 'appearance'],
-      ] as [string, SectionId][]).map(([label, id]) => <button type="button" key={id} onClick={() => { setQuery(''); setSection(id); if (id === 'appearance') setAppearanceTarget('none') }}>{label}<span aria-hidden="true">→</span></button>)}</div> },
-      { label: 'Opening & mascot', terms: 'launch startup logo replay first run setup scenes animation brain', body: <div className="ob-settings-links"><button type="button" onClick={replayOpening}>Replay opening<span aria-hidden="true">→</span></button><button type="button" onClick={onReplaySetup}>Replay first-run setup<span aria-hidden="true">→</span></button><button type="button" onClick={() => { setSection('appearance'); setAppearanceTarget('gallery') }}>All mascot scenes<span aria-hidden="true">→</span></button></div> },
-    ],
     windows: [
       { label: 'Quick window', terms: 'quick smaller window hotkey ctrl shift o shortcut', body: <div className="ob-form-column"><QuickShortcutRow /><button className="ob-small-button" type="button" onClick={() => { void bridge.quick.open().then(r => { if (!r.ok) setHelpNote('The quick window opens in the Windows app.') }).catch(() => setHelpNote('The quick window could not be opened.')) }}>Open quick window</button></div> },
       { label: 'Run at startup', terms: 'startup windows login boot launch', body: <StartupRow flag="loginItem" onLabel="Opens with Windows" offLabel="Opens when you open it" /> },
       { label: 'Warm runtime', terms: 'warm ollama runtime background staged', body: <StartupRow flag="warmRuntime" onLabel="Starts with the app" offLabel="Starts when you press start" /> },
-      { label: 'Model stays loaded', terms: 'model stays loaded keep alive ollama memory', body: <KeepLoadedRow /> },
       { label: 'Shortcuts', terms: 'keyboard ctrl comma settings new chat find search', body: <dl className="ob-shortcuts"><div><dt>Settings</dt><dd>Ctrl+,</dd></div><div><dt>Find chat or screen</dt><dd>Ctrl+K</dd></div><div><dt>Find in conversation</dt><dd>Ctrl+F</dd></div><div><dt>Quick window</dt><dd>Ctrl+Shift+O</dd></div><div><dt>Send / new line</dt><dd>Enter / Shift+Enter</dd></div></dl> },
     ],
     maps: [{ label: 'Browsing maps', terms: 'browsing maps sources pages visits history capture read timeline', body: <MemoryMap open onClose={() => undefined} embedded /> }],
     about: [
+      { label: 'Setup', terms: 'first run setup welcome onboarding replay', body: <button type="button" className="ob-small-button" onClick={onReplaySetup}>Replay first-run setup</button> },
       { label: 'OddBrain', terms: 'about version windows help learn more repository', body: <div className="ob-form-column"><span>{bridge.app.version} · {bridge.app.platform}</span><a href="https://github.com/NishadIslamUtso/OddBrain" onClick={e => { e.preventDefault(); if (isDemo) { if (!window.open('https://github.com/NishadIslamUtso/OddBrain', '_blank', 'noopener,noreferrer')) setHelpNote('Open github.com/NishadIslamUtso/OddBrain in your browser.'); return } void bridge.app.openExternal?.('https://github.com/NishadIslamUtso/OddBrain').then(r => { if (!r.ok) setHelpNote('The browser could not be opened.') }).catch(() => setHelpNote('The browser could not be opened.')) }}>OddBrain repository & help</a></div> },
-      ...(isDemo ? [{ label: 'This preview', terms: 'preview browser offline', body: <div><p>The actual app interface. Engines, Windows shortcuts, files and provider keys require the installed Windows app.</p>{(window as unknown as { __oddbrainEphemeralStorage?: boolean }).__oddbrainEphemeralStorage ? <p className="mt-2">Choices last for this session. Export a look or the offline HTML to keep them.</p> : null}</div> }] : []),
-      ...(isDemo ? [{ label: 'Preview workspace', terms: 'reset restore sample demo workspace', body: <div>{resetPreview ? <div className="ob-form-line"><button type="button" className="ob-small-button" onClick={() => { for (const key of ['ai-assistant.chats', 'ai-assistant.current-chat']) localStorage.removeItem(key); localStorage.setItem('ai-assistant.view', JSON.stringify('chat')); window.location.reload() }}>Confirm reset preview work</button><button type="button" className="ob-text-button" onClick={() => setResetPreview(false)}>Cancel</button></div> : <button type="button" className="ob-small-button" onClick={() => setResetPreview(true)}>Restore preview workspace</button>}<p className="ob-control-scope">Resets this browser preview’s work data, not its chosen appearance or saved looks. Never offered against an installed vault.</p></div> }] : []),
+      ...(isDemo ? [{ label: 'This preview', terms: 'preview browser offline', body: <div><p>The actual app interface with an optional sample workspace. Real engines, Windows shortcuts, files and provider keys require the installed Windows app.</p>{(window as unknown as { __oddbrainEphemeralStorage?: boolean }).__oddbrainEphemeralStorage ? <p className="mt-2">Choices last for this session. Export a look or the offline HTML to keep them.</p> : null}</div> }] : []),
+      ...(isDemo ? [{ label: 'Sample workspace', terms: 'reset restore sample demo workspace', body: <SampleWorkspaceControls /> }] : []),
 
     ],
     connectors: [
       {
-        label: 'The three brains',
+        label: 'Installed engines',
         terms: 'claude-code agy ollama engine connector connect install login sign in winget local cli brains',
         body: <ConnectorsSection />,
       },
@@ -582,15 +575,16 @@ export default function SettingsView({
               }`}
             />
             <div className="min-w-0">
+              {sampleEnabled() && <button type="button" className="ob-small-button" onClick={() => { try { captureSamplePage(); setHelpNote('Sample page captured. Open Vault, Today or Browsing maps to inspect it.'); onChanged() } catch { setHelpNote('Sample capture could not be saved to browser storage.') } }}>Capture sample page</button>}
               <div className="text-[12.5px]">
-                {isDemo
+                {sampleEnabled() ? 'Sample extension · not connected to a browser' : isDemo
                   ? 'Not in this window'
                   : extension.listening
                     ? `Connected - listening at ${extension.url.replace(/^https?:\/\//, '')}`
                     : 'Not connected'}
               </div>
               <div className="mt-0.5 break-all text-[11.5px] text-muted">
-                {isDemo
+                {sampleEnabled() ? 'Try a simulated capture, then open Vault or Browsing maps. No page is downloaded.' : isDemo
                   ? 'The extension connects to this app over the local loopback port.'
                   : extension.listening
                     ? 'Pages and conversations the extension captures arrive here. One-time setup: chrome://extensions → Developer mode → Load unpacked → choose the extension folder that ships with this app.'
@@ -668,7 +662,7 @@ export default function SettingsView({
             />
             <div className="min-w-0">
               <div className="text-[12.5px]">
-                {isDemo
+                {sampleEnabled() ? 'Sample extension · not connected to a browser' : isDemo
                   ? 'Not in this window'
                   : extension.listening
                     ? `Listening at ${extension.url.replace(/^https?:\/\//, '')}`
@@ -695,7 +689,7 @@ export default function SettingsView({
               <div className="text-[12.5px]">{keeping.label}</div>
               {keeping.detail && <div className="mt-0.5 break-all text-[11.5px] text-muted">{keeping.detail}</div>}
               {vault.state === 'ready' && typeof vault.files === 'number' && (
-                <div className="mt-0.5 text-[11.5px] text-muted">{vault.files} files on disk</div>
+                <div className="mt-0.5 text-[11.5px] text-muted">{vault.files} {sampleEnabled() ? 'sample notes' : 'files on disk'}</div>
               )}
             </div>
           </div>
@@ -800,12 +794,11 @@ export default function SettingsView({
             ),
           },
           {
-            label: 'Not built yet',
+            label: 'Tool approvals',
             terms: 'files shell web mcp future tools',
             body: (
               <p className="text-[12px] leading-relaxed text-muted">
-                Files, Shell, Web and MCP tools are not built yet, so there is nothing to grant. Each one appears
-                here as its own permission when it exists.
+                Engine tool approvals appear in chat. Connected tools may also require permission in their own app.
               </p>
             ),
           },
@@ -819,7 +812,7 @@ export default function SettingsView({
               ]
             : []),
         ],
-    appearance: [{ label: 'Appearance', terms: 'palette theme color colour font size width spacing density motion speed pause mascot brain scenes layout mix preset quick window words explanations compare quiz shortlist', body: <AppearancePanel appearance={appearance} onAppearanceChange={onAppearanceChange} look={look} onLookChange={onLookChange} sidebar={sidebar} onSidebarChange={onSidebarChange} name={profileName} engine={engineState.settings.id} model={engineState.settings.model || 'Choose a model'} onTry={onTryWorkspace} quickControl={<QuickShortcutRow />} initialTool={appearanceTarget} /> }],
+    appearance: [{ label: 'Appearance', terms: 'display name profile palette theme color colour font size width spacing density motion speed pause mascot brain scenes layout mix preset words explanations compare quiz shortlist', body: <AppearancePanel appearance={appearance} onAppearanceChange={onAppearanceChange} look={look} onLookChange={onLookChange} sidebar={sidebar} onSidebarChange={onSidebarChange} name={profileName} onNameChange={onProfileNameChange} engine={engineState.settings.id} model={engineState.settings.model || 'Choose a model'} onTry={onTryWorkspace} /> }],
     media: [{ label: 'Voice & files', terms: 'media attachments PDF Word Excel PowerPoint document image audio video FFmpeg transcription dictation speech voice read aloud provider', body: <MediaSettings /> }],
     models: isDemo
       ? [
@@ -830,8 +823,7 @@ export default function SettingsView({
               <div className="flex flex-col gap-1">
                 <span className="text-[12.5px]">{CLOUD_PROVIDERS.map(provider => provider.label).join(' · ')}</span>
                 <span className="text-[11.5px] text-muted">
-                  Keys are kept by your machine’s own keychain, in the desktop app. This window is the interface only, so
-                  there is no keychain behind it and no provider to ask.
+                  Provider keys are managed in the desktop app.
                 </span>
               </div>
             ),
@@ -1073,7 +1065,7 @@ export default function SettingsView({
     house: [
       { label: 'Auto-keep before a write', terms: 'auto keep before approved write checkpoint backup copies restore', body: <AutomationControls scope="keep" /> },
       {
-        label: 'The rulebook',
+        label: 'Instructions',
         terms: 'house rules instructions identity artifacts approvals memory style ask unsure CLAUDE.md AGENTS.md',
         body: <HouseRulesSection />,
       },
@@ -1081,21 +1073,22 @@ export default function SettingsView({
     engine: [
       { label: 'Second-pass review', terms: 'automatic second pass review on off report only reviewer local cloud', body: <AutomationControls scope="review" /> },
       {
-        label: 'The engine bay',
-        terms: 'engine agent claude-code agy brain model pull download detect install throttle folder',
+        label: 'Engine & workspace',
+        terms: 'engine agent claude-code agy model selection approval workspace folder',
         body: <EngineBay />,
       },
     ],
     memory: [
       {
-        label: 'What the engine remembers',
+        label: 'Engine memory',
         terms: 'memory remember facts decisions preferences vault notes auto keep forget engine notes',
         body: <MemorySection />,
       },
     ],
     hooks: [
+      { label: 'Folder watches', terms: 'watch files folder changes trigger automatic work', body: <WatchSection /> },
       {
-        label: 'Your commands at the engine\u2019s moments',
+        label: 'Event hooks',
         terms: 'hooks commands run turn done error permission automate formatter terminal events claude code',
         body: <HooksSection />,
       },
@@ -1129,12 +1122,12 @@ export default function SettingsView({
     vault: [      {
         label: 'Folder',
         terms: 'vault path choose folder default documents assistant second brain structure conflict links',
-        body: <BrainStructureSection vault={vault} isDemo={isDemo} onChanged={onChanged} onOpenBrain={onOpenBrain} />,
+        body: <BrainStructureSection vault={vault} isDemo={isDemo && !sampleEnabled()} onChanged={onChanged} onOpenBrain={onOpenBrain} />,
       },
     ],
   }
 
-  const sectionAliases: Partial<Record<SectionId, string>> = { models: 'get api keys provider credentials encryption', connectors: 'install apps extensions connection runtime', extensions: 'plugins community packs marketplace', windows: 'smaller quick window shortcut startup warm runtime model stays loaded', maps: 'browsing maps sources reading history timeline', about: 'learn more help about repository', appearance: 'looks layouts styles palettes fonts motion typography density mixes' }
+  const sectionAliases: Partial<Record<SectionId, string>> = { models: 'get api keys provider credentials encryption', connectors: 'install apps extensions connection runtime', extensions: 'plugins community packs marketplace', windows: 'smaller quick window shortcut startup warm runtime', performance: 'model stays loaded keep alive resource memory', maps: 'browsing maps sources reading history timeline', about: 'learn more help about repository', appearance: 'display name profile account looks layouts styles palettes fonts motion typography density mixes' }
   rowsById.agents = [{ label: 'Cloud inference', terms: 'allow cloud external inference local transport remote model', body: <AutomationControls scope="access" /> }, ...rowsById.agents]
   const needle = query.trim().toLowerCase()
   const rowText = (row: Row): string => `${row.label} ${row.terms || ''}`.toLowerCase()
@@ -1149,11 +1142,11 @@ export default function SettingsView({
   // did find, so the pane never sits blank next to a list of results.
   const visible = SECTIONS.filter(meta => sectionFound(meta.id))
   useEffect(() => {
-    if (!needle) return
+    if (!needle || restoringSection) return
     if (visible.some(meta => meta.id === section)) return
     const first = visible[0]
     if (first) setSection(first.id)
-  }, [needle, section, visible])
+  }, [needle, section, visible, restoringSection])
 
   if (!open) return null
 
@@ -1202,7 +1195,7 @@ export default function SettingsView({
                       className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[12.5px] ${
                         current ? 'bg-accent/15 text-ink' : 'text-muted hover:bg-white/[0.06] hover:text-ink'
                       }`}
-                      onClick={() => { setSection(meta.id); if (meta.id === 'appearance') setAppearanceTarget('none') }}
+                      onClick={() => { setSection(meta.id) }}
                       aria-label={`Section: ${meta.title}`}
                       aria-current={current ? 'page' : undefined}
                     >
@@ -1217,48 +1210,13 @@ export default function SettingsView({
           {!visible.length && <p className="px-3 py-2 text-[12px] text-muted">Nothing matches that.</p>}
         </nav>
 
-        <div className="border-t border-line p-2">
-          {engineState.turn?.permissions.length ? <button type="button" className="ob-text-button" onClick={onTryWorkspace}>Review {engineState.turn.permissions.length} request{engineState.turn.permissions.length === 1 ? '' : 's'}</button> : null}
-          <button type="button" className="ob-text-button" onClick={onClose}>Back to workspace</button>
-          <button
-            type="button"
-            className="w-full rounded-lg px-3 py-2 text-left text-[12.5px] text-muted enabled:hover:bg-white/[0.06] disabled:opacity-40"
-            onClick={resetSection}
-            disabled={!active.resettable}
-            aria-label="Reset section"
-            title={
-              active.resettable
-                ? `Put ${active.title} back to its defaults`
-                : 'Nothing in this section is a preference to reset'
-            }
-          >
-            Reset
-          </button>
-        </div>
+        {engineState.turn?.permissions.length ? <div className="border-t border-line p-2"><button type="button" className="ob-text-button" onClick={onTryWorkspace}>Review {engineState.turn.permissions.length} request{engineState.turn.permissions.length === 1 ? '' : 's'}</button></div> : null}
       </aside>
 
       <section className={`ob-settings-content ${section === 'appearance' ? 'is-appearance' : ''} min-w-0 flex-1 overflow-y-auto`}>
         <header className="flex items-center gap-2 border-b border-line px-5 py-3.5">
           <h1 className="text-[15px] font-medium">{active.title}</h1>
-          <button
-            type="button"
-            className="ml-auto rounded-lg px-2 py-1 text-muted hover:bg-white/[0.06] hover:text-ink"
-            onClick={onClose}
-            aria-label="Close settings"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 20 20"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <path d="M5 5l10 10M15 5 5 15" />
-            </svg>
-          </button>
+          {active.resettable && section !== 'appearance' ? <button type="button" className="ob-text-button ml-auto" aria-label="Reset section" onClick={resetSection}>Reset</button> : null}
         </header>
 
         <div className={`ob-settings-body mx-auto w-full ${section === 'appearance' ? '' : 'max-w-[860px]'} px-5 py-5`}>
@@ -1267,8 +1225,8 @@ export default function SettingsView({
           ) : (
             <div className="flex flex-col gap-5">
               {rows.map(row => (
-                <div key={row.label} className={`ob-setting-row ${['appearance', 'maps'].includes(section) ? 'ob-full-setting-row' : 'grid gap-1.5 sm:grid-cols-[180px_1fr] sm:gap-4'}`}>
-                  <div className={`text-[12.5px] text-muted sm:pt-1 ${['appearance', 'maps'].includes(section) ? 'sr-only' : ''}`}>{row.label}</div>
+                <div key={row.label} className={`ob-setting-row ${COMPOSED_SECTIONS.has(section) ? 'ob-full-setting-row' : 'grid gap-1.5 sm:grid-cols-[180px_1fr] sm:gap-4'}`}>
+                  <div className={`text-[12.5px] text-muted sm:pt-1 ${COMPOSED_SECTIONS.has(section) ? (rows.length === 1 || section === 'engine' || section === 'house' ? 'sr-only' : 'ob-setting-section-title') : ''}`}>{row.label}</div>
                   <div className="min-w-0">
                     <ErrorBoundary label={row.label}>{row.body}</ErrorBoundary>
                     {appearance.rowExplanations && row.note ? (

@@ -1,3 +1,5 @@
+import { sampleEnabled } from '@shared/lib/sampleWorkspace'
+import { Mascot } from '../motion/Mascot'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
@@ -224,13 +226,13 @@ export default function ArtifactsView({
   }
 
   return (
-    <section className="relative flex min-w-0 flex-1">
+    <section className="ob-artifacts-view relative flex min-w-0 flex-1" aria-label="Artifacts">
       {trash ? <div className="ob-modal-backdrop"><section className="ob-journal" role="dialog" aria-modal="true" aria-label="Artifact trash" onKeyDown={e => { trapDialogFocus(e); if (e.key === 'Escape') { e.stopPropagation(); setTrash(null) } }}><header><h2>Trash</h2><button type="button" className="ob-small-button" autoFocus onClick={() => setTrash(null)}>Close trash</button></header>{trash.length ? trash.map(item => <div key={item.key} className="ob-kept-row"><div><strong>{item.title}</strong><small>{item.type.toUpperCase()} · {item.versionCount} version{item.versionCount === 1 ? '' : 's'} · {day(item.removedAt)}{item.recoveredMetadata ? ' · title recovered from file id' : ''}</small></div><button type="button" className="ob-small-button" disabled={!!restoring} onClick={() => void recover(item.key)}>{restoring === item.key ? 'Recovering…' : 'Recover'}</button></div>) : <p>Trash is empty.</p>}{trashError ? <p role="alert">{trashError}</p> : null}</section></div> : null}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-end justify-between gap-4 px-6 pb-4 pt-5">
+        <header className="ob-screen-header flex items-center justify-between gap-4 px-6 pb-4 pt-5">
+          <Mascot motion="sketch" size={32} static />
           <div className="min-w-[180px] flex-1">
             <h1 className="text-[22px] font-semibold leading-tight">Artifacts</h1>
-            <p className="mt-1 text-[12.5px] text-muted">Save, browse, and iterate on your creations.</p>
           </div>
           <button
             type="button"
@@ -252,21 +254,21 @@ export default function ArtifactsView({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
           {error ? (
-            <p className="rounded-lg border border-line bg-card p-4 text-[12.5px] leading-relaxed text-muted">{error}</p>
+            <div className="ob-screen-empty"><Mascot motion="rain-check" size={88} static /><h2>Library unavailable</h2><p role="status">{error}</p></div>
           ) : loading && !items.length ? (
             <p className="text-[12.5px] text-muted">Reading the library…</p>
           ) : !items.length ? (
-            <div className="rounded-xl border border-line bg-card p-6">
-              <p className="text-[13px]">Nothing here yet.</p>
+            <div className="ob-screen-empty">
+              <Mascot motion="sketch" size={88} static />
+              <h2>No artifacts yet</h2>
               <p className="mt-2 max-w-[52ch] text-[12.5px] leading-relaxed text-muted">
-                Ask for something like “make me a pomodoro timer” in a chat, the reply’s document lands here with its
-                versions, or bring an existing page or drawing in with Import.
+                Create an artifact in chat or import an HTML or SVG file.
               </p>
             </div>
           ) : !matching.length ? (
             <p className="text-[12.5px] text-muted">Nothing in the library matches “{query.trim()}”.</p>
           ) : (
-            <ul className="grid grid-cols-[repeat(auto-fill,minmax(248px,1fr))] gap-4">
+            <ul className="ob-artifact-gallery grid grid-cols-[repeat(auto-fill,minmax(248px,1fr))] gap-4">
               {matching.map(item => {
                 const active = selected?.id === item.id
                 return (
@@ -352,7 +354,7 @@ export default function ArtifactsView({
             <p className="mt-5 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted" title={where}>
               <Package size={12} className="mt-0.5 shrink-0" />
               <span className="min-w-0 break-all">
-                Kept on this machine in {where}. A version is a file, so nothing here is hidden from you.
+                {sampleEnabled() ? 'Sample library in browser storage. No files were saved to disk.' : <>Kept on this machine in {where}. A version is a file, so nothing here is hidden from you.</>}
               </span>
             </p>
           ) : null}

@@ -1,5 +1,7 @@
-import { useState } from 'react'
-import { ExternalLink, FileText, FolderOpen, Search } from 'lucide-react'
+import { sampleEnabled } from '@shared/lib/sampleWorkspace'
+import { Mascot } from '../motion/Mascot'
+import { useEffect, useRef, useState } from 'react'
+import { ExternalLink, FileText, Search } from 'lucide-react'
 import { vaultGet } from '@shared/lib/vault'
 import { bridge, isDemo } from '@/platform/bridge'
 
@@ -18,6 +20,7 @@ const leaf = (path: string): string => path.split('/').filter(Boolean).at(-1) ??
 const folderOf = (path: string): string => path.split('/').slice(0, -1).join('/') || '(root)'
 
 export default function VaultView({ onAddToComposer }: { onAddToComposer: (path: string, content: string) => void }) {
+  const mounted = useRef(false), fileTicket = useRef(0), searchTicket = useRef(0)
   const [files, setFiles] = useState<string[]>([])
   const [exported, setExported] = useState('')
   const [root, setRoot] = useState('')
@@ -32,6 +35,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
     setState('loading')
     vaultGet('/files')
       .then((reply) => {
+        if (!mounted.current) return
         if (reply?.available === false || reply?.ok !== true) {
           setState('missing')
           setProblem(String(reply?.error || 'No vault folder was found.'))
@@ -40,31 +44,37 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
         setFiles(Array.isArray(reply.files) ? reply.files : [])
         setRoot(String(reply.root || ''))
         setCapped(reply.capped === true)
-        setState(Array.isArray(reply.files) && reply.files.length ? 'ready' : 'ready')
+        setState('ready')
         setProblem('')
       })
-      .catch(() => setState('missing'))
+      .catch(() => { if (mounted.current) { setState('missing'); setProblem('The vault could not be read.') } })
   }
 
   // One load when the screen appears.
-  useState(() => {
-    if (!isDemo) loadTree()
+  useEffect(() => {
+    mounted.current = true
+    if (!isDemo || sampleEnabled()) loadTree()
     else setState('missing')
-  })
+    return () => { mounted.current = false; fileTicket.current++; searchTicket.current++ }
+  }, [])
 
   const openFile = (path: string): void => {
+    const ticket = ++fileTicket.current
+    setProblem('')
     vaultGet(`/file?path=${encodeURIComponent(path)}`)
       .then((reply) => {
+        if (!mounted.current || ticket !== fileTicket.current) return
         if (reply?.ok !== true) {
           setProblem(String(reply?.error || 'The file could not be read.'))
           return
         }
         setSelected({ path, content: String(reply.content || ''), truncated: reply.truncated === true })
       })
-      .catch(() => setProblem('The file could not be read.'))
+      .catch(() => { if (mounted.current && ticket === fileTicket.current) setProblem('The file could not be read.') })
   }
 
   const searchContents = (): void => {
+    const ticket = ++searchTicket.current
     const needle = query.trim()
     if (!needle) {
       setHits(null)
@@ -72,6 +82,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
     }
     vaultGet(`/grep?q=${encodeURIComponent(needle)}`)
       .then((reply) => {
+        if (!mounted.current || ticket !== searchTicket.current) return
         if (reply?.ok !== true) {
           setProblem(String(reply?.error || 'The search failed.'))
           return
@@ -79,7 +90,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
         setHits(Array.isArray(reply.hits) ? reply.hits : [])
         setProblem('')
       })
-      .catch(() => setProblem('The search failed.'))
+      .catch(() => { if (mounted.current && ticket === searchTicket.current) setProblem('The search failed.') })
   }
 
   const nameMatches = query.trim()
@@ -94,10 +105,10 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
   }
 
   return (
-    <div className="flex-1 overflow-hidden" aria-label="Vault">
+    <div className="ob-workspace-page ob-vault-view flex-1 overflow-hidden" aria-label="Vault">
       <div className="mx-auto flex h-full w-full max-w-[var(--chat-width)] flex-col px-4 py-6">
-        <header className="flex items-center gap-2.5">
-          <FolderOpen size={18} className="shrink-0 text-muted" aria-hidden />
+        <header className="ob-screen-header flex items-center gap-2.5">
+          <Mascot motion="read" size={32} static />
           <h1 className="text-[20px] font-semibold text-ink">Vault</h1>
           {root ? (
             <span className="min-w-0 truncate text-[11.5px] text-muted" title={root}>
@@ -134,7 +145,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
             <Search size={13} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
             <input
               value={query}
-              onChange={(event) => setQuery(event.target.value)}
+              onChange={(event) => { searchTicket.current++; setHits(null); setQuery(event.target.value) }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') searchContents()
               }}
@@ -147,12 +158,10 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
 
         {state === 'loading' ? <p className="mt-6 text-[12.5px] text-muted">Reading the vault…</p> : null}
         {state === 'missing' ? (
-          <p className="mt-6 text-[12.5px] text-muted">
-            {problem || 'No vault here yet. Choose the folder the app keeps in Settings → Vault; captures and notes land there.'}
-          </p>
+          <div className="ob-screen-empty"><Mascot motion="read" size={88} static /><h2>{isDemo ? 'Your files stay in the desktop app' : 'Choose a vault'}</h2><p>{isDemo ? 'Open OddBrain on your computer to browse notes and captures.' : 'Set a folder in Settings → Vault. Its notes and captures appear here.'}</p></div>
         ) : null}
         {state === 'ready' && files.length === 0 ? (
-          <p className="mt-6 text-[12.5px] text-muted">The vault is empty. Captures from the extension land here as real markdown files.</p>
+          <div className="ob-screen-empty"><Mascot motion="read" size={88} static /><h2>No notes yet</h2><p>Notes and browser captures in this folder will appear here.</p></div>
         ) : null}
         {problem ? <p className="mt-2 text-[12px] text-warn">{problem}</p> : null}
 
@@ -196,7 +205,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
                           type="button"
                           onClick={() => openFile(file)}
                           className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left hover:bg-white/[0.04] ${
-                            selected?.path === file ? 'bg-white/[0.06]' : ''
+                            selected?.path === file ? 'bg-panel' : ''
                           }`}
                         >
                           <FileText size={12} className="shrink-0 text-muted" aria-hidden />

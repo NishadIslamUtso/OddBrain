@@ -1,3 +1,4 @@
+import { workspaceKey } from '@shared/lib/sampleWorkspace'
 import { useCallback, useMemo } from 'react'
 import type { Chat } from '@shared/types'
 import { normalizeChats } from '@shared/lib/storage'
@@ -31,13 +32,13 @@ export type ChatState = {
 
 export function useChats(onWarning?: (message: string) => void): ChatState {
   const [chats, setChats] = usePersistentState<Chat[]>(
-    CHATS_KEY,
+    workspaceKey(CHATS_KEY),
     [],
     normalizeChats,
     onWarning
   )
   const [currentChat, setCurrentChat] = usePersistentState<string>(
-    CURRENT_KEY,
+    workspaceKey(CURRENT_KEY),
     '',
     value => (typeof value === 'string' ? value : ''),
     onWarning

@@ -59,3 +59,9 @@ test('preview controls share real React shells/composer/home and never start ano
   assert.doesNotMatch(side, />Local<|UserMenuItem/)
   assert.match(side, /ProfileButton/)
 })
+
+test('appearance retains scene tools and look exports but offers no brand-artwork downloads', () => {
+  const source = readFileSync(resolve('src/renderer/src/ui/AppearancePanel.tsx'), 'utf8')
+  for (const label of ['All 77 scenes', 'Assign selected scene to role', '>Assign<', '>Replay<', 'Export look', 'Export offline HTML']) assert(source.includes(label))
+  assert.doesNotMatch(source, /Download SVG|All SVGs|scenes & downloads|motionAsset|createZip|OddBrain-motion-kit|image\/svg\+xml/)
+})

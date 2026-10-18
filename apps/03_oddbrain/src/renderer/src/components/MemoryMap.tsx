@@ -1,3 +1,4 @@
+import { sampleEnabled } from '@shared/lib/sampleWorkspace'
 import { useEffect, useMemo, useState } from 'react'
 import { vaultGet } from '@shared/lib/vault'
 import CopyText from '../ui/CopyText'
@@ -114,7 +115,7 @@ export default function MemoryMap({ open, onClose, embedded = false }: { open: b
   // asked for what is on screen rather than filtered here, so the counts above
   // the list are always the counts of the list.
   useEffect(() => {
-    if (!open || isDemo) return
+    if (!open || (isDemo && !sampleEnabled())) return
     let cancelled = false
     const controller = new AbortController()
     setState(current => (current === 'ready' ? 'ready' : 'loading'))
@@ -197,7 +198,7 @@ export default function MemoryMap({ open, onClose, embedded = false }: { open: b
         </button>
       </header> : null}
 
-      {isDemo ? (
+      {isDemo && !sampleEnabled() ? (
         <div className="p-5">
           <p className="max-w-[560px] text-[12.5px] leading-relaxed text-muted">
             There is no vault behind this window. The map is drawn from what the app kept on your own machine: your

@@ -1,6 +1,8 @@
+import { sampleEnabled } from '@shared/lib/sampleWorkspace'
+import { Mascot } from '../motion/Mascot'
 import { useEffect, useState } from 'react'
 import { useLook } from '../ui/LookContext'
-import { ArrowRight, Clock, FileText, MessageSquare, Shapes, Sun } from 'lucide-react'
+import { ArrowRight, Clock, FileText, MessageSquare, Shapes } from 'lucide-react'
 import { vaultGet } from '@shared/lib/vault'
 import { isToday, todaysArtifacts, todaysChats, worthDoing, type Suggestion, type TodayArtifact, type TodayChat } from '@shared/lib/today'
 import { isDemo, bridge } from '@/platform/bridge'
@@ -95,7 +97,7 @@ export default function TodayView({
   // The reading list is the vault's own record of what was browsed and asked
   // today — the same source Browsing Maps shows, asked for one day of it.
   useEffect(() => {
-    if (isDemo) {
+    if (isDemo && !sampleEnabled()) {
       setMapsState('missing')
       return
     }
@@ -124,7 +126,7 @@ export default function TodayView({
   // Current Snapshot is 04 Working Memory/Current Snapshot.md in the vault -
   // the engine's own short-term memory, read here through the /today door.
   useEffect(() => {
-    if (isDemo) {
+    if (isDemo && !sampleEnabled()) {
       setSnapshotState('missing')
       return
     }
@@ -164,7 +166,7 @@ export default function TodayView({
   const allQuiet = !conversations.length && !made.length && mapsQuiet && snapshotState === 'empty'
 
   if (look.layout === 'bento') return <div className="ob-bento-today" aria-label="Today">
-    <header><h1>Today</h1><span>{day}</span><button type="button" className="ob-small-button" onClick={onNew}>New chat</button></header>
+    <header className="ob-screen-header"><Mascot motion="stretch" size={32} static /><h1>Today</h1><span>{day}</span><button type="button" className="ob-small-button" onClick={onNew}>New chat</button></header>
     <div className="ob-bento-grid"><section>
       <h2>Continue</h2>{chats[0] ? <button type="button" className="ob-continue" onClick={() => onOpenChat(chats[0].id)}><strong>{chats[0].title}</strong><span>Open conversation<ArrowRight size={14} /></span></button> : <p className="ob-empty-line">No conversations yet.</p>}
       {suggestions.length ? <><h2>Worth doing</h2>{suggestions.map((suggestion, index) => <SuggestionRow key={index} suggestion={suggestion} onOpenChat={onOpenChat} onView={onView} />)}</> : null}
@@ -178,10 +180,10 @@ export default function TodayView({
   </div>
 
   return (
-    <div className="flex-1 overflow-y-auto" aria-label="Today">
+    <div className="ob-workspace-page ob-today-view flex-1 overflow-y-auto" aria-label="Today">
       <div className="mx-auto w-full max-w-[var(--chat-width)] px-4 py-8">
-        <header className="flex items-center gap-2.5">
-          <Sun size={18} className="text-muted" aria-hidden />
+        <header className="ob-screen-header flex items-center gap-2.5">
+          <Mascot motion="stretch" size={32} static />
           <h1 className="text-[20px] font-semibold text-ink">Today</h1>
           <span className="text-[12.5px] text-muted">{day}</span>
           <button

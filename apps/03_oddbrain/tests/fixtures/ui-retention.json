@@ -1940,8 +1940,8 @@
         "ui/sceneCatalog.ts",
         "motion/Mascot.tsx"
       ],
-      "purpose": "All 77 real SVGs/categories/New16/paging/roles/downloads; six-instance budget and OS priority",
-      "verification": "browser + unit + byte-equality ZIP check"
+      "purpose": "All 77 original SVGs remain available for previews, categories, paging and role assignment; six-instance budget and OS priority",
+      "verification": "browser + unit + byte-equality asset check"
     },
     {
       "originalAction": "motion-category",
@@ -1951,8 +1951,8 @@
         "ui/sceneCatalog.ts",
         "motion/Mascot.tsx"
       ],
-      "purpose": "All 77 real SVGs/categories/New16/paging/roles/downloads; six-instance budget and OS priority",
-      "verification": "browser + unit + byte-equality ZIP check"
+      "purpose": "All 77 original SVGs remain available for previews, categories, paging and role assignment; six-instance budget and OS priority",
+      "verification": "browser + unit + byte-equality asset check"
     },
     {
       "originalAction": "motion-select",
@@ -1962,8 +1962,8 @@
         "ui/sceneCatalog.ts",
         "motion/Mascot.tsx"
       ],
-      "purpose": "All 77 real SVGs/categories/New16/paging/roles/downloads; six-instance budget and OS priority",
-      "verification": "browser + unit + byte-equality ZIP check"
+      "purpose": "All 77 original SVGs remain available for previews, categories, paging and role assignment; six-instance budget and OS priority",
+      "verification": "browser + unit + byte-equality asset check"
     },
     {
       "originalAction": "motion-page",
@@ -1973,8 +1973,8 @@
         "ui/sceneCatalog.ts",
         "motion/Mascot.tsx"
       ],
-      "purpose": "All 77 real SVGs/categories/New16/paging/roles/downloads; six-instance budget and OS priority",
-      "verification": "browser + unit + byte-equality ZIP check"
+      "purpose": "All 77 original SVGs remain available for previews, categories, paging and role assignment; six-instance budget and OS priority",
+      "verification": "browser + unit + byte-equality asset check"
     },
     {
       "originalAction": "motion-assign",
@@ -1984,19 +1984,19 @@
         "ui/sceneCatalog.ts",
         "motion/Mascot.tsx"
       ],
-      "purpose": "All 77 real SVGs/categories/New16/paging/roles/downloads; six-instance budget and OS priority",
-      "verification": "browser + unit + byte-equality ZIP check"
+      "purpose": "All 77 original SVGs remain available for previews, categories, paging and role assignment; six-instance budget and OS priority",
+      "verification": "browser + unit + byte-equality asset check"
     },
     {
       "originalAction": "motion-download",
-      "feature": "scene-gallery",
+      "feature": "removed-by-request",
       "nativeSources": [
         "ui/AppearancePanel.tsx",
         "ui/sceneCatalog.ts",
         "motion/Mascot.tsx"
       ],
-      "purpose": "All 77 real SVGs/categories/New16/paging/roles/downloads; six-instance budget and OS priority",
-      "verification": "browser + unit + byte-equality ZIP check"
+      "purpose": "Owner requested removal of app-logo/mascot SVG downloads, including single-scene files and the full kit ZIP; artwork stays in the app",
+      "verification": "browser asserts no gallery export/download controls; unit checks retained original assets"
     },
     {
       "originalAction": "select-copy",

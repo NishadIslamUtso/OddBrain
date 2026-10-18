@@ -1,6 +1,7 @@
+import { Mascot } from '../motion/Mascot'
 import { useEffect, useState } from 'react'
 
-import { FolderOpen, MessageSquare, Play, Plus, SquareTerminal, Trash2, X } from 'lucide-react'
+import { MessageSquare, Play, Plus, SquareTerminal, Trash2, X } from 'lucide-react'
 import useProjects from '@/state/projects'
 import { bridge } from '@/platform/bridge'
 import { chatsOf } from '@shared/lib/projects'
@@ -75,10 +76,10 @@ export default function ProjectsView({
   }
 
   return (
-    <div className="flex-1 overflow-y-auto" aria-label="Projects">
+    <div className="ob-workspace-page ob-projects-view flex-1 overflow-y-auto" aria-label="Projects">
       <div className="mx-auto w-full max-w-[var(--chat-width)] px-4 py-8">
-        <header className="flex items-center gap-2.5">
-          <FolderOpen size={18} className="text-muted" aria-hidden />
+        <header className="ob-screen-header flex items-center gap-2.5">
+          <Mascot motion="architect" size={32} static />
           <h1 className="text-[20px] font-semibold text-ink">Projects</h1>
           <button
             type="button"
@@ -131,10 +132,7 @@ export default function ProjectsView({
         {loading ? (
           <p className="mt-6 text-[12.5px] text-muted">Reading the projects…</p>
         ) : projects.length === 0 ? (
-          <p className="mt-6 text-[12.5px] text-muted">
-            No projects yet. A project keeps its chats, its instruction and its folder in one place. One click starts
-            the first.
-          </p>
+          <div className="ob-screen-empty"><Mascot motion="architect" size={88} static /><h2>No projects yet</h2><p>Keep related chats, instructions and a working folder together.</p></div>
         ) : (
           <ul className="mt-5 flex flex-col gap-3">
             {projects.filter(p => !focusId || !projects.some(x => x.id === focusId) || p.id === focusId).map((project) => {

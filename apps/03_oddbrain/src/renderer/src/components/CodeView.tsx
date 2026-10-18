@@ -1,5 +1,6 @@
+import { Mascot } from '../motion/Mascot'
 import { useCallback, useEffect, useState } from 'react'
-import { ExternalLink, FolderOpen, Link2, RefreshCw, Terminal, Trash2, X } from 'lucide-react'
+import { ExternalLink, FolderOpen, Link2, RefreshCw, Trash2, X } from 'lucide-react'
 import { useEngine } from '@/state/engine'
 import { bridge } from '@/platform/bridge'
 import { linkFiles, markDone, normalizeBoard, scopeBoard, unlinkFile, type SessionsBoard } from '@shared/lib/sessionsBoard'
@@ -97,15 +98,11 @@ export default function CodeView({
   const view = scopeBoard(sessions, board.done, focusFolder)
 
   return (
-    <div className="flex-1 overflow-y-auto" aria-label="Code">
+    <div className="ob-workspace-page ob-code-view flex-1 overflow-y-auto" aria-label="Code">
       <div className="mx-auto w-full max-w-[var(--chat-width)] px-4 py-8">
-        <header className="flex items-center gap-2.5">
-          <Terminal size={18} className="text-muted" aria-hidden />
+        <header className="ob-screen-header flex items-center gap-2.5">
+          <Mascot motion="type" size={32} static />
           <h1 className="text-[20px] font-semibold text-ink">Code</h1>
-          <span
-            className={`h-2 w-2 rounded-full ${engine.alive ? 'bg-ok' : 'bg-muted'}`}
-            title={engine.alive ? 'The engine is running' : 'The engine starts with the next task'}
-          />
           <span className="ml-auto flex min-w-0 items-center gap-1.5 text-[11.5px] text-muted">
             <FolderOpen size={12} aria-hidden />
             <span className="truncate" title={workspace || undefined}>
@@ -213,10 +210,7 @@ export default function CodeView({
           {loading ? (
             <p className="mt-2 text-[12.5px] text-muted">Reading the board…</p>
           ) : view.sessions.length === 0 && view.done.length === 0 ? (
-            <p className="mt-2 text-[12.5px] text-muted">
-              No threads yet. Give the engine work in a folder and its thread appears here, close the app, come back,
-              and the conversation continues.
-            </p>
+            <div className="ob-screen-empty"><Mascot motion="type" size={80} static /><h2>No threads yet</h2><p>Tasks run in a working folder appear here and can be resumed later.</p></div>
           ) : (
             <div className="mt-3 grid grid-cols-2 gap-3">
               {/* Continuing, the engine resumes these. */}

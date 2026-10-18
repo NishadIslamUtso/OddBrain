@@ -134,7 +134,7 @@ export default function Sidebar({
         </button>
         <AppNav view={view} onView={onView} collapsed waiting={preview ? 0 : pending} />
         <span className="flex-1" />
-        <ProfileButton name={profileName} onOpen={() => onOpenSettings('you')} compact />
+        <ProfileButton name={profileName} onOpen={() => onOpenSettings('appearance')} compact />
       </aside>
     )
   }
@@ -225,7 +225,7 @@ export default function Sidebar({
         )}
       </nav>
 
-      <ProfileButton name={profileName} onOpen={() => onOpenSettings('you')} />
+      <ProfileButton name={profileName} onOpen={() => onOpenSettings('appearance')} />
 
       {/* The grip on the edge. Invisible until pointed at, so the sidebar does
           not look like it is wearing a handle. */}

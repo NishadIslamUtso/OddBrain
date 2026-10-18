@@ -8,7 +8,7 @@ import type { LayoutId } from '../state/look'
 
 export type ShellItem = { id: string; title: string; detail?: string; open: () => void }
 export type CommandItem = { id: string; title: string; detail?: string; run: () => void }
-export type ShellNavigation = { view: View; onView: (view: View) => void; onNew: () => void; onSettings: () => void; name: string }
+export type ShellNavigation = { view: View; onView: (view: View) => void; onNew: () => void; onBack?: () => void; canBack?: boolean; onSettings: () => void; name: string }
 /** Exactly the same structural host in the app and the scaled Appearance
  * preview. The caller supplies real content and real callbacks in the app,
  * small read-only sample components in the preview. */
@@ -17,7 +17,7 @@ export default function DesktopShell({ layout, navigation, sidebar, items = [], 
   items?: ShellItem[]; commands?: CommandItem[]; children: ReactNode; preview?: boolean; suspended?: boolean; extraSearch?: (query: string) => CommandItem[]
 }) {
   const pending = usePermissionsWaiting()
-  const { view, onView, onNew, onSettings, name } = navigation
+  const { view, onView, onNew, onBack, canBack, onSettings, name } = navigation
   const [open, setOpen] = useState(false), [query, setQuery] = useState('')
   const input = useRef<HTMLInputElement | null>(null), returnFocus = useRef<HTMLElement | null>(null)
   const list = useMemo(() => { const found = commands.filter(c => `${c.title} ${c.detail || ''}`.toLowerCase().includes(query.trim().toLowerCase())); const all = query.trim() && extraSearch ? [...found, ...extraSearch(query)] : found; return [...new Map(all.map(c => [c.id, c])).values()] }, [commands, query, extraSearch])
@@ -35,10 +35,10 @@ export default function DesktopShell({ layout, navigation, sidebar, items = [], 
   useEffect(() => { if (open) input.current?.focus() }, [open])
   const headerNav = ['topbar', 'twopane', 'bento', 'floating'].includes(layout)
   const profile = <ProfileButton name={name} onOpen={onSettings} />
-  const header = <TitleBar interactive={!preview && !suspended}>
+  const header = <TitleBar interactive={!preview && !suspended} onNew={preview ? undefined : onNew} onBack={onBack} canBack={!preview && canBack}>
     {headerNav ? <AppNav view={view} onView={onView} waiting={preview ? 0 : pending} horizontal /> : null}
     <span className="ob-grow" />
-    {layout !== 'classic' && layout !== 'rail' ? <><button type="button" className="ob-icon-button" aria-label="Find a chat or screen" title="Search · Ctrl K" onClick={search}><Search size={15} /></button><button type="button" className="ob-icon-button" aria-label="New chat" onClick={onNew}><Plus size={15} /></button>{profile}</> : null}
+    {layout !== 'classic' && layout !== 'rail' ? <><button type="button" className="ob-icon-button" aria-label="Find a chat or screen" title="Search · Ctrl K" onClick={search}><Search size={15} /></button>{profile}</> : null}
   </TitleBar>
   const itemList = <aside className="ob-item-list" aria-label="Workspace items"><div className="ob-item-list-title">{view === 'projects' ? 'Projects' : view === 'artifacts' ? 'Artifacts' : 'Recent chats'}</div><div>{items.length ? items.map(item => <button key={item.id} type="button" onClick={item.open} className="ob-item"><span>{item.title}</span>{item.detail ? <small>{item.detail}</small> : null}<ArrowRight size={13} /></button>) : <p className="ob-empty-line">Nothing here yet.</p>}</div></aside>
   const main = <div className="ob-shell-content">{children}</div>

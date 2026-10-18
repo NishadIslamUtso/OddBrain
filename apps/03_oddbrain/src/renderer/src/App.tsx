@@ -1,5 +1,7 @@
+import { sampleEnabled, workspaceKey } from '@shared/lib/sampleWorkspace'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { PanelRightOpen } from 'lucide-react'
+import useNavigationHistory from './hooks/useNavigationHistory'
+import { PanelRightOpen, X } from 'lucide-react'
 import { buildSeededPrompt } from '@shared/lib/compact'
 import { DEFAULT_MODEL } from '@shared/lib/storage'
 import { DEFAULT_PROFILE, normalizeProfile } from '@shared/lib/profile'
@@ -168,7 +170,7 @@ export default function App() {
     return () => window.removeEventListener('app:notice', hear)
   }, [])
   const [profile, setProfile] = usePersistentState('ai-assistant.profile', DEFAULT_PROFILE, normalizeProfile, setNotice)
-  const [welcomed, setWelcomed] = usePersistentState('ai-assistant.welcomed', false, (value) => value === true, setNotice)
+  const [welcomed, setWelcomed] = usePersistentState('ai-assistant.welcomed', sampleEnabled(), (value) => value === true, setNotice)
   const { projects } = useProjects(true)
   const [model, setModel] = usePersistentState(
     'ai-assistant.model',
@@ -184,7 +186,7 @@ export default function App() {
   const [permissions, setPermissions] = useState<Permissions>(DEFAULT_PERMISSIONS)
   const [permissionsRevision, setPermissionsRevision] = useState(0)
   const models = useModels(model, setModel, permissions)
-  const [draft, setDraft] = useState('')
+  const [draft, setDraft] = usePersistentState(workspaceKey('ai-assistant.composer-draft'), '', value => typeof value === 'string' ? value : '', setNotice)
   // Media for the next engine task: pictures, video frames, text files. Read
   // the moment they arrive (the reader refuses honestly), sent with the words,
   // cleared on success. The engine reads them itself, whatever engine it is.
@@ -201,7 +203,12 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false)
   /** Which pane Settings opens onto; 'models' when the account menu's
    *  "Get API keys" led here, otherwise the pane the reader left it on. */
-  const [settingsSection, setSettingsSection] = useState<SectionId>('you')
+  const [settingsSection, setSettingsSection] = useState<SectionId>('appearance')
+  useEffect(() => {
+    const show = () => { setSettingsSection('about'); setSettingsOpen(true) }
+    window.addEventListener('app:sample-settings', show)
+    return () => window.removeEventListener('app:sample-settings', show)
+  }, [])
   useEffect(() => {
     const key = (event: KeyboardEvent): void => {
       if ((event.ctrlKey || event.metaKey) && event.key === ',') { event.preventDefault(); setSettingsOpen(true) }
@@ -216,11 +223,7 @@ export default function App() {
   // the app bridge; in the browser there is no menu, and the listener is
   // simply absent.
   useEffect(() => {
-    const offNew = bridge.app?.onMenu?.('menu:new-chat', () => {
-      chats.create()
-      setView('chat')
-      setNotice('')
-    })
+    const offNew = bridge.app?.onMenu?.('menu:new-chat', () => newChat())
     const offSettings = bridge.app?.onMenu?.('menu:settings', () => setSettingsOpen(true))
     const offViews = (['chat', 'artifacts', 'today', 'projects', 'vault', 'brain', 'code'] as const).map(view =>
       bridge.app?.onMenu?.(`menu:view:${view}`, () => {
@@ -237,7 +240,7 @@ export default function App() {
   }, [])
   // Which screen is showing, remembered so the app opens where it was left.
   const [view, setView] = usePersistentState<View>(
-    'ai-assistant.view',
+    workspaceKey('ai-assistant.view'),
     'chat',
     value => (['chat', 'artifacts', 'today', 'projects', 'vault', 'brain', 'code'].includes(String(value)) ? value as View : 'chat')
   )
@@ -517,9 +520,18 @@ export default function App() {
     }
   }
 
-  const openSettings = (section: SectionId = 'you'): void => { setSettingsSection(section); setSettingsOpen(true) }
+  const location = { view, chatId: chats.currentChat, projectFocus, artifactFocus, codeFocus, settings: settingsOpen ? settingsSection : null }
+  const locationKey = settingsOpen ? `settings:${settingsSection}` : `${view}:${view === 'chat' ? chats.currentChat : view === 'projects' ? projectFocus : view === 'artifacts' ? artifactFocus : view === 'code' ? codeFocus : ''}`
+  const navigation = useNavigationHistory(location, locationKey, target => {
+    setView(target.view)
+    chats.open(chats.chats.some(chat => chat.id === target.chatId) ? target.chatId : '')
+    setProjectFocus(target.projectFocus); setArtifactFocus(target.artifactFocus); setCodeFocus(target.codeFocus)
+    if (target.settings) setSettingsSection(target.settings)
+    setSettingsOpen(target.settings !== null)
+  })
+  const openSettings = (section: SectionId = 'appearance'): void => { setSettingsSection(section); setSettingsOpen(true) }
   const openChat = (id: string): void => { chats.open(id); setView('chat') }
-  const newChat = (): void => { chats.create(); setView('chat'); setNotice('') }
+  const newChat = (): void => { chats.create(); setView('chat'); setSettingsOpen(false); setPendingProject(null); setNotice(''); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label=Message]')?.focus()) }
   const items: ShellItem[] = view === 'projects' ? projects.map(p => ({ id: p.id, title: p.name, detail: p.folder, open: () => { setProjectFocus(p.id); setView('projects') } })) : view === 'artifacts' ? library.items.map(item => ({ id: item.id, title: item.title, detail: item.type.toUpperCase(), open: () => { setArtifactFocus(item.id); setView('artifacts') } })) : chats.chats.map(c => ({ id: c.id, title: c.title, detail: c.date, open: () => openChat(c.id) }))
   const commands: CommandItem[] = [...screenCommands(setView), ...chats.chats.slice(0, 6).map(c => ({ id: 'chat-' + c.id, title: c.title, detail: 'Conversation', run: () => openChat(c.id) })), { id: 'screen-code', title: 'Code', detail: 'All project folders', run: () => { setCodeFocus(''); setView('code') } }, ...SECTIONS.map(section => ({ id: 'settings-' + section.id, title: section.id === 'models' ? 'Models & API keys' : section.id === 'connectors' ? 'Apps & extensions' : section.title, detail: 'Settings', run: () => openSettings(section.id) }))]
   const searchCommands = (query: string): CommandItem[] => searchChats(chats.chats, query).map(result => ({ id: 'chat-' + result.chat.id, title: result.chat.title, detail: result.matches[0]?.snippet || 'Conversation', run: () => openChat(result.chat.id) }))
@@ -528,7 +540,7 @@ export default function App() {
   return <LookContext value={look}><LookActions value={updateLook}>
     <div className="ob-app-root flex h-full flex-col bg-bg text-ink">
       <div className="ob-shell-host" hidden={settingsOpen} inert={settingsOpen}>
-        <DesktopShell layout={look.layout} navigation={{ view, onView: setView, onNew: newChat, onSettings: () => openSettings('you'), name: profile.name }} items={items} commands={commands} extraSearch={searchCommands} suspended={settingsOpen} sidebar={
+        <DesktopShell layout={look.layout} navigation={{ view, onView: setView, onNew: newChat, onBack: navigation.back, canBack: navigation.canBack, onSettings: () => openSettings('appearance'), name: profile.name }} items={items} commands={commands} extraSearch={searchCommands} suspended={settingsOpen} sidebar={
         <Sidebar
           view={view}
           onView={setView}
@@ -537,12 +549,8 @@ export default function App() {
           artifactCount={library.items.length}
           chats={chats.chats}
           currentChat={chats.currentChat}
-          onOpen={id => { chats.open(id); setView('chat') }}
-          onNew={() => {
-            chats.create()
-            setView('chat')
-            setNotice('')
-          }}
+          onOpen={openChat}
+          onNew={newChat}
           onDelete={chats.remove}
           onOpenSettings={(section) => {
             if (section) setSettingsSection(section)
@@ -558,7 +566,7 @@ export default function App() {
         {view === 'code' ? (
           <CodeView focusFolder={codeFocus} onClearFocus={() => setCodeFocus('')} />
         ) : view === 'brain' ? (
-          <BrainView vault={vault} isDemo={isDemo} onOpenVault={() => setView('vault')} />
+          <BrainView vault={vault} isDemo={isDemo && !sampleEnabled()} onOpenVault={() => setView('vault')} />
         ) : view === 'vault' ? (
           <VaultView
             onAddToComposer={(path, content) => {
@@ -678,7 +686,7 @@ export default function App() {
 
         </DesktopShell>
       </div>
-      {settingsOpen ? <div className="ob-settings-host"><TitleBar interactive={false} /><div className="ob-settings-stage">
+      {settingsOpen ? <div className="ob-settings-host"><TitleBar interactive={false} onNew={newChat} onBack={navigation.back} canBack={navigation.canBack}><span className="ob-grow" /><button type="button" className="ob-icon-button" aria-label="Close settings" title="Close settings" onClick={() => setSettingsOpen(false)}><X size={16} /></button></TitleBar><div className="ob-settings-stage">
         <SettingsView
           open={settingsOpen}
           initialSection={settingsSection}

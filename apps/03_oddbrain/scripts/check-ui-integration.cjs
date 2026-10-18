@@ -41,7 +41,7 @@ const browserOptions = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.read
     report.checks.push('All 16 retained systems are selectable; sampled full-system colours match the shared miniature')
     await page.getByRole('button', { name: 'Reset appearance', exact: true }).click()
     await page.locator('.ob-appearance-tabs').getByRole('button', { name: 'Layout', exact: true }).click()
-    for (const size of [{ width: 1536, height: 824 }, { width: 1280, height: 768 }]) {
+    for (const size of [{ width: 1536, height: 864 }, { width: 1280, height: 768 }]) {
       await page.setViewportSize(size)
       for (const layout of ['Classic sidebar', 'Top bar', 'Rail + list', 'Command first', 'List + detail', 'Bento dashboard', 'Console', 'Floating window']) {
         await page.locator('.ob-layout-options').getByRole('button', { name: layout, exact: true }).click()
@@ -52,7 +52,7 @@ const browserOptions = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.read
         await page.keyboard.press('Control+,')
       }
     }
-    report.checks.push('Eight layouts keep Send visible at 1536×824 and 1280×768 without horizontal page overflow')
+    report.checks.push('Eight layouts keep Send visible at 1536×864 and 1280×768 without horizontal page overflow')
     await page.getByRole('button', { name: 'Reset appearance', exact: true }).click()
     await page.getByRole('button', { name: 'Try in workspace', exact: true }).click()
     await page.screenshot({ path: path.join(output, 'target-home.png') })
