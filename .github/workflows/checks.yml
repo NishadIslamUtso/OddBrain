@@ -57,19 +57,46 @@ jobs:
       - name: Renderer checks — the real interface in Chromium
         working-directory: apps/03_oddbrain
         timeout-minutes: 20
+        shell: bash
         run: |
-          npx playwright-core install --with-deps chromium
-          nohup npx vite --config vite.web.config.ts > vite-ui.log 2>&1 &
-          for i in $(seq 1 90); do curl -sf http://127.0.0.1:5174/ >/dev/null && break; sleep 1; done
-          curl -sf http://127.0.0.1:5174/ >/dev/null
-          npm run test:ui
+          set -o pipefail
+          {
+            npx playwright-core install --with-deps chromium
+            nohup npx vite --config vite.web.config.ts > vite-ui.log 2>&1 &
+            for i in $(seq 1 90); do curl -sf http://127.0.0.1:5174/ >/dev/null && break; sleep 1; done
+            curl -sf http://127.0.0.1:5174/ >/dev/null
+            npm run test:ui
+          } 2>&1 | tee ui-checks.log
       - name: Renderer acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
           name: ui-acceptance-linux
-          path: apps/03_oddbrain/qa-ui
+          path: |
+            apps/03_oddbrain/qa-ui
+            apps/03_oddbrain/ui-checks.log
+            apps/03_oddbrain/vite-ui.log
           if-no-files-found: ignore
+      - name: Renderer checks speak their failure
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const parts = [];
+            for (const p of ['apps/03_oddbrain/ui-checks.log', 'apps/03_oddbrain/vite-ui.log']) {
+              if (!fs.existsSync(p)) continue;
+              let body = fs.readFileSync(p, 'utf8');
+              if (body.length > 36000) body = body.slice(0, 10000) + '\n...truncated...\n' + body.slice(-25000);
+              parts.push('--- ' + p + ' ---\n' + body);
+            }
+            if (!parts.length) parts.push('(no renderer log was written — the step died before tee started)');
+            await github.rest.repos.createCommitComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.sha,
+              body: 'renderer checks, in their own words:\n\n```\n' + parts.join('\n\n').replace(/```/g, "'''") + '\n```',
+            });
       - name: Smoke — the window opens and the console is clean
         working-directory: apps/03_oddbrain
         timeout-minutes: 5
