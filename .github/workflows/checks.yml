@@ -54,6 +54,22 @@ jobs:
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build
+      - name: Renderer checks — the real interface in Chromium
+        working-directory: apps/03_oddbrain
+        timeout-minutes: 20
+        run: |
+          npx playwright-core install --with-deps chromium
+          nohup npx vite --config vite.web.config.ts > vite-ui.log 2>&1 &
+          for i in $(seq 1 90); do curl -sf http://127.0.0.1:5174/ >/dev/null && break; sleep 1; done
+          curl -sf http://127.0.0.1:5174/ >/dev/null
+          npm run test:ui
+      - name: Renderer acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ui-acceptance-linux
+          path: apps/03_oddbrain/qa-ui
+          if-no-files-found: ignore
       - name: Smoke — the window opens and the console is clean
         working-directory: apps/03_oddbrain
         timeout-minutes: 5
