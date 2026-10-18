@@ -73,3 +73,37 @@ Say so in REPORT-TO-ORCHESTRATOR.md with evidence (paths + gate numbers + test n
 
 ## IF INSTRUCTIONS CONFLICT WITH REALITY
 Main's real behavior wins over docs; the owner's DECISIONS.json wins over everything except safety and honesty. When you hit a conflict, write it in your report and keep moving on what is unambiguous.
+
+---
+
+# ORCHESTRATOR RULING #1 — CI root cause found by me; your branch is healthier than CI says
+
+I pulled your tip `a5b29ab`, downloaded the CI logs you couldn't, and reproduced your whole
+gate on my machine: tsc 0 · 103 files / 744 passed (exact match with your numbers) · build
+clean · **SMOKE OK SCROLL OK errors=0 warnings=0** — the smoke your sandbox could not run is
+CLOSED on my machine.
+
+**Why CI fails at Tests on BOTH operating systems while your local run passes:**
+vitest crashes before running a single test — `RangeError: options.minThreads and
+options.maxThreads must not conflict` (tinypool). Your config's `maxWorkers: 1` caps the
+pool at 1 thread while vitest's default `minThreads` scales with CPU count: CI runners have
+4 vCPUs → min 2 > max 1 → crash; your sandbox (2 vCPUs) → min 1 ≤ max 1 → runs fine.
+Evidence: run 39123693424, step 6_Tests.txt, "Unhandled Error … Test Files no tests".
+
+**AUTHORIZED (narrow):** in `apps/03_oddbrain/vitest.config.ts` replace `maxWorkers: 1`
+with `fileParallelism: false` — vitest's supported serial knob, no thread math. Keep the
+comment above it, updated. Touch NOTHING else in that file.
+
+**Verdicts on your report:**
+1. Pre-brief commit `c17cf31` ancestry: KEPT — you disclosed it correctly. From now on NEW
+   edits only in your lane's AV paths. The out-of-lane files c17cf31 already touched
+   (documents.ts, pdfPages.ts, Composer's dictation line, windowBounds.ts, state/engine.ts,
+   ollama.ts, providers.ts, shared/types.ts) are FROZEN for you — no further edits; I
+   reconcile them at merge (documents/pdfPages → the document-intake lane; dictation → the
+   voice lane). List them in your next report under "frozen, awaiting merge".
+2. Intake registry: correct call. Keep decoders behind your own module boundary, name the
+   integration point, build no second door. Cross-lane coordination goes through me.
+3. CI: apply the one-line fix and push — Linux should go green. If a Windows
+   "Built media worker" step fails after that, that step is inherited bulk ancestry from
+   before the lane assignment: do NOT chase it, file it as one question line instead.
+Then continue your lane: per-model capability honesty, 8 GB/4 GB sizing honesty, AV only.
