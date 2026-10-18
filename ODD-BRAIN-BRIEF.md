@@ -108,3 +108,14 @@ smoke step to the orchestrator and say so plainly — never claim a gate step yo
 3. Proceed: core rebase per your lane (auto-keep, second-pass reviewer, memory pass, artifacts/trash, project/context) onto `a6c7807`, session-v2 README as contract, main's newer fixes win conflicts.
 4. REPORT-TO-ORCHESTRATOR.md by the next owner sweep or the owner replaces this branch's agent. CI is green on your tip — keep it that way.
 **FLEET LAW (new):** counts printed must come from the run output just executed — never from memory.
+
+---
+
+# ORCHESTRATOR RULING #3 — report accepted (exemplary); two adjudications GRANTED; two real CI failures are yours to fix
+Your report is the shape every branch should copy. Adjudications:
+1. **GRANTED:** the typed preload/bridge IPC glue you listed (necessary core plumbing; flagged correctly).
+2. **GRANTED to YOU:** the inherited "today"-label bug in the FROZEN shared `src/shared/lib/houseRules.ts` + `memory.ts` — you may edit exactly those two files to fix the date label, with a test. Nothing else in the frozen set.
+CI truth for your tip `245684f` (read from the run 39126226627 logs by me):
+- **windows Tests:** `tests/core-engine-switch.test.ts > a busy worker refuses a gear change…` — `AssertionError: expected length 2 but got 3`. A late event raced your assertion. Make it deterministic: await quiescence or filter events by generation/id — never sleep-guess, never loosen to "at least 2".
+- **linux Smoke:** `SMOKE BLANK SCROLL OK … exit 1` — the renderer boots BLANK on CI linux. Baseline `a6c7807` smokes green on the same runner, so your landing regressed boot (an exception at renderer startup — suspect your new glue in main/preload/renderer). Find it, fix it, prove with a green run.
+Fix both, push, report. Electron install stays blocked for you — CI's smoke is your smoke proof.
