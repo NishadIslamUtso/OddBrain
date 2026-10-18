@@ -27,9 +27,12 @@ something you can read, approve, undo, and find again later.
 - **The vault** is an Obsidian-compatible folder: conversations, sources,
   entities, events, working memory, review queues, journal, and an undo log.
   Point it anywhere; nothing is written outside the folder you chose.
-- **The extension** captures browser pages into the same vault on request. Its
-  default is capture-everything, with a blacklist. It is a separate program with
-  its own port, pairing token, and permission boundary.
+- **The extension** captures browser pages into the same vault. It starts on the
+  AI sites it declares in its manifest; broad access to every site is one
+  explicit Chrome permission away, requested from the extension's own popup, and
+  the blacklist applies either way (an empty blacklist means "check everything"
+  once broad access is on). It is a separate program with its own port, pairing
+  token, and permission boundary.
 - **Artifacts** are files the engines make or you attach: previewed in-app,
   poppable to their own window, exportable to PDF, and restorable from the
   checkpoint taken before every approved write.
@@ -106,8 +109,9 @@ Rules the code enforces:
   redirect hosts, capped in size, written to the app's own engines folder,
   hashed with SHA-256, and — on Windows — run only after a second, explicit
   permission that shows the full command.
-- Ollama is auto-started at boot from the app when the app installed it, and
-  used as-is when found elsewhere. Installing it yourself is fine:
+- With "Warm runtime" on, the staged Ollama runtime starts with the app and the
+  app stops only the runtime it started. An Ollama installed elsewhere is used
+  as-is — stop it your way. Installing it yourself is fine:
   `winget install Ollama.Ollama`.
 
 ## Security walls
@@ -135,8 +139,10 @@ These are code, not policy prose. Each one has tests.
   audio stay on the machine. PDF.js asset URLs are normalised with a forward
   slash so the same path works on Windows and Linux.
 - **No telemetry, no cloud service, no bundled model.** Cloud providers are
-  optional and only run after you add a key. Nothing is sent anywhere by
-  default. No microphone access is requested.
+  optional and only run after you add a key. Nothing is sent anywhere by default.
+- **Speech stays local and opt-in.** Dictation uses Windows System.Speech on the
+  machine; it listens only while you are dictating, and there is no wake word,
+  no background recording, and no cloud speech provider unless you add one.
 
 ## The interface, by the numbers
 
