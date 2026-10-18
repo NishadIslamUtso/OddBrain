@@ -377,6 +377,17 @@ const api = {
    * so in a sentence the screen can show, because an exception here would be a
    * blank grid with no explanation.
    */
+  /** Store phases 2-3: the engines' own catalogs as labelled sources. */
+  marketplaces: {
+    list: (): Promise<import('../main/store/marketplaces').MarketplaceSource[]> => ipcRenderer.invoke('marketplaces:list'),
+    add: (input: string): Promise<{ ok: boolean; answer: string; source?: import('../main/store/marketplaces').MarketplaceSource }> => ipcRenderer.invoke('marketplaces:add', input),
+    refresh: (id: string): Promise<{ ok: boolean; answer: string; source?: import('../main/store/marketplaces').MarketplaceSource }> => ipcRenderer.invoke('marketplaces:refresh', id),
+    remove: (id: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('marketplaces:remove', id),
+    commands: (id: string, plugin?: string): Promise<{ ok: boolean; answer?: string; lines: import('../main/store/marketplaces').CommandLine[] }> => ipcRenderer.invoke('marketplaces:commands', id, plugin),
+    run: (input: { id: string; plugin?: string; line: number }): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('marketplaces:run', input),
+    agy: (): Promise<{ ok: boolean; answer: string; hasCatalog: boolean }> => ipcRenderer.invoke('marketplaces:agy'),
+  },
+
   /** The quick-ask door: open the small window, or move its global hotkey. */
   quick: {
     open: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('quick:open'),

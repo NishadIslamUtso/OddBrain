@@ -124,6 +124,15 @@ export type DesktopBridge = {
     installCatalog: (name: string) => Promise<{ ok: boolean; answer: string; written?: string[] }>
     scan: () => Promise<Array<{ name: string; description: string; body: string; source: string }>>
   }
+  marketplaces: {
+    list: () => Promise<import('../../../main/store/marketplaces').MarketplaceSource[]>
+    add: (input: string) => Promise<{ ok: boolean; answer: string; source?: import('../../../main/store/marketplaces').MarketplaceSource }>
+    refresh: (id: string) => Promise<{ ok: boolean; answer: string; source?: import('../../../main/store/marketplaces').MarketplaceSource }>
+    remove: (id: string) => Promise<{ ok: boolean; answer: string }>
+    commands: (id: string, plugin?: string) => Promise<{ ok: boolean; answer?: string; lines: import('../../../main/store/marketplaces').CommandLine[] }>
+    run: (input: { id: string; plugin?: string; line: number }) => Promise<{ ok: boolean; answer: string }>
+    agy: () => Promise<{ ok: boolean; answer: string; hasCatalog: boolean }>
+  }
   /** Mods, Phase 1: a pack is a folder with a manifest; install, list, remove. */
   mods: {
     installFromFile: () => Promise<{
@@ -291,6 +300,15 @@ const demoBridge: DesktopBridge = {
   skills: {
     installCatalog: async () => ({ ok: false, answer: 'Installing skills needs the desktop app.' }),
     scan: async () => [],
+  },
+  marketplaces: {
+    list: async () => [],
+    add: async (input: string) => ({ ok: false, answer: `${input}: the browser preview has no machine — marketplaces live in the desktop app.` }),
+    refresh: async (id: string) => ({ ok: false, answer: `${id}: the browser preview has no machine — marketplaces live in the desktop app.` }),
+    remove: async (id: string) => ({ ok: false, answer: `${id}: the browser preview has no machine — marketplaces live in the desktop app.` }),
+    commands: async () => ({ ok: false, answer: 'The browser preview has no machine to run commands on.', lines: [] }),
+    run: async () => ({ ok: false, answer: 'The browser preview has no machine to run commands on.' }),
+    agy: async () => ({ ok: false, answer: 'The browser preview has no machine to ask.', hasCatalog: false }),
   },
   mods: {
     installFromFile: async () => ({ ok: false, answer: 'Installing packs needs the desktop app — it is the one that talks to the engines.' }),

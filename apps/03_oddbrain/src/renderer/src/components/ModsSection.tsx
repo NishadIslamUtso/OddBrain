@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { FolderOpen, Package, PackagePlus, RefreshCw, Trash2, Check, Palette, MessageSquare, BookOpen } from 'lucide-react'
 import BrainMark from './BrainMark'
 import { bridge, isDemo } from '@/platform/bridge'
+import MarketplaceSources from './MarketplaceSources'
 import { describePermissions, type Pack } from '@shared/lib/packs'
 import { readStored, writeStored } from '@shared/lib/storage'
 import { savePrompt } from '@shared/lib/prompts'
@@ -287,6 +288,7 @@ themes/paper.json`}
       )}
 
       <CommunityPacks installed={packs.map(item => ({ id: item.pack.id, version: item.pack.version }))} onInstalled={refresh} />
+      <MarketplaceSources />
     </div>
   )
 }

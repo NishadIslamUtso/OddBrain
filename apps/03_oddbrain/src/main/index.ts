@@ -10,7 +10,7 @@ import { randomBytes } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { loadAppFlags, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
-import { registerStagingRoot, setBinaryOverride, binaryOverride } from './engine/enginePath'
+import { registerStagingRoot, setBinaryOverride, binaryOverride , resolveEngineCommand } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins } from './ipcGuard'
 import { dirname, join, resolve } from 'node:path'
 import { existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -45,6 +45,7 @@ import { createMemoryManager } from './memoryFiles'
 import { createDownloadManager, type DownloadTick } from './engine/downloads'
 import { decodeAttachment } from './ingest/decode'
 import { createDictationService } from './dictation'
+import { createMarketplaceStore } from './store/marketplaces'
 import { agyModelSource, detectEngine } from './engine/availability'
 import { enginePath } from './engine/enginePath'
 import { pdfSafeName } from '../shared/lib/artifacts'
@@ -653,6 +654,28 @@ function registerBridges(): void {
       if (!event.sender.isDestroyed()) event.sender.send('dictation:event', dictationEvent)
     }))
   handle('dictation:stop', () => dictation.stop())
+  // Store phases 2-3: the engines' OWN catalogs as labelled sources. The
+  // app reads indexes on explicit presses only and never builds plugin
+  // folders — every install is the engine's exact CLI line on a card.
+  const marketplaces = createMarketplaceStore({
+    root: join(app.getPath('userData'), 'marketplaces'),
+    resolveClaude: () => resolveEngineCommand('claude-code'),
+  })
+  handle('marketplaces:list', () => marketplaces.list())
+  handle('marketplaces:add', (_event, input: unknown) => marketplaces.add(typeof input === 'string' ? input : ''))
+  handle('marketplaces:refresh', (_event, id: unknown) => marketplaces.refresh(typeof id === 'string' ? id : ''))
+  handle('marketplaces:remove', (_event, id: unknown) => marketplaces.remove(typeof id === 'string' ? id : ''))
+  handle('marketplaces:commands', (_event, id: unknown, plugin: unknown) =>
+    marketplaces.commands(typeof id === 'string' ? id : '', typeof plugin === 'string' ? plugin : undefined))
+  handle('marketplaces:run', (_event, input: unknown) => {
+    const value = (input ?? {}) as { id?: unknown; plugin?: unknown; line?: unknown }
+    return marketplaces.run({
+      id: typeof value.id === 'string' ? value.id : '',
+      ...(typeof value.plugin === 'string' ? { plugin: value.plugin } : {}),
+      line: typeof value.line === 'number' && Number.isInteger(value.line) && value.line >= 0 ? value.line : -1,
+    })
+  })
+  handle('marketplaces:agy', () => marketplaces.agyState())
   // The staged Ollama runtime, started and stopped HERE — the download
   // module's copy says this, so the doors must exist to make it true.
   downloadManager = downloads
