@@ -36,6 +36,7 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
+    setupFiles: ['tests/shims/promise.ts'],
     // Top-level suites include the restored renderer, composer and wiring checks.
     include: ['tests/*.test.{js,cjs,ts,tsx}'],
     reporters: ['default'],

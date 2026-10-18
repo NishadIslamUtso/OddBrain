@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, FolderOpen, RefreshCw, Trash2, Cpu, Cloud } from 'lucide-react'
 import { useEngine, type EngineModels } from '@/state/engine'
 import useDismiss from '@/hooks/useDismiss'
-import type { ApprovalMode, EngineId } from '@shared/lib/engine'
+import { isValidModelName, type ApprovalMode, type EngineId } from '@shared/lib/engine'
 
 /**
  * The engine bay — the app's own engine selection system.
@@ -64,6 +64,11 @@ const THROTTLE: Array<{ id: ApprovalMode; label: string; note: string }> = [
 
 export default function EngineBay() {
   const engine = useEngine()
+  // A subscription login has no model list to enumerate: the CLI's own default
+  // is what runs. This field exists for the person who knows a name its CLI
+  // accepts; empty still means "engine default". Nothing is invented here.
+  const [typedModel, setTypedModel] = useState('')
+  const [modelNote, setModelNote] = useState('')
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement | null>(null)
   useDismiss(menuRef, () => setMenuOpen(false), menuOpen)
@@ -186,6 +191,45 @@ export default function EngineBay() {
           </div>
         ) : null}
       </div>
+
+      {/* A model name the engine's CLI already knows, for logins that publish
+          no list. Validated before it can reach the launch line. */}
+      {engine.settings.id === 'claude-code' ? (
+        <div className="mt-1.5">
+          <div className="ob-form-line">
+            <input
+              aria-label="Type a model name"
+              placeholder="or type a model your CLI knows"
+              value={typedModel}
+              onChange={(event) => { setTypedModel(event.target.value); setModelNote('') }}
+              onKeyDown={(event) => {
+                if (event.key !== 'Enter') return
+                event.preventDefault()
+                const value = typedModel.trim()
+                if (!isValidModelName(value)) { setModelNote('Letters, digits, dots, colons, @, / and dashes only.'); return }
+                void engine.setModel(value).then(() => setTypedModel(''))
+              }}
+            />
+            <button
+              type="button"
+              disabled={!typedModel.trim()}
+              onClick={() => {
+                const value = typedModel.trim()
+                if (!isValidModelName(value)) { setModelNote('Letters, digits, dots, colons, @, / and dashes only.'); return }
+                void engine.setModel(value).then(() => setTypedModel(''))
+              }}
+            >
+              Use this name
+            </button>
+          </div>
+          {engine.settings.model ? (
+            <button type="button" className="mt-1 text-[11px] text-muted hover:text-ink" onClick={() => void engine.setModel('')}>
+              Back to the engine's default model
+            </button>
+          ) : null}
+          {modelNote ? <p className="mt-1 text-[11px] text-warn">{modelNote}</p> : null}
+        </div>
+      ) : null}
 
       {/* Where the engine works. */}
       <button

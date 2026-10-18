@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import type { Marketplace, MarketplaceAction, MarketplacePlan } from '@shared/lib/marketplace'
+import { KNOWN_MARKETPLACES, type Marketplace, type MarketplaceAction, type MarketplacePlan } from '@shared/lib/marketplace'
 import { displayCommandLine } from '@shared/lib/commandLine'
 import type { Appearance } from '../state/appearance'
 import { bridge, getEngineApi, isDemo } from '../platform/bridge'
@@ -30,6 +30,7 @@ function ClaudeMarket() {
   }
   return <section className="space-y-4" aria-label="Claude Code marketplaces">
     <h3>Claude Code marketplaces</h3><p className="ob-control-scope">Browse reads a public GitHub catalog. Installation and changes use your installed Claude Code CLI after you review the exact command. Sources are never refreshed at launch.</p>
+    <p className="ob-control-scope">Known public catalogs: {KNOWN_MARKETPLACES.map((source) => <button type="button" key={source.repo} className="ob-small-button mr-1.5" disabled={busy} onClick={() => setRepo(source.repo)}>{source.label}</button>)}</p>
     <div className="ob-form-line"><input aria-label="Marketplace repository" placeholder="owner/repository" list="marketplace-sources" value={repo} onChange={e => setRepo(e.target.value)} /><datalist id="marketplace-sources">{sources.map(s => <option key={s} value={s} />)}</datalist><button type="button" disabled={busy || isDemo || !repo.trim()} onClick={() => void browse()}>Browse / refresh</button></div>
     <div className="ob-inline-actions"><button type="button" disabled={busy || isDemo} onClick={async () => { setBusy(true); try { const r = await bridge.marketplace.probe(); setNote(r.ok ? r.value : r.error) } catch (e) { setNote(String(e)) } finally { setBusy(false) } }}>Check installed CLI</button><button type="button" disabled={busy || isDemo} onClick={async () => { setBusy(true); try { const r = await bridge.marketplace.installed(); if (r.ok) setInstalled(r.value); else setNote(r.error) } catch (e) { setNote(String(e)) } finally { setBusy(false) } }}>Read installed plugins</button>{busy ? <button type="button" onClick={() => void bridge.marketplace.cancel()}>Cancel operation</button> : null}</div>
     {installed ? <details><summary>Engine-reported installed plugins</summary><pre className="whitespace-pre-wrap break-all text-[12px]">{installed}</pre></details> : null}

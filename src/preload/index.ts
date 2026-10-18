@@ -48,6 +48,14 @@ const engineApi = {
     ipcRenderer.invoke('engine:clear-binary', id),
   binaryOverride: (id: 'claude-code' | 'agy'): Promise<{ path: string }> =>
     ipcRenderer.invoke('engine:binary-override', id),
+  /** The CLI's own sign-in answer. agy has none, and says so. */
+  authStatus: (id?: 'claude-code' | 'agy'): Promise<{ ok: boolean; loggedIn: boolean; method: string; provider: string; answer: string }> =>
+    ipcRenderer.invoke('engine:auth-status', id),
+  /** Open the engine's own login in a terminal; nothing is read back. */
+  openLogin: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:open-login'),
+  /** The Ollama answering on the door, plus whether Claude Code can use it. */
+  ollamaVersion: (): Promise<{ ok: boolean; version: string; compatible: boolean; answer: string }> =>
+    ipcRenderer.invoke('engine:ollama-version'),
   /** Bring a brain home; progress arrives through onPullEvent. */
   pull: (name: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:pull', name),
   /** Take a brain off this machine. */
@@ -327,7 +335,7 @@ const api = {
       ipcRenderer.invoke('mcp:read'),
     write: (
       servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>,
-    ): Promise<{ ok: boolean; written: string[] }> => ipcRenderer.invoke('mcp:write', { servers }),
+    ): Promise<{ ok: boolean; written: string[]; answer: string }> => ipcRenderer.invoke('mcp:write', { servers }),
   },
   structure: {
     /** What a folder is, and exactly what a structure apply would add. */

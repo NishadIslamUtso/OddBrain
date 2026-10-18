@@ -107,6 +107,10 @@ Rules the code enforces:
 - Before an Allow is forwarded, a checkpoint is taken. If the checkpoint cannot
   be taken, the change is denied rather than allowed blind.
 - A Deny reaches Claude Code as a real deny, not as silence.
+- **Tool servers are configuration, not execution.** Adding an MCP entry writes
+  the one list into each engine's own config file; the app never runs the
+  command itself. Names, transports and URLs are validated in the window and
+  again in the main process before anything is written.
 - Downloads come only from each publisher's official host and its declared
   redirect hosts, capped in size, written to the app's own engines folder,
   hashed with SHA-256, and — on Windows — run only after a second, explicit
@@ -115,6 +119,12 @@ Rules the code enforces:
   app stops only the runtime it started. An Ollama installed elsewhere is used
   as-is — stop it your way. Installing it yourself is fine:
   `winget install Ollama.Ollama`.
+- **Sign-in is asked, not assumed.** Connectors runs the engine's own
+  `claude auth status` and shows its answer — signed in, or the one command that
+  fixes it. A "Sign in…" button opens the CLI's own login in a real terminal and
+  reads nothing back. agy has no such command and says so.
+- Connectors also asks Ollama's door for its version and states whether it can
+  serve Claude Code's local brain route; 0.14 or newer is required.
 
 ## Security walls
 
@@ -150,7 +160,8 @@ These are code, not policy prose. Each one has tests.
 
 - **Six sidebar destinations:** Chat, Artifacts, Today, Projects, Vault, Brain;
   plus a full-screen Code board reachable from the command palette.
-- **18 Settings destinations**, in six groups:
+- **18 Settings destinations**, in six groups (Connectors now holds the engine
+  sign-in check, the Ollama version answer, and the one MCP tool-server list):
   - Your space: Appearance; Windows & shortcuts
   - Models & runtime: Engine; Models & API keys; Performance
   - Access & connections: Agent access; Connectors; Plugins
@@ -197,7 +208,7 @@ Run on this tree, on 2026-10-18:
 
 ```
 npx tsc --noEmit -p tsconfig.json     exit 0
-npx vitest run                        124 files passed, 859 tests passed
+npx vitest run                        128 files passed, 879 tests passed
 npm run build                         exit 0 (main, preload, renderer, preview)
 ```
 
@@ -209,20 +220,28 @@ installer, its checksum, and publishes them on a tag.
 
 The Windows PDF failure that this branch inherited is fixed here: pdf.js now
 receives a forward-slash data directory on both platforms, and a test pins it.
+The branch also carries clean-build's Node-20 test shim, so the suite runs in
+older sandboxes without touching app code.
 
 ## Known limits
 
 - The owner's first real signed-in session, on both engines, has not happened.
-- The app does not sign engines in. It detects them, and tells you to run
-  `claude` (or `agy`) in a terminal once; credentials stay with the engine.
+- The app runs no OAuth flow of its own. It detects engines and asks the CLI for
+  its sign-in state; "Sign in…" only opens the CLI's own login in a terminal, so
+  credentials never pass through the app.
 - Claude Code's subscription models are not enumerated in the picker. Leave the
-  model empty to use the engine's own default, choose an Ollama brain, or save
-  an Anthropic key to have its real model list appear.
+  model empty to use the engine's default; a typed model name is validated and
+  passed through only if the person supplies it. A saved Anthropic key adds the
+  provider's real list.
 - The agy wire is implemented but unproven against a live signed-in turn, and
   agy has no catalog adapter: the Plugins screen offers Claude Code marketplaces
   and OddBrain packs, and says plainly that agy has neither.
-- MCP connector entries are exposed as the two browser-control presets (Chrome
-  DevTools, Playwright). There is no general MCP server editor yet.
+- Tool servers can be added, listed and removed for both engines; the browser
+  control presets (Chrome DevTools, Playwright) are shortcuts into that same
+  list, not a second mechanism.
+- The Plugins screen offers two known public catalogs as starting points
+  (`anthropics/claude-code`, `anthropics/skills`); there is no directory search
+  beyond typing a repository.
 - No signed installer; SmartScreen will warn.
 - OCR is not built in. Scanned PDFs without a text layer are reported as having
   no extractable text, and a vision provider or OCR export is the way through.

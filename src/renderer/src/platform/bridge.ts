@@ -158,7 +158,7 @@ export type DesktopBridge = {
   /** The engine's tool servers (MCP). Browser control is one entry in this list. */
   mcp: {
     read: () => Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }> }>
-    write: (servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>) => Promise<{ ok: boolean; written: string[] }>
+    write: (servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>) => Promise<{ ok: boolean; written: string[]; answer: string }>
   }
   structure: {
     /** What a folder is, and exactly what a structure apply would add. */
@@ -321,7 +321,7 @@ const demoBridge: DesktopBridge = {
   },
   mcp: {
     read: async () => ({ servers: [] }),
-    write: async () => ({ ok: false, written: [] }),
+    write: async () => ({ ok: false, written: [], answer: 'Tool servers are written by the installed app.' }),
   },
   structure: {
     inspect: async () => ({ ok: false, error: 'Inspecting a structure needs the desktop app.' }),
@@ -444,6 +444,12 @@ export type EngineBridge = {
   pickBinary: (id: 'claude-code' | 'agy') => Promise<{ ok: boolean; answer: string; path?: string }>
   clearBinary: (id: 'claude-code' | 'agy') => Promise<{ ok: boolean; answer: string }>
   binaryOverride: (id: 'claude-code' | 'agy') => Promise<{ path: string }>
+  /** The engine's own sign-in state, asked from its CLI. */
+  authStatus: (id?: 'claude-code' | 'agy') => Promise<{ ok: boolean; loggedIn: boolean; method: string; provider: string; answer: string }>
+  /** Open the engine's own login in a terminal; nothing is read back. */
+  openLogin: () => Promise<{ ok: boolean; answer: string }>
+  /** The Ollama answering on the door, and whether it can serve Claude Code. */
+  ollamaVersion: () => Promise<{ ok: boolean; version: string; compatible: boolean; answer: string }>
   pull: (name: string) => Promise<{ ok: boolean; answer: string }>
   deleteModel: (name: string) => Promise<{ ok: boolean; answer: string }>
   /** Pull progress ticks; returns the unsubscribe. */
@@ -528,6 +534,9 @@ const demoEngineBridge: EngineBridge = {
   pickBinary: async () => ({ ok: false, answer: 'Pointing at a binary needs the desktop app.' }),
   clearBinary: async () => ({ ok: false, answer: 'The desktop app manages the binary override.' }),
   binaryOverride: async () => ({ path: '' }),
+  authStatus: async () => ({ ok: false, loggedIn: false, method: '', provider: '', answer: 'Sign-in is checked by the installed app.' }),
+  openLogin: async () => ({ ok: false, answer: 'Signing in needs the installed app.' }),
+  ollamaVersion: async () => ({ ok: false, version: '', compatible: false, answer: 'The installed app checks the local runtime.' }),
   pull: async () => ({ ok: false, answer: 'Pulling brains needs the desktop app.' }),
   deleteModel: async () => ({ ok: false, answer: 'Removing brains needs the desktop app.' }),
   onPullEvent: () => () => undefined,

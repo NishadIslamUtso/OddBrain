@@ -36,7 +36,7 @@ import {
 import { cloudEnabled, normalizePermissions } from '../shared/lib/permissions'
 import { registerArtifactIpc } from './artifacts/ipc'
 import { createEngineSocket, type EngineSocket } from './engine/socket'
-import { normalizeEngine } from '../shared/lib/engine'
+import { isValidModelName, normalizeEngine } from '../shared/lib/engine'
 import { APPROVAL_MODES, type ApprovalMode, type EngineAvailability, type EngineEvent, type EngineId, type EngineModelEntry } from '../shared/lib/engine'
 import { ENGINE_IMAGE_MIMES, MAX_ENGINE_IMAGE_CHARS as ENGINE_IMAGE_CHARS, MAX_ENGINE_ATTACHMENTS as ENGINE_IMAGE_LIMIT } from '../shared/lib/media'
 import { listCheckpoints, restoreCheckpoint, inspectCheckpoint } from './engine/checkpoints'
@@ -52,8 +52,11 @@ import { agyModelSource, detectEngine } from './engine/availability'
 import { enginePath } from './engine/enginePath'
 import { pdfSafeName } from '../shared/lib/artifacts'
 import { parsePullLine, validateModelName } from './engine/pull'
+import { openLogin, readAuthStatus } from './engine/authStatus'
+import { readOllamaVersion } from './engine/ollamaVersion'
 import { deployMcp, deploySkill, scanClaudeSkills, type McpServer, type VaultSkill } from './engine/deploy'
 import { installCatalogSkill } from './engine/skillCatalogInstall'
+import { normalizeMcpServers } from '../shared/lib/mcp'
 import { installPackFromFolder, listPacks, removePack } from './engine/packs'
 import { exportPack } from './engine/exportPack'
 import { installFromIndex, readIndex } from './engine/storeIndex'
@@ -1132,10 +1135,22 @@ function registerBridges(): void {
     }
   })
 
-  handle('mcp:write', (_event, payload: { servers: McpServer[] }): { ok: boolean; written: string[] } => {
-    const servers = Array.isArray(payload?.servers) ? payload.servers.slice(0, 100) : []
-    writeFileSync(mcpFile, JSON.stringify({ servers }), 'utf8')
-    return { ok: true, written: deployMcp(servers, settings.engine.workspace || vaultRoot()) }
+  handle('mcp:write', (_event, payload: { servers: McpServer[] }): { ok: boolean; written: string[]; answer: string } => {
+    // The window validates too, but main is the door: a forged payload gets
+    // the same refusal, and nothing half-valid is written to an engine config.
+    const normalized = normalizeMcpServers(payload?.servers)
+    if (normalized.problems.length) {
+      return { ok: false, written: [], answer: normalized.problems[0] }
+    }
+    writeFileSync(mcpFile, JSON.stringify({ servers: normalized.servers }), 'utf8')
+    const written = deployMcp(normalized.servers, settings.engine.workspace || vaultRoot())
+    return {
+      ok: true,
+      written,
+      answer: normalized.servers.length
+        ? `${normalized.servers.length} tool server${normalized.servers.length === 1 ? '' : 's'} written to ${written.length} engine file${written.length === 1 ? '' : 's'}.`
+        : 'The tool server list is empty; both engine configs were rewritten empty.',
+    }
   })
 
   // Mods (Phase 1): a pack is a folder with a manifest. Install = the person
@@ -1542,10 +1557,28 @@ function registerBridges(): void {
   })
 
   handle('engine:model', (_event, model: string, provider?: string): { ok: boolean; answer: string } => {
-    const clean = normalizeEngine({ ...settings.engine, model, cloudProvider: provider === 'anthropic' ? 'anthropic' : '' })
+    const typed = typeof model === 'string' ? model.trim() : ''
+    if (typed && !isValidModelName(typed)) {
+      return { ok: false, answer: 'Model names use letters, digits, dots, colons, @, / and dashes only; nothing was changed.' }
+    }
+    const clean = normalizeEngine({ ...settings.engine, model: typed, cloudProvider: provider === 'anthropic' ? 'anthropic' : '' })
     settings = writeSettings(settingsFile, { ...settings, engine: clean })
     return { ok: true, answer: clean.cloudProvider ? `brain set to ${clean.model} via ${clean.cloudProvider}` : `brain set to ${clean.model}` }
   })
+
+  // Is the engine actually signed in? The CLI answers for itself; agy does not.
+  handle('engine:auth-status', (_event, id?: string): Promise<unknown> =>
+    readAuthStatus(id === 'agy' ? 'agy' : 'claude-code'),
+  )
+
+  // Open the CLI's own login in a terminal. The app starts the CLI; it never
+  // receives the credentials and never runs an OAuth flow in its own window.
+  handle('engine:open-login', () => openLogin())
+
+  // Which Ollama is answering, and whether it can serve Claude Code's door.
+  handle('engine:ollama-version', (): Promise<unknown> =>
+    readOllamaVersion({ baseUrl: settings.engine.baseUrl || 'http://127.0.0.1:11434' }),
+  )
 
   // "Open a folder" — the engine's workplace, chosen once and remembered.
   handle('engine:pick-workspace', async (): Promise<{ ok: boolean; answer: string }> => {
