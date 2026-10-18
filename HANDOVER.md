@@ -10,7 +10,7 @@
 
 - **Repo:** https://github.com/NishadIslamUtso/OddBrain (branches `v3` and `main`, kept identical)
 - **State this file was written at:** commit `341efc5` — 98 test files / 716 tests, `tsc` clean, build green, smoke `SCROLL OK errors=0 warnings=0`, CI green on both branches.
-- **Companion docs:** `00_LIVING_DOCS/JUDGE-BRIEF.md` (verify-it-yourself brief), `00_LIVING_DOCS/CHANGELOG.md` (what changed each round), `00_LIVING_DOCS/ENGINE-STORES-DESIGN.md` (approved design, unbuilt).
+- **Companion docs:** `00_LIVING_DOCS/DECISIONS.md` (**the ledger of every "why"** — every nook and cranny, whose wish or which lesson caused it, and the test that guards it), `00_LIVING_DOCS/JUDGE-BRIEF.md` (verify-it-yourself brief), `00_LIVING_DOCS/CHANGELOG.md` (what changed each round), `00_LIVING_DOCS/ENGINE-STORES-DESIGN.md` (approved design, unbuilt).
 
 ---
 
@@ -249,11 +249,19 @@ own writes suppressed), **recipes** (reusable orders), **split** (long orders
 broken into reviewable steps), **battles** (two brains, same order, judged),
 **compaction** (conversation → brief, fresh session, brief rides along),
 **review** (the engine checks its own work, report-only), **handoff** (a
-finished turn becomes a vault document any later session can continue),
-**projects**, **Today view**, **find-in-conversation** (the scroller the
-smoke test proves), **quick-ask window** on a global hotkey, **hooks**,
-**house rules**, **skills catalog** (deploys to the engines' own skill
-folders), **activity journal** (every change recorded, restorable).
+finished turn becomes a vault document any later session can continue — and
+is copied in the same action), **projects**, **Today view**,
+**find-in-conversation** (the scroller the smoke test proves), **quick-ask
+window** on a global hotkey ("the same engine, the same cards"), **hooks**,
+**house rules** (the deployed rulebooks), **skills catalog** (deploys to the
+engines' own skill folders), **browser control** (Playwright-MCP driving),
+**repo map**, **voice** (a speak button on replies, local TTS), **memory
+graph** (canvas force layout, resolved links only, 400-node cap), **a11y-tree
+captures** (caps announce their cuts), **vault conflict settle** (Keep-mine /
+Use-new / Both / Combine, recorded), **menu bar where every item does a real
+thing**, **single-instance** (a second launch focuses the first),
+**activity journal** (every change recorded, restorable). Deliberately NOT
+built — and why — is its own ledger section (`DECISIONS.md` §B).
 
 ---
 
@@ -428,4 +436,5 @@ rotted tree without that reset.
 ---
 
 *Written 2026-10-17 at `341efc5`. Update the counts and the honest-state
-section every landing — a handover that drifts is a lie with better manners.*
+section every landing — a handover that drifts is a lie with better manners.
+For the WHY behind every small decision, see `00_LIVING_DOCS/DECISIONS.md`.*
