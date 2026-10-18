@@ -1,6 +1,6 @@
 # REPORT TO ORCHESTRATOR — core lane
 
-**Status: core contract items 1–5 implemented and locally tested; CI for this test-only endgame update is pending.** Branch `arena/9781cd95-oddbrain`; main comparison point `a6c7807`. The prior broad commit `9f0772b` remains in ancestry. Ruling #3's cross-platform fixes and the authorized date-label correction already landed in `bd36e2c`; ruling #4 confirmed green CI. This update adds focused regressions for completion-driven memory refresh and artifact sorting, not another feature lane. Frozen non-core paths were not edited; no merge was attempted.
+**Status: LANE COMPLETE under ruling #4; local checks and cross-platform CI passed, local Electron smoke blocked.** Branch `arena/9781cd95-oddbrain`; main comparison point `a6c7807`. The prior broad commit `9f0772b` remains in ancestry. Ruling #3's cross-platform fixes and the authorized date-label correction already landed in `bd36e2c`; ruling #4 confirmed green CI. This update adds focused regressions for completion-driven memory refresh and artifact sorting, not another feature lane. Frozen non-core paths were not edited; no merge was attempted.
 
 ## Gate on this worktree (app directory)
 
@@ -12,7 +12,7 @@
 | `npx vitest run` | **118 test files passed; 814 tests passed; zero failed.** From the full run after the endgame test changes, not the reference snapshot. |
 | `npm run build` | Exited 0; both renderer builds each logged two CSS-optimizer warnings for `::highlight(...)` (find highlights). |
 | `npm run smoke` | **Not run locally:** Electron postinstall and its one prescribed mirror retry failed again. No local `SMOKE OK SCROLL OK errors=0 warnings=0` claim. CI's successful native smoke steps are the available proof under ruling #3. |
-| CI | Runs [`39127625053`](https://github.com/NishadIslamUtso/OddBrain/actions/runs/39127625053) on `a17a4ee` and [`39127797062`](https://github.com/NishadIslamUtso/OddBrain/actions/runs/39127797062) on ruling commit `d99dad7` passed Linux and Windows Tests and native Smoke. **CI on the endgame test change is pending.** `gh run view --job ... --log` returned EOF from the log-download host, so I cannot quote the runners' literal `SMOKE OK SCROLL OK ... errors=0 warnings=0` lines. Smoke steps did exit successfully under the nonempty-screenshot, console-clean, scroll-OK gate. |
+| CI | Endgame run [`39129160057`](https://github.com/NishadIslamUtso/OddBrain/actions/runs/39129160057) on `b101d7d` **passed Linux and Windows Types, Tests, Build and native Smoke**. Earlier runs [`39127625053`](https://github.com/NishadIslamUtso/OddBrain/actions/runs/39127625053) and [`39127797062`](https://github.com/NishadIslamUtso/OddBrain/actions/runs/39127797062) also passed both OS. `gh run view --job ... --log` returned EOF from the log-download host on the earlier run, so I cannot quote the runners' literal `SMOKE OK SCROLL OK ... errors=0 warnings=0` lines. Smoke steps exited successfully under the nonempty-screenshot, console-clean, scroll-OK gate. |
 
 Current-run evidence: `/tmp/oddbrain-core-endgame-{ci,electron,mirror,tsc,vitest,build}.log` (sandbox-local, not Git deliverables).
 
