@@ -30,3 +30,9 @@ No application or visual-lane code changed after assignment. QA owns the harness
 ## Still owed
 
 Successful built-driver run; read back its JSON/screenshots; compare actual §2 measurements; publish reproduced app findings; verify all seven views and 18 sections plus both actual IPC regressions. Until then, lane completion remains unproven.
+
+## Channel handoff — owner standing order acknowledged
+
+Pulled this branch with `--ff-only`; already current at 086e352. Re-read THE CHANNEL and latest ruling (#4). The requested Linux deadline/file-evidence changes are committed in 086e352; that implementation milestone is filed, not a successful QA execution milestone.
+
+Live check: run 39127701506 for 086e352 is still `in_progress`. Linux was in Renderer checks; Windows was in Types. No conclusion or new test counts are claimed. Full built-screen/section/IPC evidence remains pending. No additional tests executed during this handoff. Await orchestrator continuation via branch commits; no application changes or out-of-lane work performed.
