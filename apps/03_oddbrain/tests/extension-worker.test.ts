@@ -1,3 +1,5 @@
+import { IDBFactory } from "fake-indexeddb";
+import { webcrypto } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -17,7 +19,9 @@ async function harness() {
     tokens: { "--color-bg": "#fafafa", "--color-ink": "#222222" },
   });
   let captures = true,
-    offline = false;
+    offline = false,
+    loseAcknowledgement = false,
+    legacy = false;
   const app = await startExtensionApi({
     port: 0,
     vault,
@@ -59,72 +63,103 @@ async function harness() {
   let registered: any[] = [];
   const manifest = JSON.parse(readFileSync(join(ext, "manifest.json"), "utf8"));
   const calls: string[] = [];
-  const context: any = vm.createContext({
-    console,
-    URL,
-    AbortSignal,
-    TextEncoder,
-    setTimeout,
-    clearTimeout,
-    structuredClone,
-    fetch: async (url: string, options: any) => {
-      calls.push(url);
-      if (offline) throw Error("offline");
-      return fetch(url, {
-        ...options,
-        headers: { ...options?.headers, origin: "chrome-extension://test" },
-      });
-    },
-    chrome: {
-      runtime: {
-        id: "test",
-        getManifest: () => manifest,
-        onMessage: event(),
-        onInstalled: event(),
-        onStartup: event(),
-        sendMessage: async () => undefined,
+  const indexedDB = new IDBFactory();
+  let context: any;
+  function boot() {
+    context = vm.createContext({
+      indexedDB,
+      crypto: webcrypto,
+      console,
+      URL,
+      AbortSignal,
+      AbortController,
+      TextEncoder,
+      setTimeout,
+      clearTimeout,
+      structuredClone,
+      fetch: async (url: string, options: any) => {
+        calls.push(url);
+        if (offline) throw Error("offline");
+        const response = await fetch(url, {
+          ...options,
+          headers: { ...options?.headers, origin: "chrome-extension://test" },
+        });
+        if (
+          loseAcknowledgement &&
+          options?.body &&
+          JSON.parse(options.body).op === "messages"
+        ) {
+          loseAcknowledgement = false;
+          throw Error("Response lost after commit");
+        }
+        if (legacy && url.endsWith("/health")) {
+          const data = await response.json();
+          delete data.capture_target;
+          return new Response(JSON.stringify(data), {
+            status: response.status,
+          });
+        }
+        return response;
       },
-      storage: { local: store(local), sync: store(sync) },
-      contextMenus: { onClicked: event() },
-      history: { onVisited: event() },
-      alarms: { onAlarm: event() },
-      permissions: {
-        onAdded: event(),
-        onRemoved: event(),
-        contains: async (request: any) => {
-          if (request.origins?.includes("<all_urls>")) return broadGranted;
-          return (
-            broadGranted ||
-            request.origins?.every((origin: string) =>
-              manifest.host_permissions.includes(origin),
-            )
-          );
+      chrome: {
+        runtime: {
+          id: "test",
+          getManifest: () => manifest,
+          onMessage: event(),
+          onInstalled: event(),
+          onStartup: event(),
+          sendMessage: async () => undefined,
+        },
+        storage: { local: store(local), sync: store(sync) },
+        contextMenus: { onClicked: event() },
+        history: { onVisited: event() },
+        alarms: { onAlarm: event() },
+        permissions: {
+          onAdded: event(),
+          onRemoved: event(),
+          contains: async (request: any) => {
+            if (request.origins?.includes("<all_urls>")) return broadGranted;
+            return (
+              broadGranted ||
+              request.origins?.every((origin: string) =>
+                manifest.host_permissions.includes(origin),
+              )
+            );
+          },
+        },
+        scripting: {
+          getRegisteredContentScripts: async (filter: any) =>
+            registered.filter((s) => !filter?.ids || filter.ids.includes(s.id)),
+          registerContentScripts: async (scripts: any[]) => {
+            registered.push(...scripts);
+          },
+          unregisterContentScripts: async (filter: any) => {
+            registered = registered.filter((s) => !filter.ids.includes(s.id));
+          },
+        },
+        tabs: {
+          query: async () => [{ id: 1, url: "https://example.com/article" }],
         },
       },
-      scripting: {
-        getRegisteredContentScripts: async (filter: any) =>
-          registered.filter((s) => !filter?.ids || filter.ids.includes(s.id)),
-        registerContentScripts: async (scripts: any[]) => {
-          registered.push(...scripts);
-        },
-        unregisterContentScripts: async (filter: any) => {
-          registered = registered.filter((s) => !filter.ids.includes(s.id));
-        },
-      },
-      tabs: {
-        query: async () => [{ id: 1, url: "https://example.com/article" }],
-      },
-    },
-  });
-  context.importScripts = (...files: string[]) => {
-    for (const file of files)
-      vm.runInContext(readFileSync(join(ext, file), "utf8"), context, {
-        filename: file,
-      });
-  };
-  vm.runInContext(readFileSync(join(ext, "background.js"), "utf8"), context);
+    });
+    context.importScripts = (...files: string[]) => {
+      for (const file of files)
+        vm.runInContext(readFileSync(join(ext, file), "utf8"), context, {
+          filename: file,
+        });
+    };
+    vm.runInContext(readFileSync(join(ext, "background.js"), "utf8"), context);
+  }
+  boot();
   return {
     local,
+    restart: async () => {
+      await context.flushConversations();
+      await vm.runInContext("conversationOutbox.close()", context);
+      boot();
+    },
+    drain: () => context.flushConversations(),
+    queued: () => vm.runInContext("conversationOutbox.list()", context),
     sync,
     calls,
     vault,
@@ -136,6 +171,12 @@ async function harness() {
       await context.refreshBroadScript();
     },
     refreshSites: async () => context.refreshConversationScripts(),
+    setLegacy: (value: boolean) => {
+      legacy = value;
+    },
+    loseAck: () => {
+      loseAcknowledgement = true;
+    },
     setOffline: (v: boolean) => {
       offline = v;
     },
@@ -145,6 +186,8 @@ async function harness() {
     dispatch: async (msg: any, sender: any = { id: "test" }) =>
       context.dispatch(msg, sender),
     dispose: async () => {
+      await context.flushConversations();
+      await vm.runInContext("conversationOutbox.close()", context);
       await app.close();
       rmSync(root, { recursive: true, force: true });
     },
@@ -194,11 +237,45 @@ describe("extension worker against the real paired vault API", () => {
         sender,
       );
       expect(result.ok).toBe(true);
-      expect(result.changed).toBe(1);
+      expect(result.queued).toBe(true);
+      await h.drain();
       expect(
-        (await h.dispatch({ type: "ob-conversation-sync", payload }, sender))
-          .changed,
-      ).toBe(0);
+        (
+          await h.dispatch(
+            {
+              type: "ob-conversation-sync",
+              payload: {
+                url,
+                conversation,
+                op: "delivery",
+                receipts: [result.receipt],
+              },
+            },
+            sender,
+          )
+        ).saved,
+      ).toBe(1);
+      const again = await h.dispatch(
+        { type: "ob-conversation-sync", payload },
+        sender,
+      );
+      await h.drain();
+      expect(
+        (
+          await h.dispatch(
+            {
+              type: "ob-conversation-sync",
+              payload: {
+                url,
+                conversation,
+                op: "delivery",
+                receipts: [again.receipt],
+              },
+            },
+            sender,
+          )
+        ).saved,
+      ).toBe(1);
       expect(JSON.stringify(h.local)).not.toContain(message.text);
       expect(
         (
@@ -226,18 +303,26 @@ describe("extension worker against the real paired vault API", () => {
       ).toBe(false);
       h.local.autoCaptureAi = true;
       h.setCaptures(false);
-      expect(
-        (await h.dispatch({ type: "ob-conversation-sync", payload }, sender))
-          .ok,
-      ).toBe(false);
+      await h.dispatch({ type: "ob-sync" });
+      await expect(
+        h.dispatch({ type: "ob-conversation-sync", payload }, sender),
+      ).rejects.toThrow("Enable browser capture");
       h.setCaptures(true);
+      await h.dispatch({ type: "ob-sync" });
       h.setOffline(true);
       const offline = await h.dispatch(
         { type: "ob-conversation-sync", payload },
         sender,
       );
-      expect(offline.ok).toBe(false);
-      expect(offline.error).toContain("Keep the conversation open");
+      expect(offline.ok).toBe(true);
+      expect(offline.queued).toBe(true);
+      await h.drain();
+      expect(await h.queued()).toHaveLength(1);
+      await h.restart();
+      expect(await h.queued()).toHaveLength(1);
+      h.setOffline(false);
+      await h.drain();
+      expect(await h.queued()).toHaveLength(0);
       expect(h.local.queue).toHaveLength(0);
     } finally {
       await h.dispose();
@@ -514,4 +599,263 @@ describe("extension worker against the real paired vault API", () => {
       await h.dispose();
     }
   });
+});
+
+const queuedUrl = "https://chatgpt.com/c/durable";
+const queuedConversation = {
+  provider: "ChatGPT",
+  adapter: "chatgpt",
+  key: "chatgpt:durable",
+  url: queuedUrl,
+  title: "Durability fixture",
+};
+const queuedSender = {
+  id: "test",
+  frameId: 0,
+  url: queuedUrl,
+  tab: { id: 3, url: queuedUrl, incognito: false },
+};
+const queuedMessage = {
+  id: "msg",
+  role: "user",
+  speaker: "",
+  text: "DURABLE_PRIVATE_TEXT",
+  timestamp: "",
+  reply_to: "",
+  model: "",
+  identity: "native",
+  status: "observed",
+  attachments: [],
+};
+const queuedPayload = {
+  url: queuedUrl,
+  conversation: queuedConversation,
+  op: "messages",
+  messages: [queuedMessage],
+  order: ["msg"],
+};
+async function offlineQueue(h: Awaited<ReturnType<typeof harness>>) {
+  await h.dispatch({ type: "ob-sync" });
+  h.setOffline(true);
+  const receipt = await h.dispatch(
+    { type: "ob-conversation-sync", payload: queuedPayload },
+    queuedSender,
+  );
+  await h.drain();
+  return receipt;
+}
+it("durable replay survives a lost acknowledgement without a second immutable message revision", async () => {
+  const h = await harness();
+  try {
+    await offlineQueue(h);
+    h.setOffline(false);
+    h.loseAck();
+    await h.drain();
+    expect(await h.queued()).toHaveLength(1);
+    const files = h.vault.files(),
+      before = files.walkFiles(
+        "02 Sources/Conversations/Browser",
+        ".json",
+      ).files;
+    await h.restart();
+    await h.drain();
+    expect(await h.queued()).toHaveLength(0);
+    expect(
+      files.walkFiles("02 Sources/Conversations/Browser", ".json").files,
+    ).toEqual(before);
+    expect(JSON.stringify(h.local.activity)).not.toContain(queuedMessage.text);
+  } finally {
+    await h.dispose();
+  }
+});
+it("pause retains bytes, exclusion removes them, and a page cannot inspect or discard the outbox", async () => {
+  const h = await harness();
+  try {
+    await offlineQueue(h);
+    h.local.conversationPaused = true;
+    h.setOffline(false);
+    await h.drain();
+    expect(await h.queued()).toHaveLength(1);
+    expect(
+      h.vault.files().walkFiles("02 Sources/Conversations/Browser", ".json")
+        .files,
+    ).toHaveLength(0);
+    for (const type of [
+      "ob-conversation-outbox",
+      "ob-conversation-discard",
+      "ob-clear-queue",
+    ])
+      await expect(h.dispatch({ type }, queuedSender)).rejects.toThrow(
+        "extension interface",
+      );
+    await h.dispatch({
+      type: "ob-blacklist-update",
+      excluded_patterns: ["chatgpt.com/*"],
+    });
+    expect(await h.queued()).toHaveLength(0);
+  } finally {
+    await h.dispose();
+  }
+});
+it("pairing refusal discards private waiting bytes instead of redirecting them to another app", async () => {
+  const h = await harness();
+  try {
+    await offlineQueue(h);
+    h.local.pairToken = "revoked";
+    h.setOffline(false);
+    await h.drain();
+    expect(await h.queued()).toHaveLength(0);
+    expect(JSON.stringify(h.local.activity)).not.toContain(queuedMessage.text);
+  } finally {
+    await h.dispose();
+  }
+});
+it("a new vault identity holds queued conversations and the server rejects their old target", async () => {
+  const h = await harness();
+  try {
+    await offlineQueue(h);
+    const oldTarget = h.local.conversationDestination.target;
+    h.vault.files().write(".oddbrain/capture-destination", "c".repeat(64));
+    h.setOffline(false);
+    await h.drain();
+    expect((await h.queued())[0].problem).toContain("Different vault");
+    const result = await fetch(h.app.url + "/conversation-sync", {
+      method: "POST",
+      headers: {
+        origin: "chrome-extension://test",
+        "content-type": "application/json",
+        "x-oddbrain-pair": h.app.pairToken,
+      },
+      body: JSON.stringify({ ...queuedPayload, capture_target: oldTarget }),
+    });
+    expect(result.status).toBe(409);
+    expect(
+      h.vault.files().walkFiles("02 Sources/Conversations/Browser", ".json")
+        .files,
+    ).toHaveLength(0);
+    const summary = await h.dispatch({ type: "ob-conversation-outbox" });
+    expect(JSON.stringify(summary)).not.toContain(queuedMessage.text);
+    await h.dispatch({
+      type: "ob-conversation-discard",
+      id: summary.conversations[0].id,
+    });
+    expect(await h.queued()).toHaveLength(0);
+  } finally {
+    await h.dispose();
+  }
+});
+it("completed attachment bytes replay from the queue with no source tab or remote fetch", async () => {
+  const h = await harness();
+  try {
+    await h.dispatch({ type: "ob-sync" });
+    h.setOffline(true);
+    const attachment = {
+      id: "file",
+      kind: "file",
+      name: "note.txt",
+      url: "https://chatgpt.com/file",
+      mime: "text/plain",
+      representation: "original",
+    };
+    const message = { ...queuedMessage, attachments: [attachment] };
+    const bytes = Buffer.from("DURABLE FILE");
+    const hash = await webcrypto.subtle
+      .digest("SHA-256", bytes)
+      .then((data) => Buffer.from(data).toString("hex"));
+    await h.dispatch(
+      {
+        type: "ob-conversation-sync",
+        payload: { ...queuedPayload, messages: [message] },
+      },
+      queuedSender,
+    );
+    const common = {
+      url: queuedUrl,
+      conversation: queuedConversation,
+      message_id: "msg",
+      attachment_id: "file",
+    };
+    await h.dispatch(
+      {
+        type: "ob-conversation-sync",
+        payload: {
+          ...common,
+          op: "media-part",
+          index: 0,
+          hash,
+          data: bytes.toString("base64"),
+        },
+      },
+      queuedSender,
+    );
+    expect(
+      (await h.dispatch({ type: "ob-conversation-outbox" })).conversations[0]
+        .incomplete,
+    ).toBe(true);
+    const finish = await h.dispatch(
+      {
+        type: "ob-conversation-sync",
+        payload: {
+          ...common,
+          op: "media-finish",
+          mime: "text/plain",
+          size: bytes.length,
+          parts: [hash],
+        },
+      },
+      queuedSender,
+    );
+    expect(
+      (await h.dispatch({ type: "ob-conversation-outbox" })).conversations[0]
+        .incomplete,
+    ).toBe(false);
+    await h.restart();
+    expect(await h.queued()).toHaveLength(3);
+    h.setOffline(false);
+    await h.drain();
+    expect(await h.queued()).toHaveLength(0);
+    const result = await h.dispatch(
+      {
+        type: "ob-conversation-sync",
+        payload: { ...common, op: "media-state" },
+      },
+      queuedSender,
+    );
+    expect(result.saved.bytes).toBe(bytes.length);
+    expect(h.vault.files().read(result.saved.source)).toBe("DURABLE FILE");
+    expect(h.calls.every((url) => url.startsWith(h.app.url))).toBe(true);
+    expect(
+      (
+        await h.dispatch(
+          {
+            type: "ob-conversation-sync",
+            payload: { ...common, op: "delivery", receipts: [finish.receipt] },
+          },
+          queuedSender,
+        )
+      ).saved,
+    ).toBe(1);
+  } finally {
+    await h.dispose();
+  }
+});
+
+it("an older desktop cannot silently receive queued writes without the destination guard", async () => {
+  const h = await harness();
+  try {
+    await offlineQueue(h);
+    h.setLegacy(true);
+    h.setOffline(false);
+    await h.drain();
+    expect((await h.queued())[0].problem).toContain("Update OddBrain");
+    expect(
+      h.vault.files().walkFiles("02 Sources/Conversations/Browser", ".json")
+        .files,
+    ).toHaveLength(0);
+    h.setLegacy(false);
+    await h.drain();
+    expect(await h.queued()).toHaveLength(0);
+  } finally {
+    await h.dispose();
+  }
 });

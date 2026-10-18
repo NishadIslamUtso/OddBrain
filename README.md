@@ -24,7 +24,7 @@ Owner: Utso (`nishadislamutso@gmail.com`) · ASUS TUF A15, Ryzen 7, 8 GB RAM, RT
 | Path | What it is |
 |---|---|
 | `apps/03_oddbrain/` | **The app.** Electron 41 + React 19 + Vite. Main process `src/main/`, renderer `src/renderer/src/`, tests `tests/`. |
-| `extension/` | Chromium MV3 companion (0.4.0). Incremental open-conversation/message/media capture, progress, explicit context insertion and secondary manual clipping; no browser history. |
+| `extension/` | Chromium MV3 companion (0.5.0). Incremental open-conversation/message/media capture, progress, explicit context insertion and secondary manual clipping; no browser history. |
 | `vault/Brain/` | Second brain: engine rulebooks (`CLAUDE.md`, `AGENTS.md`), sources, memory structure, templates. Seeded canonical; the real folder is chosen in-app at runtime. |
 | `store/packs/` | Starter packs the in-app store installs. |
 | `apps/01_…pixel-clone/`, `apps/02_…clone-v6/` | Predecessor prototypes. Archaeology, not shipped. |
@@ -51,7 +51,7 @@ The complete appearance inventory, built by the owner personally (authority: SPE
 
 ## Selective reliability upgrade
 
-The reviewed lanes were integrated selectively, not merged wholesale. The app remains in `apps/03_oddbrain/`; starter vault files, appearance/navigation, memory review and extension 0.4 remain intact.
+The reviewed lanes were integrated selectively, not merged wholesale. The app remains in `apps/03_oddbrain/`; starter vault files, appearance/navigation, memory review and the browser companion remain intact.
 
 - **Engines and stores:** cancellation/routing fixes, independent Ollama/Anthropic model discovery, provider-aware model selection and stale-response protection. Switching engines during an active task is refused with an explicit explanation rather than falsely promising a switch. Failed skill installations remain retryable, not marked installed.
 - **Network and attachments:** shared bounded-response handling, strict image-count/base64/size checks, HTTPS provider safeguards, and complete commit-pinned skill bundles with licenses/support files. Existing engine skills are never replaced by a catalog install; remove or relocate them deliberately before reinstalling.
@@ -63,7 +63,7 @@ The reviewed lanes were integrated selectively, not merged wholesale. The app re
 `src/main/media/documents.ts` — pdfjs's Node factories read `standardFontDataUrl` / `cMapUrl` / `wasmUrl` as filesystem paths that must end in `/`. The old code appended the platform separator: on Windows that produced `...\pdfjs-dist\cmaps\`, which pdfjs rejects — **PDF attachment extraction failed on every Windows machine** (caught by `tests/media-decoding.test.ts` on Windows CI). Now the paths are normalized to forward slashes with a trailing slash. Windows APIs accept forward slashes; pdfjs's own Node factory `fs.readFile`s the result. Plus a test-env shim (`tests/shims/promise.ts`) so Node-20 sandboxes can run the same suite the app's Node-22 runtime passes — app code untouched by it.
 
 
-## Memory workflow and browser companion (0.4.0)
+## Memory workflow and browser companion (0.5.0)
 
 ### What exists / why / how
 
@@ -81,13 +81,19 @@ The reviewed lanes were integrated selectively, not merged wholesale. The app re
 1. Build/run the updated desktop app. Load `extension/` unpacked from Chrome/Edge's extension manager with Developer mode enabled. Packaged desktop builds place it in `resources/extension`.
 2. Copy the pairing token from the app's extension/Agent access controls to extension **Settings → Connected app → Save & test connection**. Allow browser capture and choose the intended vault. Default loopback port: 8765; change it in the extension if the app reports another port.
 3. Enable the people/Classroom sites you want in extension settings and grant their site access once. Reload existing tabs after changing grants. Open the conversation itself, not just its inbox.
-4. Leave the tab open while progress is pending. Pause stops automatic capture. Browser history is neither requested nor listened to; an obsolete grant is revoked where the browser permits it. Original saved data is not deleted.
+4. Keep the tab open until text and any desired files are saved or fully queued. “Queued on this browser” is not a desktop receipt; protected data can retry after the tab closes. Incomplete downloads still need the source tab. Pause stops collection and queued replay. Browser history is neither requested nor listened to; an obsolete grant is revoked where the browser permits it. Original saved data is not deleted.
 
 Experimental readers: ChatGPT, Claude, Gemini, Google AI Studio, DeepSeek, Arena, GLM/Z.ai, Kimi, Grok, Qwen, Mistral Le Chat, Perplexity, Copilot and Poe; opt-in Messenger/Facebook Messages, Instagram DMs, WhatsApp Web, Slack, Discord's opened channel and Google Classroom streams. Facebook posts, Instagram feeds, unsent drafts and inbox previews are excluded. The passive Discord reader is not a self-bot or a claim of platform approval; service/workspace rules still apply.
 
 New/changed message checksums are compared with the vault. Full current messages, immutable revisions, titles/order evidence and attachment receipts live under `02 Sources/Conversations/Browser/<hash>/`. Transfer chunks are 512 KiB; files over 256 MiB and messages over 8 million characters are visibly refused, not truncated. Completed attachment transfers are not downloaded again. Rendered images can be previews rather than originals, and that distinction is retained. Newly saved in-app OddBrain conversations also have structured text sidecars; their original Markdown, context, thinking and attachment files remain intact.
 
-**Limits, not promises:** readers see loaded DOM only. No account crawling, opening chats, auto-scrolling older history, mobile/native-app capture, hidden-token extraction, encrypted-history restoration or restricted/view-once bypass. Authenticated live-site layouts have not been validated here. CORS, redirects, expired links, off-page media and MediaSource blobs can prevent media saving. There is no OCR, transcription or media understanding in this organizer. Closing an offline/pending conversation can lose unsent observations; conversation sync has no durable browser outbox or byte-range resume. Legacy manual captures retain their bounded, explicit outbox.
+**Limits, not promises:** readers see loaded DOM only. No account crawling, opening chats, auto-scrolling older history, mobile/native-app capture, hidden-token extraction, encrypted-history restoration or restricted/view-once bypass. Authenticated live-site layouts have not been validated here. CORS, redirects, expired links, off-page media and MediaSource blobs can prevent media saving. There is no OCR, transcription or media understanding in this organizer. Conversation writes are queued transactionally in extension IndexedDB before replay. Complete queued text/files survive normal browser restarts; unloaded messages and bytes not yet downloaded do not. Partial file chunks are retained and reused by hash, but downloading an incomplete file still requires reopening its source; HTTP byte-range resume is not implemented. Legacy manual captures retain their separate bounded outbox.
+
+**Durable capture (0.5):** the browser queue is bounded to 128 MiB / 4,096 operations, with an 18 MiB per-operation limit and explicit storage-full/write-failure messages. `unlimitedStorage` protects extension storage from browser quota/eviction rules; the app still enforces those bounds. It grants no additional site access. The extension must verify its paired vault online once before collecting offline. Retry wakes on browser startup and the existing one-minute alarm, uses only the paired loopback app, checks current site grants/exclusions, and sends only changed message bodies. No worker downloads remote attachments or runs a model.
+
+Queued bytes are tied to the pairing and a persistent vault identity (`.oddbrain/capture-destination`). Changing vaults holds old captures rather than sending them to the new vault. Pause retains the queue; disabling a site, excluding it, removing its grant, or a capture/pairing refusal removes applicable waiting data. Re-pairing/forgetting and outbox clearing also remove waiting copies with confirmation. Activity → Outbox shows waiting conversations and supports individual discard. Retain the vault identity in backups if you need pending captures to reconnect to a restored vault. Browser profile deletion, uninstalling the extension or clearing its storage removes the browser copies; this is not an independent backup or a power-loss durability guarantee.
+
+**Daily-use improvements in progress:** durable capture is the first completed stage. Source-linked recall, grouped interpretation review, content-first People/Journal/Life Story and consolidated setup are still pending; they are not claimed as implemented by this update.
 
 Discovery examines the current committed message revisions, at most 64 new passages per pass, with a 15,000-JSON-file scan cap per source tree and visible coverage/error notices. Raw older revisions remain on disk; legacy Markdown-only conversations are not automatically backfilled. A single malformed source is reported without stopping healthy ones. The organizer runs while the desktop app is open, not as an independent OS service.
 
@@ -128,6 +134,6 @@ CI (`.github/workflows/`): `checks.yml` runs the gate on Linux + Windows per pus
 Historical clean-build measurements: **124 test files / 858 tests**. These are baseline results, not proof of the newer workflow or native acceptance. Current verification is recorded below.
 
 
-**Current verification (2026-10-19, sandbox):** 1,010 tests across 145 files passed with no skips (including the Chromium conversation-reader/paired-vault fixture); TypeScript, Electron build and web build passed. All nine app browser suites and the extension browser suite passed. The builds still emit the existing CSS `::highlight` optimizer notices and the web bundle-size warning. Native Windows/live-account acceptance remains outstanding. No installer or signed release was produced by this validation.
+**Current verification (2026-10-19, sandbox):** 1,021 tests across 147 files passed with no skips (including the Chromium conversation-reader/paired-vault fixture and real IndexedDB recovery across a full Chromium restart); TypeScript, Electron build and web build passed. All nine app browser suites and the extension browser suite passed. The builds still emit the existing CSS `::highlight` optimizer notices and the web bundle-size warning. Native Windows/live-account acceptance remains outstanding. No installer or signed release was produced by this validation.
 
 Extension structural-selector references (facts, not copied automation): [timeline adapters](https://github.com/houyanchao/chatgpt-gemini-timeline/tree/main/js/timeline/adapters), [Defuddle's Grok extractor](https://github.com/kepano/defuddle/blob/main/src/extractors/grok.ts), [Arena site configuration](https://github.com/lumingya/universal-web-api/blob/main/config/sites/arena.ai.json). These are secondary evidence, not authenticated live-site verification.

@@ -1,3 +1,9 @@
+import { IDBFactory } from "fake-indexeddb";
+import { createRequire } from "node:module";
+import { createHash } from "node:crypto";
+const { create: createOutbox } = createRequire(import.meta.url)(
+  "../../../extension/lib/conversation-outbox.js",
+);
 /** Real Chromium DOM + paired vault; Chrome APIs are explicit fixtures, not a
  * claim of native MV3 or authenticated provider acceptance. */
 import { it, expect } from "vitest";
@@ -21,6 +27,12 @@ it.skipIf(!browserOptions)(
     const browser = await chromium.launch(
       JSON.parse(readFileSync(browserOptions!, "utf8")),
     );
+    const outbox = createOutbox({
+      indexedDB: new IDBFactory(),
+      digest: async (value: string) =>
+        createHash("sha256").update(value).digest("hex"),
+    });
+    const destination = { identity: "a".repeat(64), target: "b".repeat(64) };
     let offline = false,
       excluded = false,
       missing = true;
@@ -47,20 +59,44 @@ it.skipIf(!browserOptions)(
           return { ok: true };
         }
         if (msg.type !== "ob-conversation-sync") return { ok: false };
-        if (offline) return { ok: false, error: "Desktop app unavailable" };
-        const response = await fetch(app.url + "/conversation-sync", {
-          method: "POST",
-          headers: {
-            origin: "chrome-extension://fixture",
-            "content-type": "application/json",
-            "x-oddbrain-pair": app.pairToken,
-          },
-          body: JSON.stringify(msg.payload),
-        });
-        const result = await response.json();
-        if (msg.payload.op === "messages")
-          writes.push({ payload: msg.payload, result });
-        return result;
+        const post = async (payload: any) => {
+          // This fixture exercises the reader transport, while worker tests
+          // exercise policy/target guards. The real vault still writes evidence.
+          const { capture_target: _target, ...body } = payload;
+          const response = await fetch(app.url + "/conversation-sync", {
+            method: "POST",
+            headers: {
+              origin: "chrome-extension://fixture",
+              "content-type": "application/json",
+              "x-oddbrain-pair": app.pairToken,
+            },
+            body: JSON.stringify(body),
+          });
+          const result = await response.json();
+          if (body.op === "messages") writes.push({ payload: body, result });
+          return result;
+        };
+        if (
+          ["messages", "media-part", "media-finish"].includes(msg.payload.op)
+        ) {
+          const row = await outbox.enqueue(msg.payload, destination);
+          return { ok: true, queued: true, receipt: row.id };
+        }
+        if (msg.payload.op === "delivery") {
+          if (!offline)
+            for (const row of await outbox.list()) {
+              const result = await post(await outbox.body(row.id));
+              if (!result.ok) break;
+              await outbox.remove([row.id], true);
+            }
+          return { ok: true, ...(await outbox.receipts(msg.payload.receipts)) };
+        }
+        if (offline) return { ok: true, saved: null, parts: [] };
+        // A fresh message may still be waiting locally when media-state is read.
+        const result = await post(msg.payload);
+        return !result.ok && msg.payload.op === "media-state"
+          ? { ok: true, saved: null }
+          : result;
       });
       await page.addInitScript(() => {
         const callbacks: any[] = [],
@@ -204,7 +240,7 @@ it.skipIf(!browserOptions)(
       });
       await expect
         .poll(() => progress.at(-1)?.state, { timeout: 15000 })
-        .toBe("Saving interrupted");
+        .toBe("Queued on this browser");
       offline = false;
       missing = false;
       // Reload resumes from disk. Already saved originals must not be downloaded again.
@@ -232,7 +268,7 @@ it.skipIf(!browserOptions)(
           JSON.parse(readFileSync(join(root, source, "messages", f), "utf8")),
         );
       expect(records.find((r) => r.message.id === "a1").message.text).toBe(
-        "After pause",
+        "While offline",
       );
       await page.evaluate(() => {
         history.pushState({}, "", "/c/second");
@@ -271,6 +307,7 @@ it.skipIf(!browserOptions)(
       ).toBe(false);
       expect(errors).toEqual([]);
     } finally {
+      await outbox.close();
       await browser.close();
       await app.close();
       rmSync(root, { recursive: true, force: true });

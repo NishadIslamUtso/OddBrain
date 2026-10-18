@@ -120,6 +120,7 @@ function AgentAccessCard({ isDemo }: { isDemo: boolean }): ReactNode {
           type="button"
           aria-label="Rotate the pairing token"
           onClick={() => {
+            if (!window.confirm('Rotate the pairing token? Already-paired extensions will lose access, and their waiting conversation captures will be discarded when the old token is refused. Let them finish saving first. Saved vault files are unchanged.')) return
             void bridge.extensionPair.rotate().then(view => {
               if (view.ok) {
                 setToken(view.token)

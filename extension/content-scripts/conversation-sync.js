@@ -1,5 +1,5 @@
-/* Passive, resumable open-conversation sync. The app's disk receipts, not a
- * browser cache, decide what is saved. The tab must stay open for unsent data. */
+/* Passive conversation capture. Writes receive durable browser receipts first;
+ * only the desktop acknowledgement means saved to OddBrain. */
 (() => {
   if (globalThis.__oddConversationSync || chrome.extension?.inIncognitoContext)
     return;
@@ -19,6 +19,7 @@
     pause;
   let prefs = {},
     pending = false,
+    unsafeToClose = false,
     run = 0,
     seenURL = location.href,
     lastCheck = 0;
@@ -65,7 +66,7 @@
     bar = el("progress");
     bar.max = 1;
     bar.value = 0;
-    bar.setAttribute("aria-label", "Observed messages saved");
+    bar.setAttribute("aria-label", "Capture progress");
     box.append(row, bar, detail);
     shadow.append(style, box);
     document.documentElement.append(host);
@@ -115,7 +116,7 @@
       throw Error(
         result?.error ||
           result?.reason ||
-          "App unavailable. Keep this tab open; saving will retry.",
+          "Saving could not be confirmed. Keep this tab open and check the extension outbox.",
       );
     return result;
   }
@@ -132,7 +133,9 @@
       attachment_id: attachment.id,
     };
     const before = await request({ ...common, op: "media-state" }, epoch, url);
-    if (before.saved) return true;
+    if (before.saved) return { saved: true };
+    if (before.staged) return { receipt: before.receipt };
+    const knownParts = new Set(before.parts || []);
     const original = snapshot.media.get(attachment.id)?.url;
     if (!original)
       throw Error("The attachment has no accessible download address.");
@@ -174,21 +177,32 @@
       const partSize = 512 * 1024,
         parts = [];
       let pendingBytes = new Uint8Array(0),
+        lastProgress = 0,
         size = 0;
       const part = async (bytes) => {
         const checksum = await reader.sha(bytes);
-        await request(
-          {
-            ...common,
-            op: "media-part",
-            index: parts.length,
-            hash: checksum,
-            data: base64(bytes),
-          },
-          epoch,
-          url,
-        );
+        if (!knownParts.has(checksum))
+          await request(
+            {
+              ...common,
+              op: "media-part",
+              index: parts.length,
+              hash: checksum,
+              data: base64(bytes),
+            },
+            epoch,
+            url,
+          );
         parts.push(checksum);
+        if (Date.now() - lastProgress > 700) {
+          lastProgress = Date.now();
+          await status(
+            "Protecting attachment",
+            `${attachment.name || "Attachment"}: ${(size / 1024 / 1024).toFixed(1)} MB read${expected ? " of " + (expected / 1024 / 1024).toFixed(1) + " MB" : ""}. Keep this tab open until the complete file is queued or saved.`,
+            Math.min(size, expected),
+            expected,
+          );
+        }
       };
       try {
         while (true) {
@@ -214,12 +228,12 @@
         await stream.cancel().catch(() => {});
       }
       if (!size) throw Error("The attachment was empty.");
-      await request(
+      const result = await request(
         { ...common, op: "media-finish", mime, size, parts },
         epoch,
         url,
       );
-      return true;
+      return { receipt: result.receipt };
     } finally {
       clearTimeout(timeout);
       controller.abort();
@@ -242,6 +256,7 @@
       const site = reader.siteFor(url);
       if (!site || !enabled(site)) {
         pending = false;
+        unsafeToClose = false;
         if (host && prefs.conversationPaused)
           await status(
             "Paused",
@@ -256,6 +271,7 @@
       const access = await send({ type: "ob-conversation-access", url });
       if (!access?.allowed) {
         pending = false;
+        unsafeToClose = false;
         if (access?.excluded) {
           host?.remove();
           host = null;
@@ -271,49 +287,33 @@
       if (!current(epoch, url)) return;
       if (!snapshot.messages?.length) {
         pending = false;
+        unsafeToClose = false;
         await status("Waiting", snapshot.reason || "Open a conversation.");
         return;
       }
       const messages = snapshot.messages,
         total = messages.length;
       pending = true;
+      unsafeToClose = true;
       let done = 0;
+      const receipts = [];
       await status(
         "Saving conversation",
-        `${snapshot.conversation.title}\nChecking saved messages…`,
+        `${snapshot.conversation.title}\nProtecting messages in this browser…`,
         done,
         total,
       );
-      // Ask the vault on every scan. A vault switch, cleared data or worker restart
-      // cannot make a stale browser-side checkpoint suppress a write.
+      // Queue all observed text before waiting for the desktop. Replay checks
+      // the vault's hashes and sends only changed bodies, not cached guesses.
       for (let start = 0; start < total; start += 40) {
         const batch = messages.slice(start, start + 40);
-        const checksums = Object.fromEntries(
-          await Promise.all(
-            batch.map(async (m) => [m.id, await reader.sha(JSON.stringify(m))]),
-          ),
-        );
-        const known = await request(
-          {
-            op: "state",
-            conversation: snapshot.conversation,
-            ids: batch.map((m) => m.id),
-            checksums,
-          },
-          epoch,
-          url,
-        );
-        const changed = batch.filter(
-          (m) =>
-            known.hashes[m.id] !== checksums[m.id] &&
-            known.seen?.[m.id] !== checksums[m.id],
-        );
+        const changed = batch;
         // Small transport batches, but no substring cap. A very large message
         // is submitted alone; a refusal is shown, never disguised as a save.
         let group = [],
           bytes = 0;
         async function flush() {
-          await request(
+          const result = await request(
             {
               op: "messages",
               conversation: snapshot.conversation,
@@ -323,6 +323,7 @@
             epoch,
             url,
           );
+          if (result.receipt) receipts.push(result.receipt);
           group = [];
           bytes = 0;
         }
@@ -336,8 +337,8 @@
         await flush();
         done += batch.length;
         await status(
-          "Messages saved",
-          `${done} of ${total} loaded messages saved. Checking attachments…`,
+          "Queued on this browser",
+          `${done} of ${total} loaded messages protected in this browser. Checking attachments…`,
           done,
           total,
         );
@@ -346,6 +347,7 @@
         m.attachments.map((a) => ({ m, a })),
       );
       let savedMedia = 0,
+        queuedMedia = 0,
         missing = 0,
         problem = "";
       for (const { m, a } of attachments) {
@@ -364,8 +366,12 @@
           total,
         );
         try {
-          await saveMedia(snapshot, m, a, epoch, url);
-          savedMedia++;
+          const result = await saveMedia(snapshot, m, a, epoch, url);
+          if (result.saved) savedMedia++;
+          else {
+            queuedMedia++;
+            receipts.push(result.receipt);
+          }
           retryAt.delete(retryKey);
         } catch (error) {
           if (!current(epoch, url)) return;
@@ -374,17 +380,33 @@
           retryAt.set(retryKey, { at: Date.now() + 60_000, reason: problem });
         }
       }
-      pending = missing > 0 || snapshot.streaming;
+      const delivery = await request(
+        { op: "delivery", conversation: snapshot.conversation, receipts },
+        epoch,
+        url,
+      );
+      const waiting = delivery.queued > 0;
+      const receiptProblem = delivery.missing > 0 || delivery.problems?.length;
+      if (!waiting && !receiptProblem) {
+        savedMedia += queuedMedia;
+        queuedMedia = 0;
+      }
+      pending = missing > 0 || snapshot.streaming || waiting || receiptProblem;
+      unsafeToClose = missing > 0 || snapshot.streaming || receiptProblem;
       const coverage = snapshot.uncertain
         ? "Some speaker, title or message identities are unverified. "
         : "";
       await status(
-        missing
-          ? "Attachments pending"
-          : snapshot.streaming
-            ? "Response arriving"
-            : "Saved what’s loaded",
-        `${total} messages · ${savedMedia}/${attachments.length} attachment files saved. ${missing ? problem + " " : ""}${coverage}Saved media is the resource exposed by the site; previews may not be originals. Older history and other conversations are not checked.`,
+        receiptProblem
+          ? "Needs attention"
+          : waiting
+            ? "Queued on this browser"
+            : missing
+              ? "Attachments pending"
+              : snapshot.streaming
+                ? "Response arriving"
+                : "Saved what’s loaded",
+        `${total} loaded messages. ${waiting ? "Waiting captures are protected in this browser and will retry when OddBrain reconnects. " : receiptProblem ? "Some captures were cleared or refused; check the extension outbox. " : "Messages saved to OddBrain. "}${savedMedia}/${attachments.length} attachment files saved${queuedMedia ? "; " + queuedMedia + " complete files queued" : ""}. ${missing ? problem + " Reopen or keep this conversation open to finish missing files. " : ""}${delivery.problems?.[0] || ""} ${coverage}Older history and other conversations are not checked. Media may be previews, not originals.`,
         done,
         total,
         `${savedMedia}/${attachments.length}`,
@@ -394,7 +416,8 @@
         pending = true;
         await status(
           "Saving interrupted",
-          error.message + " Keep this tab open; OddBrain will retry.",
+          error.message +
+            " Already queued captures remain in this browser. Keep this tab open for anything not yet queued.",
         );
       }
     } finally {
@@ -477,6 +500,7 @@
       run++;
       activeAbort?.abort();
       pending = false;
+      unsafeToClose = false;
       retryAt.clear();
       dirty = true;
     }
@@ -484,7 +508,7 @@
   }, 6000);
   // Best-effort close warning, not a promise that a browser will keep a tab alive.
   window.addEventListener("beforeunload", (event) => {
-    if (pending) {
+    if (unsafeToClose) {
       event.preventDefault();
       event.returnValue = "";
     }

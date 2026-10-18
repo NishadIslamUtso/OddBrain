@@ -455,6 +455,70 @@ fs.mkdirSync(dir, { recursive: true });
       path: path.join(dir, "extension-library.png"),
       fullPage: true,
     });
+    // Waiting conversations use the existing outbox, with plain text titles,
+    // honest partial-file wording and explicit discard confirmation.
+    await inner().evaluate(() => {
+      const original = chrome.runtime.sendMessage;
+      let waiting = [
+        {
+          id: "fixture-receipt",
+          title: "<img src=x onerror=alert(1)> Saved later",
+          messages: 2,
+          parts: 3,
+          incomplete: true,
+          files: 0,
+          bytes: 1000,
+          problem: "",
+        },
+      ];
+      chrome.runtime.sendMessage = async (msg) => {
+        if (msg.type === "ob-conversation-outbox")
+          return {
+            ok: true,
+            conversations: waiting,
+            count: waiting.length,
+            bytes: 1000,
+          };
+        if (msg.type === "ob-conversation-discard") {
+          waiting = [];
+          return { ok: true };
+        }
+        return original(msg);
+      };
+    });
+    await ui().locator("[data-tab=activity]").click();
+    await ui()
+      .getByRole("button", { name: "Discard waiting capture", exact: true })
+      .waitFor();
+    assert.match(
+      await ui().locator("#queue-list").innerText(),
+      /Reopen the source conversation/,
+    );
+    assert.equal(await ui().locator("#queue-list img").count(), 0);
+    await page.screenshot({
+      path: path.join(dir, "conversation-outbox.png"),
+      fullPage: true,
+    });
+    await ui()
+      .getByRole("button", { name: "Discard waiting capture", exact: true })
+      .click();
+    await ui().getByRole("button", { name: "Keep it", exact: true }).click();
+    assert.equal(
+      await ui()
+        .getByRole("button", { name: "Discard waiting capture", exact: true })
+        .count(),
+      1,
+    );
+    await ui()
+      .getByRole("button", { name: "Discard waiting capture", exact: true })
+      .click();
+    await ui()
+      .getByRole("dialog")
+      .getByRole("button", { name: "Discard waiting capture", exact: true })
+      .click();
+    await ui()
+      .getByRole("button", { name: "Discard waiting capture", exact: true })
+      .waitFor({ state: "hidden" });
     assert.deepEqual(errors, []);
     fs.writeFileSync(
       path.join(dir, "browser-acceptance.json"),
@@ -465,7 +529,7 @@ fs.mkdirSync(dir, { recursive: true });
       ),
     );
     console.log(
-      "PASS: capture review, capsule versions, XSS text rendering, exclusions, queue confirmation, 8 looks × 2 surfaces × 4 screens, 280px layout, motion pause, private extraction, focused insertion, no automatic draft queries.",
+      "PASS: capture review, capsule versions, XSS text rendering, exclusions, durable conversation outbox/discard confirmation, 8 looks × 2 surfaces × 4 screens, 280px layout, motion pause, private extraction, focused insertion, no automatic draft queries.",
     );
   } finally {
     await browser.close();
