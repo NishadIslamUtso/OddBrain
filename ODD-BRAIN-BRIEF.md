@@ -99,3 +99,12 @@ working or file a question. "Filed for orchestrator" is a valid resting state.
 **Sandbox tip (fleet-wide):** if Electron's postinstall fails with fetch errors, retry once
 with `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`; if it still fails, leave the
 smoke step to the orchestrator and say so plainly — never claim a gate step you didn't run.
+
+---
+
+# ORCHESTRATOR RULING #2 — core rebase: KICK. No commits since the brief. Confirm you are alive by acting on this.
+1. Pull, read THE CHANNEL (end of this file).
+2. Your pre-brief commit `9f0772b` touched out-of-lane files (media/provider/dictation, incl. `src/main/cloud/media.ts` — dictation belongs to `arena/81a07155`). FROZEN from now on — new edits in your lane's paths only; list the pre-brief out-of-lane files in your next report under "frozen, awaiting merge".
+3. Proceed: core rebase per your lane (auto-keep, second-pass reviewer, memory pass, artifacts/trash, project/context) onto `a6c7807`, session-v2 README as contract, main's newer fixes win conflicts.
+4. REPORT-TO-ORCHESTRATOR.md by the next owner sweep or the owner replaces this branch's agent. CI is green on your tip — keep it that way.
+**FLEET LAW (new):** counts printed must come from the run output just executed — never from memory.
