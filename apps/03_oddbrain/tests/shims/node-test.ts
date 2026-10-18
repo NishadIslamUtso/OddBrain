@@ -75,16 +75,27 @@ function createMock(onRestore: (undo: () => void) => void) {
   }
 }
 
+type TestOptions = {
+  /** A test that starts real child processes needs longer than the runner's 5 s default. */
+  timeout?: number
+}
+
 type TestFn = {
   (name: string, body: Body): void
+  (name: string, options: TestOptions, body: Body): void
   skip: (name: string, body?: Body) => void
   todo: (name: string) => void
   before: (body: () => unknown) => void
   after: (body: () => unknown) => void
 }
 
-const test = ((name: string, body: Body) => {
-  vitestTest(name, context => {
+const test = ((name: string, optionsOrBody: TestOptions | Body, maybeBody?: Body) => {
+  // node:test takes options as the second argument. Vitest 4+ also wants them
+  // there. Forwarding them matters: a test that says 20 s and silently gets the
+  // 5 s default is a test whose timeout is a comment.
+  const options = typeof optionsOrBody === 'function' ? {} : optionsOrBody
+  const body = (typeof optionsOrBody === 'function' ? optionsOrBody : maybeBody) as Body
+  vitestTest(name, options as never, context => {
     const mock = createMock(() => {})
     const hooks: Array<() => unknown> = []
     const ctx: TestContext = {
