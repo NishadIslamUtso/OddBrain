@@ -23,27 +23,25 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install
-        working-directory: apps/03_oddbrain
-        run: npm ci --no-audit --no-fund
-      - name: Build and package the installer
-        working-directory: apps/03_oddbrain
-        run: npm run dist:win
-      - name: Verify packaged media workers under Electron
-        working-directory: apps/03_oddbrain
-        timeout-minutes: 5
-        run: npx electron scripts/check-electron-media.cjs dist/win-unpacked/resources/app.asar.unpacked/out/main/mediaWorker.js
-      - name: Prove it - sha256 into the summary
-        working-directory: apps/03_oddbrain
-        shell: pwsh
-        run: |
-          $h = (Get-FileHash dist/OddBrain-Setup-0.9.0.exe -Algorithm SHA256).Hash.ToLower()
-          "$h  OddBrain-Setup-0.9.0.exe" | Out-File -Encoding ascii dist/OddBrain-Setup-0.9.0.exe.sha256
-          Add-Content $env:GITHUB_STEP_SUMMARY "## Installer built"
-          Add-Content $env:GITHUB_STEP_SUMMARY '```'
-          Add-Content $env:GITHUB_STEP_SUMMARY "sha256: $h"
-          Add-Content $env:GITHUB_STEP_SUMMARY '```'
-      - name: Upload the artifact (30 days)
+      - name: Exact ordered install, types, unit, build and scroll gate
+        env:
+          ODDBRAIN_VERIFY_DIR: ${{ runner.temp }}/oddbrain-verification
+        run: node scripts/verify-gate.cjs
+      - name: Build UNSIGNED installer (unknown publisher) and verify actual packaged executable
+        env:
+          ODDBRAIN_VERIFY_DIR: ${{ runner.temp }}/oddbrain-verification
+        run: node scripts/verify-package.cjs
+      - name: Verification evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer-verification-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/oddbrain-verification/*.json
+            ${{ runner.temp }}/oddbrain-verification/*.log
+          retention-days: 30
+          if-no-files-found: warn
+      - name: Upload UNSIGNED installer — unknown publisher (30 days)
         uses: actions/upload-artifact@v4
         with:
           name: OddBrain-Setup-${{ github.sha }}

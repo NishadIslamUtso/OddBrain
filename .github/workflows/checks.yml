@@ -1,127 +1,80 @@
-# The gate, on every push, on both operating systems. Linux always ran it;
-# Windows (the target OS) joined 2026-10-17 as allow-failure until it ran
-# green once — and when it did, the training wheels came off the same day.
-# A red X here fails the push now. It earned that.
 name: checks
 on: [push, pull_request]
+permissions:
+  contents: read
 jobs:
   linux:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
+    timeout-minutes: 30
+    env:
+      ODDBRAIN_VERIFY_DIR: ${{ runner.temp }}/oddbrain-verification
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install
-        working-directory: apps/03_oddbrain
-        run: npm install --no-audit --no-fund
-      - name: Types
-        working-directory: apps/03_oddbrain
-        run: npx tsc --noEmit -p tsconfig.json
-      - name: Tests
-        working-directory: apps/03_oddbrain
-        run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-linux.xml
-      - name: Linux speaks
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const p = 'apps/03_oddbrain/junit-linux.xml';
-            if (fs.existsSync(p)) {
-              const raw = fs.readFileSync(p, 'utf8');
-              const lines = [];
-              for (const suite of raw.split(/(?=<testsuite )/)) {
-                const head = suite.match(/<testsuite name="([^"]+)"[^>]*failures="(\d+)" errors="(\d+)"/);
-                if (!head || (head[2] === '0' && head[3] === '0')) continue;
-                lines.push('FAILED SUITE ' + head[1] + ' (' + head[2] + ' failures, ' + head[3] + ' errors)');
-                for (const m of suite.matchAll(/<testcase classname="[^"]*" name="([^"]*)"[^>]*>\s*<failure message="([^"]*)"/g)) {
-                  lines.push('  - ' + m[1] + ' — ' + m[2].slice(0, 800));
-                }
-              }
-              if (lines.length) {
-                let body = lines.join('\n');
-                if (body.length > 40000) body = body.slice(0, 40000) + '\n...truncated';
-                await github.rest.repos.createCommitComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  commit_sha: context.sha,
-                  body: 'linux failures, in its own words:\n\n' + body
-                });
-              }
-            }
-      - name: Build
-        working-directory: apps/03_oddbrain
-        run: npm run build
-      - name: Native PDF, OCR and Office workers (offline)
-        working-directory: apps/03_oddbrain
-        timeout-minutes: 5
-        run: node scripts/check-media-native.cjs
-      - name: Smoke — the window opens and the console is clean
-        working-directory: apps/03_oddbrain
-        timeout-minutes: 5
-        env:
-          ELECTRON_DISABLE_SANDBOX: 1
+      - name: Electron and Xvfb system dependencies
         run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64
-          xvfb-run -a npx electron . --smoke
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64 libatk-bridge2.0-0 libgtk-3-0
+      - name: Exact ordered gate and real scrolling smoke
+        run: xvfb-run -a node scripts/verify-gate.cjs
+      - name: Gate contract tests
+        run: node --test tests/verification-gate.test.cjs
+      - name: Actual offline decoder workers
+        working-directory: apps/03_oddbrain
+        run: node scripts/check-media-native.cjs
+      - name: Install matching test browser
+        working-directory: apps/03_oddbrain
+        run: npx playwright-core install --with-deps chromium
+      - name: Actual renderer checks (fixture limitations recorded)
+        run: node scripts/verify-renderer.cjs
+      - name: Built Electron automation with local CLI and HTTP fixtures
+        run: xvfb-run -a node scripts/verify-electron.cjs
+      - name: Verification evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-linux-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/oddbrain-verification/*.json
+            ${{ runner.temp }}/oddbrain-verification/*.log
+            ${{ runner.temp }}/oddbrain-verification/*.png
+            ${{ runner.temp }}/oddbrain-verification/renderer
+          if-no-files-found: warn
+          retention-days: 14
 
   windows:
     runs-on: windows-latest
-    permissions:
-      contents: write
+    timeout-minutes: 40
+    env:
+      ODDBRAIN_VERIFY_DIR: ${{ runner.temp }}/oddbrain-verification
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install
+      - name: Exact ordered gate and real scrolling smoke
+        run: node scripts/verify-gate.cjs
+      - name: Gate contract tests
+        run: node --test tests/verification-gate.test.cjs
+      - name: Actual offline decoder workers
         working-directory: apps/03_oddbrain
-        run: npm ci --no-audit --no-fund
-      - name: Types
-        working-directory: apps/03_oddbrain
-        run: npx tsc --noEmit -p tsconfig.json
-      - name: Tests
-        working-directory: apps/03_oddbrain
-        run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-windows.xml
-      - name: Windows speaks
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const p = 'apps/03_oddbrain/junit-windows.xml';
-            if (fs.existsSync(p)) {
-              const raw = fs.readFileSync(p, 'utf8');
-              const lines = [];
-              for (const suite of raw.split(/(?=<testsuite )/)) {
-                const head = suite.match(/<testsuite name="([^"]+)"[^>]*failures="(\d+)" errors="(\d+)"/);
-                if (!head || (head[2] === '0' && head[3] === '0')) continue;
-                lines.push('FAILED SUITE ' + head[1] + ' (' + head[2] + ' failures, ' + head[3] + ' errors)');
-                for (const m of suite.matchAll(/<testcase classname="[^"]*" name="([^"]*)"[^>]*>\s*<failure message="([^"]*)"/g)) {
-                  lines.push('  - ' + m[1] + ' — ' + m[2].slice(0, 800));
-                }
-              }
-              if (lines.length) {
-                let body = lines.join('\n');
-                if (body.length > 40000) body = body.slice(0, 40000) + '\n...truncated';
-                await github.rest.repos.createCommitComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  commit_sha: context.sha,
-                  body: 'windows failures, in its own words:\n\n' + body
-                });
-              }
-            }
-      - name: Build
-        working-directory: apps/03_oddbrain
-        run: npm run build
-      - name: Native PDF, OCR and Office workers (offline)
-        working-directory: apps/03_oddbrain
-        timeout-minutes: 5
         run: node scripts/check-media-native.cjs
-      - name: Smoke — the window opens and the console is clean
+      - name: Install matching test browser
         working-directory: apps/03_oddbrain
-        timeout-minutes: 5
-        shell: pwsh
-        run: npx electron . --smoke
+        run: npx playwright-core install chromium
+      - name: Actual renderer checks (fixture limitations recorded)
+        run: node scripts/verify-renderer.cjs
+      - name: Verification evidence, including failures
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: verification-windows-${{ github.sha }}
+          path: |
+            ${{ runner.temp }}/oddbrain-verification/*.json
+            ${{ runner.temp }}/oddbrain-verification/*.log
+            ${{ runner.temp }}/oddbrain-verification/*.png
+            ${{ runner.temp }}/oddbrain-verification/renderer
+          if-no-files-found: warn
+          retention-days: 14

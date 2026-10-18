@@ -60,6 +60,8 @@
 6. **Unsigned installer** — Windows shows "unknown publisher". No certificate exists; stated, not hidden.
 7. **The two real-machine bugs you reported 2026-10-18 — FIXED IN CODE, pending your machine.** ① App found no Ollama and the desktop app quits fully, so you had to run `ollama serve` by hand → now the app starts your installed copy at boot (`%LOCALAPPDATA%\Programs\Ollama\ollama.exe` → PATH → staged copy), the Ollama card has "Start the brain door", and the honest answer names which copy started. ② agy not found → "Point to the exe…" on the agy card persists your pick in `userData/engine-binaries.json` and it beats every probe/launch; "Use automatic detection" undoes it. Both covered by 7 new tests (99 files / 723 total). Install the newest CI artifact and check on the TUF A15 — that closes them for real.
 
+Verification-lane disposition of all seven baseline gaps: see [VERIFY-RESULTS.md](VERIFY-RESULTS.md). This is a coverage/blocker ledger, not installed-machine acceptance. The ordered local gate is blocked at Electron download; new CI and the manual unsigned installer run are pending.
+
 ## 5. THE LAWS (kept, and what made me keep them)
 
 - **Honesty over polish** — your "fake green dots / fake model names". Words, never colored claims; no invented names; retries name the fix; crashed panes speak (error boundary). Kept because one lie costs more than ten features.
