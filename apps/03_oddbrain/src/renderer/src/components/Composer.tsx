@@ -206,6 +206,7 @@ export default function Composer({
               <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:battle', { detail: value })); setTools(false) }}><Swords size={14} />Brain battle</button>
               <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:split', { detail: value })); setTools(false) }}><ListOrdered size={14} />Split a task</button>
               <button type="button" aria-pressed={look.showThinking} onClick={() => changeLook({ showThinking: !look.showThinking })}><ScrollText size={14} />Thinking details<span>{look.showThinking ? 'On' : 'Off'}</span></button>
+              <button type="button" onClick={() => { window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' })); setTools(false) }}><ListOrdered size={14} />Memory inbox</button>
               <button type="button" onClick={() => { window.dispatchEvent(new Event('app:show-journal')); setTools(false) }}><ListOrdered size={14} />Turn journal</button>
             </div> : null}
           </div>
@@ -557,8 +558,7 @@ function ModelChip({ open, onToggle }: { open: boolean; onToggle: () => void }) 
           {/* The engine's own choice, always first and always real: it is
               whatever the engine itself logs in with — never a name this app
               invented. */}
-          {engine.settings.id === 'claude-code' ? (
-            <button
+          <button
               type="button"
               role="menuitemradio"
               aria-checked={engine.settings.model === ''}
@@ -572,8 +572,7 @@ function ModelChip({ open, onToggle }: { open: boolean; onToggle: () => void }) 
             >
               <span className="min-w-0 flex-1 truncate">{modelLabel('')}</span>
               <span className="shrink-0 text-[10.5px] text-muted">its own login</span>
-            </button>
-          ) : null}
+          </button>
           {engine.models.entries.length === 0 ? (
             <p className="px-2.5 py-2 text-[12px] leading-relaxed text-muted">
               {engine.models.loading
@@ -583,21 +582,21 @@ function ModelChip({ open, onToggle }: { open: boolean; onToggle: () => void }) 
           ) : (
             entries.map(entry => (
               <button
-                key={entry.name}
+                key={`${entry.provider || "ollama"}:${entry.name}`}
                 type="button"
                 role="menuitemradio"
-                aria-checked={entry.name === engine.settings.model}
+                aria-checked={entry.name === engine.settings.model && (entry.provider || '') === engine.settings.cloudProvider}
                 onClick={() => {
                   void engine.setModel(entry.name, entry.provider)
                   onToggle()
                 }}
                 className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] ${
-                  entry.name === engine.settings.model ? 'bg-white/[0.06] text-ink' : 'text-muted hover:text-ink'
+                  entry.name === engine.settings.model && (entry.provider || '') === engine.settings.cloudProvider ? 'bg-white/[0.06] text-ink' : 'text-muted hover:text-ink'
                 }`}
               >
                 <span className="min-w-0 flex-1 truncate">{entry.name}</span>
                 {entry.cloud ? (
-                  <span className="shrink-0 rounded-md border border-line px-1.5 text-[10px] text-muted">cloud</span>
+                  <span className="shrink-0 rounded-md border border-line px-1.5 text-[10px] text-muted">{entry.provider === 'anthropic' ? 'Anthropic' : 'cloud'}</span>
                 ) : typeof entry.sizeGB === 'number' ? (
                   <span className="shrink-0 text-[10.5px] text-muted">{entry.sizeGB.toFixed(1)} GB</span>
                 ) : null}

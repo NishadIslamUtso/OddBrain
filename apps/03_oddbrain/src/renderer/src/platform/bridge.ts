@@ -1,3 +1,5 @@
+import type { MemoryBridge } from '@shared/lib/memoryWorkspace'
+import { demoMemoryWorkspace } from './sampleMemory'
 import { DEFAULT_MEDIA, type MediaBridge } from '@shared/lib/mediaBridge'
 import type { MarketplaceBridge } from '@shared/lib/marketplace'
 import { DEFAULT_AUTOMATION, normalizeAutomation, type AutomationBridge, type AutomationView } from '@shared/lib/automation'
@@ -48,6 +50,7 @@ import type {
 export type DesktopBridge = {
   media: MediaBridge
   marketplace: MarketplaceBridge
+  memoryWorkspace: MemoryBridge
   automation: AutomationBridge
   extensionPair: {
     get: () => Promise<{ token: string }>
@@ -196,6 +199,7 @@ export type DesktopBridge = {
   }
   /** Whether the browser extension can reach this app, and where. */
   extension: {
+    publishAppearance?: (value: import('@shared/lib/extensionAppearance').ExtensionAppearance) => Promise<{ ok: boolean }>
     status: () => Promise<{ ok: boolean; listening: boolean; port: number; url: string; error: string }>
   }
   /**
@@ -275,6 +279,7 @@ const demoBridge: DesktopBridge = {
   },
   marketplace: { sources: async () => [], browse: unavailableMarket, probe: unavailableMarket, installed: unavailableMarket, plan: unavailableMarket, confirm: unavailableMarket, cancel: async () => {} },
   automation: demoAutomation,
+  memoryWorkspace: demoMemoryWorkspace,
   extensionPair: {
     get: async () => ({ token: '' }),
     rotate: async () => ({ ok: false, token: '' }),
@@ -632,3 +637,5 @@ export const getAutomationApi = (): AutomationBridge => {
   if (typeof window !== 'undefined') { const candidate = (window as unknown as { api?: { automation?: AutomationBridge } }).api?.automation; if (candidate) return candidate }
   return demoAutomation
 }
+
+export const getMemoryWorkspaceApi = (): MemoryBridge => window.api?.memoryWorkspace || demoMemoryWorkspace

@@ -1,3 +1,4 @@
+import { selectEngine } from '@shared/lib/engine'
 /**
  * The engine, as the interface sees it.
  *
@@ -124,7 +125,7 @@ type EngineStore = EngineState & {
   /** Whether the engine process is alive on this machine. */
   running(): boolean
   /** Choose which engine thinks inside the app; persists. */
-  pick(id: EngineId): Promise<void>
+  pick(id: EngineId): Promise<{ ok: boolean; answer: string }>
   /** Ask the brain door what the engine can use. */
   loadModels(): Promise<void>
   /** Pick the engine's brain; persists. */
@@ -222,6 +223,7 @@ const drainLine = (): void => {
 
 let subscribed = false
 let initializing = false
+let modelRequest = 0
 let version = 0
 const listeners = new Set<() => void>()
 
@@ -503,23 +505,33 @@ const store: EngineStore = {
     return state.alive
   },
 
-  async pick(id: EngineId): Promise<void> {
+  async pick(id: EngineId): Promise<{ ok: boolean; answer: string }> {
     const answer = await getEngineApi().pick(id)
-    if (answer.ok) setState({ settings: { ...state.settings, id } })
+    if (!answer.ok) { setState({ models: { ...state.models, error: answer.answer } }); return answer }
+    if (state.settings.id !== id) {
+      modelRequest++
+      setState({ settings: selectEngine(state.settings, id), models: { loading: false, entries: [], error: '' } })
+      await store.loadModels()
+    }
+    return answer
   },
 
   async loadModels(): Promise<void> {
     if (state.models.loading) return
+    const request = ++modelRequest
     setState({ models: { ...state.models, loading: true, error: '' } })
-    const answer = await getEngineApi().models()
-    setState({
-      models: { loading: false, entries: answer.models, error: answer.ok ? '' : answer.error || 'the brain door did not answer' },
-    })
+    try {
+      const answer = await getEngineApi().models()
+      if (request !== modelRequest) return
+      setState({ models: { loading: false, entries: answer.models, error: answer.error || (!answer.ok ? 'The model sources did not answer.' : '') } })
+    } catch {
+      if (request === modelRequest) setState({ models: { loading: false, entries: [], error: 'The model sources could not be read. Try refreshing.' } })
+    }
   },
 
   async setModel(name: string, provider?: 'anthropic'): Promise<void> {
     const answer = await getEngineApi().setModel(name, provider)
-    if (answer.ok) setState({ settings: { ...state.settings, model: name } })
+    if (answer.ok) setState({ settings: { ...state.settings, model: name, cloudProvider: provider === 'anthropic' ? 'anthropic' : '' } })
   },
 
   async setApproval(mode: ApprovalMode): Promise<void> {
@@ -641,6 +653,7 @@ export function usePermissionsWaiting(): number {
 
 /** Test seam: put the store back to its first day. */
 export function resetEngineForTests(): void {
+  modelRequest++
   subscribed = false
   state.on = false
   state.turn = null

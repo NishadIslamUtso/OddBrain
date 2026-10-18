@@ -15,7 +15,7 @@ import EngineBay from './EngineBay'
 import AutomationControls from '../ui/AutomationControls'
 import RecipesSection from './RecipesSection'
 import HooksSection from './HooksSection'
-import MemorySection from './MemorySection'
+import { OrganizerSettings } from './MemoryWorkspace'
 import { useEngine } from '@/state/engine'
 import type { VaultState } from '../hooks/useVault'
 import {
@@ -31,7 +31,6 @@ import { DEFAULT_APPEARANCE, type Appearance } from '../state/appearance'
 import { DEFAULT_LOOK, DEFAULT_SIDEBAR, type LookPreferences, type SidebarPreferences } from '../state/look'
 import AppearancePanel from '../ui/AppearancePanel'
 import WatchSection from './WatchSection'
-import MemoryMap from './MemoryMap'
 import { useQuickPreference, setQuickPreference } from '../state/quickPreference'
 import {
   CUSTOM_FIELDS,
@@ -91,7 +90,7 @@ function AgentAccessCard({ isDemo }: { isDemo: boolean }): ReactNode {
     <div className="min-w-0">
       <div className="text-[12.5px]">The browser extension proves itself with this token.</div>
       <div className="mt-0.5 text-[11.5px] text-muted">
-        Copy it once into the extension popup (Pairing tab). It never travels over the network; rotating it makes every
+        Copy it once into the extension popup (Settings tab). It never travels over the network; rotating it makes every
         already-paired extension ask again.
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -111,7 +110,7 @@ function AgentAccessCard({ isDemo }: { isDemo: boolean }): ReactNode {
           aria-label="Copy the pairing token"
           onClick={() => {
             void navigator.clipboard?.writeText(token)
-            setNote('Copied. Paste it into the extension popup, Pairing tab.')
+            setNote('Copied. Paste it into the extension popup, Settings tab.')
           }}
           className="rounded-lg border border-line px-2 py-0.5 text-[11px] text-ink hover:border-accent"
         >
@@ -164,7 +163,7 @@ export const SECTIONS: readonly { id: SectionId; title: string; group: string; r
   { id: 'media', title: 'Voice & files', group: 'Files & memory' },
   { id: 'vault', title: 'Vault', group: 'Files & memory' },
   { id: 'memory', title: 'Memory', group: 'Files & memory' },
-  { id: 'maps', title: 'Browsing maps', group: 'Files & memory' },
+  { id: 'maps', title: 'Capture sources', group: 'Files & memory' },
   { id: 'house', title: 'House rules', group: 'Agent behavior' },
   { id: 'skills', title: 'Skills', group: 'Agent behavior' },
   { id: 'recipes', title: 'Recipes', group: 'Agent behavior' },
@@ -550,7 +549,7 @@ export default function SettingsView({
       { label: 'Warm runtime', terms: 'warm ollama runtime background staged', body: <StartupRow flag="warmRuntime" onLabel="Starts with the app" offLabel="Starts when you press start" /> },
       { label: 'Shortcuts', terms: 'keyboard ctrl comma settings new chat find search', body: <dl className="ob-shortcuts"><div><dt>Settings</dt><dd>Ctrl+,</dd></div><div><dt>Find chat or screen</dt><dd>Ctrl+K</dd></div><div><dt>Find in conversation</dt><dd>Ctrl+F</dd></div><div><dt>Quick window</dt><dd>Ctrl+Shift+O</dd></div><div><dt>Send / new line</dt><dd>Enter / Shift+Enter</dd></div></dl> },
     ],
-    maps: [{ label: 'Browsing maps', terms: 'browsing maps sources pages visits history capture read timeline', body: <MemoryMap open onClose={() => undefined} embedded /> }],
+    maps: [{ label: 'Capture sources', terms: 'browsing maps sources pages visits history capture read timeline', body: <div><p>Saved conversations, files and capture coverage now live in Vault. No browser history is collected.</p><button type="button" className="ob-small-button" onClick={() => window.dispatchEvent(new Event('app:capture-sources'))}>Open Capture sources in Vault</button></div> }],
     about: [
       { label: 'Setup', terms: 'first run setup welcome onboarding replay', body: <button type="button" className="ob-small-button" onClick={onReplaySetup}>Replay first-run setup</button> },
       { label: 'OddBrain', terms: 'about version windows help learn more repository', body: <div className="ob-form-column"><span>{bridge.app.version} · {bridge.app.platform}</span><a href="https://github.com/NishadIslamUtso/OddBrain" onClick={e => { e.preventDefault(); if (isDemo) { if (!window.open('https://github.com/NishadIslamUtso/OddBrain', '_blank', 'noopener,noreferrer')) setHelpNote('Open github.com/NishadIslamUtso/OddBrain in your browser.'); return } void bridge.app.openExternal?.('https://github.com/NishadIslamUtso/OddBrain').then(r => { if (!r.ok) setHelpNote('The browser could not be opened.') }).catch(() => setHelpNote('The browser could not be opened.')) }}>OddBrain repository & help</a></div> },
@@ -575,7 +574,7 @@ export default function SettingsView({
               }`}
             />
             <div className="min-w-0">
-              {sampleEnabled() && <button type="button" className="ob-small-button" onClick={() => { try { captureSamplePage(); setHelpNote('Sample page captured. Open Vault, Today or Browsing maps to inspect it.'); onChanged() } catch { setHelpNote('Sample capture could not be saved to browser storage.') } }}>Capture sample page</button>}
+              {sampleEnabled() && <button type="button" className="ob-small-button" onClick={() => { try { captureSamplePage(); setHelpNote('Sample page captured. Open Vault → Capture sources to inspect it.'); onChanged() } catch { setHelpNote('Sample capture could not be saved to browser storage.') } }}>Capture sample page</button>}
               <div className="text-[12.5px]">
                 {sampleEnabled() ? 'Sample extension · not connected to a browser' : isDemo
                   ? 'Not in this window'
@@ -584,7 +583,7 @@ export default function SettingsView({
                     : 'Not connected'}
               </div>
               <div className="mt-0.5 break-all text-[11.5px] text-muted">
-                {sampleEnabled() ? 'Try a simulated capture, then open Vault or Browsing maps. No page is downloaded.' : isDemo
+                {sampleEnabled() ? 'Try a simulated capture, then open Vault or Capture sources. No page is downloaded.' : isDemo
                   ? 'The extension connects to this app over the local loopback port.'
                   : extension.listening
                     ? 'Pages and conversations the extension captures arrive here. One-time setup: chrome://extensions → Developer mode → Load unpacked → choose the extension folder that ships with this app.'
@@ -1082,7 +1081,7 @@ export default function SettingsView({
       {
         label: 'Engine memory',
         terms: 'memory remember facts decisions preferences vault notes auto keep forget engine notes',
-        body: <MemorySection />,
+        body: <OrganizerSettings />,
       },
     ],
     hooks: [

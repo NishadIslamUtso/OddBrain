@@ -366,7 +366,7 @@ test('a key from Models rides the ENGINE: its env points the engine at the provi
   // the app itself still calls no provider. The local door is not touched at all.
   const env = brainEnvironment('http://localhost:11434', 'sk-ant-test')
   assert.deepEqual(env, {
-    ANTHROPIC_BASE_URL: 'https://api.anthropic.com/v1',
+    ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
     ANTHROPIC_API_KEY: 'sk-ant-test',
   })
   assert.equal('ANTHROPIC_AUTH_TOKEN' in env, false)

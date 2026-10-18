@@ -14,12 +14,13 @@
  */
 import { existsSync, readdirSync } from 'node:fs'
 import { basename, join, resolve } from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { InputError, VaultMissingError } from './errors'
 import { createVaultFiles, toPosix, type VaultFiles } from './files'
 import { PRIVACY_FILE, SCOPE_FILE, excluded, readPatterns, replacePatterns } from './blacklist'
 import { digest, dhakaParts, parseFollowups, safeSegment, section, splitDocument, timestamp, yamlDocument } from './text'
 import { createZip, safeEntryName } from './zip'
+import { syncConversation } from './conversations'
 
 export type Payload = Record<string, any>
 
@@ -304,7 +305,8 @@ export function createVaultService({
 
   function capture(data: Payload) {
     const store = vault()
-    const types = ['conversation', 'web_page', 'browser_visit', 'a11y_tree', 'capsule', 'artifact', 'journal', 'wasnt_accessible', 'blacklist_update']
+    if (data?.type === 'browser_visit') throw new InputError('Browser-history capture has been retired. Update the extension; existing saved visits are preserved.')
+    const types = ['conversation', 'web_page', 'a11y_tree', 'capsule', 'artifact', 'journal', 'wasnt_accessible', 'blacklist_update']
     if (!data || !types.includes(data.type)) throw new InputError('Unsupported capture type.')
     if (data.url) {
       let url: URL
@@ -381,6 +383,20 @@ export function createVaultService({
         relative,
         yamlDocument(metadata, `# ${metadata.title}\n\nProvider: ${provider}\nURL: ${metadata.url}\n\n## Transcript\n\n${transcript}`)
       )
+      if (provider === 'OddBrain') {
+        // A structured sidecar for new in-app captures. The original Markdown,
+        // model thinking/context and attachments remain untouched. Only actual
+        // message text is eligible for the separate review-only organizer.
+        const sha = (value: string) => createHash('sha256').update(value).digest('hex')
+        const base = `02 Sources/Conversations/App/${sha(provider + '\n' + id)}`
+        for (const message of prepared) {
+          const m = { id: typeof message.id === 'string' && message.id ? message.id : sha(JSON.stringify({ role: message.role, text: message.text, timestamp: message.timestamp })), role: message.role, speaker: '', text: message.text, timestamp: message.timestamp }
+          const checksum = sha(JSON.stringify(m)), record = JSON.stringify({ message: m, hash: checksum, observed_at: captured })
+          store.writeOnce(`${base}/revisions/${sha(m.id)}-${checksum}.json`, record)
+          store.writeAtomic(`${base}/messages/${sha(m.id)}.json`, record)
+        }
+        store.writeAtomic(`${base}/conversation.json`, JSON.stringify({ key: id, provider, adapter: 'oddbrain', title: metadata.title, url: metadata.url, original: relative }))
+      }
       // Source snapshots are immutable. Capturing a conversation title is NOT
       // confirmation of a personal fact, so no entity is created here.
     } else if (data.type === 'web_page') {
@@ -460,21 +476,6 @@ export function createVaultService({
           })}\n`
         )
       }
-    } else if (data.type === 'browser_visit') {
-      if (!data.url) throw new InputError('Visit URL is required.')
-      relative = `02 Sources/Browser Activity/${year}/${month}.jsonl`
-      store.append(
-        relative,
-        `${JSON.stringify({
-          url: data.url,
-          title: data.title || '',
-          visited_at: timestamp(data.visited_at, captured),
-          captured_at: captured,
-          capture_status: data.capture_status || 'visit-only',
-          source: data.source || 'history-api',
-          interpretation: 'Visit metadata is not proof of reading or agreement.',
-        })}\n`
-      )
     } else if (data.type === 'wasnt_accessible') {
       if (typeof data.reason !== 'string' || !data.reason.trim()) throw new InputError('Failure reason is required.')
       relative = `01 Inbox/Processing Errors/${year}-${month}.md`
@@ -486,6 +487,7 @@ export function createVaultService({
       const capsule = data.capsule
       if (!capsule || typeof capsule.title !== 'string' || !capsule.title.trim()) throw new InputError('Capsule title is required.')
       const id = safeSegment(capsule.id, 'capsule id')
+      if (id.startsWith('memory-')) throw new InputError('This capsule is reviewed memory. Correct it in Brain → Memory inbox instead.')
       for (const key of ['goals', 'constraints', 'decisions', 'sources', 'attachments']) {
         if (capsule[key] && (!Array.isArray(capsule[key]) || capsule[key].some((item: unknown) => typeof item !== 'string'))) {
           throw new InputError(`Capsule ${key} must be a list of strings.`)
@@ -550,10 +552,17 @@ export function createVaultService({
   function listEntries(): Payload[] {
     const store = vault()
     const entries: Payload[] = []
+    let reviewed: { proposals?: Array<{ id: string; kind: string; state: string; revision: number }> } = {}, projections: Record<string, string> = {}
+    try { reviewed = JSON.parse(store.read('06 Review/Organizer/state.json') || '{}'); projections = JSON.parse(store.read('06 Review/Organizer/projections.json') || '{}') } catch { /* Fail closed for generated memory, not for ordinary manual capsules. */ }
     for (const file of store.listMarkdown('03 Memory/Entities')) {
       const source = `03 Memory/Entities/${file}`
-      const { metadata, body } = splitDocument(store.read(source))
+      const original = store.read(source), { metadata, body } = splitDocument(original)
       if (!metadata.id) continue
+      if (String(metadata.id).startsWith('memory-')) {
+        const record = Array.isArray(reviewed?.proposals) ? reviewed.proposals.find(p => `memory-${p.id}` === metadata.id && p.kind === 'capsule' && p.state === 'approved' && p.revision === Number(metadata.version)) : null
+        if (!record || createHash('sha256').update(original).digest('hex') !== projections?.[source]) continue
+        metadata.suggestion_safe = false
+      }
       const title = metadata.title || body.match(/^# (?:Capsule: )?(.+)$/m)?.[1] || file.replace(/\.md$/, '')
       if (typeof title !== 'string') continue
       entries.push({
@@ -600,11 +609,11 @@ export function createVaultService({
   }
 
   function capsules(query = ''): Payload[] {
-    return search(listEntries().filter(entry => entry.type === 'capsule'), query).slice(0, 100)
+    return search(listEntries().filter(entry => entry.type === 'capsule' && entry.status !== 'withdrawn'), query).slice(0, 100)
   }
 
   function context(query: string) {
-    const entries = query ? search(listEntries(), query).slice(0, 5) : []
+    const entries = query ? search(listEntries().filter(entry => entry.suggestion_safe !== false && entry.status !== 'withdrawn'), query).slice(0, 5) : []
     return {
       capsules: entries.filter(entry => entry.type === 'capsule'),
       entities: entries.filter(entry => entry.type !== 'capsule'),
@@ -800,6 +809,11 @@ export function createVaultService({
     blacklist,
     updateBlacklist,
     capture,
+    conversationSync(data: Payload) {
+      if (!data || typeof data.url !== 'string') throw new InputError('Conversation URL is required.')
+      if (excluded(data.url, blacklist())) return { ok: false, skipped: true, reason: 'blacklist' }
+      return syncConversation(vault(), data, clock().toISOString())
+    },
     links,
     onui,
     listEntries,

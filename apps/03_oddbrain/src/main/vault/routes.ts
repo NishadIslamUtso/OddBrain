@@ -42,6 +42,7 @@ const ROUTES: Record<string, string[]> = {
   '/onui': ['GET'],
   '/links': ['GET'],
   '/capture': ['POST'],
+  '/conversation-sync': ['POST'],
   '/export-zip': ['POST'],
 }
 
@@ -134,6 +135,7 @@ export function handleVaultRequest(service: VaultService, request: VaultRouteReq
       return fallback(route, request.method)
     }
     if (request.method === 'POST') {
+      if (route === '/conversation-sync') return { status: 200, body: service.conversationSync(request.body as Record<string, any>) }
       if (route === '/capture') return { status: 200, body: service.capture(request.body as Record<string, any>) }
       if (route === '/blacklist') return { status: 200, body: service.updateBlacklist(request.body as Record<string, any>) }
       if (route === '/export-zip') return { status: 200, body: service.exportZip(request.body as Record<string, any>) }

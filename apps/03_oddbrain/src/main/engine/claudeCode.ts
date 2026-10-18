@@ -158,7 +158,7 @@ export function brainEnvironment(baseUrl: string, apiKey?: string): Record<strin
   // no provider. Without a key the local door serves the brain, as always.
   if (apiKey) {
     return {
-      ANTHROPIC_BASE_URL: 'https://api.anthropic.com/v1',
+      ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
       ANTHROPIC_API_KEY: apiKey,
     }
   }
@@ -184,7 +184,7 @@ export function startClaudeCodeSession(input: StartSessionInput): EngineSession 
       env: {
         ...sanitizeEnvironment(process.env),
         ...(input.auth?.apiKey
-          ? brainEnvironment('https://api.anthropic.com/v1', input.auth.apiKey)
+          ? brainEnvironment('https://api.anthropic.com', input.auth.apiKey)
           : // A named brain rides the door it came from. An EMPTY model means
             // the engine runs as itself — its own login, its own default —
             // and is never pointed at a door that may not even exist. The

@@ -126,14 +126,14 @@ export function agyModelSource(installed: boolean): ModelSource {
           ok: false,
           models: [],
           error:
-            'agy is not on this machine yet, its brain list is Google\u2019s own (plan-dependent) and appears once agy is installed and signed in. Your Ollama brains cannot plug into agy: it has no custom door.',
+            'agy is not on this machine. Install and sign in to use its own default model. This app has no verified agy model-list adapter; there is no custom door for Ollama models.',
         }
       }
       return {
         ok: false,
         models: [],
         error:
-          'agy is installed. Sign in once by running `agy` in a terminal, then reopen the bay, its own brain list (Gemini family, plan-gated) will be read from the machine. Ollama brains cannot plug into agy.',
+          'agy is installed, but this app has no verified agy model-list adapter. Sign in with agy in your terminal and use the engine’s own default model. Refreshing here will not discover a catalog; Ollama models cannot be used through agy.',
       }
     },
   }

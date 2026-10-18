@@ -1,3 +1,4 @@
+import { boundedResponse } from '../network/boundedResponse'
 import type { EngineSettings } from '../../shared/lib/engine'
 import { isRemoteModel } from '../../shared/lib/ollama'
 /** Decide before sending task text. Model-list requests contain no prompt.
@@ -5,6 +6,8 @@ import { isRemoteModel } from '../../shared/lib/ollama'
 export async function inferenceAllowed(engine: EngineSettings, local: boolean, cloud: boolean, fetchImpl: typeof fetch = fetch): Promise<{ ok: boolean; answer?: string }> {
   if (local && cloud) return { ok: true }
   if (!local && !cloud) return { ok: false, answer: 'Local and cloud inference are both off in Agent access. Nothing was sent.' }
+  // With no named model, Claude uses its own login, never the Ollama endpoint.
+  if (engine.id === 'claude-code' && !engine.model) return cloud ? { ok: true } : { ok: false, answer: 'The engine default uses its own external service. Enable cloud inference, or select a verified local model. Nothing was sent.' }
   if (engine.id === 'agy' || engine.cloudProvider === 'anthropic') return cloud ? { ok: true } : { ok: false, answer: 'Cloud inference is off in Agent access. This engine/model runs externally; nothing was sent.' }
   let remote = isRemoteModel(engine.model)
   try {
@@ -14,7 +17,7 @@ export async function inferenceAllowed(engine: EngineSettings, local: boolean, c
     if (!remote) {
       const response = await fetchImpl(url.href.replace(/\/$/, '') + '/api/tags', { signal: AbortSignal.timeout(5000), redirect: 'error' })
       if (!response.ok) throw Error()
-      const text = await response.text(); if (text.length > 2_000_000) throw Error()
+      const text = await boundedResponse(response)
       const data = JSON.parse(text), model = (Array.isArray(data.models) ? data.models : []).find((m: {name?:string;model?:string}) => m.name === engine.model || m.model === engine.model)
       if (!model) throw Error()
       remote = isRemoteModel(engine.model, model)

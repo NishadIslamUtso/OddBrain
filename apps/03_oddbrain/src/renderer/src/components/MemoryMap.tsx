@@ -5,7 +5,7 @@ import CopyText from '../ui/CopyText'
 import { isDemo } from '../platform/bridge'
 
 /**
- * Browsing Maps — what was read and when.
+ * Capture sources — what was read and when.
  *
  * The vault already holds every conversation the app kept and everything the
  * browser extension captured. This is the surface that lets a person *see* it:
@@ -177,9 +177,9 @@ export default function MemoryMap({ open, onClose, embedded = false }: { open: b
   const busiest = topHosts[0]?.count || 1
 
   return (
-    <div className={embedded ? "ob-embedded-map flex flex-col bg-bg" : "absolute inset-0 z-40 flex flex-col bg-bg"} role={embedded ? undefined : "dialog"} aria-modal={embedded ? undefined : true} aria-label="Browsing Maps">
+    <div className={embedded ? "ob-embedded-map flex flex-col bg-bg" : "absolute inset-0 z-40 flex flex-col bg-bg"} role={embedded ? undefined : "dialog"} aria-modal={embedded ? undefined : true} aria-label="Capture sources">
       {!embedded ? <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
-        <h1 className="text-[15px] font-medium">Browsing Maps</h1>
+        <h1 className="text-[15px] font-medium">Capture sources</h1>
         {summary ? (
           <span className="text-[12px] text-muted">
             {summary.total} {summary.total === 1 ? 'entry' : 'entries'}
@@ -190,7 +190,7 @@ export default function MemoryMap({ open, onClose, embedded = false }: { open: b
           type="button"
           className="ml-auto rounded-lg px-2 py-1 text-muted hover:bg-white/[0.06] hover:text-ink"
           onClick={onClose}
-          aria-label="Close browsing maps"
+          aria-label="Close capture sources"
         >
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
             <path d="M5 5l10 10M15 5 5 15" />

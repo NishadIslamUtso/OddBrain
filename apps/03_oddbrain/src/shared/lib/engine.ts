@@ -225,3 +225,8 @@ export function toolSummary(name: string, input: unknown): string {
   const text = JSON.stringify(value) ?? ''
   return text.length <= 160 ? text : `${text.slice(0, 157)}…`
 }
+
+/** Engine-specific model/provider choices never leak into another adapter. */
+export function selectEngine(current: EngineSettings, id: EngineId): EngineSettings {
+  return current.id === id ? current : { ...current, id, model: '', cloudProvider: '' }
+}

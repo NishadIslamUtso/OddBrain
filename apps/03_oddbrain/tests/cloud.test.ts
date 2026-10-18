@@ -152,6 +152,49 @@ test('nothing reaches a provider when no key is saved', async () => {
   }
 })
 
+test('keys and prompts never go to insecure or ambiguous remote base URLs', async () => {
+  const keys = store().keys
+  keys.set('openai', 'sk-do-not-send')
+  let requests = 0
+  const make = (baseUrl: string) => createCloudClient({
+    keys,
+    env: { AI_ASSISTANT_OPENAI_BASE_URL: baseUrl },
+    fetchImpl: async () => {
+      requests += 1
+      return new Response('{"data":[]}', { status: 200 })
+    },
+  })
+  for (const baseUrl of ['http://198.51.100.20/v1', 'https://user:password@example.com/v1', 'https://example.com/v1?tenant=x']) {
+    const client = make(baseUrl)
+    await assert.rejects(() => client.listModels('openai'), /needs HTTPS, or HTTP on loopback/)
+    await assert.rejects(async () => {
+      for await (const _record of client.stream({ model: 'openai/private-model', messages: [{ role: 'user', content: 'private prompt' }], maxTokens: 10 })) {
+        // unreachable
+      }
+    }, /needs HTTPS, or HTTP on loopback/)
+  }
+  assert.equal(requests, 0, 'validation happens before a key or prompt can leave')
+})
+
+test('oversized model-list responses are cancelled and refused', async () => {
+  const keys = store().keys
+  keys.set('openai', 'sk-live')
+  let cancelled = false
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(new Uint8Array(2_000_001))
+    },
+    cancel() { cancelled = true },
+  })
+  const client = createCloudClient({
+    keys,
+    env: { AI_ASSISTANT_OPENAI_BASE_URL: 'https://provider.example/v1' },
+    fetchImpl: async () => new Response(body, { status: 200 }),
+  })
+  await assert.rejects(() => client.listModels('openai'), /2,000,000-byte limit/)
+  assert.equal(cancelled, true)
+})
+
 test('a saved key is what makes a model appear, and Test reports a refused key plainly', async () => {
   const provider = await fakeProvider((request, response) => {
     if (request.url === '/models') {

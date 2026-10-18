@@ -23,6 +23,7 @@ import type { OllamaMessage, OllamaRecord } from '../../shared/types'
  */
 
 export type LocalApiOptions = {
+  onInferenceActivity?: (busy: boolean) => void
   port: number
   /** Directory holding the built renderer. Omitted in dev, where Vite serves it. */
   rendererDir?: string
@@ -208,6 +209,12 @@ export function startLocalApi(options: LocalApiOptions): Promise<LocalApi> {
       response,
       () => {
         if (pathname.startsWith('/api/ollama')) {
+          if (request.method === 'POST' && /\/(chat|generate)$/.test(pathname)) {
+            options.onInferenceActivity?.(true)
+            let released = false
+            const release = () => { if (!released) { released = true; options.onInferenceActivity?.(false) } }
+            response.once('finish', release); response.once('close', release)
+          }
           void handleOllama(request, response)
           return
         }

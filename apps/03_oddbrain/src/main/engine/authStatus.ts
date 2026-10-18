@@ -57,7 +57,7 @@ export type LoginLaunch = { ok: boolean; command: string[]; answer: string }
  * a path that cannot be quoted safely is refused rather than escaped.
  */
 export function cmdQuote(command: string): string | null {
-  if (/[\u0000\r\n"]/.test(command)) return null
+  if (/[\u0000\r\n"%!]/.test(command)) return null
   return /^[A-Za-z0-9._:\\/-]+$/.test(command) ? command : `"${command}"`
 }
 

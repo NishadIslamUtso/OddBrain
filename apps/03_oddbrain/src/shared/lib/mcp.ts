@@ -26,6 +26,7 @@ export function mcpServerProblem(server: Partial<McpServerEntry>): string {
   if (command) {
     if (command.length > 512) return 'That command is too long.'
     if (/[\u0000\r\n]/.test(command)) return 'A command cannot contain a line break.'
+    if (server.args !== undefined && (!Array.isArray(server.args) || server.args.length > 32)) return 'Use at most 32 arguments; nothing will be silently dropped.'
     for (const arg of server.args ?? []) {
       if (typeof arg !== 'string' || arg.length > 500 || /[\u0000\r\n]/.test(arg)) return 'Arguments are plain text, up to 500 characters each.'
     }
@@ -34,6 +35,7 @@ export function mcpServerProblem(server: Partial<McpServerEntry>): string {
   let parsed: URL
   try { parsed = new URL(url) } catch { return 'That URL is not a URL.' }
   if (url.length > 2048) return 'That URL is too long.'
+  if (parsed.username || parsed.password || parsed.hash) return 'Put credentials in the engine’s secure configuration, not in the server URL.'
   if (parsed.protocol === 'https:') return ''
   const loopback = ['localhost', '127.0.0.1', '[::1]', '::1'].includes(parsed.hostname)
   if (parsed.protocol === 'http:' && loopback) return ''
@@ -44,6 +46,7 @@ export function mcpServerProblem(server: Partial<McpServerEntry>): string {
 export function normalizeMcpServer(raw: unknown): McpServerEntry | null {
   if (!raw || typeof raw !== 'object') return null
   const record = raw as Record<string, unknown>
+  if (record.args !== undefined && (!Array.isArray(record.args) || record.args.some(arg => typeof arg !== 'string'))) return null
   const entry: McpServerEntry = {
     name: typeof record.name === 'string' ? record.name.trim() : '',
     ...(typeof record.command === 'string' && record.command.trim() ? { command: record.command.trim() } : {}),
@@ -96,6 +99,7 @@ export function parseMcpArgs(text: string): { ok: boolean; args: string[]; probl
 /** The whole list, with every problem named; the caller decides what to do. */
 export function normalizeMcpServers(raw: unknown): { servers: McpServerEntry[]; problems: string[] } {
   if (!Array.isArray(raw)) return { servers: [], problems: ['The server list is not a list.'] }
+  if (raw.length > 100) return { servers: [], problems: ['At most 100 servers are supported; nothing was silently truncated.'] }
   const servers: McpServerEntry[] = []
   const problems: string[] = []
   const seen = new Set<string>()

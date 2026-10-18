@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHash } from 'node:crypto'
@@ -60,6 +60,22 @@ test('packDigest is stable across reads and changes when a file changes', () => 
     assert.notEqual(packDigest(root).digest, first, 'one edited byte, different digest')
   } finally {
     rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('pack digests refuse links instead of hashing bytes outside the pack', () => {
+  if (process.platform === 'win32') return
+  const root = mkdtempSync(join(tmpdir(), 'pack-link-'))
+  const outside = join(mkdtempSync(join(tmpdir(), 'pack-outside-')), 'secret.txt')
+  try {
+    writeFileSync(outside, 'outside bytes')
+    symlinkSync(outside, join(root, 'borrowed.txt'))
+    const result = packDigest(root)
+    assert.equal(result.digest, undefined)
+    assert.match(result.problem ?? '', /symbolic link/)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+    rmSync(join(outside, '..'), { recursive: true, force: true })
   }
 })
 

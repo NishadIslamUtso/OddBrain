@@ -19,7 +19,7 @@ const fixture = vi.hoisted(() => ({
     ] },
     models: { loading: false, entries: [], error: '' },
     turn: null as null | { state: string },
-    pick: vi.fn(async (id: string) => { fixture.engine.settings.id = id }),
+    pick: vi.fn(async (id: string) => { fixture.engine.settings.id = id; return { ok: true, answer: '' } }),
     loadModels: vi.fn(), checkEngines: vi.fn(), pickWorkspace: vi.fn(), setModel: vi.fn(),
     setApproval: vi.fn(), removeModel: vi.fn(),
   },
@@ -60,4 +60,13 @@ test('picking an engine that is not installed says a turn will refuse', async ()
   await mount()
   await act(async () => { radio('agy').click(); await Promise.resolve() })
   expect(status()).toContain('not installed on this machine')
+})
+
+ test('a refused mid-turn switch shows the refusal, never a false next-engine promise', async () => {
+  fixture.engine.turn = { state: 'running' }
+  fixture.engine.pick.mockResolvedValueOnce({ ok: false, answer: 'Stop the active task or wait for it to finish before switching engines.' })
+  await mount()
+  await act(async () => { radio('agy').click(); await Promise.resolve() })
+  expect(status()).toContain('Stop the active task')
+  expect(status()).not.toContain('the next one uses')
 })

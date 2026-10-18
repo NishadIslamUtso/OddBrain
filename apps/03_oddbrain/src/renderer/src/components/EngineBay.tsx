@@ -88,12 +88,14 @@ export default function EngineBay() {
   const choose = (id: EngineId, missing: boolean): void => {
     const previous = engine.settings.id
     const midTurn = engine.turn?.state === 'running'
-    void engine.pick(id)
+    void engine.pick(id).then(answer => {
+    if (!answer.ok) { setSwapNote(answer.answer); return }
     setSwapNote(missing
       ? `${label(id)} is not installed on this machine. A turn will refuse with its install command until it is.`
       : midTurn && previous !== id
         ? `This turn stays on ${label(previous)} until it ends; the next one uses ${label(id)}.`
         : '')
+    }).catch(() => setSwapNote('The engine choice could not be saved.'))
   }
 
   const models: EngineModels = engine.models
@@ -181,15 +183,15 @@ export default function EngineBay() {
           >
             {models.loading ? (
               <p className="px-2.5 py-2 text-[12px] text-muted">Loading models…</p>
-            ) : models.error ? (
+            ) : models.error && !models.entries.length ? (
               <p className="px-2.5 py-2 text-[12px] leading-relaxed text-muted">{models.error}</p>
             ) : (
               models.entries.map((entry) => (
-                <div key={entry.name} className="ob-engine-model-row" role="none">
-                  <button type="button" role="menuitemradio" aria-checked={entry.name === engine.settings.model}
+                <div key={`${entry.provider || "ollama"}:${entry.name}`} className="ob-engine-model-row" role="none">
+                  <button type="button" role="menuitemradio" aria-checked={entry.name === engine.settings.model && (entry.provider || '') === engine.settings.cloudProvider}
                     onClick={() => { void engine.setModel(entry.name, entry.provider); setMenuOpen(false) }}>
                     <span>{entry.name}</span>
-                    {entry.cloud ? <small><Cloud size={10} /> Cloud</small> : entry.sizeGB !== null ? <small>{entry.sizeGB.toFixed(1)} GB</small> : null}
+                    {entry.cloud ? <small><Cloud size={10} /> {entry.provider === 'anthropic' ? 'Anthropic' : 'Cloud'}</small> : entry.sizeGB !== null ? <small>{entry.sizeGB.toFixed(1)} GB</small> : null}
                   </button>
                   {!entry.cloud ? <button type="button" role="menuitem" title={`Remove ${entry.name}`} aria-label={`Remove ${entry.name}`} onClick={() => void engine.removeModel(entry.name)}><Trash2 size={12} /></button> : null}
                 </div>

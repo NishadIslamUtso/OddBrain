@@ -1,41 +1,47 @@
 /**
  * Installing a catalog skill, in one testable piece.
  *
- * The door in index.ts takes a name; this module does the work: the name must
- * be in the app's own catalog (a door that fetches arbitrary URLs is not a
- * door), the file is fetched from the catalog's source, capped, parsed with
- * the same parser the import path uses, and deployed to every engine's own
- * folder by the same deploySkill Track A already ships.
+ * The name must be in the app's curated catalog. The downloader resolves the
+ * repository branch to an immutable commit, fetches one bounded archive, and
+ * extracts only that skill's complete directory. This matters: current skills
+ * include scripts, references, examples, assets and license files; copying only
+ * SKILL.md creates instructions that point at files which do not exist.
  */
 import { catalogEntry, type CatalogSkill } from '../../shared/lib/skillCatalog'
-import { deploySkill, parseSkillMd, type VaultSkill } from './deploy'
+import type { VaultSkill } from './deploy'
+import { deploySkillBundle, downloadSkillBundle, type SkillBundle } from './skillBundle'
 
 export type CatalogInstallResult =
-  | { ok: true; skill: VaultSkill; written: string[] }
+  | { ok: true; skill: VaultSkill; written: string[]; revision: string }
   | { ok: false; answer: string }
+
+export type SkillBundleLoader = (entry: CatalogSkill, fetchImpl: typeof fetch) => Promise<SkillBundle>
 
 export async function installCatalogSkill(
   name: string,
   targets: { claudeSkillsDir: string; agySkillsDir: string },
   fetchImpl: typeof fetch = fetch,
+  loadBundle: SkillBundleLoader = downloadSkillBundle,
 ): Promise<CatalogInstallResult> {
-  const entry: CatalogSkill | null = catalogEntry(name)
+  const entry = catalogEntry(name)
   if (!entry) return { ok: false, answer: 'That skill is not in the catalog.' }
-  let text: string
+  let bundle: SkillBundle
   try {
-    const response = await fetchImpl(entry.source)
-    if (!response.ok) return { ok: false, answer: `The catalog answered ${response.status} for ${entry.name}.` }
-    text = await response.text()
-  } catch {
-    return { ok: false, answer: 'The catalog could not be reached, are you online?' }
+    bundle = await loadBundle(entry, fetchImpl)
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : ''
+    return {
+      ok: false,
+      answer: detail || 'The catalog could not be reached, are you online?',
+    }
   }
-  if (!text || text.length > 200_000) return { ok: false, answer: 'That skill file is not one this app will install.' }
-  const parsed = parseSkillMd(text)
-  if (!parsed.name || !parsed.body) return { ok: false, answer: 'That file is not shaped like a skill.' }
-  const skill: VaultSkill = {
-    name: parsed.name === entry.name ? parsed.name : `${entry.name} (${parsed.name})`,
-    description: parsed.description || entry.what,
-    body: parsed.body,
+  try {
+    const result = deploySkillBundle(entry, bundle, targets)
+    return { ok: true, ...result, revision: bundle.revision }
+  } catch (error) {
+    return {
+      ok: false,
+      answer: error instanceof Error ? error.message : 'The complete skill could not be installed. Nothing is assumed installed.',
+    }
   }
-  return { ok: true, skill, written: deploySkill({ name: entry.name, description: skill.description, body: skill.body }, targets) }
 }

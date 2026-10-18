@@ -1,3 +1,4 @@
+import type { MemoryBridge } from '../shared/lib/memoryWorkspace'
 import type { MediaBridge } from '../shared/lib/mediaBridge'
 import type { MarketplaceBridge } from '../shared/lib/marketplace'
 import type { AutomationBridge, AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
@@ -206,6 +207,7 @@ const marketplaceApi: MarketplaceBridge = {
 const api = {
   media: mediaApi, marketplace: marketplaceApi,
   automation: automationApi,
+  memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,
   app: {
     previewHtml: (): Promise<{ ok: boolean; html?: string; error?: string }> => ipcRenderer.invoke('app:preview-html'),
     claimLaunch: (): Promise<boolean> => ipcRenderer.invoke('app:claim-launch'),
@@ -372,6 +374,7 @@ const api = {
       ipcRenderer.invoke('vault:capture-chat', { title, markdown }),
   },
   extension: {
+    publishAppearance: (value: import('../shared/lib/extensionAppearance').ExtensionAppearance): Promise<{ ok: boolean }> => ipcRenderer.invoke('extension:appearance', value),
     /**
      * Whether the browser extension can reach this app, and at what address. A
      * port that is open is a fact the interface shows rather than something to

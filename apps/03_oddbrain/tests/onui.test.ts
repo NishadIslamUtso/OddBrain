@@ -63,7 +63,7 @@ test('the latest web_page capture is the page: url, title and the readable conte
 test('the newest line wins: a later visit-only capture hides the older page text', t => {
   const service = fixture(t)
   service.capture({ type: 'web_page', url: 'https://example.com/a', content: 'Old content.' })
-  service.capture({ type: 'browser_visit', url: 'https://example.com/b', title: 'Just a visit' })
+  service.files().append('02 Sources/Browser Activity/2026/10.jsonl', JSON.stringify({ url: 'https://example.com/b', title: 'Just a visit', capture_status: 'visit-only' }) + '\n')
   const answer = service.onui() as {
     page: { url: string; capture_status: string; note?: string; content?: string }
   }

@@ -1,3 +1,4 @@
+import { publishExtensionAppearance } from './lib/extensionAppearance'
 import { sampleEnabled, workspaceKey } from '@shared/lib/sampleWorkspace'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import useNavigationHistory from './hooks/useNavigationHistory'
@@ -140,7 +141,7 @@ export default function App() {
   const [sidebarPrefs, setSidebarPrefs] = usePersistentState(SIDEBAR_KEY, DEFAULT_SIDEBAR, normalizeSidebar, setNotice)
   const updateLook = useCallback((patch: Partial<LookPreferences>) => setLook(previous => normalizeLook({ ...previous, ...patch })), [setLook])
   useEffect(() => {
-    const apply = (): void => { applyAppearance(appearance); applyLook(appearance, look); setMotionMode(appearance.motion); setMascotPause(look.paused) }
+    const apply = (): void => { applyAppearance(appearance); applyLook(appearance, look); setMotionMode(appearance.motion); setMascotPause(look.paused); publishExtensionAppearance(appearance, look) }
     apply()
     const scheme = window.matchMedia('(prefers-color-scheme: dark)'); scheme.addEventListener('change', apply)
     return () => scheme.removeEventListener('change', apply)
@@ -529,11 +530,13 @@ export default function App() {
     if (target.settings) setSettingsSection(target.settings)
     setSettingsOpen(target.settings !== null)
   })
+  useEffect(() => { const open = () => { setSettingsOpen(false); setView('brain') }; window.addEventListener('app:memory-open', open); return () => window.removeEventListener('app:memory-open', open) }, [])
+  useEffect(() => { const open = () => { setSettingsOpen(false); setView('vault'); requestAnimationFrame(() => window.dispatchEvent(new Event('app:vault-sources-select'))) }; window.addEventListener('app:capture-sources', open); return () => window.removeEventListener('app:capture-sources', open) }, [])
   const openSettings = (section: SectionId = 'appearance'): void => { setSettingsSection(section); setSettingsOpen(true) }
   const openChat = (id: string): void => { chats.open(id); setView('chat') }
   const newChat = (): void => { chats.create(); setView('chat'); setSettingsOpen(false); setPendingProject(null); setNotice(''); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label=Message]')?.focus()) }
   const items: ShellItem[] = view === 'projects' ? projects.map(p => ({ id: p.id, title: p.name, detail: p.folder, open: () => { setProjectFocus(p.id); setView('projects') } })) : view === 'artifacts' ? library.items.map(item => ({ id: item.id, title: item.title, detail: item.type.toUpperCase(), open: () => { setArtifactFocus(item.id); setView('artifacts') } })) : chats.chats.map(c => ({ id: c.id, title: c.title, detail: c.date, open: () => openChat(c.id) }))
-  const commands: CommandItem[] = [...screenCommands(setView), ...chats.chats.slice(0, 6).map(c => ({ id: 'chat-' + c.id, title: c.title, detail: 'Conversation', run: () => openChat(c.id) })), { id: 'screen-code', title: 'Code', detail: 'All project folders', run: () => { setCodeFocus(''); setView('code') } }, ...SECTIONS.map(section => ({ id: 'settings-' + section.id, title: section.id === 'models' ? 'Models & API keys' : section.id === 'connectors' ? 'Apps & extensions' : section.title, detail: 'Settings', run: () => openSettings(section.id) }))]
+  const commands: CommandItem[] = [{ id: 'memory-inbox', title: 'Memory inbox', detail: 'Review interpretations, people and your life story', run: () => window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' })) }, ...screenCommands(setView), ...chats.chats.slice(0, 6).map(c => ({ id: 'chat-' + c.id, title: c.title, detail: 'Conversation', run: () => openChat(c.id) })), { id: 'screen-code', title: 'Code', detail: 'All project folders', run: () => { setCodeFocus(''); setView('code') } }, ...SECTIONS.map(section => ({ id: 'settings-' + section.id, title: section.id === 'models' ? 'Models & API keys' : section.id === 'connectors' ? 'Apps & extensions' : section.title, detail: 'Settings', run: () => openSettings(section.id) }))]
   const searchCommands = (query: string): CommandItem[] => searchChats(chats.chats, query).map(result => ({ id: 'chat-' + result.chat.id, title: result.chat.title, detail: result.matches[0]?.snippet || 'Conversation', run: () => openChat(result.chat.id) }))
   if (!welcomed) return <LookContext value={look}><LookActions value={updateLook}><div className="ob-app-root"><FirstRunView onFinish={() => setWelcomed(true)} onName={name => setProfile({ ...profile, name })} /></div><LaunchOverlay /></LookActions></LookContext>
 
@@ -605,7 +608,7 @@ export default function App() {
           />
         ) : view === 'today' ? (
           <TodayView
-            onOpenMaps={() => openSettings('maps')}
+            onOpenMaps={() => window.dispatchEvent(new Event('app:capture-sources'))}
             chats={chats.chats}
             artifacts={library.items}
             artifactsLoading={library.loading}

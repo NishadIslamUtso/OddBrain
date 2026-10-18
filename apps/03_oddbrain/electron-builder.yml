@@ -52,6 +52,7 @@ extraResources:
       - lib/**
       - popup/**
       - icons/**
+      - assets/**
   # The community store ships with the app too: a real folder index at
   # resources/store, so the Plugins pane offers packs that exist on the
   # person's disk from the first run — offline, no account, no network.

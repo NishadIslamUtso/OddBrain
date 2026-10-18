@@ -1,3 +1,5 @@
+import { boundedResponse } from '../network/boundedResponse'
+export { boundedResponse } from '../network/boundedResponse'
 import { cloudEnabled, type Permissions } from '../../shared/lib/permissions'
 import { providerById } from '../../shared/lib/providers'
 import { extracted } from './documents'
@@ -5,14 +7,6 @@ import { mediaKind } from './formats'
 import type { MediaInput, MediaPreferences, MediaResult } from '../../shared/lib/mediaBridge'
 
 export type MediaAccess = { permissions: Permissions; external: boolean; key(id: string): string; customBaseUrl: string }
-export async function boundedResponse(response: Response, max = 2_000_000): Promise<string> {
-  if (Number(response.headers.get('content-length') || 0) > max) { await response.body?.cancel(); throw Error('Provider response exceeds the size limit.') }
-  if (!response.body) return ''
-  const reader = response.body.getReader(); const chunks: Uint8Array[] = []; let size = 0
-  try { for (;;) { const next = await reader.read(); if (next.done) break; size += next.value.length; if (size > max) throw Error('Provider response exceeds the size limit.'); chunks.push(next.value) } }
-  finally { await reader.cancel().catch(() => {}); reader.releaseLock() }
-  return Buffer.concat(chunks).toString('utf8')
-}
 export function providerTarget(provider: string, access: MediaAccess): { base: string; headers: Record<string, string> } {
   const spec = providerById(provider)
   if (!spec) throw Error('Choose a supported provider in Voice & files first.')

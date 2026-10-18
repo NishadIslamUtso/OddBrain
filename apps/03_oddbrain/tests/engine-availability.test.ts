@@ -35,7 +35,7 @@ test('detection: a nonsense version answer is treated as not found', async () =>
   assert.equal(answer.found, false)
 })
 
-test('agy brains: never invented — not installed says so, installed says sign in', async () => {
+test('agy brains: never invented — not installed says so, installed discloses the missing adapter', async () => {
   const missing = await agyModelSource(false).models()
   assert.equal(missing.ok, false)
   assert.equal(missing.models.length, 0)
@@ -45,7 +45,7 @@ test('agy brains: never invented — not installed says so, installed says sign 
   const installed = await agyModelSource(true).models()
   assert.equal(installed.ok, false)
   assert.equal(installed.models.length, 0)
-  assert.match(installed.error ?? '', /Sign in once/)
+  assert.match(installed.error ?? '', /no verified agy model-list adapter/)
 })
 
 test('the routing is wired: engine:models asks the chosen engine, not a fixed door', () => {
