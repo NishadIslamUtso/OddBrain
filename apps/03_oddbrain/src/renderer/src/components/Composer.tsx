@@ -1,5 +1,6 @@
-import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronDown, CookingPot, Cpu, FolderOpen, Layers, ListOrdered, Map, Mic, MicOff, Paperclip, Play, ScrollText, Square, Swords, X } from 'lucide-react'
+import { useRecordedDictation } from '../hooks/useRecordedDictation'
+import { useContext, useEffect, useRef, useState } from 'react'
+import { ArrowUp, ChevronDown, CookingPot, Cpu, FolderOpen, Layers, ListOrdered, Map, MoreHorizontal, Mic, MicOff, Paperclip, Play, ScrollText, Square, Swords, X } from 'lucide-react'
 import { modelLabel } from '@shared/lib/engine'
 import type { Project } from '@shared/lib/projects'
 import type { Attachment } from '@shared/types'
@@ -7,10 +8,13 @@ import type { Recipe } from '@shared/lib/recipes'
 import { renderRecipe } from '@shared/lib/recipes'
 import { loadRecipes, runRecipe, useRecipes } from '@/state/recipes'
 import { mapContextBlock } from '@shared/lib/repoMap'
-import { getEngineApi } from '@/platform/bridge'
+import { bridge, getEngineApi } from '@/platform/bridge'
 import { vaultGet, type VaultReply } from '@shared/lib/vault'
 import { useEngine, type EngineTurn } from '@/state/engine'
 import useDismiss from '@/hooks/useDismiss'
+import BriefContext from '../ui/BriefContext'
+import ComposerSurface from '../ui/ComposerSurface'
+import { LookActions, useLook } from '../ui/LookContext'
 
 /**
  * The composer.
@@ -62,9 +66,20 @@ export default function Composer({
   const box = useRef<HTMLTextAreaElement | null>(null)
   const [boxOpen, setBoxOpen] = useState<'engine' | 'models' | null>(null)
   const [cook, setCook] = useState(false)
+  const [tools, setTools] = useState(false)
+  const toolsRef = useRef<HTMLDivElement | null>(null)
+  const look = useLook(), changeLook = useContext(LookActions)
+  useDismiss(toolsRef, () => setTools(false), tools)
   const [listening, setListening] = useState(false)
   const fileInput = useRef<HTMLInputElement | null>(null)
-  const recognition = useRef<{ stop: () => void } | null>(null)
+  const recorded = useRecordedDictation(value,onChange)
+  const recognition = useRef<{ stop: () => void; onresult: unknown; onerror: unknown; onend: unknown } | null>(null)
+  const draftRef = useRef(value)
+  draftRef.current = value
+  useEffect(() => () => {
+    const ear = recognition.current
+    if (ear) { ear.onresult = null; ear.onerror = null; ear.onend = null; ear.stop() }
+  }, [])
   const pickerRef = useRef<HTMLDivElement | null>(null)
   useDismiss(pickerRef, () => setBoxOpen(null), boxOpen !== null)
 
@@ -73,37 +88,57 @@ export default function Composer({
    * the draft. Where the machine has no microphone or no listener, the button
    * says so instead of pretending. The notice rides the app's own channel.
    */
-  const toggleDictation = (): void => {
+  const toggleDictation = async (): Promise<void> => {
+    if(recorded.starting){recorded.cancel();return}
+    if(recorded.recording){recorded.stop();return}
+    if(recorded.transcribing){recorded.cancel();return}
     if (listening) {
       recognition.current?.stop()
       return
     }
+    try {
+      const preferences = await bridge.media.read()
+      if(preferences.model){await recorded.start(preferences);return}
+    }catch{window.dispatchEvent(new CustomEvent('app:notice',{detail:'Media preferences could not be read. No microphone was opened.'}));return}
     type SpeechCtor = new () => {
       lang: string
       interimResults: boolean
       continuous: boolean
+      processLocally?: boolean
       start: () => void
       stop: () => void
-      onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
+      onresult: ((event: { resultIndex: number; results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null
       onerror: (() => void) | null
       onend: (() => void) | null
     }
-    const Ctor = (globalThis as unknown as { webkitSpeechRecognition?: SpeechCtor }).webkitSpeechRecognition
+    const scope = globalThis as unknown as { SpeechRecognition?: SpeechCtor; webkitSpeechRecognition?: SpeechCtor }
+    const Ctor = scope.SpeechRecognition || scope.webkitSpeechRecognition
     if (typeof Ctor !== 'function') {
-      window.dispatchEvent(new CustomEvent('app:notice', { detail: 'This window has no speech listener: dictation needs a microphone.' }))
+      window.dispatchEvent(new CustomEvent('app:notice', { detail: 'On-device dictation is unavailable in this window. No microphone was opened or provider used.' }))
       return
     }
     try {
       const ear = new Ctor()
+      if (!('processLocally' in ear)) {
+        window.dispatchEvent(new CustomEvent('app:notice', { detail: 'This runtime has no verified on-device dictation. Network speech recognition was not started; no other provider was selected.' }))
+        return
+      }
+      ear.processLocally = true
       ear.lang = navigator.language || 'en-US'
       ear.interimResults = false
       ear.continuous = true
       ear.onresult = (event) => {
         let said = ''
-        for (let i = 0; i < event.results.length; i += 1) said += `${event.results[i][0].transcript} `
-        if (said.trim()) onChange(`${value ? `${value.trimEnd()} ` : ''}${said.trim()}`)
+        for (let i = event.resultIndex; i < event.results.length; i += 1) {
+          if (event.results[i].isFinal) said += `${event.results[i][0].transcript} `
+        }
+        if (said.trim()) {
+          const next = `${draftRef.current ? `${draftRef.current.trimEnd()} ` : ''}${said.trim()}`
+          draftRef.current = next
+          onChange(next)
+        }
       }
-      ear.onerror = () => setListening(false)
+      ear.onerror = () => { setListening(false); window.dispatchEvent(new CustomEvent('app:notice', { detail: 'On-device dictation failed. Check microphone permission and the installed speech language. No other service was used.' })) }
       ear.onend = () => setListening(false)
       ear.start()
       recognition.current = ear
@@ -147,8 +182,10 @@ export default function Composer({
   }
 
   return (
-    <div className="shrink-0 px-6 pb-4">
-      <div className="rounded-2xl border border-line bg-card focus-within:border-accent/50">
+    <div className="ob-composer-host shrink-0 px-6 pb-4">
+      <BriefContext />
+      {recorded.recording ? <button type="button" className="ob-small-button" onClick={recorded.cancel}>Cancel recording</button> : null}
+      <ComposerSurface>
         <textarea
           ref={box}
           value={value}
@@ -156,7 +193,7 @@ export default function Composer({
           onKeyDown={keydown}
           onPaste={paste}
           rows={1}
-          placeholder="How can I help you today?"
+          placeholder="Ask anything"
           aria-label="Message"
           className="block max-h-[200px] w-full resize-none bg-transparent px-4 pt-3.5 text-[14px] leading-relaxed text-ink outline-none placeholder:text-muted"
         />
@@ -177,12 +214,11 @@ export default function Composer({
           </ul>
         ) : null}
         <div className="flex items-center gap-1.5 px-2.5 pb-2 pt-1" ref={pickerRef}>
-          <ProjectDropdown projects={projects} project={project} onProject={onProject} />
           <input
             ref={fileInput}
             type="file"
             multiple
-            accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py"
+            accept="*/*"
             className="hidden"
             onChange={event => {
               const files = Array.from(event.target.files ?? [])
@@ -194,26 +230,37 @@ export default function Composer({
             type="button"
             onClick={() => fileInput.current?.click()}
             aria-label="Attach"
-            title="Attach a picture, a video (its frames), or a text file"
+            title="Attach a document, image, audio, video or other file"
             className="flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:text-ink"
           >
             <Paperclip size={13} />
           </button>
           <button
             type="button"
-            onClick={toggleDictation}
-            aria-label={listening ? 'Stop dictation' : 'Dictate'}
-            aria-pressed={listening}
-            title={listening ? 'Listening. Press again to stop.' : 'Speak into the box: the window\u2019s own listener types what you say'}
-            className={`flex h-7 w-7 items-center justify-center rounded-lg ${listening ? 'text-warn' : 'text-muted hover:text-ink'}`}
+            onClick={()=>void toggleDictation()}
+            aria-label={recorded.starting ? 'Cancel microphone request' : recorded.transcribing ? 'Cancel transcription' : listening || recorded.recording ? 'Stop dictation' : 'Dictate'}
+            aria-pressed={listening || recorded.recording}
+            title={recorded.starting ? 'Cancel microphone request' : recorded.transcribing ? 'Cancel transcription' : listening || recorded.recording ? 'Stop recording and transcribe into the draft' : 'Dictate into the draft; never sends automatically'}
+            className={`flex h-7 w-7 items-center justify-center rounded-lg ${listening || recorded.recording ? 'text-warn' : 'text-muted hover:text-ink'}`}
           >
-            {listening ? <MicOff size={13} /> : <Mic size={13} />}
+            {listening || recorded.recording ? <MicOff size={13} /> : <Mic size={13} />}
           </button>
-          <RecipeButton />
-          <MapButton onInsert={(map) => onChange(value.trim() ? `${value.trimEnd()}\n\n${map}\n` : `${map}\n`)} />
           <span className="ml-auto" />
           <EngineChip open={boxOpen === 'engine'} onToggle={() => setBoxOpen(boxOpen === 'engine' ? null : 'engine')} />
           <ModelChip open={boxOpen === 'models'} onToggle={() => setBoxOpen(boxOpen === 'models' ? null : 'models')} />
+          <div className="ob-more-tools" ref={toolsRef}>
+            <button type="button" className="ob-icon-button" onClick={() => setTools(v => !v)} aria-label="More chat tools" aria-expanded={tools} title="More chat tools"><MoreHorizontal size={15} /></button>
+            {tools ? <div className="ob-tools-popup" role="dialog" aria-label="Chat tools">
+              <ProjectDropdown projects={projects} project={project} onProject={onProject} />
+              <RecipeButton />
+              <MapButton onInsert={map => onChange(value.trim() ? `${value.trimEnd()}\n\n${map}\n` : `${map}\n`)} />
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { setCook(true); setTools(false) }}><CookingPot size={14} />Cook context</button>
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:battle', { detail: value })); setTools(false) }}><Swords size={14} />Brain battle</button>
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:split', { detail: value })); setTools(false) }}><ListOrdered size={14} />Split a task</button>
+              <button type="button" aria-pressed={look.showThinking} onClick={() => changeLook({ showThinking: !look.showThinking })}><ScrollText size={14} />Thinking details<span>{look.showThinking ? 'On' : 'Off'}</span></button>
+              <button type="button" onClick={() => { window.dispatchEvent(new Event('app:show-journal')); setTools(false) }}><ListOrdered size={14} />Turn journal</button>
+            </div> : null}
+          </div>
           <span className="ml-auto flex items-center gap-2">
             {busy ? (
               <button
@@ -240,41 +287,8 @@ export default function Composer({
             </button>
           </span>
         </div>
-      </div>
-
-      {value.trim() && !busy ? (
-        <div className="relative px-1 pt-1.5">
-          <button
-            type="button"
-            onClick={() => setCook(open => !open)}
-            aria-expanded={cook}
-            title="Cook this prompt: pull matching vault notes in as [Title: line] context, preview, then send"
-            className="flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <CookingPot size={11} aria-hidden />
-            Cook This Prompt
-          </button>
-          {cook ? <CookDialog draft={value} onDone={(next) => { if (next !== null) onChange(next); setCook(false) }} /> : null}
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent('app:battle', { detail: value }))}
-            title="Battle: run this prompt on two brains and pick the better answer (blind, private tally)"
-            className="ml-1.5 flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <Swords size={11} aria-hidden />
-            Battle
-          </button>
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent('app:split', { detail: value }))}
-            title="Split: the engine breaks this work order into steps, then the app runs them one by one"
-            className="ml-1.5 flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <ListOrdered size={11} aria-hidden />
-            Split
-          </button>
-        </div>
-      ) : null}
+      </ComposerSurface>
+      {cook ? <CookDialog draft={value} onDone={next => { if (next !== null) onChange(next); setCook(false) }} /> : null}
       {preview ? <p className="px-1 pt-2 text-[12px] text-muted">{preview}</p> : null}
       {notice ? <p className="px-1 pt-2 text-[12px] text-warn">{notice}</p> : null}
     </div>

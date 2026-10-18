@@ -54,6 +54,10 @@ jobs:
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build
+      - name: Native PDF, OCR and Office workers (offline)
+        working-directory: apps/03_oddbrain
+        timeout-minutes: 5
+        run: node scripts/check-media-native.cjs
       - name: Smoke — the window opens and the console is clean
         working-directory: apps/03_oddbrain
         timeout-minutes: 5
@@ -112,6 +116,10 @@ jobs:
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build
+      - name: Native PDF, OCR and Office workers (offline)
+        working-directory: apps/03_oddbrain
+        timeout-minutes: 5
+        run: node scripts/check-media-native.cjs
       - name: Smoke — the window opens and the console is clean
         working-directory: apps/03_oddbrain
         timeout-minutes: 5

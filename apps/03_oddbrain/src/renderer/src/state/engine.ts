@@ -101,7 +101,7 @@ export type ContextTotals = {
   costUsd: number
 }
 
-export type LineItem = { id: number; prompt: string }
+export type LineItem = { id: number; prompt: string; pictures?: Array<{ mime: string; data: string }> }
 
 export type JournalEntry = {
   at: string
@@ -134,7 +134,7 @@ type EngineStore = EngineState & {
   /** The engine's own thinking budget; persists. */
   setThinking(mode: 'default' | 'extended'): Promise<void>
   /** Park a work order for when the current turn closes. */
-  enqueue(prompt: string): LineItem
+  enqueue(prompt: string, pictures?: Array<{ mime: string; data: string }>): LineItem
   removeFromLine(id: number): void
   clearLine(): void
   /** "Open a folder": pick where the engine works; persists. */
@@ -217,7 +217,7 @@ const drainLine = (): void => {
   const next = state.line[0]
   if (!next) return
   setState({ line: state.line.slice(1) })
-  void store.send(next.prompt)
+  void store.send(next.prompt, next.pictures)
 }
 
 let subscribed = false
@@ -532,9 +532,9 @@ const store: EngineStore = {
     if (answer.ok) setState({ settings: { ...state.settings, thinking: mode } })
   },
 
-  enqueue(prompt: string): LineItem {
+  enqueue(prompt: string, pictures: Array<{ mime: string; data: string }> = []): LineItem {
     lineId += 1
-    const item: LineItem = { id: lineId, prompt }
+    const item: LineItem = { id: lineId, prompt, ...(pictures.length ? { pictures: pictures.map(picture => ({ ...picture })) } : {}) }
     state.line = [...state.line, item]
     emit()
     // Nothing running? The line is a straight pass-through.

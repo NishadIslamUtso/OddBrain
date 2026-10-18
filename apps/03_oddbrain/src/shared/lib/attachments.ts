@@ -6,6 +6,12 @@ const TEXT_EXTENSIONS = /\.(?:txt|md|csv|json|js|jsx|ts|tsx|html?|css|py|xml|ya?
 
 export const MAX_ATTACHMENTS = 4
 export const MAX_TEXT_LENGTH = 12_000
+export class AttachmentTextLimitError extends Error {
+  constructor(public readonly text:string,name:string){
+    super(`${name}: maximum length is 12,000 characters for the 4,096-token local context. No content has been silently truncated.`)
+    this.name='AttachmentTextLimitError'
+  }
+}
 const MAX_IMAGE_BYTES = 2 * 1024 * 1024
 
 /**
@@ -39,7 +45,7 @@ export async function readAttachment(
   }
   if (!TEXT_EXTENSIONS.test(file.name) && !/^text\//.test(file.type)) {
     throw new Error(
-      `${file.name}: only text/code files and supported images are available. PDF/Word parsing is not implemented; export them as text.`
+      `${file.name}: this format has no verified decoder in this runtime. PDF, scanned pages, legacy Office files and audio need a supported decoder or an explicitly selected capable provider. No other provider was used; export as UTF-8 text if possible.`
     )
   }
   if (file.size > 64 * 1024) throw new Error(`${file.name}: maximum text file size is 64 KB.`)
@@ -48,9 +54,7 @@ export async function readAttachment(
     throw new Error(`${file.name}: this is not a readable UTF-8 text file.`)
   }
   if (text.length > MAX_TEXT_LENGTH) {
-    throw new Error(
-      `${file.name}: maximum length is 12,000 characters for the 4,096-token local context. No content has been silently truncated.`
-    )
+    throw new AttachmentTextLimitError(text,file.name)
   }
   return { ...common, kind: 'text', text }
 }

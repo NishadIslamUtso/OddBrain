@@ -114,8 +114,8 @@ export const DEFAULT_APPEARANCE: Appearance = Object.freeze({
   textSize: 'medium',
   font: 'sans',
   motion: 'system',
-  mascotWords: true,
-  rowExplanations: true,
+  mascotWords: false,
+  rowExplanations: false,
   packCss: '',
   designSystem: '',
 })

@@ -2,11 +2,9 @@
 #
 # Deliberately small, and every line here is a decision rather than a default:
 #
-# - The payload is `out/` and nothing else. `out/` is what electron-vite builds:
-#   the main process, the preload script and the renderer. `node_modules` is not
-#   shipped because nothing in the packaged app needs it — the dependencies that
-#   do (React, Tailwind) are compiled into `out/renderer` by Vite, and the main
-#   process uses only Node built-ins and Electron itself.
+# - `out/` holds the built main/preload/renderer. electron-builder also collects
+#   production dependencies, including the PDF, Office, canvas and OCR decoders.
+#   React and Tailwind are compiled into the renderer.
 # - `asar` on, so the app's own files are not laid out loose in the install
 #   directory where a stray edit by hand would change behaviour silently.
 # - One target: NSIS. Per-user, not per-machine, so installing does not ask for
@@ -41,6 +39,8 @@ files:
 # `resources/extension` so "Load unpacked" at chrome://extensions has a folder to
 # point at. It is not packed into the asar — Chrome needs real files on disk.
 extraResources:
+  - from: resources/oddbrain-preview.html
+    to: oddbrain-preview.html
   - from: ../../extension
     to: extension
     filter:
@@ -66,13 +66,20 @@ electronLanguages:
 # 92 MB file and a smaller one, at the cost of a slower build.
 compression: maximum
 
-# Nothing to rebuild: the app has no native modules. Saying so skips a step that
-# would otherwise run for every build and fail on a machine without toolchains.
+# Canvas ships platform-specific prebuilt Node-API bindings; do not rebuild it
+# against Electron with an unrelated local toolchain.
 npmRebuild: false
 
 # The interface is served from the app's own process over http, so the packaged
 # build must not be sandboxed away from loopback.
 asar: true
+# Worker threads and dynamic PDF imports need ordinary filesystem paths, not
+# Electron's main-process ASAR filesystem shim. Unpack the worker, shared build
+# chunks and its complete production dependency graph, including WASM/data/.node.
+asarUnpack:
+  - out/main/mediaWorker.js
+  - out/main/chunks/**
+  - node_modules/**
 # Fuses are flipped on the packaged binary by @electron/fuses (scripts/apply-fuses.cjs):
 # no ELECTRON_RUN_AS_NODE, no NODE_OPTIONS, no --inspect in production.
 afterPack: scripts/apply-fuses.cjs

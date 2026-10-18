@@ -29,6 +29,10 @@ jobs:
       - name: Build and package the installer
         working-directory: apps/03_oddbrain
         run: npm run dist:win
+      - name: Verify packaged media workers under Electron
+        working-directory: apps/03_oddbrain
+        timeout-minutes: 5
+        run: npx electron scripts/check-electron-media.cjs dist/win-unpacked/resources/app.asar.unpacked/out/main/mediaWorker.js
       - name: Prove it - sha256 into the summary
         working-directory: apps/03_oddbrain
         shell: pwsh
@@ -49,6 +53,7 @@ jobs:
           retention-days: 30
           if-no-files-found: error
       - name: Attach to the release (on a version tag only)
+        working-directory: apps/03_oddbrain
         if: startsWith(github.ref, 'refs/tags/v')
         env:
           GH_TOKEN: ${{ github.token }}

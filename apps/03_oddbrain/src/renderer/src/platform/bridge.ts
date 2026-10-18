@@ -1,3 +1,6 @@
+import type { MarketplaceBridge } from '@shared/lib/engineMarketplace'
+import { DEFAULT_MEDIA, type MediaBridge } from '@shared/lib/mediaProcessing'
+import { DEFAULT_AUTOMATION, normalizeAutomation, type AutomationBridge, type AutomationView } from '@shared/lib/automation'
 /**
  * The one place the interface talks to the machine.
  *
@@ -43,11 +46,16 @@ import type {
 
 /** What the preload script exposes today. It grows as the main process does. */
 export type DesktopBridge = {
+  marketplace: MarketplaceBridge
+  media: MediaBridge
+  automation: AutomationBridge
   extensionPair: {
     get: () => Promise<{ token: string }>
     rotate: () => Promise<{ ok: boolean; token: string }>
   }
   app: {
+    claimLaunch?: () => Promise<boolean>
+    previewHtml?: () => Promise<{ ok: boolean; html?: string; error?: string }>
     version: string
     platform: string
     /** Desktop only: open the vault folder in the file manager. */
@@ -89,6 +97,7 @@ export type DesktopBridge = {
     forgetSession: (workspace: string) => Promise<{ ok: boolean }>
     openFolder: (folder: string) => Promise<{ ok: boolean }>
     checkpoints: {
+      inspect: (copy: string) => Promise<{ ok: boolean; content?: string; clipped?: boolean; answer?: string }>
       list: () => Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }>
       restore: (copy: string, original?: string) => Promise<{ ok: boolean; answer: string }>
     }
@@ -214,6 +223,8 @@ export type DesktopBridge = {
   }
 
   artifacts: {
+    trashList: () => Promise<{ ok: boolean; items: import('../../../main/artifacts/store').TrashItem[]; error?: string }>
+    trashRestore: (key: string) => Promise<ItemAnswer>
     list: () => Promise<ListAnswer>
     read: (id: string, version?: number) => Promise<ReadAnswer>
     save: (input: SaveInput) => Promise<ItemAnswer>
@@ -240,7 +251,22 @@ export const hasDesktopBridge = (): boolean =>
   typeof window !== 'undefined' && typeof window.api === 'object' && window.api !== null
 
 /** Empty, and honest about it. See rule 2 above. */
+let demoAutomationPreferences = { ...DEFAULT_AUTOMATION }
+try { if (typeof localStorage !== 'undefined') demoAutomationPreferences = normalizeAutomation(JSON.parse(localStorage.getItem('oddbrain.automation-preview') || 'null')) } catch {}
+const demoAutomationListeners = new Set<(view: AutomationView) => void>()
+const demoAutomationView = (): AutomationView => ({ preferences: { ...demoAutomationPreferences }, current: null, reports: [], queued: 0, desktop: false })
+const demoAutomation: AutomationBridge = {
+  read: async () => demoAutomationView(),
+  update: async patch => { demoAutomationPreferences = normalizeAutomation({ ...demoAutomationPreferences, ...patch }); try { localStorage.setItem('oddbrain.automation-preview', JSON.stringify(demoAutomationPreferences)) } catch {} const view = demoAutomationView(); for (const notify of demoAutomationListeners) notify(view); return { ok: true, view } },
+  models: async () => ({ ok: false, models: [], error: 'Reviewer models are listed by the installed app.' }),
+  review: async () => ({ ok: false, error: 'Report-only review uses the installed app and its model service. No review was sent from this preview.' }),
+  cancel: async () => ({ ok: true }),
+  onChanged: listener => { demoAutomationListeners.add(listener); return () => demoAutomationListeners.delete(listener) },
+}
 const demoBridge: DesktopBridge = {
+  marketplace:{browse:async()=>({ok:false,error:'The official CLI is available only in the desktop app.'}),plan:async()=>({ok:false,error:'No engine command can run in this browser preview.'}),approve:async()=>({ok:false,output:'',error:'No engine command can run in this browser preview.'}),deny:async()=>undefined},
+  media: { read:async()=>({...DEFAULT_MEDIA}), update:async()=>({ok:false,error:'Media processing requires the installed desktop app.'}), models:async()=>({models:[],problems:['Model discovery requires the desktop app.']}), process:async()=>({ok:false,error:'Media processing requires the installed desktop app. No file was sent.'}), cancel:async()=>undefined },
+  automation: demoAutomation,
   extensionPair: {
     get: async () => ({ token: '' }),
     rotate: async () => ({ ok: false, token: '' }),
@@ -311,6 +337,8 @@ const demoBridge: DesktopBridge = {
    * grid that implies nothing was ever made.
    */
 artifacts: {
+    trashList: async () => ({ ok: false, items: [], error: 'Trash recovery uses the installed app’s library.' }),
+    trashRestore: async () => ({ ok: false, error: 'Trash recovery uses the installed app’s library.' }),
     list: async (): Promise<ListAnswer> => ({
       ok: false,
       error: 'The artifact library is part of the desktop app: this window has no folder to keep documents in.',
@@ -385,6 +413,7 @@ artifacts: {
     forgetSession: async () => ({ ok: false }),
     openFolder: async () => ({ ok: false }),
     checkpoints: {
+      inspect: async () => ({ ok: false, answer: 'Snapshots live in the installed app.' }),
       list: async () => ({ ok: true, checkpoints: [] }),
       restore: async () => ({ ok: false, answer: 'Checkpoints live in the desktop app.' }),
     },
@@ -417,8 +446,10 @@ export type EngineBridge = {
   setApproval: (mode: ApprovalMode) => Promise<{ ok: boolean; answer: string }>
   setThinking: (mode: 'default' | 'extended') => Promise<{ ok: boolean; answer: string }>
   memory: {
-    list: () => Promise<{ ok: boolean; folder?: string; files?: Array<{ name: string; path: string; updated: string; content: string; clipped: boolean }> }>
-    remove: (name: string) => Promise<{ ok: boolean; answer: string }>
+    chooseFolder?: () => Promise<{ ok: boolean; answer: string; folder?: string; canceled?: boolean }>
+    defaultFolder?: () => Promise<{ ok: boolean; answer: string }>
+    list: () => Promise<{ ok: boolean; answer?: string; folder?: string; files?: Array<{ name: string; path: string; updated: string; content: string; clipped: boolean }> }>
+    remove: (name: string, expectedFolder?: string) => Promise<{ ok: boolean; answer: string }>
   }
   journal: {
     list: () => Promise<{ ok: boolean; entries: Array<{ at: string; prompt: string; answer: string; sessionId: string | null; usage: string; workspace: string }> }>
@@ -510,6 +541,8 @@ const demoEngineBridge: EngineBridge = {
   answer: async () => ({ ok: false }),
   setThinking: async () => ({ ok: false, answer: 'Thinking lives in the desktop app.' }),
   memory: {
+    chooseFolder: async () => ({ ok: false, answer: 'Choosing a memory folder uses the installed app.' }),
+    defaultFolder: async () => ({ ok: false, answer: 'Memory locations are saved by the installed app.' }),
     list: async () => ({ ok: true, files: [] }),
     remove: async () => ({ ok: false, answer: 'Memories live in the desktop app.' }),
   },
@@ -576,3 +609,9 @@ export const getEngineApi = (): EngineBridge => {
 
 /** True in the browser preview, where there is no main process behind the UI. */
 export const isDemo = !hasDesktopBridge()
+
+/** The preload's operational service, with an honest browser-only fallback. */
+export const getAutomationApi = (): AutomationBridge => {
+  if (typeof window !== 'undefined') { const candidate = (window as unknown as { api?: { automation?: AutomationBridge } }).api?.automation; if (candidate) return candidate }
+  return demoAutomation
+}

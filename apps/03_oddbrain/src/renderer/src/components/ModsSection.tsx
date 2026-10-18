@@ -1,3 +1,4 @@
+import EngineMarketplace from '../ui/EngineMarketplace'
 import { useEffect, useState } from 'react'
 import { FolderOpen, Package, PackagePlus, RefreshCw, Trash2, Check, Palette, MessageSquare, BookOpen } from 'lucide-react'
 import BrainMark from './BrainMark'
@@ -37,7 +38,7 @@ const rememberTheme = (id: string, theme: StoredTheme): void => {
   writeStored(THEMES_KEY, { ...all, [id]: theme })
 }
 
-export default function ModsSection({
+function OddBrainPacks({
   onAppearanceChange,
   appearance,
 }: {
@@ -461,7 +462,7 @@ function CommunityPacks({ installed, onInstalled }: {
   }
 
   useEffect(() => {
-    browseAll()
+    void bridge.mods.indexList().then(list=>setIndexes(list ?? []))
     void bridge.mods.communityIndex?.().then(setCommunity)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
@@ -670,3 +671,5 @@ function CommunityPacks({ installed, onInstalled }: {
     </section>
   )
 }
+
+export default function ModsSection(props:{onAppearanceChange:(appearance:Appearance)=>void;appearance:Appearance}){return <EngineMarketplace><OddBrainPacks {...props}/></EngineMarketplace>}

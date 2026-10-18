@@ -8,9 +8,13 @@
  * nothing else — this is not a general archiver, it is one trusted file from
  * one trusted host.
  */
-import { existsSync } from 'node:fs'
+import { existsSync, createWriteStream } from 'node:fs'
+import { createHash, randomUUID } from 'node:crypto'
+import { Readable, Transform } from 'node:stream'
+import { pipeline } from 'node:stream/promises'
+import { extractRuntimeArchive, OLLAMA_ARCHIVE_LIMITS, safeArchivePath } from './runtimeArchive'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rm, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
 import { ENGINE_DOWNLOADS, MAX_DOWNLOAD_BYTES, humanBytes, isOfficialDownloadHost, isOfficialUrl, parseShaLine } from '../../shared/lib/engineDownloads'
@@ -78,6 +82,7 @@ export function createDownloadManager(options: {
       status: reply.status,
       headers: { get: (name: string) => reply.headers.get(name) },
       arrayBuffer: () => reply.arrayBuffer(),
+      body: reply.body,
     }
   })
 
@@ -167,51 +172,56 @@ export function createDownloadManager(options: {
         onTick({ engine, got: 0, total: null, phase: 'error', answer })
         return { ok: false, answer }
       }
-      let bytes: Uint8Array
+      const directory = join(root, engine)
+      await mkdir(directory, { recursive: true })
+      const token = randomUUID()
+      const temporary = join(directory, `download-${token}.part`)
+      const staging = join(directory, `unpack-${token}`)
+      const target = stagedPath(engine) ?? join(directory, 'download.bin')
+      let got = 0
+      const hash = createHash('sha256')
       try {
-        bytes = new Uint8Array((await reply.arrayBuffer?.()) ?? new ArrayBuffer(0))
-      } catch (failure) {
-        const answer = `The download broke midway: ${(failure as Error).message}`
-        onTick({ engine, got: 0, total: null, phase: 'error', answer })
-        return { ok: false, answer }
-      }
-      if (!bytes.length) {
-        const answer = `${info.host} sent nothing. Nothing was installed.`
-        onTick({ engine, got: 0, total: null, phase: 'error', answer })
-        return { ok: false, answer }
-      }
-      if (bytes.length > MAX_DOWNLOAD_BYTES) {
-        const answer = 'The download exceeded the size cap. Nothing was installed.'
-        onTick({ engine, got: 0, total: null, phase: 'error', answer })
-        return { ok: false, answer }
-      }
-      onTick({ engine, got: bytes.length, total: bytes.length, phase: 'downloading' })
-      const target = stagedPath(engine) ?? join(root, engine, 'download.bin')
-      await mkdir(join(root, engine), { recursive: true })
-      await writeFile(target, bytes)
-      const digest = parseShaLine(await import('node:crypto').then(crypto => crypto.createHash('sha256').update(bytes).digest('hex')))
-      const record: InstallRecord = {
-        engine,
-        file: target,
-        endpoint: info.windows,
-        sha256: digest,
-        at: new Date().toISOString(),
-      }
-      await writeRecords(engine, record)
-      // A zip for the app's own runtime is unpacked right away; an installer
-      // script waits for its own run permission.
-      if (info.kind === 'zip') {
-        const unpacked = await unzipArchive(bytes, join(root, engine, 'app'))
-        if (!unpacked.ok) {
-          const answer = `The archive could not be unpacked: ${unpacked.answer}`
-          onTick({ engine, got: 0, total: null, phase: 'error', answer })
-          return { ok: false, answer }
+        // Native fetch streams to disk. A test/legacy transport may supply an
+        // arrayBuffer, which still has the same measured-byte gate.
+        const body = reply.body as { getReader?: unknown } | undefined
+        const source = body && typeof body.getReader === 'function'
+          ? Readable.fromWeb(body as never)
+          : Readable.from([new Uint8Array((await reply.arrayBuffer?.()) ?? new ArrayBuffer(0))])
+        let lastTick = 0
+        const budget = new Transform({ transform(chunk: Buffer, _encoding, callback) {
+          got += chunk.length
+          if (got > MAX_DOWNLOAD_BYTES) { callback(Error('The download exceeded the size cap. Nothing was installed.')); return }
+          hash.update(chunk)
+          if (Date.now() - lastTick > 150) { lastTick = Date.now(); onTick({ engine, got, total: declared || null, phase: 'downloading' }) }
+          callback(null, chunk)
+        } })
+        await pipeline(source, budget, createWriteStream(temporary, { flags: 'wx', mode: 0o600 }))
+        if (!got) throw Error(`${info.host} sent nothing. Nothing was installed.`)
+        if (info.kind === 'zip') {
+          const unpacked = await extractRuntimeArchive(temporary, staging, engine === 'ollama' ? OLLAMA_ARCHIVE_LIMITS : undefined)
+          if (!unpacked.ok) throw Error(`The archive could not be unpacked: ${unpacked.answer}`)
+          if (engine === 'ollama' && !existsSync(join(staging, 'ollama.exe'))) throw Error('The runtime archive contains no ollama.exe. Nothing was installed.')
+          // Swap only a completely extracted runtime; keep the old one on failure.
+          const active = join(directory, 'app'), backup = join(directory, `previous-${token}`)
+          const hadActive = existsSync(active)
+          if (hadActive) await rename(active, backup)
+          try { await rename(staging, active) }
+          catch (error) { if (hadActive) await rename(backup, active); throw error }
+          await rm(backup, { recursive: true, force: true })
         }
+        await rename(temporary, target)
+        await writeRecords(engine, { engine, file: target, endpoint: info.windows, sha256: parseShaLine(hash.digest('hex')), at: new Date().toISOString() })
+      } catch (failure) {
+        await rm(temporary, { force: true })
+        await rm(staging, { recursive: true, force: true })
+        const answer = (failure as Error).message
+        onTick({ engine, got, total: declared || null, phase: 'error', answer })
+        return { ok: false, answer }
       }
       const answer = info.kind === 'zip'
         ? 'Downloaded from the official endpoint and unpacked into the app\u2019s own engines folder. (The file\u2019s SHA-256 is recorded below; the official source is pinned by URL.)'
         : 'Staged. Running the official installer is a separate permission, shown in full before it runs.'
-      onTick({ engine, got: bytes.length, total: bytes.length, phase: 'staged', answer })
+      onTick({ engine, got, total: got, phase: 'staged', answer })
       return { ok: true, answer }
     },
 
@@ -385,7 +395,7 @@ export async function unzipArchive(
   let totalActual = 0
   await fs.mkdir(destination, { recursive: true })
   for (let index = 0; index < count; index += 1) {
-    if (view.getUint32(offset, true) !== 0x02014b50) return { ok: false, answer: 'damaged central directory' }
+    if (offset + 46 > bytes.length || view.getUint32(offset, true) !== 0x02014b50) return { ok: false, answer: 'damaged central directory' }
     const method = view.getUint16(offset + 10, true)
     const compressedSize = view.getUint32(offset + 20, true)
     // The central directory DECLARES the uncompressed size — check it before
@@ -401,9 +411,10 @@ export async function unzipArchive(
     const commentLength = view.getUint16(offset + 32, true)
     const localOffset = view.getUint32(offset + 42, true)
     const name = decoder.decode(bytes.subarray(offset + 46, offset + 46 + nameLength))
-    if (name.includes('..') || /^[A-Za-z]:/.test(name) || name.startsWith('/')) {
+    if (!safeArchivePath(name)) {
       return { ok: false, answer: `unsafe path in archive: ${name}` }
     }
+    if (localOffset + 30 > bytes.length) return { ok: false, answer: 'damaged local header' }
     const localNameLength = view.getUint16(localOffset + 26, true)
     const localExtraLength = view.getUint16(localOffset + 28, true)
     const dataStart = localOffset + 30 + localNameLength + localExtraLength

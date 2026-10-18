@@ -1,3 +1,6 @@
+import type { MarketplaceBridge } from '../shared/lib/engineMarketplace'
+import type { MediaBridge } from '../shared/lib/mediaProcessing'
+import type { AutomationBridge, AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
 import { contextBridge, ipcRenderer } from 'electron'
 import type {
   CloudModelsAnswer,
@@ -72,9 +75,11 @@ const engineApi = {
   setThinking: (mode: 'default' | 'extended'): Promise<{ ok: boolean; answer: string }> =>
     ipcRenderer.invoke('engine:thinking', mode),
   memory: {
+    chooseFolder: (): Promise<{ ok: boolean; answer: string; folder?: string; canceled?: boolean }> => ipcRenderer.invoke('memory:choose-folder'),
+    defaultFolder: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:default-folder'),
     list: (): Promise<{ ok: boolean; folder?: string; files?: Array<{ name: string; path: string; updated: string; content: string; clipped: boolean }> }> =>
       ipcRenderer.invoke('memory:list'),
-    remove: (name: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:remove', name),
+    remove: (name: string, expectedFolder?: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:remove', name, expectedFolder),
   },
   journal: {
     list: (): Promise<{ ok: boolean; entries: Array<{ at: string; prompt: string; answer: string; sessionId: string | null; usage: string; workspace: string }> }> =>
@@ -169,8 +174,23 @@ const engineApi = {
   },
 }
 
+const automationApi: AutomationBridge = {
+  read: () => ipcRenderer.invoke('automation:read'),
+  update: (patch: Partial<AutomationPreferences>) => ipcRenderer.invoke('automation:update', patch),
+  models: () => ipcRenderer.invoke('automation:models'),
+  review: (input: ReviewInput) => ipcRenderer.invoke('automation:review', input),
+  cancel: () => ipcRenderer.invoke('automation:cancel'),
+  onChanged: listener => { const hear = (_event: unknown, view: AutomationView): void => listener(view); ipcRenderer.on('automation:changed', hear); return () => ipcRenderer.removeListener('automation:changed', hear) },
+}
+const mediaApi: MediaBridge = { read:()=>ipcRenderer.invoke('media:read'), update:value=>ipcRenderer.invoke('media:update',value), models:()=>ipcRenderer.invoke('media:models'), process:input=>ipcRenderer.invoke('media:process',input), cancel:id=>ipcRenderer.invoke('media:cancel',id) }
+const marketplaceApi: MarketplaceBridge = { browse:()=>ipcRenderer.invoke('marketplace:browse'), plan:(action,target)=>ipcRenderer.invoke('marketplace:plan',action,target), approve:token=>ipcRenderer.invoke('marketplace:approve',token),deny:token=>ipcRenderer.invoke('marketplace:deny',token) }
 const api = {
+  marketplace:marketplaceApi,
+  media:mediaApi,
+  automation: automationApi,
   app: {
+    previewHtml: (): Promise<{ ok: boolean; html?: string; error?: string }> => ipcRenderer.invoke('app:preview-html'),
+    claimLaunch: (): Promise<boolean> => ipcRenderer.invoke('app:claim-launch'),
     /** Which build is running. Used by the About panel and bug reports. */
     version: process.env['npm_package_version'] ?? '0.1.0',
     platform: process.platform,
@@ -212,6 +232,7 @@ const api = {
     forgetSession: (workspace: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('engine:sessions-forget', workspace),
     openFolder: (folder: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('app:open-folder', folder),
     checkpoints: {
+      inspect: (copy: string): Promise<{ ok: boolean; content?: string; clipped?: boolean; answer?: string }> => ipcRenderer.invoke('engine:checkpoint:inspect', copy),
       list: (): Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }> =>
         ipcRenderer.invoke('engine:checkpoints:list'),
       restore: (copy: string, original?: string): Promise<{ ok: boolean; answer: string }> =>
@@ -363,6 +384,8 @@ const api = {
   },
 
   artifacts: {
+    trashList: (): Promise<{ ok: boolean; items: import('../main/artifacts/store').TrashItem[]; error?: string }> => ipcRenderer.invoke('artifacts:trash-list'),
+    trashRestore: (key: string): Promise<ItemAnswer> => ipcRenderer.invoke('artifacts:trash-restore', key),
     list: (): Promise<ListAnswer> => ipcRenderer.invoke('artifacts:list'),
     /** One document. `version` is 1-based, the number the chips show. */
     read: (id: string, version?: number): Promise<ReadAnswer> => ipcRenderer.invoke('artifacts:read', id, version),

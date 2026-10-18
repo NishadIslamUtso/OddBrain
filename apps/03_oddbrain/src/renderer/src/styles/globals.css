@@ -32,12 +32,12 @@
   /* Light too for the browser's own controls: native selects, checkboxes and
    * autofill follow this, so night mode is not a dark room with white switches. */
   color-scheme: light;
-  --color-bg: #f4f2ec;
-  --color-panel: #ebe8df;
-  --color-card: #fbfaf6;
-  --color-line: #dcd7ca;
-  --color-ink: #262420;
-  --color-muted: #6f6a5e;
+  --color-bg: #f5f5f7;
+  --color-panel: #ededf0;
+  --color-card: #ffffff;
+  --color-line: #d9d9e0;
+  --color-ink: #242429;
+  --color-muted: #666670;
   --color-brand: #b04a6a;
   --color-ok: #15803d;
   --color-warn: #b45309;
@@ -46,12 +46,12 @@
 @media (prefers-color-scheme: light) {
   :root:not([data-theme='dark']) {
     color-scheme: light;
-    --color-bg: #f4f2ec;
-    --color-panel: #ebe8df;
-    --color-card: #fbfaf6;
-    --color-line: #dcd7ca;
-    --color-ink: #262420;
-    --color-muted: #6f6a5e;
+    --color-bg: #f5f5f7;
+    --color-panel: #ededf0;
+    --color-card: #ffffff;
+    --color-line: #d9d9e0;
+    --color-ink: #242429;
+    --color-muted: #666670;
     --color-brand: #b04a6a;
     --color-ok: #15803d;
     --color-warn: #b45309;
