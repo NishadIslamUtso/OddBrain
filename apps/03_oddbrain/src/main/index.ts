@@ -52,6 +52,7 @@ import { installCatalogSkill } from './engine/skillCatalogInstall'
 import { installPackFromFolder, listPacks, removePack } from './engine/packs'
 import { exportPack } from './engine/exportPack'
 import { installFromIndex, readIndex } from './engine/storeIndex'
+import { marketplaceAddCommand, probeMarketplace, runMarketplaceAdd } from './engine/marketplaces'
 import { starterPackFiles } from './engine/vaultSkills'
 import { deployBuiltInSkills } from './engine/vaultSkills'
 import { applyConflictAction, brainFileContents, classifyBrainRoot, defaultVaultPath, planBrainApply, planBrainRefresh } from '../shared/lib/brainStructure'
@@ -1203,6 +1204,39 @@ function registerBridges(): void {
     const source = toSource(String(payload?.kind ?? ''), String(payload?.locator ?? ''))
     if (!source) return { ok: false as const, answer: 'That is not a folder path or an https URL.' }
     return installFromIndex(source, String(payload?.id ?? ''), { storeRoot: join(app.getPath('userData'), 'extensions'), ...skillTargets() })
+  })
+
+  // Engine marketplaces (phase 2). Reading is a probe of the engine's OWN
+  // help text — one process, read-only, no catalog of our own. Installing is
+  // a separate act the person asks for by name, and it runs the engine's own
+  // documented command so the engine stays the thing that installs its things.
+  // Engine marketplaces (phase 2). Reading is a probe of the engine's OWN
+  // help text — one process, read-only, no catalog of our own. Adding one is
+  // a separate act the person asks for by name, and it runs the engine's own
+  // documented command so the engine stays the thing that installs its things.
+  const engineBinary = async (id: EngineId): Promise<string | null> => {
+    const found = await detectEngine(id)
+    return found.found && found.path ? found.path : null
+  }
+  handle('marketplace:probe', async (_event, id: EngineId) => {
+    if (id !== 'claude-code' && id !== 'agy') return { ok: false as const, answer: 'Unknown engine.' }
+    const binary = await engineBinary(id)
+    return { ok: true as const, probe: await probeMarketplace(id, binary) }
+  })
+  handle('marketplace:add', async (_event, payload: { id?: string; locator?: string; confirmed?: boolean }) => {
+    const id = payload?.id === 'agy' ? 'agy' : 'claude-code'
+    const binary = await engineBinary(id)
+    if (!binary) return { ok: false as const, answer: `${id} is not installed, so it cannot add a marketplace.` }
+    // The card comes first: without an explicit confirmation the exact command
+    // is returned for display, and nothing runs.
+    if (payload?.confirmed !== true) {
+      const args = marketplaceAddCommand(id, String(payload?.locator ?? ''))
+      return args
+        ? { ok: false as const, answer: `Not run. The command is: ${id} ${args.join(' ')}` }
+        : { ok: false as const, answer: 'That entry cannot be turned into a command this app will run.' }
+    }
+    const result = await runMarketplaceAdd(id, binary, String(payload?.locator ?? ''))
+    return { ok: result.ok, answer: result.answer }
   })
 
   // Mods (Phase 3): publish. Export turns the engine's real skills and the

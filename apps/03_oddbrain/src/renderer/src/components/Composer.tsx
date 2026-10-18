@@ -171,7 +171,7 @@ export default function Composer({
         {attachments.length > 0 && onDetach ? (
           <ul className="flex flex-wrap gap-1.5 px-4 pt-2" aria-label="Attached">
             {attachments.map(entry => (
-              <li key={entry.id} className="flex items-center gap-1 rounded-lg border border-line bg-bg px-1.5 py-1 text-[11px] text-muted">
+              <li key={entry.id} title={entry.note || entry.name} className="flex items-center gap-1 rounded-lg border border-line bg-bg px-1.5 py-1 text-[11px] text-muted">
                 {entry.kind === 'image' && entry.data ? (
                   <img src={`data:${entry.mime};base64,${entry.data}`} alt="" className="h-6 w-6 rounded object-cover" />
                 ) : (
@@ -180,6 +180,7 @@ export default function Composer({
                 <button type="button" onClick={() => onDetach(entry.id)} aria-label={`Remove ${entry.name}`} className="text-muted hover:text-ink">
                   <X size={11} />
                 </button>
+                {entry.note ? <span className="sr-only">{entry.note}</span> : null}
               </li>
             ))}
           </ul>
@@ -189,7 +190,7 @@ export default function Composer({
             ref={fileInput}
             type="file"
             multiple
-            accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py"
+            accept="image/*,video/*,audio/*,.pdf,.docx,.xlsx,.pptx,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py,.html,.css,.xml,.yml,.yaml,.log,.sql,.sh,.c,.cpp,.h,.java,.rs"
             className="hidden"
             onChange={event => {
               const files = Array.from(event.target.files ?? [])

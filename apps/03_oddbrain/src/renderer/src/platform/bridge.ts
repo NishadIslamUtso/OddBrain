@@ -150,6 +150,10 @@ export type DesktopBridge = {
     exportPack: (payload: { name: string; description: string; author: string; skills: string[]; theme: { appearance: Record<string, string>; css?: string } | null }) => Promise<{ ok: boolean; answer: string; folder?: string; index?: string }>
     installStarter: () => Promise<{ ok: boolean; answer: string; folder?: string; written?: string[] }>
     communityIndex?: () => Promise<{ ok: boolean; path?: string }>
+    /** What an engine's own build documents for its marketplace, asked on demand. */
+    marketplaceProbe?: (id: 'claude-code' | 'agy') => Promise<{ ok: boolean; probe?: { engine: string; state: string; answer: string; commands: string[]; checkedAt: string }; answer?: string }>
+    /** The engine's own install command, run only after the person sees it. */
+    marketplaceAdd?: (id: 'claude-code' | 'agy', locator: string, confirmed: boolean) => Promise<{ ok: boolean; answer: string }>
   }
   /** The engine's tool servers (MCP). Browser control is one entry in this list. */
   mcp: {
@@ -304,6 +308,8 @@ const demoBridge: DesktopBridge = {
     exportPack: async () => ({ ok: false, answer: 'Exporting a pack needs the desktop app.' }),
     installStarter: async () => ({ ok: false, answer: 'Installing the starter pack needs the desktop app.' }),
     communityIndex: async () => ({ ok: false }),
+    marketplaceProbe: async () => ({ ok: false, answer: 'The installed app asks the engine; this window cannot.' }),
+    marketplaceAdd: async () => ({ ok: false, answer: 'The installed app runs engine commands.' }),
   },
   mcp: {
     read: async () => ({ servers: [] }),

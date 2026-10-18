@@ -302,6 +302,12 @@ const api = {
       ipcRenderer.invoke('mods:export', payload),
     installStarter: (): Promise<{ ok: boolean; answer: string; folder?: string; written?: string[] }> =>
       ipcRenderer.invoke('mods:install-starter'),
+    /** What an engine's own CLI documents for its marketplace, asked on demand. */
+    marketplaceProbe: (id: 'claude-code' | 'agy'): Promise<{ ok: boolean; probe?: { engine: string; state: string; answer: string; commands: string[]; checkedAt: string }; answer?: string }> =>
+      ipcRenderer.invoke('marketplace:probe', id),
+    /** The engine's own command, only after the person has seen it. */
+    marketplaceAdd: (id: 'claude-code' | 'agy', locator: string, confirmed: boolean): Promise<{ ok: boolean; answer: string }> =>
+      ipcRenderer.invoke('marketplace:add', { id, locator, confirmed }),
     communityIndex: (): Promise<{ ok: boolean; path?: string }> =>
       ipcRenderer.invoke('mods:community-index'),
   },

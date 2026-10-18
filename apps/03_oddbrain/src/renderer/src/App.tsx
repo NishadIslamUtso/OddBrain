@@ -30,6 +30,7 @@ import useArtifactRewrite from './hooks/useArtifactRewrite'
 import useModels from './hooks/useModels'
 import type { Attachment } from '@shared/types'
 import { readAttachment } from '@shared/lib/attachments'
+import { mediaKind } from '@shared/lib/decode'
 import { extractFrames } from './lib/videoFrames'
 import usePersistentState from './hooks/usePersistentState'
 import useVault from './hooks/useVault'
@@ -470,7 +471,7 @@ export default function App() {
     const taken: Attachment[] = []
     for (const file of files.slice(0, room)) {
       try {
-        if (/^video\/(?:mp4|webm)$/.test(file.type)) {
+        if (mediaKind(file) === 'video') {
           // A video rides as evenly spaced still frames: the engine reads
           // pictures natively, and frames carry the story a clip would.
           const frames = await extractFrames(file, room - taken.length)

@@ -17,6 +17,20 @@ import { ENGINE_DOWNLOADS, MAX_DOWNLOAD_BYTES, humanBytes, isOfficialDownloadHos
 
 export type DownloadTick = { engine: string; got: number; total: number | null; phase: 'downloading' | 'staged' | 'error'; answer?: string }
 
+/**
+ * The runtime archive is not a toy zip. Measured on the official
+ * ollama-windows-amd64.zip: 1.47 GB compressed, 87 entries, 1.94 GB unpacked,
+ * and one 692 MB DLL (CUDA). The old caps (200 files, 200 MB each, 400 MB
+ * total) refused it at the first entry, which is why "the download fails at
+ * unpack" — the transfer was fine. These are still caps: an archive that
+ * exceeds them is refused before anything is inflated.
+ */
+export const RUNTIME_ZIP_LIMITS = Object.freeze({
+  files: 512,
+  perFile: 1_500 * 1024 * 1024,
+  totalUncompressed: 4 * 1024 * 1024 * 1024,
+})
+
 export type InstallRecord = {
   engine: string
   file: string
@@ -25,7 +39,7 @@ export type InstallRecord = {
   at: string
 }
 
-type FetchLike = (url: string) => Promise<{ ok: boolean; status?: number; headers?: { get(name: string): string | null }; arrayBuffer?: () => Promise<ArrayBuffer>; body?: unknown }>
+type FetchLike = (url: string) => Promise<{ ok: boolean; status?: number; headers?: { get(name: string): string | null }; arrayBuffer?: () => Promise<ArrayBuffer>; body?: ReadableStream<Uint8Array> | null }>
 
 export type DownloadManager = {
   start(engine: string): Promise<{ ok: boolean; answer: string }>
@@ -78,6 +92,7 @@ export function createDownloadManager(options: {
       status: reply.status,
       headers: { get: (name: string) => reply.headers.get(name) },
       arrayBuffer: () => reply.arrayBuffer(),
+      body: reply.body,
     }
   })
 
@@ -167,9 +182,40 @@ export function createDownloadManager(options: {
         onTick({ engine, got: 0, total: null, phase: 'error', answer })
         return { ok: false, answer }
       }
+      // Streamed, with real progress: a 1.47 GB transfer that reports nothing
+      // until it ends reads as a hang. Falls back to one buffer only when the
+      // fetch implementation has no body to read.
       let bytes: Uint8Array
       try {
-        bytes = new Uint8Array((await reply.arrayBuffer?.()) ?? new ArrayBuffer(0))
+        const stream = (reply as { body?: ReadableStream<Uint8Array> | null }).body
+        if (stream && typeof (stream as ReadableStream<Uint8Array>).getReader === 'function') {
+          const reader = (stream as ReadableStream<Uint8Array>).getReader()
+          const chunks: Uint8Array[] = []
+          let got = 0
+          let lastTick = 0
+          for (;;) {
+            const { done, value } = await reader.read()
+            if (done) break
+            if (value) {
+              got += value.byteLength
+              if (got > MAX_DOWNLOAD_BYTES) {
+                await reader.cancel().catch(() => undefined)
+                const answer = `The download passed the ${humanBytes(MAX_DOWNLOAD_BYTES)} cap. Nothing was installed.`
+                onTick({ engine, got, total: declared || null, phase: 'error', answer })
+                return { ok: false, answer }
+              }
+              chunks.push(value)
+              // Four ticks a second at most: progress, not a strobe.
+              const now = Date.now()
+              if (now - lastTick >= 250) { lastTick = now; onTick({ engine, got, total: declared || null, phase: 'downloading' }) }
+            }
+          }
+          bytes = new Uint8Array(got)
+          let at = 0
+          for (const chunk of chunks) { bytes.set(chunk, at); at += chunk.byteLength }
+        } else {
+          bytes = new Uint8Array((await reply.arrayBuffer?.()) ?? new ArrayBuffer(0))
+        }
       } catch (failure) {
         const answer = `The download broke midway: ${(failure as Error).message}`
         onTick({ engine, got: 0, total: null, phase: 'error', answer })
@@ -201,6 +247,7 @@ export function createDownloadManager(options: {
       // A zip for the app's own runtime is unpacked right away; an installer
       // script waits for its own run permission.
       if (info.kind === 'zip') {
+        onTick({ engine, got: bytes.length, total: bytes.length, phase: 'downloading', answer: 'Unpacking the runtime…' })
         const unpacked = await unzipArchive(bytes, join(root, engine, 'app'))
         if (!unpacked.ok) {
           const answer = `The archive could not be unpacked: ${unpacked.answer}`
@@ -367,7 +414,7 @@ export function createDownloadManager(options: {
 export async function unzipArchive(
   bytes: Uint8Array,
   destination: string,
-  limits = { files: 200, perFile: 200 * 1024 * 1024, totalUncompressed: 400 * 1024 * 1024 },
+  limits: { files: number; perFile: number; totalUncompressed: number } = RUNTIME_ZIP_LIMITS,
   fs: { mkdir(path: string, options?: { recursive?: boolean }): Promise<unknown>; writeFile(path: string, data: Uint8Array): Promise<unknown> } = { mkdir, writeFile },
 ): Promise<{ ok: boolean; answer: string }> {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)

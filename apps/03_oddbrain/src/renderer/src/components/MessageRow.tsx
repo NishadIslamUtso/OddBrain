@@ -1,8 +1,8 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Volume2, Square as StopSquare } from 'lucide-react'
 import type { Artifact, Message } from '@shared/types'
 import type { ElementPick } from '@shared/lib/artifacts'
-import { ttsSupported } from '@shared/lib/media'
+import { speakableText, speechChunks, ttsSupported } from '@shared/lib/media'
 import { THINKING_OPEN_EVENT, setThinkingOpen, thinkingOpenNow } from '@shared/lib/thinkingOpen'
 import { parseCloudModel } from '@shared/lib/providers'
 import type { ArtifactView } from '@/state/artifactView'
@@ -21,32 +21,49 @@ import { useLook } from '../ui/LookContext'
  */
 
 /**
- * Read one reply aloud, with the window's own voice. Its own component so the
- * speaking state is a hook that never depends on which branch rendered.
+ * Read one reply aloud, with the window's own voice.
+ *
+ * Long replies are queued in sentence-sized pieces because Chromium stops a
+ * single utterance after roughly fifteen seconds. Stopping cancels the queue,
+ * and unmounting stops the window from talking to an empty chair.
  */
 function SpeakButton({ text }: { text: string }) {
   const [speaking, setSpeaking] = useState(false)
+  const cancelled = useRef(false)
+  useEffect(() => () => {
+    cancelled.current = true
+    if (ttsSupported()) window.speechSynthesis.cancel()
+  }, [])
   if (!ttsSupported()) return null
-  const toggle = (): void => {
-    if (speaking) {
-      window.speechSynthesis.cancel()
-      setSpeaking(false)
-      return
-    }
-    const voice = new SpeechSynthesisUtterance(text)
-    voice.onend = () => setSpeaking(false)
-    voice.onerror = () => setSpeaking(false)
+  const stop = (): void => {
+    cancelled.current = true
     window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(voice)
+    setSpeaking(false)
+  }
+  const start = (): void => {
+    const chunks = speechChunks(speakableText(text))
+    if (!chunks.length) return
+    cancelled.current = false
+    window.speechSynthesis.cancel()
     setSpeaking(true)
+    let index = 0
+    const next = (): void => {
+      if (cancelled.current) return
+      if (index >= chunks.length) { setSpeaking(false); return }
+      const voice = new SpeechSynthesisUtterance(chunks[index++])
+      voice.onend = next
+      voice.onerror = () => { cancelled.current = true; setSpeaking(false) }
+      window.speechSynthesis.speak(voice)
+    }
+    next()
   }
   return (
     <button
       type="button"
-      onClick={toggle}
+      onClick={() => (speaking ? stop() : start())}
       aria-label={speaking ? 'Stop reading aloud' : 'Read aloud'}
       title={speaking ? 'Stop reading aloud' : 'Read this reply aloud'}
-      className="mt-2 flex items-center gap-1 rounded-lg border border-line px-1.5 py-0.5 text-[10.5px] text-muted hover:text-ink"
+      className="ob-message-action flex items-center gap-1 text-[11px] text-muted hover:text-ink"
     >
       {speaking ? <StopSquare size={10} /> : <Volume2 size={10} />}
       {speaking ? 'Stop' : 'Listen'}
@@ -148,8 +165,12 @@ export default function MessageRow({
             {message.content}
           </div>
         ) : null}
-        {message.content && message.status !== 'streaming' ? <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div> : null}
-        {message.content && message.status !== 'streaming' ? <SpeakButton text={message.content} /> : null}
+        {message.content && message.status !== 'streaming' ? (
+          <div className="ob-message-actions">
+            <CopyText text={message.content} label="Copy message" />
+            <SpeakButton text={message.content} />
+          </div>
+        ) : null}
 
         {streaming && !message.content && !message.stage ? (
           <p className="text-[13px] text-muted">Thinking…</p>
