@@ -1,26 +1,23 @@
 # Report to orchestrator — audio/video/image intake
 
-**Status: NOT COMPLETE.** The Vitest repair and AV honesty changes pass local gates and GitHub Actions on `9f4e5e1`. Remaining blockers are shared intake-registry integration, unverified per-model audio support, and the absence of real-device decode/RAM/VRAM measurements. Baseline: `a6c7807`; branch: `arena/9a3a5c88-oddbrain`.
+**Status: IN PROGRESS.** Ruling #4 answers the registry question and approves the current decoder boundary until the shared door lands. This continuation adds visible per-model image-capability disclosure. Local typecheck, tests, and build pass; Electron install/smoke failed in the sandbox, and CI for these latest changes is pending. No completion claim.
 
 ## What exists
 
-### AV handling already present on this branch
+### AV decoding and limits
 
 - `apps/03_oddbrain/src/shared/lib/media.ts` validates MP3/WAV containers and derives bounded video-frame timestamps. Audio limits are 6 MiB and 90 seconds, mono/stereo, 8–48 kHz; formats are MP3 and uncompressed PCM/float WAV.
-- `apps/03_oddbrain/src/shared/lib/attachments.ts` locally decodes/re-encodes PNG/JPEG/WebP images (source sides up to 8192 px / 24 MP; output sides up to 2048 px and output up to 2 MiB), validates audio, and keeps media bytes in IndexedDB. This file also contains document extraction, which is outside this lane and frozen.
+- The AV parts of `apps/03_oddbrain/src/shared/lib/attachments.ts` locally decode/re-encode PNG/JPEG/WebP images (source sides up to 8192 px / 24 MP; output sides up to 2048 px and output up to 2 MiB), validate/decode audio, and persist payloads in IndexedDB. Document extraction in that file is not this lane.
 - `apps/03_oddbrain/src/renderer/src/lib/videoFrames.ts` bounds MP4/WebM work to 100 MiB, 10 minutes, 4096 px per source side, at most four sampled frames, each no larger than 1280×720 and 2 MiB. Video audio is not extracted or sent.
-- Existing `App.addFiles` routes attachments through `readAttachment`, `readAudioAttachment`, and `extractFrames`. Audio goes only to the explicitly selected, enabled OpenAI model; there is no provider/model fallback. The provider model list does not establish per-model audio capability.
+- `apps/03_oddbrain/src/renderer/src/components/composerMedia.ts` states audio capability as unverified for the exact selected OpenAI model when the provider model list has no capability field. It never infers support from the name, selects a default, or reroutes.
+- `apps/03_oddbrain/vitest.config.ts` contains the Ruling #1 repair: `fileParallelism: false` replaces `maxWorkers: 1`, with only its adjacent comment updated.
+- The same module reports `agy` image input as unsupported (the engine refuses it) and `claude-code` image input as unverified for its exact selected model. `Composer.tsx` displays this as a status line while image payloads are attached, before Send; it does not switch engines.
+- `Composer.tsx` also displays exact prepared image/audio payload byte counts from the base64 payload. These are not source-video sizes or RAM/VRAM estimates; invalid or missing bytes produce no label.
+- `apps/03_oddbrain/tests/composer-media-honesty.test.ts` covers exact-model audio disclosure, no automatic selection, AGY image refusal, unverified Claude Code image capability, no guessed model name, exact payload bytes, malformed payloads, and exact byte formatting.
 
-### AV-only changes in this continuation
+## Intake ownership and integration
 
-- `apps/03_oddbrain/src/renderer/src/components/composerMedia.ts` now reports audio capability as **unverified** for the exact selected OpenAI model when the provider listing lacks capability data. It does not infer support from a model name. It distinguishes no selection and a model missing from the enabled list; it never selects or reroutes automatically.
-- `apps/03_oddbrain/src/renderer/src/components/Composer.tsx` uses that model-specific disclosure before send. It also shows exact outgoing image/audio payload bytes, calculated from the prepared base64 payload and labeled in bytes. Invalid or missing payload data produces no size label. These are payload byte counts—not source-video sizes, RAM/VRAM readings, or fit estimates. The prior dictation hunk in this file was not changed.
-- `apps/03_oddbrain/tests/composer-media-honesty.test.ts` adds five checks for unknown model capability, explicit selection/no fallback, exact byte counts, and refusal to invent a size.
-- `apps/03_oddbrain/vitest.config.ts` contains only the Ruling #1 fix: `fileParallelism: false` replaces `maxWorkers: 1`, with its adjacent comment updated. Local Vitest and CI now pass with the setting.
-
-## Intake ownership and collision
-
-The baseline has no `src/main/` media/decode registry (`git ls-tree -r a6c7807 apps/03_oddbrain/src/main` found none). No second intake door was added. Current AV decoders remain behind the existing `readAttachment` / `readAudioAttachment` / `extractFrames` functions; `App.addFiles` is the named integration point for `arena/6d6aabbf`'s shared intake registry. Registry integration is still pending coordination with that lane.
+**Ruling #4 (in `ODD-BRAIN-BRIEF.md`, commit `4a459e3`) answers Q1.** There is no main-process media registry because image/audio/video decoding uses renderer APIs. The current `readAttachment`, `readAudioAttachment`, and `extractFrames` boundary is the explicitly approved fallback until `arena/6d6aabbf` lands its shared door. No second door and no `src/main/media` module should be added. The integration seam is the shared door's AV kind-dispatch calling these decoder functions and printing their named refusals verbatim. The door and `src/shared/types.ts` remain owned by the other lane; I did not edit them.
 
 **Frozen, awaiting merge (no further edits):**
 
@@ -31,33 +28,28 @@ The baseline has no `src/main/` media/decode registry (`git ls-tree -r a6c7807 a
 - `apps/03_oddbrain/src/shared/lib/ollama.ts`
 - `apps/03_oddbrain/src/shared/lib/providers.ts`
 - `apps/03_oddbrain/src/shared/types.ts`
-- The pre-brief dictation change in `apps/03_oddbrain/src/renderer/src/components/Composer.tsx` (the AV-only composer edits above do not touch it).
+- The pre-brief dictation hunk in `apps/03_oddbrain/src/renderer/src/components/Composer.tsx`; AV-only Composer changes do not touch it.
 
-Other out-of-allowlist ancestry from `c17cf31` remains a reported collision, not new work: `package.json` / `package-lock.json`, `src/main/index.ts`, renderer `App.tsx`, `ChatView.tsx`, `useChat.ts`, `renderer/src/lib/videoFrames.ts`, `src/shared/lib/media.ts`, and `src/shared/lib/attachments.ts`. No further edits were made to those paths in this continuation. The one-file `vitest.config.ts` change is the explicit Ruling #1 exception. No visual redesign or work on the visual-UI owner's branch was done.
+Other accepted out-of-allowlist ancestry from `c17cf31` is unchanged in this continuation: `package.json` / `package-lock.json`, `src/main/index.ts`, renderer `App.tsx`, `ChatView.tsx`, `useChat.ts`, and other non-AV hunks. The `App.addFiles` door was not edited. In `attachments.ts`, only AV decoder work belongs to this lane; document extraction remains frozen. `media.ts` and `videoFrames.ts` are AV decoder paths under Ruling #4. No visual redesign or work on the visual-UI owner's branch was done.
 
 ## session-v2
 
 **Ported: none.** `reference/session-v2/OddBrain-App-UI.patch` is reference-only and declares baseline `2f05dac9`, not this branch's `a6c7807`; the brief disallows applying it wholesale. No session-v2 code was copied.
 
-## Gate and CI evidence
+## Gate evidence for this local update
 
-### AV commit `9f4e5e1` (local verification)
+Commands were run in order in `apps/03_oddbrain`:
 
-- `npx tsc --noEmit`: pass, 0 errors (also rechecked through `npm run build`).
-- Focused AV tests: 3 files / 15 tests passed.
-- `npx vitest run`: **104 files / 749 tests passed**.
-- `npm run build`: pass. It emitted the same two CSS optimizer warnings for the existing `::highlight(ob-find)` and `::highlight(ob-find-current)` rules.
-- GitHub Actions run `39125432706` for `9f4e5e1` passed on both Linux and Windows, including Install, Types, Tests, platform speak checks, Build, and Smoke.
+1. `npm ci --ignore-scripts && node node_modules/electron/install.js`: installed 483 packages; audit reported 14 vulnerabilities (11 moderate, 1 high, 2 critical). Electron install then failed with `TypeError: fetch failed`.
+2. `npx tsc --noEmit`: pass, 0 errors.
+3. `npx vitest run`: **104 files / 752 tests passed**.
+4. `npm run build`: pass; two existing CSS optimizer warnings for `::highlight(ob-find)` and `::highlight(ob-find-current)`.
+5. `npm run smoke`: failed before launch because Electron was not installed. The Electron mirror retry was not run in this sandbox. Do not count local smoke as passed.
 
-### Vitest repair and prior environment limits
-
-- CI run `39124976799` for `0228186` passed on Linux and Windows: Install, Types, Tests, platform speak checks, Build, and Smoke all passed. No Windows “Built media worker” failure was reported, so no question line is needed.
-- The pre-fix CI failure was tinypool's `RangeError: options.minThreads and options.maxThreads must not conflict`: a 4-vCPU runner selected `minThreads: 2` while `maxWorkers: 1`. Ruling #1 authorized the one-file `fileParallelism: false` repair. The earlier failing runs are `39123693424` and `39123792135`.
-- The sandbox's earlier `npm ci --ignore-scripts` installed 483 packages (audit: 14 vulnerabilities—11 moderate, 1 high, 2 critical), but `node node_modules/electron/install.js` failed with `TypeError: fetch failed`. Local `npm run smoke` therefore failed before launch and was not retried; CI Smoke passed on the current AV commit as recorded above.
+The prior AV commit `9f4e5e1` had green Linux/Windows CI in run `39125432706`; this Composer update is not included in that run. CI for the current update is pending its push.
 
 ## Remaining / unproven
 
-- Shared intake-registry integration is not done; coordinate at `App.addFiles` with `arena/6d6aabbf`. No `src/main/` media registry was present at baseline, and no second door was built.
-- Audio capability remains unverified per model because the provider listing exposes no capability field. The composer says this before send; a selected model may refuse. No live provider request was made.
-- The 8 GB RAM / 4 GB VRAM device's real decode peak, available memory, and model fit were not measured. Fixed input/frame bounds remain; exact prepared payload bytes are shown without implying RAM/VRAM use or a performance fit.
-- No real-device media corpus, codec matrix, DRM/encryption fixture, or physical-device media decode run has been demonstrated. CI smoke is green; do not claim the lane complete until registry ownership/integration is resolved and the remaining evidence gaps are addressed.
+- Per-model audio and Claude Code image capability remains unverified because the available model lists do not expose modality capability data. The composer names that uncertainty before send; AGY's image refusal is explicit. No live provider request was made.
+- The owner's 8 GB RAM / 4 GB VRAM device's decode peak, available memory, and model fit were not measured. Fixed decode bounds remain; only exact prepared payload bytes are shown.
+- No physical-device media corpus, codec matrix, or encrypted/DRM fixture was run. The shared door's integration is deferred until `arena/6d6aabbf` lands, per Ruling #4.

@@ -11,7 +11,7 @@ import { getEngineApi } from '@/platform/bridge'
 import { vaultGet, type VaultReply } from '@shared/lib/vault'
 import { useEngine, type EngineTurn } from '@/state/engine'
 import useDismiss from '@/hooks/useDismiss'
-import { audioModelDisclosure, preparedMediaSizeLabel } from './composerMedia'
+import { audioModelDisclosure, imageModelDisclosure, preparedMediaSizeLabel } from './composerMedia'
 
 /**
  * The composer.
@@ -76,6 +76,10 @@ export default function Composer({
   const fileInput = useRef<HTMLInputElement | null>(null)
   const recognition = useRef<{ stop: () => void } | null>(null)
   const pickerRef = useRef<HTMLDivElement | null>(null)
+  const engineState = useEngine()
+  const imageDisclosure = attachments.some(entry => entry.kind === 'image')
+    ? imageModelDisclosure(engineState.settings.id, engineState.settings.model)
+    : null
   useDismiss(pickerRef, () => setBoxOpen(null), boxOpen !== null)
 
   /**
@@ -193,6 +197,11 @@ export default function Composer({
               )
             })}
           </ul>
+        ) : null}
+        {imageDisclosure ? (
+          <p role="status" className="px-4 pt-2 text-[11px] leading-relaxed text-muted">
+            {imageDisclosure.message}
+          </p>
         ) : null}
         <div className="flex items-center gap-1.5 px-2.5 pb-2 pt-1" ref={pickerRef}>
           <ProjectDropdown projects={projects} project={project} onProject={onProject} />

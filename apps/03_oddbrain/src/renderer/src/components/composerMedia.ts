@@ -5,6 +5,11 @@ export type AudioModelDisclosure = {
   message: string
 }
 
+export type ImageModelDisclosure = {
+  state: 'unsupported' | 'unverified'
+  message: string
+}
+
 /**
  * The provider's model listing has no audio-capability field. Keep the selected
  * destination explicit and report that missing evidence instead of inferring
@@ -36,6 +41,33 @@ export function audioModelDisclosure(
   return {
     state: 'unverified',
     message: `Audio support for ${prefix}${modelId} is not reported by the provider model list. It may refuse this clip. It will be sent only to this exact model; there is no fallback.`,
+  }
+}
+
+/**
+ * Do not infer image capability from a model name. The AGY image refusal is
+ * explicit in its engine; Claude Code's current model list has no capability
+ * field, so it remains unverified and is named before the user sends.
+ */
+export function imageModelDisclosure(engineId: string, selectedModel: string): ImageModelDisclosure {
+  if (engineId === 'agy') {
+    return {
+      state: 'unsupported',
+      message: 'The agy engine cannot receive image attachments. Sampled video frames are images too. They remain attached; nothing is sent or switched.',
+    }
+  }
+  if (engineId !== 'claude-code') {
+    return {
+      state: 'unverified',
+      message: 'Image support for the selected engine is not verified. It may refuse these images or sampled video frames; nothing will be sent to another engine.',
+    }
+  }
+
+  const model = selectedModel.trim()
+  const target = model ? `claude-code model ${JSON.stringify(model)}` : 'current claude-code model'
+  return {
+    state: 'unverified',
+    message: `Image support for the ${target} is not reported here. It may refuse these images or sampled video frames; nothing will be sent to another engine.`,
   }
 }
 

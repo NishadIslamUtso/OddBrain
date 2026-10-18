@@ -4,6 +4,7 @@ import {
   audioModelDisclosure,
   base64PayloadBytes,
   formatExactBytes,
+  imageModelDisclosure,
   preparedMediaPayloadBytes,
   preparedMediaSizeLabel,
 } from '../src/renderer/src/components/composerMedia'
@@ -31,6 +32,34 @@ test('audio does not choose a model automatically or treat a missing model as en
   assert.equal(absent.state, 'not-enabled')
   assert.match(absent.message, /not in the current enabled OpenAI model list/i)
   assert.match(absent.message, /nothing will be rerouted/i)
+})
+
+test('AGY image capability is named as unsupported before send, without switching engines', () => {
+  const disclosure = imageModelDisclosure('agy', '')
+
+  assert.equal(disclosure.state, 'unsupported')
+  assert.match(disclosure.message, /agy engine cannot receive image attachments/i)
+  assert.match(disclosure.message, /sampled video frames are images too/i)
+  assert.match(disclosure.message, /nothing is sent or switched/i)
+})
+
+test('Claude Code image capability is unverified for the exact selected model', () => {
+  const disclosure = imageModelDisclosure('claude-code', 'sonnet')
+
+  assert.equal(disclosure.state, 'unverified')
+  assert.match(disclosure.message, /claude-code model "sonnet"/)
+  assert.match(disclosure.message, /not reported here/i)
+  assert.match(disclosure.message, /may refuse/i)
+  assert.match(disclosure.message, /nothing will be sent to another engine/i)
+  assert.doesNotMatch(disclosure.message, /supports images/i)
+})
+
+test('an unnamed Claude Code model is not replaced with a guessed identifier', () => {
+  const disclosure = imageModelDisclosure('claude-code', '')
+
+  assert.equal(disclosure.state, 'unverified')
+  assert.match(disclosure.message, /current claude-code model/)
+  assert.doesNotMatch(disclosure.message, /sonnet|opus|haiku/i)
 })
 
 test('prepared image and audio size is the exact decoded payload byte count', () => {
