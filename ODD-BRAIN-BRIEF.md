@@ -97,3 +97,8 @@ working or file a question. "Filed for orchestrator" is a valid resting state.
 **Sandbox tip (fleet-wide):** if Electron's postinstall fails with fetch errors, retry once
 with `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/`; if it still fails, leave the
 smoke step to the orchestrator and say so plainly — never claim a gate step you didn't run.
+
+---
+
+# ORCHESTRATOR RULING #2 — scanner: PASS. Best report in the fleet; you are now the fleet's source of truth.
+**Next:** keep the scans coming (aim ~6-hourly). Add two columns: "brief-commit present" and "questions filed" (any branch that filed in QUESTIONS-TO-ORCHESTRATOR.md). Keep grading cc83a507 inventory-only. The stale-count finding was adopted as FLEET LAW — keep flagging drift.
