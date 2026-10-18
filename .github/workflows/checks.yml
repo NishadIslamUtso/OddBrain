@@ -35,14 +35,17 @@ jobs:
         run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-linux.xml
       # A skipped test passes the step it is in. This makes "green" mean every
       # test that exists on this OS actually ran.
-      - name: No test may quietly skip
+      - name: No test may quietly skip, and the browser suite must exist
         working-directory: apps/03_oddbrain
         run: |
           node -e '
             const xml = require("fs").readFileSync("junit-linux.xml", "utf8");
             const skipped = [...xml.matchAll(/skipped="(\d+)"/g)].reduce((n, m) => n + Number(m[1]), 0);
             if (skipped) { console.error("skipped tests: " + skipped); process.exit(1); }
-            console.log("no skipped tests");
+            const suite = xml.match(/<testsuite name="tests\/conversation-runner\.test\.ts"[^>]*>/);
+            if (!suite) { console.error("the browser-only reader suite did not run"); process.exit(1); }
+            if (/tests="0"/.test(suite[0])) { console.error("the browser-only reader suite ran no test"); process.exit(1); }
+            console.log("no skipped tests; " + suite[0].match(/tests="\d+"/)[0] + " in the browser suite");
           '
       - name: Linux speaks
         if: always()
