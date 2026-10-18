@@ -1,6 +1,6 @@
 # Report to orchestrator — audio/video/image intake
 
-**Status: NOT COMPLETE.** The Vitest CI repair is green. The additional AV honesty changes below pass the local typecheck, tests, and build, but have not yet run in GitHub Actions. Baseline: `a6c7807`; branch: `arena/9a3a5c88-oddbrain`.
+**Status: NOT COMPLETE.** The Vitest repair and AV honesty changes pass local gates and GitHub Actions on `9f4e5e1`. Remaining blockers are shared intake-registry integration, unverified per-model audio support, and the absence of real-device decode/RAM/VRAM measurements. Baseline: `a6c7807`; branch: `arena/9a3a5c88-oddbrain`.
 
 ## What exists
 
@@ -41,23 +41,23 @@ Other out-of-allowlist ancestry from `c17cf31` remains a reported collision, not
 
 ## Gate and CI evidence
 
-### Current AV working tree (local)
+### AV commit `9f4e5e1` (local verification)
 
 - `npx tsc --noEmit`: pass, 0 errors (also rechecked through `npm run build`).
 - Focused AV tests: 3 files / 15 tests passed.
 - `npx vitest run`: **104 files / 749 tests passed**.
 - `npm run build`: pass. It emitted the same two CSS optimizer warnings for the existing `::highlight(ob-find)` and `::highlight(ob-find-current)` rules.
-- The current AV edits have **not yet been pushed or checked by CI at this report point**.
+- GitHub Actions run `39125432706` for `9f4e5e1` passed on both Linux and Windows, including Install, Types, Tests, platform speak checks, Build, and Smoke.
 
 ### Vitest repair and prior environment limits
 
 - CI run `39124976799` for `0228186` passed on Linux and Windows: Install, Types, Tests, platform speak checks, Build, and Smoke all passed. No Windows “Built media worker” failure was reported, so no question line is needed.
 - The pre-fix CI failure was tinypool's `RangeError: options.minThreads and options.maxThreads must not conflict`: a 4-vCPU runner selected `minThreads: 2` while `maxWorkers: 1`. Ruling #1 authorized the one-file `fileParallelism: false` repair. The earlier failing runs are `39123693424` and `39123792135`.
-- The sandbox's earlier `npm ci --ignore-scripts` installed 483 packages (audit: 14 vulnerabilities—11 moderate, 1 high, 2 critical), but `node node_modules/electron/install.js` failed with `TypeError: fetch failed`. Local `npm run smoke` therefore failed before launch and was not retried. CI Smoke passed on `0228186`; smoke for the newer AV edits is pending CI.
+- The sandbox's earlier `npm ci --ignore-scripts` installed 483 packages (audit: 14 vulnerabilities—11 moderate, 1 high, 2 critical), but `node node_modules/electron/install.js` failed with `TypeError: fetch failed`. Local `npm run smoke` therefore failed before launch and was not retried; CI Smoke passed on the current AV commit as recorded above.
 
 ## Remaining / unproven
 
 - Shared intake-registry integration is not done; coordinate at `App.addFiles` with `arena/6d6aabbf`. No `src/main/` media registry was present at baseline, and no second door was built.
 - Audio capability remains unverified per model because the provider listing exposes no capability field. The composer says this before send; a selected model may refuse. No live provider request was made.
 - The 8 GB RAM / 4 GB VRAM device's real decode peak, available memory, and model fit were not measured. Fixed input/frame bounds remain; exact prepared payload bytes are shown without implying RAM/VRAM use or a performance fit.
-- No real-device media corpus, codec matrix, DRM/encryption fixture, or current-AV-change Windows/Electron smoke run has been demonstrated. Do not claim the lane complete until the pushed AV changes pass CI and registry ownership is resolved.
+- No real-device media corpus, codec matrix, DRM/encryption fixture, or physical-device media decode run has been demonstrated. CI smoke is green; do not claim the lane complete until registry ownership/integration is resolved and the remaining evidence gaps are addressed.
