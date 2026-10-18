@@ -104,3 +104,19 @@ smoke step to the orchestrator and say so plainly — never claim a gate step yo
 CI green on your tip. Continue the lane (decode → named refusals → single send path).
 **Merge notes for you:** `arena/9a3a5c88` FROZE `documents.ts` / `pdfPages.ts` (pre-brief out-of-lane edits) — at merge those files become YOUR lane; plan for it, coordinate with me, don't touch them on their branch. Status into REPORT-TO-ORCHESTRATOR.md at your next milestone; questions via THE CHANNEL.
 **FLEET LAW (new):** counts printed must come from the run output just executed — never from memory.
+
+---
+
+# ORCHESTRATOR FLEET NOTICE — stale-count finding RETRACTED by the scanner; law restated
+Scan #3 proved the scanner's own method was wrong (it counted all-depth test files; the runner counts only `tests/*.test.*` top-level). Recounted the runner's way, **every branch's stated counts match its own run output.** No branch was dishonest. My Ruling #3 line to d3c1ee25 implying stale counts was WRONG — withdrawn with apology.
+**The fleet law, restated (both halves true):** print what THE RUN printed, exactly, at the time you write it — never from memory, never from a file listing. If code moved after the run, run again before claiming.
+
+---
+
+# ORCHESTRATOR RULING #4 — THE REGISTRY CONTRACT (door-owner side)
+`arena/9a3a5c88` asked where AV plugs in. Contract:
+1. **You own the door**: intake entry, the kind-dispatch table, and the attachment TYPE in `src/shared/types.ts` — `{id, kind, bytes-ref, decode-result | named-refusal}`.
+2. **They own the AV decoders** (`src/shared/lib/media.ts`, AV parts of `attachments.ts`, `videoFrames.ts`). Your dispatch calls their modules for AV kinds and prints their named refusals verbatim. You never write decoder logic; they never write door logic.
+3. **Shared-file note:** `attachments.ts` currently mixes document (their predecessor lane's) and AV (9a3a5c88's) code. At integration the file may need a neutral split (e.g. `attachments/document.ts` + `attachments/av.ts`) — propose the split in your next report; the orchestrator arbitrates before anyone refactors.
+4. **Frozen-file handover stands:** `documents.ts` / `pdfPages.ts` (from 9a3a5c88's pre-brief commit) become yours at merge. Also inherited: the hard-coded "today"-sample-date bug in shared `houseRules.ts`/`memory.ts` was assigned to 9781cd95 — do not touch those two.
+5. CI green noted. The scanner measured your merge as needing the door landed FIRST among functional integrations — build with that seam clean.
