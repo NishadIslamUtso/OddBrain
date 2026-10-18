@@ -4,10 +4,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
+  binaryOverride,
   engineCandidates,
   registerStagingRoot,
+  resetBinaryOverrides,
   resetStagingRoots,
   resolveEngineCommand,
+  setBinaryOverride,
 } from '../src/main/engine/enginePath'
 import { readFileSync } from 'node:fs'
 
@@ -65,4 +68,29 @@ test('the boot registers the app data engines folder, and retries name the actua
   assert.match(index, /registerStagingRoot\(join\(app\.getPath\('userData'\), 'engines'\)\)/)
   const stream = readFileSync(new URL('../src/main/engine/stream.ts', import.meta.url), 'utf8')
   assert.match(stream, /run `claude` once in a terminal and sign in/)
+})
+
+test('every directory on the PATH is probed by name — installers drop binaries anywhere', () => {
+  resetStagingRoots()
+  resetBinaryOverrides()
+  const env = { APPDATA: '', USERPROFILE: '', LOCALAPPDATA: '', PATH: 'C:\\a;C:\\b with spaces;C:\\c' }
+  const candidates = engineCandidates('agy', env)
+  for (const dir of ['C:\\a', 'C:\\b with spaces', 'C:\\c']) {
+    for (const ext of ['exe', 'cmd', 'bat']) {
+      assert.ok(candidates.includes(join(dir, `agy.${ext}`)), `${dir} agy.${ext} missing from ${JSON.stringify(candidates)}`)
+    }
+  }
+})
+
+test('an owner-pointed binary beats every probe and launch', () => {
+  resetStagingRoots()
+  resetBinaryOverrides()
+  const pointed = 'C:\\Users\\Nishad Islam Utso\\Downloads\\agy.exe'
+  setBinaryOverride('agy', pointed)
+  assert.equal(binaryOverride('agy'), pointed)
+  assert.equal(resolveEngineCommand('agy', { PATH: '' }), pointed)
+  const candidates = engineCandidates('agy', { PATH: '' })
+  assert.equal(candidates[0], pointed, 'the override is the first probe candidate')
+  resetBinaryOverrides()
+  assert.equal(binaryOverride('agy'), '')
 })

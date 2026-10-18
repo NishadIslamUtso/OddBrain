@@ -3,7 +3,7 @@ import { randomBytes } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { loadAppFlags, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
-import { registerStagingRoot } from './engine/enginePath'
+import { registerStagingRoot, setBinaryOverride, binaryOverride } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins } from './ipcGuard'
 import { dirname, join, resolve } from 'node:path'
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -584,6 +584,13 @@ function registerBridges(): void {
   handle('engine:download:serve-start', () => downloads.ollamaStart())
   handle('engine:download:serve-stop', () => downloads.ollamaStop())
   handle('engine:download:serve-status', () => downloads.ollamaStatus())
+  // The owner's Ollama desktop app quits fully — it does NOT keep `serve`
+  // resident. So the app starts the door itself at boot (his installed copy
+  // first, staged second) and only reports the truth afterward. Fire and
+  // forget: a failure here is the Connectors card's job to say, not a crash.
+  void downloads.ollamaStart().then((answer) => {
+    console.log(`[ollama] ${answer.answer}`)
+  }).catch(() => {})
 
   // The two "keep it running" switches, in their own file (see appFlags.ts).
   const appFlagsFile = (): string => join(app.getPath('userData'), 'app-flags.json')
@@ -592,6 +599,41 @@ function registerBridges(): void {
   // run. The real machine lesson: the app asked for a name and detected
   // nothing, so the owner typed empty quotes and moved on. Spaces in the
   // username are normal Windows — carried through untouched.
+  // "Point to the exe" — the durable answer to every installer that drops a
+  // binary somewhere nobody pre-listed. The person sees the file; the person
+  // points; the app prefers it forever.
+  handle('engine:pick-binary', async (_event, id: EngineId): Promise<{ ok: boolean; answer: string; path?: string }> => {
+    if (id !== 'claude-code' && id !== 'agy') return { ok: false, answer: 'Unknown engine.' }
+    const picked = await dialog.showOpenDialog({
+      title: `Point to ${id === 'claude-code' ? 'claude' : 'agy'}`,
+      properties: ['openFile'],
+      filters: [{ name: 'Executable', extensions: ['exe', 'cmd', 'bat'] }],
+    })
+    if (picked.canceled || !picked.filePaths[0]) return { ok: false, answer: 'Nothing was picked.' }
+    const file = picked.filePaths[0]
+    if (!existsSync(file)) return { ok: false, answer: 'That file does not exist.' }
+    setBinaryOverride(id, file)
+    try {
+      writeFileSync(join(app.getPath('userData'), 'engine-binaries.json'), JSON.stringify({ 'claude-code': binaryOverride('claude-code'), 'agy': binaryOverride('agy') }, null, 2))
+    } catch {}
+    detectEngine(id, true).catch(() => {})
+    return { ok: true, answer: `${id} is pointed at ${file}. Launches and detection prefer it from now on.`, path: file }
+  })
+
+  handle('engine:clear-binary', (_event, id: EngineId): { ok: boolean; answer: string } => {
+    if (id !== 'claude-code' && id !== 'agy') return { ok: false, answer: 'Unknown engine.' }
+    setBinaryOverride(id, '')
+    try {
+      writeFileSync(join(app.getPath('userData'), 'engine-binaries.json'), JSON.stringify({ 'claude-code': binaryOverride('claude-code'), 'agy': binaryOverride('agy') }, null, 2))
+    } catch {}
+    detectEngine(id, true).catch(() => {})
+    return { ok: true, answer: `${id} is back to automatic detection.` }
+  })
+
+  handle('engine:binary-override', (_event, id: EngineId): { path: string } => {
+    return { path: id === 'claude-code' || id === 'agy' ? binaryOverride(id) : '' }
+  })
+
   handle('app:whoami', (): { name: string } => {
     try {
       const info = userInfo()
@@ -1425,6 +1467,20 @@ try {
   registerStagingRoot(join(app.getPath('userData'), 'engines'))
 } catch {
   /* no data folder yet (odd test launches) — nothing staged to register */
+}
+
+// The owner's pointed binaries survive restarts: userData/engine-binaries.json.
+try {
+  const overrideFile = join(app.getPath('userData'), 'engine-binaries.json')
+  if (existsSync(overrideFile)) {
+    const parsed = JSON.parse(readFileSync(overrideFile, 'utf8')) as Record<string, string>
+    for (const id of ['claude-code', 'agy'] as const) {
+      const p = typeof parsed[id] === 'string' ? parsed[id] : ''
+      if (p && existsSync(p)) setBinaryOverride(id, p)
+    }
+  }
+} catch {
+  /* a broken override file must never block the boot */
 }
 
 const isSmoke = process.argv.includes('--smoke')

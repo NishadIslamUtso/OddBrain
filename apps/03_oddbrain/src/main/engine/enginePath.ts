@@ -109,12 +109,36 @@ export function resetStagingRoots(): void {
   stagingRoots.length = 0
 }
 
+/**
+ * The owner-pointed binaries. "Point to the exe" in Connectors writes here;
+ * an override beats every probe — nobody knows where an installer put a
+ * binary better than the person who can see the file.
+ */
+let overrides: Partial<Record<'claude-code' | 'agy', string>> | null = null
+
+/** The owner-pointed binary for one engine, or ''. */
+export function binaryOverride(id: 'claude-code' | 'agy'): string {
+  return overrides?.[id] ?? ''
+}
+
+/** Remember (or clear with '') the owner-pointed binary for one engine. */
+export function setBinaryOverride(id: 'claude-code' | 'agy', path: string): void {
+  if (!overrides) overrides = {}
+  overrides[id] = path
+}
+
+/** Test seam. */
+export function resetBinaryOverrides(): void {
+  overrides = null
+}
+
 /** Known absolute install spots on Windows, for probing and for spawning. */
 export function engineCandidates(id: 'claude-code' | 'agy', env: NodeJS.ProcessEnv = process.env): string[] {
   const npmDir = env['APPDATA'] ? join(env['APPDATA'], 'npm') : ''
   const localBin = env['USERPROFILE'] ? join(env['USERPROFILE'], '.local', 'bin') : ''
   const programs = env['LOCALAPPDATA'] ? join(env['LOCALAPPDATA'], 'Programs') : ''
   const binary = id === 'claude-code' ? 'claude' : 'agy'
+  const override = binaryOverride(id)
   const staged = stagingRoots.flatMap((root) => [
     join(root, id, 'app', `${binary}.exe`),
     join(root, id, 'app', `${binary}.cmd`),
@@ -122,15 +146,30 @@ export function engineCandidates(id: 'claude-code' | 'agy', env: NodeJS.ProcessE
     join(root, id, `${binary}.exe`),
     join(root, id, binary),
   ])
+  // Every directory on the PATH (the inherited one; the registry user PATH
+  // is merged into it by the boot warm-up) is probed by name — installers
+  // drop binaries in folders nobody pre-listed, and agy did exactly that.
+  const pathText = env['PATH'] ?? ''
+  // Split by the PATH's own shape, not the host OS: a Windows-shaped PATH
+  // (`C:\x;C:\y`) can be probed from anywhere (tests, a migrated env).
+  const fromPath = pathText
+    .split(pathText.includes(';') ? ';' : pathText.includes(':') ? ':' : ';')
+    .filter(Boolean)
+    .slice(0, 64)
+    .flatMap((dir) => [join(dir, `${binary}.exe`), join(dir, `${binary}.cmd`), join(dir, `${binary}.bat`)])
   if (id === 'claude-code') {
     return [
+      ...(override ? [override] : []),
       ...staged,
+      ...fromPath,
       ...(npmDir ? [join(npmDir, 'claude.cmd'), join(npmDir, 'claude')] : []),
       ...(localBin ? [join(localBin, 'claude.exe'), join(localBin, 'claude')] : []),
     ]
   }
   return [
+    ...(override ? [override] : []),
     ...staged,
+    ...fromPath,
     ...(localBin ? [join(localBin, 'agy.exe'), join(localBin, 'agy')] : []),
     ...(programs ? [join(programs, 'agy', 'agy.exe')] : []),
   ]
@@ -145,6 +184,9 @@ export function engineCandidates(id: 'claude-code' | 'agy', env: NodeJS.ProcessE
  */
 export function resolveEngineCommand(id: 'claude-code' | 'agy', env: NodeJS.ProcessEnv = process.env): string {
   kickRefreshIfStale(process.platform, env)
+  // The owner's pointer is the first answer — before every probe.
+  const pointed = binaryOverride(id)
+  if (pointed) return pointed
   for (const candidate of engineCandidates(id, env)) {
     try {
       if (existsSync(candidate)) return candidate

@@ -43,9 +43,22 @@ export default function ConnectorsSection(): React.JSX.Element {
     count: 0,
     error: '',
   })
+  const [overrides, setOverrides] = useState<{ 'claude-code': string; agy: string }>({ 'claude-code': '', agy: '' })
+  const [serving, setServing] = useState(false)
+  const [say, setSay] = useState('')
+
+  const readOverrides = (): void => {
+    for (const id of ['claude-code', 'agy'] as const) {
+      void getEngineApi()
+        .binaryOverride(id)
+        .then((reply) => setOverrides((current) => ({ ...current, [id]: reply.path })))
+        .catch(() => {})
+    }
+  }
 
   const checkAll = (): void => {
     void engine.checkEngines(true)
+    readOverrides()
     if (isDemo) return
     setDoor({ checking: true, ok: false, count: 0, error: '' })
     void getEngineApi()
@@ -59,6 +72,41 @@ export default function ConnectorsSection(): React.JSX.Element {
         })
       })
       .catch(() => setDoor({ checking: false, ok: false, count: 0, error: 'the door did not answer' }))
+  }
+
+  /** Start the brain door with the binary the app found (his installed copy first). */
+  const startDoor = (): void => {
+    setServing(true)
+    setSay('Starting the brain door…')
+    void getEngineApi()
+      .downloads.serveStart()
+      .then((answer) => {
+        setSay(answer.answer)
+        setServing(false)
+        checkAll()
+      })
+      .catch(() => {
+        setServing(false)
+        setSay('The brain door could not be started.')
+      })
+  }
+
+  const pointTo = (id: 'claude-code' | 'agy'): void => {
+    void getEngineApi()
+      .pickBinary(id)
+      .then((answer) => {
+        setSay(answer.answer)
+        checkAll()
+      })
+  }
+
+  const clearPoint = (id: 'claude-code' | 'agy'): void => {
+    void getEngineApi()
+      .clearBinary(id)
+      .then((answer) => {
+        setSay(answer.answer)
+        checkAll()
+      })
   }
 
   useEffect(() => {
@@ -89,6 +137,12 @@ export default function ConnectorsSection(): React.JSX.Element {
           <RefreshCw size={10} aria-hidden /> {engine.detection.loading || door.checking ? 'Checking…' : 'Check all'}
         </button>
       </div>
+
+      {say ? (
+        <p role="status" className="rounded-lg border border-line bg-bg px-2.5 py-1.5 text-[11.5px] leading-relaxed text-ink">
+          {say}
+        </p>
+      ) : null}
 
       <div className="flex flex-col gap-2">
         {/* ── Claude Code ── */}
@@ -127,9 +181,32 @@ export default function ConnectorsSection(): React.JSX.Element {
                 <CopyChip line="npm install -g @anthropic-ai/claude-code" label="Copy the install command" />
                 <span className="text-[11px] text-muted">or press Download beside claude-code in the Engine bay.</span>
               </>
-            ) : (
+            ) : null}
+            {engineTone('claude-code') !== 'ok' ? null : (
               <span className="text-[11px] text-muted">Sign in once: run <span className="font-mono">claude</span> in any terminal and follow its login. The app never borrows your account.</span>
             )}
+            <button
+              type="button"
+              onClick={() => pointTo('claude-code')}
+              className="rounded-lg border border-line px-2 py-1 text-[11.5px] text-muted transition-colors hover:text-ink"
+              title="If the automatic probe cannot see your install, point at the exe yourself — it beats every probe."
+            >
+              {overrides['claude-code'] ? 'Change the pointed exe' : 'Point to the exe…'}
+            </button>
+            {overrides['claude-code'] ? (
+              <>
+                <span className="min-w-0 truncate font-mono text-[10.5px] text-muted" title={overrides['claude-code']}>
+                  {overrides['claude-code']}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => clearPoint('claude-code')}
+                  className="rounded-lg border border-line px-2 py-1 text-[11px] text-muted transition-colors hover:text-warn"
+                >
+                  Use automatic detection
+                </button>
+              </>
+            ) : null}
           </div>
         </section>
 
@@ -171,6 +248,28 @@ export default function ConnectorsSection(): React.JSX.Element {
             >
               Official page <ExternalLink size={10} aria-hidden />
             </a>
+            <button
+              type="button"
+              onClick={() => pointTo('agy')}
+              className="rounded-lg border border-line px-2 py-1 text-[11.5px] text-muted transition-colors hover:text-ink"
+              title="If the automatic probe cannot see your install, point at agy.exe yourself — it beats every probe."
+            >
+              {overrides.agy ? 'Change the pointed exe' : 'Point to the exe…'}
+            </button>
+            {overrides.agy ? (
+              <>
+                <span className="min-w-0 truncate font-mono text-[10.5px] text-muted" title={overrides.agy}>
+                  {overrides.agy}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => clearPoint('agy')}
+                  className="rounded-lg border border-line px-2 py-1 text-[11px] text-muted transition-colors hover:text-warn"
+                >
+                  Use automatic detection
+                </button>
+              </>
+            ) : null}
             {engineTone('agy') === 'ok' ? (
               <span className="text-[11px] text-muted">Sign in once: run <span className="font-mono">agy</span> in a terminal.</span>
             ) : null}
@@ -192,10 +291,20 @@ export default function ConnectorsSection(): React.JSX.Element {
           <p className="mt-1 text-[11px] leading-relaxed text-muted">
             {door.ok
               ? 'Free local brains for Claude Code: pick one in the composer\u2019s model menu (the door is used when a brain is named). Start and stop the staged copy in the Engine bay.'
-              : 'The free local brains come from here. You do NOT need this app to carry them \u2014 install Ollama yourself, once, and it is found automatically:'}
+              : 'The free local brains come from here. You do NOT need this app to carry them \u2014 install Ollama yourself, once, and it is found automatically. The ollama.com download is a CLI-only build and the desktop app quits fully, so the app starts the server (the "brain door") for you:'}
           </p>
           {!door.ok ? (
             <div className="mt-2 flex flex-wrap items-center gap-1.5">
+              <button
+                type="button"
+                onClick={startDoor}
+                disabled={serving}
+                title="The Ollama app quits fully — it does not keep its server running. The app starts the door itself: your installed copy first, its staged copy second."
+                className="rounded-lg border border-accent/60 px-2.5 py-1 text-[11.5px] text-ink transition-colors hover:border-accent disabled:opacity-50"
+              >
+                {serving ? 'Starting…' : 'Start the brain door'}
+              </button>
+              <span className="text-[11px] text-muted">or install it yourself:</span>
               <span className="font-mono text-[11px] text-muted">winget install Ollama.Ollama</span>
               <CopyChip line="winget install Ollama.Ollama" label="Copy the winget install command" />
               <a
@@ -207,7 +316,7 @@ export default function ConnectorsSection(): React.JSX.Element {
                 ollama.com/download <ExternalLink size={10} aria-hidden />
               </a>
               <span className="text-[10.5px] text-muted">
-                (that download is the CLI-only build — no tray, no auto-start; the installer is the same brain with a setup wizard)
+                (the desktop app quits fully and does not keep its server running — this button starts it for you; winget's build is the same brain without the tray)
               </span>
             </div>
           ) : null}

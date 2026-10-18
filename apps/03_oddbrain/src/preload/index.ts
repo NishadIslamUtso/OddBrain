@@ -38,6 +38,13 @@ const engineApi = {
     ipcRenderer.invoke('engine:models'),
   /** What engines are really installed on this machine. */
   detect: (fresh?: boolean): Promise<EngineAvailability[]> => ipcRenderer.invoke('engine:detect', fresh === true),
+  /** Point the app at the exe yourself — beats every automatic probe. */
+  pickBinary: (id: 'claude-code' | 'agy'): Promise<{ ok: boolean; answer: string; path?: string }> =>
+    ipcRenderer.invoke('engine:pick-binary', id),
+  clearBinary: (id: 'claude-code' | 'agy'): Promise<{ ok: boolean; answer: string }> =>
+    ipcRenderer.invoke('engine:clear-binary', id),
+  binaryOverride: (id: 'claude-code' | 'agy'): Promise<{ path: string }> =>
+    ipcRenderer.invoke('engine:binary-override', id),
   /** Bring a brain home; progress arrives through onPullEvent. */
   pull: (name: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:pull', name),
   /** Take a brain off this machine. */

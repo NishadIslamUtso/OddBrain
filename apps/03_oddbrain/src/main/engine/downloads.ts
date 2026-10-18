@@ -260,8 +260,24 @@ export function createDownloadManager(options: {
     },
 
     ollamaBinary() {
+      // The staged copy first; then the Ollama the OWNER installed (the
+      // desktop app puts it in Programs/Ollama; winget the same) — then any
+      // ollama.exe sitting on the PATH. His install, started by the app: no
+      // second copy downloaded for nothing.
       for (const candidate of [join(root, 'ollama', 'app', 'ollama.exe'), join(root, 'ollama', 'app', 'ollama')]) {
         if (existsSync(candidate)) return candidate
+      }
+      const env = process.env
+      const programs = env['LOCALAPPDATA'] ? join(env['LOCALAPPDATA'], 'Programs', 'Ollama', 'ollama.exe') : ''
+      if (programs && existsSync(programs)) return programs
+      const pathText = env['PATH'] ?? ''
+      for (const dir of pathText.split(pathText.includes(';') ? ';' : pathText.includes(':') ? ':' : ';').filter(Boolean).slice(0, 64)) {
+        const onPath = join(dir, pathText.includes('\\') || process.platform === 'win32' ? 'ollama.exe' : 'ollama')
+        try {
+          if (existsSync(onPath)) return onPath
+        } catch {
+          /* a hostile PATH entry throws — skip it */
+        }
       }
       return null
     },
@@ -269,27 +285,39 @@ export function createDownloadManager(options: {
     /** The staged runtime, started detached: its pid lives in our folder. */
     async ollamaStart(env?: { OLLAMA_KEEP_ALIVE: string }) {
       const binary = this.ollamaBinary()
-      if (!binary) return { ok: false, answer: 'The Ollama runtime is not staged yet. Download it first.' }
+      if (!binary) {
+        return {
+          ok: false,
+          answer:
+            'No Ollama was found — not staged here, not in Programs\\Ollama, not on the PATH. Install it once (winget install Ollama.Ollama) and it is found; or download the staged copy in the Engine bay.',
+        }
+      }
       if ((await this.ollamaStatus()).running) {
         return { ok: true, answer: 'The local runtime is already answering at 127.0.0.1:11434.' }
       }
+      const staged = binary.startsWith(join(root, 'ollama'))
       const pidFile = join(root, 'ollama', 'serve.pid')
       try { await rm(pidFile, { force: true }) } catch {}
-      const child = spawn(binary, ['serve'], {
-        cwd: join(root, 'ollama', 'app'),
+      const start = options.spawnImpl ?? spawn
+      const child = start(binary, ['serve'], {
+        cwd: staged ? join(root, 'ollama', 'app') : join(binary, '..'),
         detached: true,
         stdio: 'ignore',
         ...(env ? { env: { ...process.env, ...env } } : {}),
       })
       child.unref()
       if (!child.pid) return { ok: false, answer: 'The runtime could not be started.' }
+      await mkdir(join(root, 'ollama'), { recursive: true })
       await writeFile(pidFile, String(child.pid), 'utf8')
       // Give it a moment, then say the truth about whether it came up.
       const knock = options.probe ?? answering
       for (let attempt = 0; attempt < 10; attempt++) {
         await new Promise(resolve => setTimeout(resolve, options.probe ? 5 : 500))
         if (await knock()) {
-          return { ok: true, answer: `The local runtime is up at 127.0.0.1:11434 (started by the app, pid ${child.pid}).` }
+          const which = staged
+            ? 'the app\u2019s staged copy'
+            : `your installed Ollama (${binary})`
+          return { ok: true, answer: `The local runtime is up at 127.0.0.1:11434 \u2014 ${which}, pid ${child.pid}.` }
         }
         if (child.exitCode !== null) break
       }

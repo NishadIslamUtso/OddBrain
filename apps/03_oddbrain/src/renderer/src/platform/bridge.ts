@@ -403,6 +403,10 @@ export type EngineBridge = {
   pick: (id: EngineId) => Promise<{ ok: boolean; answer: string }>
   models: () => Promise<{ ok: boolean; models: EngineModelEntry[]; error?: string }>
   detect: (fresh?: boolean) => Promise<EngineAvailability[]>
+  /** Point the app at the exe yourself (Connectors). */
+  pickBinary: (id: 'claude-code' | 'agy') => Promise<{ ok: boolean; answer: string; path?: string }>
+  clearBinary: (id: 'claude-code' | 'agy') => Promise<{ ok: boolean; answer: string }>
+  binaryOverride: (id: 'claude-code' | 'agy') => Promise<{ path: string }>
   pull: (name: string) => Promise<{ ok: boolean; answer: string }>
   deleteModel: (name: string) => Promise<{ ok: boolean; answer: string }>
   /** Pull progress ticks; returns the unsubscribe. */
@@ -482,6 +486,9 @@ const demoEngineBridge: EngineBridge = {
     error: 'Engine brains are listed in the desktop app: this window is the interface only.',
   }),
   detect: async () => [],
+  pickBinary: async () => ({ ok: false, answer: 'Pointing at a binary needs the desktop app.' }),
+  clearBinary: async () => ({ ok: false, answer: 'The desktop app manages the binary override.' }),
+  binaryOverride: async () => ({ path: '' }),
   pull: async () => ({ ok: false, answer: 'Pulling brains needs the desktop app.' }),
   deleteModel: async () => ({ ok: false, answer: 'Removing brains needs the desktop app.' }),
   onPullEvent: () => () => undefined,
