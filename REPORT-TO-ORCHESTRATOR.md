@@ -77,8 +77,13 @@ for this branch.
 | `23cca81` (before the lane reset) | linux pass, windows pass | linux pass, windows pass |
 | `0ac2abc` (baseline tree) | linux **fail** at the Smoke step, windows pass | both pass |
 | `0ce273a` (adds the comparison) | linux **fail** at the Smoke step, windows pass | both pass |
+| `c2dc8a6` (adds this report) | linux **fail** at the Tests step, windows pass | both pass |
 
-Baseline `a6c7807` itself has 8 successful check-runs on record.
+Baseline `a6c7807` itself has 8 successful check-runs on record. Its newest
+linux job finished the whole chain in 67 seconds. My failing linux job stopped
+at 48 seconds. The failing step moved between Smoke and Tests across three tips
+whose source is byte-identical to baseline, and Windows passed every time. That
+pattern points at the runner, not the content.
 
 The tip differs from baseline by Markdown files only, so its content cannot
 change whether Electron opens. I could not read the failing step's log from
@@ -88,6 +93,11 @@ workflow file may be broken" on both attempts. I am not claiming a green smoke
 on this tip. Rerun the linux job when you judge; if it stays red on an unchanged
 baseline tree, the cause is the runner or the smoke step's apt line, not this
 branch.
+
+Update: the tip before this amend, `6464585`, passed all four jobs (checks
+linux and windows, installer linux and windows). Three earlier tips with the
+same tree failed one linux job at two different steps and then passed when the
+content was pushed again. That is the documented flake protocol, not a fix.
 
 ## Ported from session-v2, and refused
 
