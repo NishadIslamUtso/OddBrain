@@ -1,0 +1,215 @@
+{
+  "title": "OddBrain UI/UX reference · revision 2",
+  "date": "2026-10-17",
+  "scope": "Offline design reference and implementation handoff; not applied to the Electron repository.",
+  "browser": "Playwright Chromium 156, Linux sandbox; desktop sizes 940x620, 1280x820, 1440x900",
+  "reference_sha256": "808d5f16860266e0331e245cbe25b84be3f44b8c2f798f3bd6bc9ac6469f6508",
+  "source_upload_sha256": "16b9291c53a786a9c03ec63cc71c78471107352c6e17ad19f2e32dda1ad88554",
+  "inventory": {
+    "name": "Complete inventory",
+    "presets": 8,
+    "layouts": 8,
+    "sourcePalettes": 9,
+    "styles": 4,
+    "scenes": 77,
+    "settings": 18
+  },
+  "svg_artwork_unchanged": true,
+  "checks": [
+    {
+      "name": "Complete inventory",
+      "presets": 8,
+      "layouts": 8,
+      "sourcePalettes": 9,
+      "styles": 4,
+      "scenes": 77,
+      "settings": 18
+    },
+    {
+      "name": "Keyboard poke",
+      "scene": "boop",
+      "reply": "Boop. Highly technical work.",
+      "chatId": null
+    },
+    {
+      "name": "Pointer drag / flick",
+      "kind": "flick"
+    },
+    {
+      "name": "Preset warm-editorial",
+      "vibe": "warm-editorial",
+      "shell": "classic",
+      "font": "editorial",
+      "theme": "paper",
+      "preview": true,
+      "selected": 1
+    },
+    {
+      "name": "Preset cozy-studio",
+      "vibe": "cozy-studio",
+      "shell": "topbar",
+      "font": "humanist",
+      "theme": "peach",
+      "preview": true,
+      "selected": 1
+    },
+    {
+      "name": "Preset quiet-minimal",
+      "vibe": "quiet-minimal",
+      "shell": "command",
+      "font": "system",
+      "theme": "mono",
+      "preview": true,
+      "selected": 1
+    },
+    {
+      "name": "Preset playful-lab",
+      "vibe": "playful-lab",
+      "shell": "bento",
+      "font": "humanist",
+      "theme": "citrus",
+      "preview": true,
+      "selected": 1
+    },
+    {
+      "name": "Preset ink-sketchbook",
+      "vibe": "ink-sketchbook",
+      "shell": "twopane",
+      "font": "serif",
+      "theme": "paper",
+      "preview": true,
+      "selected": 1
+    },
+    {
+      "name": "Preset terminal-engine",
+      "vibe": "terminal-engine",
+      "shell": "console",
+      "font": "mono",
+      "theme": "midnight",
+      "preview": true,
+      "selected": 1
+    },
+    {
+      "name": "Preset retro-desktop",
+      "vibe": "retro-desktop",
+      "shell": "floating",
+      "font": "humanist",
+      "theme": "blue",
+      "preview": true,
+      "selected": 1
+    },
+    {
+      "name": "Preset glass-future",
+      "vibe": "glass-future",
+      "shell": "rail",
+      "font": "system",
+      "theme": "rose",
+      "preview": true,
+      "selected": 1
+    },
+    {
+      "name": "Theme and accent contrast",
+      "count": 240,
+      "failures": [],
+      "minButton": 4.735128550004136,
+      "minMuted": 4.63302495354922
+    },
+    {
+      "name": "Every exposed preference value responds",
+      "values": 61
+    },
+    {
+      "name": "All scenes assignable",
+      "roles": 8,
+      "optionsPerRole": 77
+    },
+    {
+      "name": "Save / restore / reload",
+      "theme": "sage",
+      "speed": 1.25
+    },
+    {
+      "name": "Former name-menu actions",
+      "destinations": [
+        "Models & API keys",
+        "Apps & extensions",
+        "Plugins & community",
+        "Browsing maps",
+        "Smaller window & shortcuts",
+        "Learn more",
+        "Appearance",
+        "Replay opening",
+        "Replay first-run setup",
+        "All mascot scenes"
+      ]
+    },
+    {
+      "name": "Approval + appropriate scene and word",
+      "scene": "eye-roll",
+      "word": "Befuddling",
+      "valid": true
+    },
+    {
+      "name": "Settings sections reachable",
+      "count": 18
+    },
+    {
+      "name": "Desktop geometry sweep",
+      "combinations": 64,
+      "overflowCount": 0
+    },
+    {
+      "name": "Layout × style",
+      "combinations": 32
+    },
+    {
+      "name": "Reduced motion",
+      "still": "true",
+      "animation": "none",
+      "errors": []
+    },
+    {
+      "name": "Kit gallery paging",
+      "page": 1
+    },
+    {
+      "name": "All exploration tools retained",
+      "modes": 5
+    }
+  ],
+  "geometry_sweeps": {
+    "layout_screens": 64,
+    "layout_palette_style": 320,
+    "layout_font_text_size_width": 360,
+    "overflow_or_clipped_composer_failures": []
+  },
+  "additional_checks": [
+    "Sidebar width keyboard adjustment and reset",
+    "Settings heading stays 15px",
+    "Settings search finds former menu actions",
+    "Preview follows palette, style and actual layout",
+    "Paused scene and word stay paired and frozen",
+    "Saved HTML / JSON round-trip",
+    "Works with storage blocked inside a sandboxed file viewer",
+    "Head poke",
+    "Shoe poke",
+    "Double click",
+    "Hold",
+    "Hover tickle",
+    "Repeated poke",
+    "System light/dark changes retain palette",
+    "Invalid import fields rejected and numeric fields clamped",
+    "Exported standalone HTML reopens from file with exact saved state",
+    "Project instruction save remains functional",
+    "Reset sample workspace retains every appearance axis and saved look",
+    "Complete appearance snapshot, saved looks and new Settings destinations survive reload"
+  ],
+  "page_errors": [],
+  "console_errors": [],
+  "unexpected_external_requests": [],
+  "limitations": [
+    "Not exhaustive testing of every Cartesian-product preference combination.",
+    "Native Windows installation, actual provider keys, native startup/warm runtime, Quick window and extension capture need real-app verification.",
+    "Responses, filesystem writes and native installation actions in the HTML are explicitly scripted previews."
+  ]
+}
