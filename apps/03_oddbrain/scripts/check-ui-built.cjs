@@ -32,7 +32,10 @@ const watchdog = setTimeout(() => {
   process.exit(2)
 }, 8 * 60 * 1000)
 watchdog.unref()
-const say = (msg) => { console.error('[built-qa] ' + msg) }
+const say = (msg) => {
+  fs.appendFileSync(path.resolve('built-qa-phases.log'), `${new Date().toISOString()} [built-qa] ${msg}\n`)
+  console.error('[built-qa] ' + msg)
+}
 
 ;(async () => {
   let app

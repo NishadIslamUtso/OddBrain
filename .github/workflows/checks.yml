@@ -56,17 +56,21 @@ jobs:
         run: npm run build
       - name: Renderer checks — the real interface in Chromium
         working-directory: apps/03_oddbrain
-        timeout-minutes: 20
+        timeout-minutes: 10
         shell: bash
         run: |
-          set -o pipefail
-          {
-            npx playwright-core install --with-deps chromium
-            nohup npx vite --config vite.web.config.ts > vite-ui.log 2>&1 &
-            for i in $(seq 1 90); do curl -sf http://127.0.0.1:5174/ >/dev/null && break; sleep 1; done
-            curl -sf http://127.0.0.1:5174/ >/dev/null
-            npm run test:ui
-          } 2>&1 | tee ui-checks.log
+          set -euo pipefail
+          phase() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> renderer-phases.log; }
+          trap 'rc=$?; phase "exit=$rc"' EXIT
+          phase 'playwright install start (240s deadline)'
+          timeout --kill-after=10s 240s npx playwright-core install --with-deps chromium >> ui-checks.log 2>&1
+          phase 'playwright install done; vite start'
+          nohup npx vite --config vite.web.config.ts > vite-ui.log 2>&1 &
+          phase 'server readiness start (90s deadline)'
+          timeout --kill-after=5s 90s bash -c 'until curl --connect-timeout 2 --max-time 3 -sf http://127.0.0.1:5174/ >/dev/null; do sleep 1; done'
+          phase 'server ready; renderer checks start (240s deadline)'
+          timeout --kill-after=10s 240s npm run test:ui >> ui-checks.log 2>&1
+          phase 'renderer checks passed'
       - name: Renderer acceptance evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -75,6 +79,7 @@ jobs:
           path: |
             apps/03_oddbrain/qa-ui
             apps/03_oddbrain/ui-checks.log
+            apps/03_oddbrain/renderer-phases.log
             apps/03_oddbrain/vite-ui.log
           if-no-files-found: ignore
       - name: Renderer checks speak their failure
@@ -84,7 +89,7 @@ jobs:
           script: |
             const fs = require('fs');
             const parts = [];
-            for (const p of ['apps/03_oddbrain/ui-checks.log', 'apps/03_oddbrain/vite-ui.log']) {
+            for (const p of ['apps/03_oddbrain/renderer-phases.log', 'apps/03_oddbrain/ui-checks.log', 'apps/03_oddbrain/vite-ui.log']) {
               if (!fs.existsSync(p)) continue;
               let body = fs.readFileSync(p, 'utf8');
               if (body.length > 36000) body = body.slice(0, 10000) + '\n...truncated...\n' + body.slice(-25000);
@@ -107,20 +112,21 @@ jobs:
           xvfb-run -a npx electron . --smoke
       - name: Built-app QA — every screen, every section, real IPC
         working-directory: apps/03_oddbrain
-        timeout-minutes: 15
+        timeout-minutes: 12
         shell: bash
         env:
           ELECTRON_DISABLE_SANDBOX: 1
         run: |
-          set -o pipefail
-          {
-            echo "[built-qa] step start $(date -u +%T)"
-            echo "[built-qa] node=$(node --version) xvfb=$(which xvfb-run || echo MISSING)"
-            sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64
-            echo "[built-qa] apt done $(date -u +%T)"
-            xvfb-run -a node scripts/check-ui-built.cjs
-            echo "[built-qa] script exit=$? $(date -u +%T)"
-          } 2>&1 | tee built-qa.log
+          set -euo pipefail
+          phase() { printf '%s %s\n' "$(date -u +%FT%TZ)" "$*" >> built-qa-phases.log; }
+          trap 'rc=$?; phase "exit=$rc"' EXIT
+          phase 'apt update start (60s deadline)'
+          timeout --kill-after=10s 60s sudo apt-get -o DPkg::Lock::Timeout=30 update -qq >> built-qa.log 2>&1
+          phase 'apt install start (90s deadline)'
+          timeout --kill-after=10s 90s sudo apt-get -o DPkg::Lock::Timeout=30 install -y -qq xvfb libnss3 libnspr4 libasound2t64 >> built-qa.log 2>&1
+          phase 'built driver start (540s deadline)'
+          timeout --kill-after=10s 540s xvfb-run -a node scripts/check-ui-built.cjs >> built-qa.log 2>&1
+          phase 'built driver passed'
       - name: Built QA evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -130,6 +136,7 @@ jobs:
             apps/03_oddbrain/qa-ui/built-app-results.json
             apps/03_oddbrain/qa-ui/built-app-final.png
             apps/03_oddbrain/built-qa.log
+            apps/03_oddbrain/built-qa-phases.log
           if-no-files-found: ignore
       - name: Built QA speaks its failure
         if: failure()
@@ -139,7 +146,7 @@ jobs:
             const fs = require('fs');
             const p = 'apps/03_oddbrain/built-qa.log';
             if (!fs.existsSync(p)) return;
-            let body = fs.readFileSync(p, 'utf8');
+            let body = (fs.existsSync('apps/03_oddbrain/built-qa-phases.log') ? fs.readFileSync('apps/03_oddbrain/built-qa-phases.log', 'utf8') + '\n' : '') + fs.readFileSync(p, 'utf8');
             if (body.length > 36000) body = body.slice(0, 10000) + '\n...truncated...\n' + body.slice(-25000);
             await github.rest.repos.createCommitComment({
               owner: context.repo.owner,
