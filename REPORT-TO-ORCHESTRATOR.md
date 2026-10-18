@@ -32,7 +32,7 @@ The baseline has no `src/main/` media/decode registry (`git ls-tree -r a6c7807 a
 4. `npm run build`: **pass**; two CSS optimizer warnings for the existing `::highlight(ob-find)` and `::highlight(ob-find-current)` rules.
 5. `npm run smoke`: **fail** before launch because Electron was not installed; expected `SMOKE OK SCROLL OK errors=0 warnings=0` was not observed.
 
-GitHub Actions run `39122937063` for `f65d352` and follow-up run `39123551397` for report commit `2a8e3fb` both failed at the Tests step on Linux and Windows; Types passed and Build/Smoke were skipped. The exact workflow Vitest command with default + JUnit reporters passed locally with 103 files / 744 tests. Actions log downloads returned EOF here, so the CI-specific failure details and cause are unproven. `gh run rerun` refused the earlier run because the workflow may be broken. CI is **not green**.
+GitHub Actions run `39122937063` for `f65d352`, `39123551397` for `2a8e3fb`, and `39123693424` for `2218d5e` failed at the Tests step on Linux and Windows; Types passed and Build/Smoke were skipped. The exact workflow Vitest command with default + JUnit reporters passed locally with 103 files / 744 tests. The log download for the first run returned EOF; later check annotations provide only the generic exit code, so the CI-specific failure details and cause are unproven. `gh run rerun` refused the first run because the workflow may be broken. CI is **not green**.
 
 ## Remaining / unproven
 
