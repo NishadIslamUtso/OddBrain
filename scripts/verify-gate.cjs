@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-const { failureAnnotation } = require('./verify-contracts.cjs');
+const { failureAnnotation, receiptNotice } = require('./verify-contracts.cjs');
 // Verification only. No app source changes, downloads of models, sign-ins or
 // microphone access. Linux: run this under xvfb-run for the real Electron smoke.
 const { spawnSync } = require('node:child_process');
@@ -27,18 +27,25 @@ try {
   // These are intentionally the brief's exact gate, in this order.
   run('install', 'npm', ['ci', '--ignore-scripts']);
   run('electron-install', process.execPath, ['node_modules/electron/install.js']);
+  if (process.platform === 'linux' && process.env.GITHUB_ACTIONS === 'true') {
+    // Ubuntu restricts unprivileged user namespaces. Configure Electron's
+    // shipped sandbox helper instead of disabling the application's sandbox.
+    const sandbox = path.join(APP, 'node_modules/electron/dist/chrome-sandbox');
+    run('sandbox-owner', 'sudo', ['chown', 'root:root', sandbox]);
+    run('sandbox-mode', 'sudo', ['chmod', '4755', sandbox]);
+  }
   run('types', 'npx', ['tsc', '--noEmit']);
   report.typecheckErrors = 0;
   report.unit = unitResult(run('unit', 'npx', ['vitest', 'run']));
   run('build', 'npm', ['run', 'build']);
-  // Isolate smoke files and ports from normal user configuration. Do not bypass
+  // Linux profile / vault / ports are isolated; Windows uses its fresh CI runner profile. Do not bypass
   // the app's existing console/scroll checks or retry a failing smoke.
-  const home = path.join(evidence, 'smoke-home'); fs.mkdirSync(home, { recursive: true });
+  const home = path.join(evidence, 'smoke-home');
+  for (const folder of [home, path.join(home, 'vault'), path.join(home, 'config')]) fs.mkdirSync(folder, { recursive: true });
   report.smoke = smokeResult(run('smoke', 'npm', ['run', 'smoke'], {
-    HOME: home, USERPROFILE: home, XDG_CONFIG_HOME: path.join(home, 'config'),
-    APPDATA: path.join(home, 'AppData', 'Roaming'), LOCALAPPDATA: path.join(home, 'AppData', 'Local'),
+    ...(process.platform === 'win32' ? {} : { HOME: home, XDG_CONFIG_HOME: path.join(home, 'config') }),
     AI_ASSISTANT_VAULT: path.join(home, 'vault'), AI_ASSISTANT_API_PORT: '0', AI_ASSISTANT_EXTENSION_PORT: '0',
   }));
   report.status = 'passed';
 } catch (error) { failureAnnotation(error); report.status = 'failed'; report.error = error.message; process.exitCode = 1; }
-finally { save(); console.log(JSON.stringify(report, null, 2)); }
+finally { save(); receiptNotice(report); console.log(JSON.stringify(report, null, 2)); }

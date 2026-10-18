@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-const { failureAnnotation } = require('./verify-contracts.cjs');
+const { failureAnnotation, receiptNotice } = require('./verify-contracts.cjs');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os'), crypto = require('node:crypto');
 const { spawnSync } = require('node:child_process');
 const { smokeResult, unsignedNotice } = require('./verify-contracts.cjs');
@@ -27,9 +27,8 @@ try {
   const signature = execute('installer-signature', 'powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', '(Get-AuthenticodeSignature -LiteralPath $env:ODDBRAIN_VERIFY_INSTALLER).Status.ToString()'], { ODDBRAIN_VERIFY_INSTALLER: installer }).trim();
   if (signature !== 'NotSigned') throw Error(`Expected the explicitly UNSIGNED installer, got ${signature}`);
   report.installer = { name: path.basename(installer), bytes: bytes.length, sha256, signature };
-  const home = path.join(evidence, 'packaged-smoke-home'); fs.mkdirSync(home, { recursive: true });
+  const home = path.join(evidence, 'packaged-smoke-home'); fs.mkdirSync(path.join(home, 'vault'), { recursive: true });
   report.smoke = smokeResult(execute('packaged-smoke', path.join(APP, 'dist/win-unpacked/OddBrain.exe'), ['--smoke', '--disable-gpu'], {
-    HOME: home, USERPROFILE: home, APPDATA: path.join(home, 'AppData/Roaming'), LOCALAPPDATA: path.join(home, 'AppData/Local'),
     AI_ASSISTANT_VAULT: path.join(home, 'vault'), AI_ASSISTANT_API_PORT: '0', AI_ASSISTANT_EXTENSION_PORT: '0',
   }));
   execute('packaged-media', process.execPath, [path.join(APP, 'node_modules/electron/cli.js'), path.join(APP, 'scripts/check-electron-media.cjs'), path.join(APP, 'dist/win-unpacked/resources/app.asar.unpacked/out/main/mediaWorker.js')]);
@@ -38,5 +37,5 @@ try {
 finally {
   fs.writeFileSync(path.join(evidence, 'package.json'), JSON.stringify(report, null, 2) + '\n');
   if (process.env.GITHUB_STEP_SUMMARY) fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, `\n## Windows artifact verification\n${report.notice}\n\nStatus: ${report.status}\n`);
-  console.log(JSON.stringify(report, null, 2));
+  receiptNotice(report); console.log(JSON.stringify(report, null, 2));
 }

@@ -22,4 +22,11 @@ function unsignedNotice() {
 function failureAnnotation(error) {
   if (process.env.GITHUB_ACTIONS) console.error('::error::' + String(error.stack || error).replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A'));
 }
-module.exports = { clean, smokeResult, unitResult, unsignedNotice, failureAnnotation };
+function receiptNotice(report) {
+  if (process.env.GITHUB_ACTIONS) {
+    const { platform, commit, status, unit, typecheckErrors, smoke, checks, installer } = report;
+    const receipt = JSON.stringify({ platform, commit, status, unit, typecheckErrors, smoke, checks, installer });
+    console.log('::notice title=Verification receipt::' + receipt.replaceAll('%', '%25').replaceAll('\r', '%0D').replaceAll('\n', '%0A'));
+  }
+}
+module.exports = { clean, smokeResult, unitResult, unsignedNotice, failureAnnotation, receiptNotice };

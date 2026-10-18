@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-const { failureAnnotation } = require('./verify-contracts.cjs');
+const { failureAnnotation, receiptNotice } = require('./verify-contracts.cjs');
 const { spawn } = require('node:child_process');
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const APP = path.resolve(__dirname, '../apps/03_oddbrain');
@@ -33,6 +33,6 @@ async function run(file) {
   finally {
     server.kill(); fs.writeFileSync(path.join(evidence, 'renderer-server.log'), serverOutput);
     fs.writeFileSync(path.join(evidence, 'renderer.json'), JSON.stringify(report, null, 2) + '\n');
-    console.log(JSON.stringify(report, null, 2));
+    receiptNotice(report); console.log(JSON.stringify(report, null, 2));
   }
 })();

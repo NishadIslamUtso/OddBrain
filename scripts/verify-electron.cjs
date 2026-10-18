@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 'use strict';
-const { failureAnnotation } = require('./verify-contracts.cjs');
+const { failureAnnotation, receiptNotice } = require('./verify-contracts.cjs');
 // Real built Electron/IPC/filesystem integration with a deterministic LOCAL
 // CLI and HTTP fixture. No authenticated provider, real model or OS microphone.
 const fs = require('node:fs'), os = require('node:os'), path = require('node:path'), http = require('node:http');
@@ -96,5 +96,5 @@ readline.createInterface({input:process.stdin}).on('line',line=>{
     assert.deepEqual(report.errors, []); report.localModelRequests = calls.length; report.status = 'passed';
     await page.screenshot({ path: path.join(evidence, 'electron.png') });
   } catch (error) { failureAnnotation(error); report.status = 'failed'; report.error = error.stack; process.exitCode = 1; }
-  finally { if (app) await app.close().catch(() => {}); await new Promise(resolve => server.close(resolve)); fs.writeFileSync(path.join(evidence, 'electron.json'), JSON.stringify(report, null, 2) + '\n'); console.log(JSON.stringify(report, null, 2)); }
+  finally { if (app) await app.close().catch(() => {}); await new Promise(resolve => server.close(resolve)); fs.writeFileSync(path.join(evidence, 'electron.json'), JSON.stringify(report, null, 2) + '\n'); receiptNotice(report); console.log(JSON.stringify(report, null, 2)); }
 })();
