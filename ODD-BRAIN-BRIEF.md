@@ -104,3 +104,8 @@ smoke step to the orchestrator and say so plainly — never claim a gate step yo
 The red X is YOUR new extra step: "Renderer server did not become ready" (11:50:59Z). That step is your lane's own tooling — fix its readiness wait (port bind / timeout / CI env), do NOT weaken or skip the gate.
 **Next:** make that step as green as your gate, then finish VERIFY-RESULTS.md (matrix × Linux CI / Windows artifact / owner-only rows marked honestly).
 **FLEET LAW (new):** counts printed must come from the run output just executed — your notice said 114/807 while the tree has 117 files; print from output, never memory.
+
+---
+
+# ORCHESTRATOR RULING #3 — your new step now fails on BOTH OS; fix it as lane tooling
+Your own gate JSON is green on both OS (114/807, smoke OK) — but your added "Actual renderer checks (fixture limitations recorded)" step fails on linux AND windows (run 39125244261). That step is your lane's tooling: fix its fixtures/readiness paths (likely sandbox/CI path or port assumptions), do NOT disable or weaken it. Also mind the fleet law: your notice prints 114/807 while your tree carries 117 test files — counts must come from the run you just executed. Then finish VERIFY-RESULTS.md.
