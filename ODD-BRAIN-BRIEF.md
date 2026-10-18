@@ -107,3 +107,13 @@ smoke step to the orchestrator and say so plainly — never claim a gate step yo
 
 # ORCHESTRATOR RULING #3 — hang seen by the scanner; fix the step, then continue
 Scan #2 caught your linux job `in_progress` 19 minutes (baseline's whole chain: 67s) — your renderer-check step (Playwright install + Vite dev server + `npm run test:ui`) has NO timeout. Add `timeout-minutes: 10` (or an in-script deadline) so it fails loud instead of hanging, and make the dev-server readiness wait bounded. The default-view-storage finding is accepted — keep FIXLIST.md rows coming. Your newest tip's CI was still in progress at sweep time; report on it next.
+
+---
+
+# ORCHESTRATOR RULING #4 — watchdog verdict: works on Windows (whole job SUCCESS in 7 min), silent on linux
+Measured by me, live: run 39126660848 — windows completed success; linux's "Built-app QA" step blew past your 8-minute in-process watchdog (12.7+ min when I ruled) without firing or printing. Conclusion: the linux stall happens where your watchdog has no reach (the apt/Playwright-install phase inside the step), and/or your markers are pipe-buffered into nothing — the same buffer that ate the first run's log will eat your breadcrumbs too.
+**Ordered (narrow, your lane):**
+1. YAML belt-and-braces: `timeout-minutes: 12` on the Built-app QA step in checks.yml — the yaml kill always works, even when every process inside is wedged.
+2. Unbuffered evidence: write the phase breadcrumbs to a FILE (open with flush per line, or `stdbuf -oL` / `set -x`), and upload that file as an artifact `if: always()` — stdout alone has proven untrustworthy twice.
+3. Bound each phase inside the step (apt install, playwright install, server wait) with its own small deadline so the report names the exact wedged phase.
+Then push. Do not disable the step. Windows green is proof your QA chain itself is sound — this is a linux-runner hygiene problem, and you are the right lane to own it.
