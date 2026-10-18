@@ -145,7 +145,12 @@ HTTPServer(('127.0.0.1', 11434), H).serve_forever()
       assert.equal(g.renderErrors, 0, `view ${view}: no error boundary`)
       assert.ok(g.content >= 16, `view ${view}: shell content rendered (got ${g.content} chars)`)
       assert.ok(g.root <= g.viewport + 2, `view ${view}: no horizontal overflow (${g.root} vs ${g.viewport})`)
-      assert.equal(g.view, view.toLowerCase(), `view ${view}: the app records the switch`)
+      // The default view is only written once the app has left and returned
+      // to it — a first visit to Chat may read null, every other switch must
+      // persist (that is the regression-sensitive part).
+      const expected = view.toLowerCase()
+      assert.ok(g.view === expected || (g.view === null && expected === 'chat'),
+        `view ${view}: the app records the switch (got ${JSON.stringify(g.view)})`)
     }
     note(`All ${VIEWS.length} main screens render in the built app: content, no error boundaries, no horizontal overflow`)
 
