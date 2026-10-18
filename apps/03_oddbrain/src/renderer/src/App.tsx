@@ -30,6 +30,7 @@ import useArtifactRewrite from './hooks/useArtifactRewrite'
 import useModels from './hooks/useModels'
 import type { Attachment } from '@shared/types'
 import { readAttachment } from '@shared/lib/attachments'
+import { base64ToFile, intakeVerdict, isConvertibleImage, reencodeToPng } from '@shared/lib/mediaIntake'
 import { extractFrames } from './lib/videoFrames'
 import usePersistentState from './hooks/usePersistentState'
 import useVault from './hooks/useVault'
@@ -470,18 +471,35 @@ export default function App() {
     const taken: Attachment[] = []
     for (const file of files.slice(0, room)) {
       try {
-        if (/^video\/(?:mp4|webm)$/.test(file.type)) {
+        // The front door answers BEFORE anything is read or sent. The engines
+        // read pictures themselves, so vision is honestly available here; what
+        // this checks is the FORMAT — audio, PDF, Office and archives are
+        // refused with the reason named, rather than dropped quietly or handed
+        // to the engine as bytes it cannot use.
+        const verdict = intakeVerdict(file.name, file.type, { vision: true })
+        if (!verdict.ok) {
+          setNotice(verdict.reason)
+          break
+        }
+        if (verdict.route === 'video-frames') {
           // A video rides as evenly spaced still frames: the engine reads
           // pictures natively, and frames carry the story a clip would.
           const frames = await extractFrames(file, room - taken.length)
           for (const frame of frames) {
             taken.push(await readAttachment(frame, { verified: true, vision: true, thinking: false }))
           }
-        } else {
-          // The engine sees pictures itself; the chat vision bridge's gate is
-          // about the chat brain, not the engine's own eyes.
-          taken.push(await readAttachment(file, { verified: true, vision: true, thinking: false }))
+          continue
         }
+        if (isConvertibleImage(file.name, file.type)) {
+          // A gif, bmp, svg, avif or ico: decoded and re-encoded to PNG on this
+          // machine, because that is what the engine's wire carries. Nothing is
+          // uploaded to do it, and the person is told it happened.
+          const png = base64ToFile(await reencodeToPng(file), `${file.name}.png`)
+          setNotice(`${file.name} was re-encoded to PNG on this machine so the engine could read it.`)
+          taken.push(await readAttachment(png, { verified: true, vision: true, thinking: false }))
+          continue
+        }
+        taken.push(await readAttachment(file, { verified: true, vision: true, thinking: false }))
       } catch (failure) {
         setNotice((failure as Error).message)
         break
