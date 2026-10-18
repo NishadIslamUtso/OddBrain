@@ -60,6 +60,17 @@ const engineApi = {
   /** Read any picked file honestly: real text, or the real reason not. */
   ingest: (name: string, mime: string, data: Uint8Array): Promise<{ ok: boolean; text?: string; reason?: string }> =>
     ipcRenderer.invoke('ingest:decode', name, mime, data),
+  /** Windows' own speech engine; words arrive through onEvent. */
+  dictation: {
+    start: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('dictation:start'),
+    stop: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('dictation:stop'),
+    onEvent: (listener: (event: { kind: 'text'; value: string } | { kind: 'stopped'; reason?: string }) => void): (() => void) => {
+      const channel = 'dictation:event'
+      const hear = (_event: unknown, value: unknown): void => listener(value as never)
+      ipcRenderer.on(channel, hear)
+      return () => ipcRenderer.removeListener(channel, hear)
+    },
+  },
   /** Pull progress ticks, in the same shape `parsePullLine` produces. */
   onPullEvent: (listener: (tick: unknown) => void): (() => void) => {
     const channel = 'engine:pull-event'

@@ -436,6 +436,12 @@ export type EngineBridge = {
   onPullEvent: (listener: (tick: unknown) => void) => () => void
   /** Read any picked file honestly: real text, or the real reason not. */
   ingest: (name: string, mime: string, data: Uint8Array) => Promise<{ ok: boolean; text?: string; reason?: string }>
+  /** Windows' own speech engine; words arrive through onEvent. */
+  dictation: {
+    start: () => Promise<{ ok: boolean; answer: string }>
+    stop: () => Promise<{ ok: boolean; answer: string }>
+    onEvent: (listener: (event: { kind: 'text'; value: string } | { kind: 'stopped'; reason?: string }) => void) => () => void
+  }
   readHouseRules: () => Promise<{ rules: HouseRules; defaults: HouseRules }>
   writeHouseRules: (rules: HouseRules) => Promise<{ ok: boolean; written: string[] }>
   setModel: (model: string, provider?: 'anthropic') => Promise<{ ok: boolean; answer: string }>
@@ -520,6 +526,11 @@ const demoEngineBridge: EngineBridge = {
   deleteModel: async () => ({ ok: false, answer: 'Removing brains needs the desktop app.' }),
   onPullEvent: () => () => undefined,
   ingest: async (name) => ({ ok: false, reason: `${name}: the browser preview reads text and pictures only — file decoding lives in the desktop app.` }),
+  dictation: {
+    start: async () => ({ ok: false, answer: 'Dictation runs in the desktop app; the browser preview uses its own listener if it has one.' }),
+    stop: async () => ({ ok: false, answer: 'Not listening.' }),
+    onEvent: () => () => undefined,
+  },
   readHouseRules: async () => ({ rules: { ...DEFAULT_HOUSE_RULES }, defaults: { ...DEFAULT_HOUSE_RULES } }),
   writeHouseRules: async () => ({
     ok: false,

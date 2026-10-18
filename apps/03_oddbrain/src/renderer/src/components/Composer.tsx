@@ -75,14 +75,45 @@ export default function Composer({
   const pickerRef = useRef<HTMLDivElement | null>(null)
   useDismiss(pickerRef, () => setBoxOpen(null), boxOpen !== null)
 
+  // The dictation events below arrive outside React's render flow; they read
+  // the latest draft and write through the latest setter they were given.
+  const valueRef = useRef(value)
+  valueRef.current = value
+  const onChangeRef = useRef(onChange)
+  onChangeRef.current = onChange
+  const appendHeard = (said: string): void => {
+    const trimmed = said.trim()
+    if (trimmed) onChangeRef.current(`${valueRef.current ? `${valueRef.current.trimEnd()} ` : ''}${trimmed}`)
+  }
+  useEffect(() => {
+    // The desktop's offline recognizer speaks first when it exists; its words
+    // and its honest stops arrive on this one channel.
+    const off = getEngineApi().dictation.onEvent((event) => {
+      if (event.kind === 'text') appendHeard(event.value)
+      else {
+        setListening(false)
+        if (event.reason) window.dispatchEvent(new CustomEvent('app:notice', { detail: event.reason }))
+      }
+    })
+    return off
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   /**
-   * Dictation: the window's own speech recognition (Chromium's), words into
-   * the draft. Where the machine has no microphone or no listener, the button
-   * says so instead of pretending. The notice rides the app's own channel.
+   * Dictation: the desktop's offline recognizer first (Windows' own speech
+   * engine — nothing leaves the machine), the window's own listener as the
+   * fallback, and where neither exists the button reports BOTH real reasons
+   * instead of pretending at a microphone.
    */
-  const toggleDictation = (): void => {
+  const toggleDictation = async (): Promise<void> => {
     if (listening) {
       recognition.current?.stop()
+      void getEngineApi().dictation.stop()
+      return
+    }
+    const native = await getEngineApi().dictation.start()
+    if (native.ok) {
+      setListening(true)
       return
     }
     type SpeechCtor = new () => {
@@ -97,7 +128,9 @@ export default function Composer({
     }
     const Ctor = (globalThis as unknown as { webkitSpeechRecognition?: SpeechCtor }).webkitSpeechRecognition
     if (typeof Ctor !== 'function') {
-      window.dispatchEvent(new CustomEvent('app:notice', { detail: 'This window has no speech listener: dictation needs a microphone.' }))
+      window.dispatchEvent(new CustomEvent('app:notice', {
+        detail: `${native.answer} This window also has no speech listener of its own.`,
+      }))
       return
     }
     try {
@@ -106,9 +139,10 @@ export default function Composer({
       ear.interimResults = false
       ear.continuous = true
       ear.onresult = (event) => {
-        let said = ''
-        for (let i = 0; i < event.results.length; i += 1) said += `${event.results[i][0].transcript} `
-        if (said.trim()) onChange(`${value ? `${value.trimEnd()} ` : ''}${said.trim()}`)
+        // Continuous results grow with every accepted phrase; only the newest
+        // phrase is added, or each utterance would land in the draft twice.
+        const last = event.results[event.results.length - 1]
+        if (last) appendHeard(last[0].transcript)
       }
       ear.onerror = () => setListening(false)
       ear.onend = () => setListening(false)
@@ -208,7 +242,7 @@ export default function Composer({
           </button>
           <button
             type="button"
-            onClick={toggleDictation}
+            onClick={() => void toggleDictation()}
             aria-label={listening ? 'Stop dictation' : 'Dictate'}
             aria-pressed={listening}
             title={listening ? 'Listening. Press again to stop.' : 'Speak into the box: the window\u2019s own listener types what you say'}

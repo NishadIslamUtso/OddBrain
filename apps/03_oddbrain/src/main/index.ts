@@ -44,6 +44,7 @@ import { createJournalManager } from './journal'
 import { createMemoryManager } from './memoryFiles'
 import { createDownloadManager, type DownloadTick } from './engine/downloads'
 import { decodeAttachment } from './ingest/decode'
+import { createDictationService } from './dictation'
 import { agyModelSource, detectEngine } from './engine/availability'
 import { enginePath } from './engine/enginePath'
 import { pdfSafeName } from '../shared/lib/artifacts'
@@ -644,6 +645,14 @@ function registerBridges(): void {
     if (!(data instanceof Uint8Array)) return { ok: false, reason: `${name}: the file bytes did not arrive — nothing was read.` }
     return decodeAttachment(data, name, mime)
   })
+  // Dictation: Windows' own speech engine, spawned per session. Offline by
+  // construction; the browser's listener is the preview fallback.
+  const dictation = createDictationService()
+  handle('dictation:start', (event) =>
+    dictation.start((dictationEvent) => {
+      if (!event.sender.isDestroyed()) event.sender.send('dictation:event', dictationEvent)
+    }))
+  handle('dictation:stop', () => dictation.stop())
   // The staged Ollama runtime, started and stopped HERE — the download
   // module's copy says this, so the doors must exist to make it true.
   downloadManager = downloads
