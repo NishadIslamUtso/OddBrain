@@ -85,7 +85,11 @@ export async function decodeDocument(name: string, bytes: Buffer): Promise<Media
     Object.assign(globalThis, { DOMMatrix: canvas.DOMMatrix, ImageData: canvas.ImageData, Path2D: canvas.Path2D })
     const pdf = await import('pdfjs-dist/legacy/build/pdf.mjs')
     const root = dirname(require.resolve('pdfjs-dist/package.json'))
-    const task = pdf.getDocument({ standardFontDataUrl: join(root, 'standard_fonts') + sep, cMapUrl: join(root, 'cmaps') + sep, cMapPacked: true, wasmUrl: join(root, 'wasm') + sep, data: new Uint8Array(bytes), useSystemFonts: false, useWorkerFetch: false, disableFontFace: true, stopAtErrors: true })
+    // pdfjs's Node factories read these strings as filesystem paths after appending
+    // a file name, and reject anything not ending in "/". Forward slashes are valid
+    // Windows path separators; backslashes are not valid here on any platform.
+    const dataDir = (p: string) => p.split(sep).join('/') + '/'
+    const task = pdf.getDocument({ standardFontDataUrl: dataDir(join(root, 'standard_fonts')), cMapUrl: dataDir(join(root, 'cmaps')), cMapPacked: true, wasmUrl: dataDir(join(root, 'wasm')), data: new Uint8Array(bytes), useSystemFonts: false, useWorkerFetch: false, disableFontFace: true, stopAtErrors: true })
     try {
       const doc = await task.promise
       const count = Math.min(doc.numPages, 50)
