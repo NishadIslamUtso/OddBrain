@@ -1,42 +1,63 @@
 # Report to orchestrator — audio/video/image intake
 
-**Status: NOT COMPLETE.** This is a truthful handoff, not a green milestone claim. Baseline is `a6c7807`; current branch is `arena/9a3a5c88-oddbrain`, tip at report time `f65d352`.
+**Status: NOT COMPLETE.** The Vitest CI repair is green. The additional AV honesty changes below pass the local typecheck, tests, and build, but have not yet run in GitHub Actions. Baseline: `a6c7807`; branch: `arena/9a3a5c88-oddbrain`.
 
-## What exists now
+## What exists
 
-The pre-brief commit `c17cf31` contains working-tree AV intake code and unit coverage:
+### AV handling already present on this branch
 
-- `apps/03_oddbrain/src/shared/lib/media.ts` validates MP3/WAV containers and derives bounded video-frame timestamps. Audio inputs are limited to 6 MiB, 90 seconds, mono/stereo and 8–48 kHz; supported formats are MP3 and uncompressed PCM/float WAV.
-- `apps/03_oddbrain/src/shared/lib/attachments.ts` locally decodes/re-encodes PNG/JPEG/WebP images (input dimensions up to 8192 per side / 24 MP; output at most 2048 per side and 2 MiB), validates/decodes audio, and stores sent media bytes in IndexedDB. The current shared file also implements document extraction, which is outside this lane.
-- `apps/03_oddbrain/src/renderer/src/lib/videoFrames.ts` attempts bounded MP4/WebM decoding: at most 100 MiB, 10 minutes, 4096 px per source side and four sampled frames, each no larger than 1280×720. Video audio is not extracted or sent; the UI/source note says so.
-- `apps/03_oddbrain/src/renderer/src/App.tsx`, `components/Composer.tsx`, `components/ChatView.tsx`, `hooks/useChat.ts`, `src/shared/lib/providers.ts` and `src/shared/types.ts` wire intake to explicit model selection. Audio is allowed only through the explicitly selected, enabled OpenAI route; no alternate provider/model fallback is used. The UI warns before send that provider model listings do not establish audio capability and that the chosen model may refuse the clip.
-- Evidence: `tests/audio-attachments.test.ts` covers local validation, refusal paths and persistence/reload through `loadAudio`; `tests/providers.test.ts` covers selected-provider serialization/refusal; `tests/cloud-routing.test.ts` checks the exact selected OpenAI model route. No live provider call was made.
+- `apps/03_oddbrain/src/shared/lib/media.ts` validates MP3/WAV containers and derives bounded video-frame timestamps. Audio limits are 6 MiB and 90 seconds, mono/stereo, 8–48 kHz; formats are MP3 and uncompressed PCM/float WAV.
+- `apps/03_oddbrain/src/shared/lib/attachments.ts` locally decodes/re-encodes PNG/JPEG/WebP images (source sides up to 8192 px / 24 MP; output sides up to 2048 px and output up to 2 MiB), validates audio, and keeps media bytes in IndexedDB. This file also contains document extraction, which is outside this lane and frozen.
+- `apps/03_oddbrain/src/renderer/src/lib/videoFrames.ts` bounds MP4/WebM work to 100 MiB, 10 minutes, 4096 px per source side, at most four sampled frames, each no larger than 1280×720 and 2 MiB. Video audio is not extracted or sent.
+- Existing `App.addFiles` routes attachments through `readAttachment`, `readAudioAttachment`, and `extractFrames`. Audio goes only to the explicitly selected, enabled OpenAI model; there is no provider/model fallback. The provider model list does not establish per-model audio capability.
 
-The current implementation does **not** verify audio capability for each listed OpenAI model; it warns that the exact selected model may refuse. 8 GB/4 GB device performance has not been measured. No wake-word or continuous voice feature was added. The prior `Composer.tsx` change also sets dictation to one utterance; dictation is not this lane and is called out below as a scope collision.
+### AV-only changes in this continuation
 
-## Intake ownership / path collision
+- `apps/03_oddbrain/src/renderer/src/components/composerMedia.ts` now reports audio capability as **unverified** for the exact selected OpenAI model when the provider listing lacks capability data. It does not infer support from a model name. It distinguishes no selection and a model missing from the enabled list; it never selects or reroutes automatically.
+- `apps/03_oddbrain/src/renderer/src/components/Composer.tsx` uses that model-specific disclosure before send. It also shows exact outgoing image/audio payload bytes, calculated from the prepared base64 payload and labeled in bytes. Invalid or missing payload data produces no size label. These are payload byte counts—not source-video sizes, RAM/VRAM readings, or fit estimates. The prior dictation hunk in this file was not changed.
+- `apps/03_oddbrain/tests/composer-media-honesty.test.ts` adds five checks for unknown model capability, explicit selection/no fallback, exact byte counts, and refusal to invent a size.
+- `apps/03_oddbrain/vitest.config.ts` contains only the Ruling #1 fix: `fileParallelism: false` replaces `maxWorkers: 1`, with its adjacent comment updated. Local Vitest and CI now pass with the setting.
 
-The baseline has no `src/main/` media/decode registry (`git ls-tree -r a6c7807 apps/03_oddbrain/src/main` found no media/decode/attachment module). The existing AV path remains renderer-side (`App.addFiles` → `readAttachment` / `readAudioAttachment` and `extractFrames`). I did not create a second intake door or integrate another branch's registry. The named integration point for the intake-owner lane is that existing `App.addFiles` boundary; it needs coordination with `arena/6d6aabbf` before integration.
+## Intake ownership and collision
 
-**Important collision:** `c17cf31` predates the lane brief and changes files outside the allowed paths. I am reporting, not concealing, that mismatch. Beyond `components/Composer.tsx` and `tests/`, the branch currently changes `package.json`/`package-lock.json`, `src/main/index.ts`, `src/main/windowBounds.ts`, `renderer/src/App.tsx`, `renderer/src/components/ChatView.tsx`, `renderer/src/hooks/useChat.ts`, `renderer/src/lib/videoFrames.ts`, `renderer/src/state/engine.ts`, `src/shared/lib/attachments.ts`, `media.ts`, `providers.ts`, `ollama.ts`, `documents.ts`, `pdfPages.ts`, `src/shared/types.ts`, and `vitest.config.ts`. Several are document extraction/window-bounds/provider-routing work or intake-door edits outside this lane's allowlist. I made no visual UI redesign and did not touch the visual-UI owner's branch.
+The baseline has no `src/main/` media/decode registry (`git ls-tree -r a6c7807 apps/03_oddbrain/src/main` found none). No second intake door was added. Current AV decoders remain behind the existing `readAttachment` / `readAudioAttachment` / `extractFrames` functions; `App.addFiles` is the named integration point for `arena/6d6aabbf`'s shared intake registry. Registry integration is still pending coordination with that lane.
 
-## session-v2 comparison
+**Frozen, awaiting merge (no further edits):**
 
-**Ported: none.** I refused to apply `reference/session-v2/OddBrain-App-UI.patch` wholesale: its manifest identifies baseline `2f05dac9`, while this branch is based on `a6c7807`; the brief says it is reference-only and piecewise. No session-v2 AV implementation was copied into this branch.
+- `apps/03_oddbrain/src/shared/lib/documents.ts`
+- `apps/03_oddbrain/src/shared/lib/pdfPages.ts`
+- `apps/03_oddbrain/src/main/windowBounds.ts`
+- `apps/03_oddbrain/src/renderer/src/state/engine.ts`
+- `apps/03_oddbrain/src/shared/lib/ollama.ts`
+- `apps/03_oddbrain/src/shared/lib/providers.ts`
+- `apps/03_oddbrain/src/shared/types.ts`
+- The pre-brief dictation change in `apps/03_oddbrain/src/renderer/src/components/Composer.tsx` (the AV-only composer edits above do not touch it).
 
-## Gate results (ran in the required order, in `apps/03_oddbrain`)
+Other out-of-allowlist ancestry from `c17cf31` remains a reported collision, not new work: `package.json` / `package-lock.json`, `src/main/index.ts`, renderer `App.tsx`, `ChatView.tsx`, `useChat.ts`, `renderer/src/lib/videoFrames.ts`, `src/shared/lib/media.ts`, and `src/shared/lib/attachments.ts`. No further edits were made to those paths in this continuation. The one-file `vitest.config.ts` change is the explicit Ruling #1 exception. No visual redesign or work on the visual-UI owner's branch was done.
 
-1. `npm ci --ignore-scripts && node node_modules/electron/install.js`: `npm ci` installed 483 packages (14 audit vulnerabilities: 11 moderate, 1 high, 2 critical). Electron installation then failed with `TypeError: fetch failed`.
-2. `npx tsc --noEmit`: **pass, 0 errors**.
-3. `npx vitest run`: **pass, 103 files / 744 tests**.
-4. `npm run build`: **pass**; two CSS optimizer warnings for the existing `::highlight(ob-find)` and `::highlight(ob-find-current)` rules.
-5. `npm run smoke`: **fail** before launch because Electron was not installed; expected `SMOKE OK SCROLL OK errors=0 warnings=0` was not observed.
+## session-v2
 
-GitHub Actions run `39122937063` for `f65d352`, `39123551397` for `2a8e3fb`, and `39123693424` for `2218d5e` failed at the Tests step on Linux and Windows; Types passed and Build/Smoke were skipped. The exact workflow Vitest command with default + JUnit reporters passed locally with 103 files / 744 tests. The log download for the first run returned EOF; later check annotations provide only the generic exit code, so the CI-specific failure details and cause are unproven. `gh run rerun` refused the first run because the workflow may be broken. CI is **not green**.
+**Ported: none.** `reference/session-v2/OddBrain-App-UI.patch` is reference-only and declares baseline `2f05dac9`, not this branch's `a6c7807`; the brief disallows applying it wholesale. No session-v2 code was copied.
+
+## Gate and CI evidence
+
+### Current AV working tree (local)
+
+- `npx tsc --noEmit`: pass, 0 errors (also rechecked through `npm run build`).
+- Focused AV tests: 3 files / 15 tests passed.
+- `npx vitest run`: **104 files / 749 tests passed**.
+- `npm run build`: pass. It emitted the same two CSS optimizer warnings for the existing `::highlight(ob-find)` and `::highlight(ob-find-current)` rules.
+- The current AV edits have **not yet been pushed or checked by CI at this report point**.
+
+### Vitest repair and prior environment limits
+
+- CI run `39124976799` for `0228186` passed on Linux and Windows: Install, Types, Tests, platform speak checks, Build, and Smoke all passed. No Windows “Built media worker” failure was reported, so no question line is needed.
+- The pre-fix CI failure was tinypool's `RangeError: options.minThreads and options.maxThreads must not conflict`: a 4-vCPU runner selected `minThreads: 2` while `maxWorkers: 1`. Ruling #1 authorized the one-file `fileParallelism: false` repair. The earlier failing runs are `39123693424` and `39123792135`.
+- The sandbox's earlier `npm ci --ignore-scripts` installed 483 packages (audit: 14 vulnerabilities—11 moderate, 1 high, 2 critical), but `node node_modules/electron/install.js` failed with `TypeError: fetch failed`. Local `npm run smoke` therefore failed before launch and was not retried. CI Smoke passed on `0228186`; smoke for the newer AV edits is pending CI.
 
 ## Remaining / unproven
 
-- No `src/main/` AV decoder module or integration with the intake owner's registry.
-- Per-model audio capability is not verified; only the selected/enabled OpenAI route is enforced and refusal is explained.
-- No live provider test, Windows/Electron launch, real-device memory/VRAM measurement, or successful smoke run.
-- The gate and CI are not fully green, so this branch is not marked complete.
+- Shared intake-registry integration is not done; coordinate at `App.addFiles` with `arena/6d6aabbf`. No `src/main/` media registry was present at baseline, and no second door was built.
+- Audio capability remains unverified per model because the provider listing exposes no capability field. The composer says this before send; a selected model may refuse. No live provider request was made.
+- The 8 GB RAM / 4 GB VRAM device's real decode peak, available memory, and model fit were not measured. Fixed input/frame bounds remain; exact prepared payload bytes are shown without implying RAM/VRAM use or a performance fit.
+- No real-device media corpus, codec matrix, DRM/encryption fixture, or current-AV-change Windows/Electron smoke run has been demonstrated. Do not claim the lane complete until the pushed AV changes pass CI and registry ownership is resolved.

@@ -11,6 +11,7 @@ import { getEngineApi } from '@/platform/bridge'
 import { vaultGet, type VaultReply } from '@shared/lib/vault'
 import { useEngine, type EngineTurn } from '@/state/engine'
 import useDismiss from '@/hooks/useDismiss'
+import { audioModelDisclosure, preparedMediaSizeLabel } from './composerMedia'
 
 /**
  * The composer.
@@ -171,18 +172,26 @@ export default function Composer({
         />
         {attachments.length > 0 && onDetach ? (
           <ul className="flex flex-wrap gap-1.5 px-4 pt-2" aria-label="Attached">
-            {attachments.map(entry => (
-              <li key={entry.id} className="flex items-center gap-1 rounded-lg border border-line bg-bg px-1.5 py-1 text-[11px] text-muted">
-                {entry.kind === 'image' && entry.data ? (
-                  <img src={`data:${entry.mime};base64,${entry.data}`} alt="" className="h-6 w-6 rounded object-cover" />
-                ) : (
-                  <span className="max-w-[140px] truncate">{entry.name}</span>
-                )}
-                <button type="button" onClick={() => onDetach(entry.id)} aria-label={`Remove ${entry.name}`} className="text-muted hover:text-ink">
-                  <X size={11} />
-                </button>
-              </li>
-            ))}
+            {attachments.map(entry => {
+              const payloadSize = preparedMediaSizeLabel(entry)
+              return (
+                <li
+                  key={entry.id}
+                  title={payloadSize ? `Exact prepared media payload: ${payloadSize}` : undefined}
+                  className="flex items-center gap-1 rounded-lg border border-line bg-bg px-1.5 py-1 text-[11px] text-muted"
+                >
+                  {entry.kind === 'image' && entry.data ? (
+                    <img src={`data:${entry.mime};base64,${entry.data}`} alt="" className="h-6 w-6 rounded object-cover" />
+                  ) : (
+                    <span className="max-w-[140px] truncate">{entry.name}</span>
+                  )}
+                  {payloadSize ? <span className="shrink-0 text-[10px]">{payloadSize}</span> : null}
+                  <button type="button" onClick={() => onDetach(entry.id)} aria-label={`Remove ${entry.name}`} className="text-muted hover:text-ink">
+                    <X size={11} />
+                  </button>
+                </li>
+              )
+            })}
           </ul>
         ) : null}
         <div className="flex items-center gap-1.5 px-2.5 pb-2 pt-1" ref={pickerRef}>
@@ -683,6 +692,7 @@ function AudioModelChip({
   onRefresh?: () => void
 }) {
   const selectedLabel = selected.startsWith('openai/') ? selected.slice('openai/'.length) : ''
+  const disclosure = audioModelDisclosure(selected, models)
   return (
     <div className="relative">
       <button
@@ -691,9 +701,7 @@ function AudioModelChip({
         aria-haspopup="menu"
         aria-expanded={open}
         aria-label={selectedLabel ? `Audio model: openai/${selectedLabel}` : 'Choose an OpenAI audio model'}
-        title={selectedLabel
-          ? `Audio goes only to the selected OpenAI model openai/${selectedLabel}. The model may refuse audio; nothing is switched.`
-          : 'Choose an enabled OpenAI model for this audio. No model is chosen automatically.'}
+        title={disclosure.message}
         className={`flex h-7 min-w-0 items-center gap-1.5 rounded-lg px-2 text-[11.5px] ${selectedLabel ? 'text-ink' : 'text-warn hover:text-ink'}`}
       >
         <Mic size={11} aria-hidden />
@@ -702,9 +710,7 @@ function AudioModelChip({
       </button>
       {open ? (
         <div role="menu" aria-label="OpenAI models for audio input" className="absolute bottom-9 right-0 z-20 max-h-[300px] w-[300px] overflow-y-auto rounded-xl border border-line bg-card p-1.5 shadow-xl">
-          <p className="px-2.5 py-2 text-[11.5px] leading-relaxed text-muted">
-            Audio is sent only to the OpenAI model you choose here. The provider list does not report audio support, so a selected model may refuse it; there is no fallback.
-          </p>
+          <p className="px-2.5 py-2 text-[11.5px] leading-relaxed text-muted">{disclosure.message}</p>
           {models.length ? models.map(model => (
             <button
               key={model.name}
