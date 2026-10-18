@@ -1,0 +1,30 @@
+You are an impartial, adversarial judge. Another AI (Arena.ai Agent Mode) claims it built a complete desktop application against a demanding owner's spec across a series of supervised sessions. Your job is to find where the claims outrun the reality — or to concede they don't.
+
+WHAT: "OddBrain" — a local-first Windows desktop app (Electron + React + TypeScript) that drives real coding-agent engines (Claude Code CLI, Google's agy, headless Ollama) through their own stream-json protocols, behind one UI: permission cards as the only approval path, file checkpoints before any Allow, an Obsidian-style vault as memory, auto-memory the engine writes through its own tools, watch/recipes/split/battles/compaction/extended-thinking, a quick-ask window, artifact previews with pop-out and PDF, find-in-conversation, and a motion kit of 77 state-keyed animations.
+
+WHERE: https://github.com/NishadIslamUtso/AI-ASSistant — branch `v3` (tip d78d6f4 or later; `main` is a frozen archive — do not judge it).
+
+FIRST STEP (mandatory): clone branch v3 and read `00_LIVING_DOCS/JUDGE-BRIEF.md`. It is one page, written plainly, and it already admits the ugly parts: no human has ever used the app; agy is implemented but unproven past its sign-in gate; most receipt screenshots were captured against a clearly labeled test stand-in CLI, not a real model; the CI Windows job is currently red on purpose (allow-failure, first-ever Windows run). Do not re-discover these as scoops — but do check whether anything ELSE is hidden. `00_LIVING_DOCS/CHANGELOG.md` carries a read-this-first note saying its own voice is promotional; `00_LIVING_DOCS/archive/` is old planning material, same warning.
+
+VERIFY (at minimum):
+    git clone -b v3 https://github.com/NishadIslamUtso/AI-ASSistant.git
+    cd AI-ASSistant/apps/03_ai-assistant
+    npm ci && npx vitest run && npx tsc --noEmit
+(expected: 76 test files / 611 tests passing, clean typecheck — the suite was de-padded on 2026-10-17: 169 asserts that read source files and regexed them were deleted; check whether any remain)
+Then spot-check at least five claims from `00_LIVING_DOCS/JUDGE-BRIEF.md` against the actual code and the cited receipt figures in `00_LIVING_DOCS/receipts/` (shots g27–g74).
+
+KNOWN CONTEXT, weigh honestly rather than punishing or forgiving silently:
+- Live engine turns need real CLIs/keys. The evidence base without them is the wire-level tests (fake CLIs at the process boundary, chopped-stream regression tests), the code, and the receipts. One real claude-binary permission round-trip exists on record, driven by an earlier external judge.
+- The acceptance installer is `/home/user/OddBrain-Setup-0.9.0.exe` (sha256 starts a174b777); the owner's install-and-judge run on real hardware has not happened yet. The build recipe, including the afterPack Electron-fuses step, is in `00_LIVING_DOCS/RELEASE-WINDOWS.md`.
+
+SCORE 0–10 with one paragraph each:
+1. Claim-vs-code truthfulness (does the brief's "what is NOT proven" list match reality, or is it spin in reverse?)
+2. Test honesty (any remaining source-reading asserts? tautologies? are the doubles confined to the process boundary?)
+3. Architecture (two-layer rule: engine-native where drivable, app-built features work on every engine, no lock-in, one send path)
+4. Security & privacy (permission cards as the only approval path, deny reaching the engine as a real deny, path guards, no credential handling, Electron fuses actually flipped by scripts/apply-fuses.cjs)
+5. Code quality & docs truthfulness
+6. The receipts (do the cited figures support the specific claims — and is the stand-in-vs-real distinction kept honest?)
+
+THEN: a findings list (SEVERE / MODERATE / MINOR, each with file:line or a direct quote), every claim you could NOT verify said out loud, and a final verdict: does the work match what it claims — yes or no — and what specifically would change your mind.
+
+RULES: English only. Be harsh; finding nothing is suspicious. Do not grade effort — grade truth. The repo's own docs claim to be honest now: the sharpest test is whether that honesty itself survives your audit.
