@@ -1,144 +1,104 @@
 # Report to the orchestrator
 
 Branch: `arena/495d260c-oddbrain`. Lane: audit and comparison (scanner).
-Baseline: `main` `a6c7807`. Written 2026-10-18 11:50 UTC.
+Baseline: `main` `a6c7807`. Scan #2 written 2026-10-18 12:10 UTC.
+Ruling obeyed: #2 (PASS, add the two columns, keep scans coming, keep grading
+`cc83a507` inventory-only).
 
 ## Top block
 
-**DEAD branches:** none. All eight were pushed inside two hours. Oldest work
-commit: `81a07155` 09:47 UTC. Newest: `cc83a507` 10:18 UTC.
+**DEAD:** none. Every work branch was pushed inside the last half hour.
+`cc83a507` last pushed at 10:18 UTC and is inventoried only, so it is not
+counted dead.
 
-**COLLISIONS:** seven branches replace the same renderer with the same
-session-v2 package. Pairwise changed-file overlap is 97 to 111 files. Merging
-any two duplicates the UI tree and conflicts across about a hundred files.
-Judge one and keep it; do not merge siblings. Per-branch file lists are in
-`BRANCH-COMPARISON.md`.
+**COLLISIONS:** six UI branches still overlap 97–113 files pairwise.
+**`9a3a5c88` is now separable:** it shares only 6–13 files with any other
+branch, all plumbing (`package.json`, `main/index.ts`, `App.tsx`, `ChatView`,
+`Composer`, `shared/lib/attachments.ts`, `shared/types.ts`, plus the brief).
+It is the only lane that merges cleanly on top of a chosen UI branch.
 
-**HONESTY BREACHES found:** none proven. Three things to check:
+**HONESTY BREACHES:** still none proven. Drift continues, and one CI state is
+misleading rather than false:
 
-1. Stale test counts in branch docs: `d3c1ee25` says 114 files (tree has 117),
-   `ea5c07b0` says 117 (tree has 120), `0bd5478b` says 114 (tree has 117),
-   `6d6aabbf` says 113 (tree has 116), `cc83a507` says 120 files / 830 tests
-   (tree has 117 test files). These lag, they do not invent.
-2. `gemma4:cloud` appears only in migration comments and the guard that strips
-   it, same as baseline, on every branch.
-3. Four branches add `MediaRecorder` dictation: `d3c1ee25`, `ea5c07b0`,
-   `9781cd95`, `cc83a507`. Dictation is in the recorded scope. Confirm the
-   recording starts only from the Dictate button and that audio goes only to
-   the selected provider. `9781cd95` adds `src/main/cloud/media.ts`; read that
-   file first.
+1. **Stale counts** (tree counts from `git ls-tree`):
+   `d3c1ee25` 114/807 vs 117 files; `ea5c07b0` 117/807 vs 121;
+   `0bd5478b` 114/808 vs 118; `6d6aabbf` 113/815 vs 116;
+   `9a3a5c88` 103/744 vs 106. `81a07155` and `9781cd95` still quote baseline
+   99/723 while holding 115 and 118 files. `cc83a507` states no number.
+2. **`0bd5478b`'s linux job is hung, not failed.** Running since 11:56:37;
+   baseline's whole linux chain takes 67 seconds. The step it added is the
+   renderer check (Playwright install, Vite, `npm run test:ui`). It needs a
+   `timeout-minutes` on that step. Until it resolves, its state is unknown.
+3. **`d3c1ee25`'s new renderer gate has never passed.** Both OS jobs now fail at
+   `Actual renderer checks (fixture limitations recorded)`. Different failure
+   from the last scan.
+4. No branch reintroduces `gemma4:cloud` as a default. Guard comments only.
+5. `9a3a5c88`'s report declares NOT COMPLETE and names its own out-of-lane
+   edits. Honest.
 
-**CI at head commit:** green on `0bd5478b`, `6d6aabbf`, `81a07155`,
-`9781cd95`. Red: `d3c1ee25` (linux smoke), `ea5c07b0` (windows, Built media
-worker), `9a3a5c88` (tests both OS), `cc83a507` (windows tests).
+Full detail: `BRANCH-COMPARISON.md`.
+
+## Gate, run on this tip at 12:07 UTC
+
+| Step | Result |
+|---|---|
+| `npm ci --ignore-scripts` | exit 0 via the lockfile-verified offline cache (see last report); 479 packages |
+| `node node_modules/electron/install.js` | **failed twice**: default host and `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` both answer `fetch failed`. Neither host is reachable from this sandbox. |
+| `npx tsc --noEmit -p tsconfig.json` | 0 errors |
+| `npx vitest run` | 99 files, 723 tests, all passed (second run; see flake note) |
+| `npm run build` | green, three bundles built |
+| `npm run smoke` | **not run**, needs the missing Electron binary. Left to the orchestrator, as the channel note allows. |
+
+**Flake, recorded rather than smoothed over:** the first full run this turn was
+`1 failed | 722 passed (723)`, failing
+`tests/watch-fire.test.ts > a real change fires the order once, through the one
+send path; the cooldown holds`. The file then passed alone three times in a row,
+and the full suite passed on re-run. It is a timing-sensitive test in baseline
+code on a loaded sandbox, not branch content. Expect the same in other lanes'
+runs; a single red on that test is not evidence against anybody.
+
+## CI on this branch
+
+The tip `59190ec` carries 4/4 successful jobs (checks linux and windows,
+installer linux and windows). Earlier tips failed one linux job at two different
+steps on byte-identical content, then passed when the same tree was pushed
+again. CI state for this branch is content-independent noise; the gate table
+above is the real evidence.
 
 ## What exists now
 
 | File | Role |
 |---|---|
-| `BRANCH-COMPARISON.md` | The scan: status table, 221-id coverage, capability matrix, guard presence, merge risk, method, limits |
-| `00_LIVING_DOCS/SOURCE-ARTIFACTS.md` | Index of the uploaded designs, the source patch and the archives, with SHA-256 for each |
-| `ODD-BRAIN-BRIEF.md` | The orchestrator's brief, unchanged |
+| `BRANCH-COMPARISON.md` | Scan #2: status table with the two new columns, 221-id coverage, capability matrix, guard presence, merge risk, method, limits |
 | `REPORT-TO-ORCHESTRATOR.md` | This file |
+| `00_LIVING_DOCS/SOURCE-ARTIFACTS.md` | Index of uploaded designs, source patch, archives, with SHA-256 |
+| `ODD-BRAIN-BRIEF.md` | The orchestrator's brief and rulings, unchanged |
 
-`git diff --stat a6c7807 HEAD` on the tip lists documentation only. No file
-under `src/`, `tests/` or `.github/` differs from baseline.
+`git diff --stat a6c7807 HEAD` lists four Markdown files, 505 lines added, no
+`src/`, no `tests/`, no workflows.
 
-## Gate numbers, exact
+## Ported from session-v2, refused
 
-Run in `apps/03_oddbrain` on the tip.
-
-| Step | Result |
-|---|---|
-| `npm ci --ignore-scripts` | Exit 0 only after a cache workaround, see below. 479 packages installed. |
-| `node node_modules/electron/install.js` | **Failed.** `fetch failed`; the release host is unreachable from this sandbox. |
-| `npx tsc --noEmit` | 0 errors |
-| `npx vitest run` | 99 files, 723 tests, 0 failures |
-| `npm run build` | Green: `out/renderer/index.html` 1.09 kB, `index-*.css` 45.28 kB, `index-*.js` 2500.35 kB |
-| `npm run smoke` | **Not run.** It needs the Electron binary that could not be downloaded. |
-
-The cache workaround, in full: the literal `npm ci` failed twice with
-`ECONNRESET` and `ERR_SSL_CIPHER_OPERATION_FAILED` against
-`registry.npmjs.org`. The same tarballs fetched cleanly with
-`curl --http1.1`. I downloaded all 600 resolved tarballs from
-`package-lock.json`, verified every sha512 against the lockfile (600/600),
-seeded the npm cache with them, and ran `npm ci --offline`. Nothing in the tree
-changed. A judge rerunning the literal command on a normal network should not
-need this.
-
-`release-assets.githubusercontent.com` returns no connection here (`curl`
-reports `000`), so the Electron binary cannot arrive. Smoke is therefore CI-only
-for this branch.
-
-## CI on this branch
-
-| Tip commit | Checks workflow | Installer workflow |
-|---|---|---|
-| `23cca81` (before the lane reset) | linux pass, windows pass | linux pass, windows pass |
-| `0ac2abc` (baseline tree) | linux **fail** at the Smoke step, windows pass | both pass |
-| `0ce273a` (adds the comparison) | linux **fail** at the Smoke step, windows pass | both pass |
-| `c2dc8a6` (adds this report) | linux **fail** at the Tests step, windows pass | both pass |
-
-Baseline `a6c7807` itself has 8 successful check-runs on record. Its newest
-linux job finished the whole chain in 67 seconds. My failing linux job stopped
-at 48 seconds. The failing step moved between Smoke and Tests across three tips
-whose source is byte-identical to baseline, and Windows passed every time. That
-pattern points at the runner, not the content.
-
-The tip differs from baseline by Markdown files only, so its content cannot
-change whether Electron opens. I could not read the failing step's log from
-here: GitHub's log archive host (`results-receiver.actions.githubusercontent.com`)
-is unreachable, and `gh run rerun --failed` answers "cannot be rerun; its
-workflow file may be broken" on both attempts. I am not claiming a green smoke
-on this tip. Rerun the linux job when you judge; if it stays red on an unchanged
-baseline tree, the cause is the runner or the smoke step's apt line, not this
-branch.
-
-Update: the tip before this amend, `6464585`, passed all four jobs (checks
-linux and windows, installer linux and windows). Three earlier tips with the
-same tree failed one linux job at two different steps and then passed when the
-content was pushed again. That is the documented flake protocol, not a fix.
-
-## Ported from session-v2, and refused
-
-Ported in this lane: nothing. A scanner that edits code is a conflicted scanner.
-
-History, for the record: commits `479d2b2`, `b6373e3`, `2da3914` and `ba90a78`
-on this branch carried the session UI merge onto `a6c7807`, plus media decode,
-read-aloud chunking, the marketplace probe and the runtime unpack limits. The
-lane reset at `0ac2abc` returned the tree to baseline so the tip touches only
-documentation. The work is still reachable:
-
-```
-git diff a6c7807 ba90a78          # 116 files, 7,777 insertions
-git cherry-pick b6373e3           # the media, speech and marketplace commit
-```
-
-Refused to port: any further feature code (lane), session-v2's simulation code
-(its own audit says it is not the product), and the earlier
-`DELIVERY-2026-10-18.md` claim sheet, because the tip no longer carries what it
-described.
+Nothing ported in this lane, by design. Commits `479d2b2`, `b6373e3`,
+`2da3914`, `ba90a78` carry the earlier session-UI merge; `git diff a6c7807
+ba90a78` still shows it. Refused: any feature code, session-v2's simulation
+code, and the retired `DELIVERY-2026-10-18.md` claim sheet.
 
 ## Unproven
 
-- Runtime behaviour behind the 221-id coverage. File presence is not a working
-  control, and no branch was executed during this scan.
-- Per-branch test totals. I counted files and `it()` calls from git; I did not
-  install and run eight suites.
-- The linux smoke failure described above.
-- Whether recorded dictation on the four branches stays inside the selected
-  provider.
+- Runtime behaviour behind the 221-id coverage. No branch was executed.
+- Test counts per branch. I count files from git, I do not install eight suites.
+- `0bd5478b`'s linux job; still running at scan time.
+- Smoke on my own tip, for the download reason above.
 
 ## Collisions with other lanes
 
-- Seven UI branches collide with each other; see the report's table.
-- This branch now collides with nobody: docs only, no `src/`, no `tests/`, no
-  workflows.
-- I did not inventory `cc83a507` beyond facts (owner's track, no brief commit),
-  as instructed.
+None. This branch touches no product path. The UI branches collide with each
+other, not with this one.
 
 ## Milestone
 
-The scanner deliverable exists and is current. No feature milestone is claimed
-because the lane has none and because smoke is not green on the tip in CI.
-Stopping here unless the orchestrator asks for another scan.
+Scanner deliverable is current and the ruling's two columns are live.
+Next scan due about 18:10 UTC or on the next sweep, whichever comes first.
+No question needs a ruling, so nothing was filed in
+`QUESTIONS-TO-ORCHESTRATOR.md`.
