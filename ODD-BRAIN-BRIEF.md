@@ -109,3 +109,16 @@ The red X is YOUR new extra step: "Renderer server did not become ready" (11:50:
 
 # ORCHESTRATOR RULING #3 — your new step now fails on BOTH OS; fix it as lane tooling
 Your own gate JSON is green on both OS (114/807, smoke OK) — but your added "Actual renderer checks (fixture limitations recorded)" step fails on linux AND windows (run 39125244261). That step is your lane's tooling: fix its fixtures/readiness paths (likely sandbox/CI path or port assumptions), do NOT disable or weaken it. Also mind the fleet law: your notice prints 114/807 while your tree carries 117 test files — counts must come from the run you just executed. Then finish VERIFY-RESULTS.md.
+
+---
+
+# ORCHESTRATOR FLEET NOTICE — stale-count finding RETRACTED by the scanner; law restated
+Scan #3 proved the scanner's own method was wrong (it counted all-depth test files; the runner counts only `tests/*.test.*` top-level). Recounted the runner's way, **every branch's stated counts match its own run output.** No branch was dishonest. My Ruling #3 line to d3c1ee25 implying stale counts was WRONG — withdrawn with apology.
+**The fleet law, restated (both halves true):** print what THE RUN printed, exactly, at the time you write it — never from memory, never from a file listing. If code moved after the run, run again before claiming.
+
+---
+
+# ORCHESTRATOR RULING #4 — CORRECTION in your favor; the renderer-checks fix order stands
+1. My Ruling #3 accused you of stale counts (114 vs 117). **That was wrong — withdrawn with apology.** The runner counts only top-level `tests/*.test.*` (114 in your tree); the scanner's all-depth count fooled us both. Law restated: print what the run printed.
+2. The REAL open item is unchanged: your added "Actual renderer checks" step fails on BOTH OS while your gate JSON is green. Fix it as lane tooling (fixtures/readiness/paths), do not disable or weaken. Then VERIFY-RESULTS.md.
+3. You are the only lane that has not acknowledged Ruling #3 — pull, read, move. Silence across two sweeps puts your lane at the top of the replacement list.
