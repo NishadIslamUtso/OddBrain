@@ -94,6 +94,27 @@ export function isOfficialDownloadHost(engine: string, url: string): boolean {
  * point of the cap is a hostile offer, not a big honest one. */
 export const MAX_DOWNLOAD_BYTES = 2_500 * 1024 * 1024
 
+/**
+ * The unpack caps for an engine RUNTIME zip — the official Ollama Windows
+ * archive, measured 2026-10-17: 1.47 GB compressed, 87 entries, 1.94 GB
+ * unpacked, biggest single file 692 MB (`lib/ollama/cuda_v12/cublasLt64_12.dll`).
+ *
+ * `unzipArchive`'s own defaults are pack-sized (200 files / 200 MB per file /
+ * 400 MB total) because a theme or skill pack should never be that big, and a
+ * pack that is means something is wrong. Those defaults are RIGHT for packs and
+ * WRONG for a runtime: with them the app downloaded the official archive in
+ * full and then refused to unpack it, blaming the publisher for its own cap.
+ *
+ * So the runtime gets its own numbers, sized from the real file with headroom,
+ * and still bounded: a hostile archive is refused at 4 GB unpacked, not after
+ * it has filled the disk. Pack downloads keep the strict defaults.
+ */
+export const RUNTIME_ZIP_LIMITS = {
+  files: 512,
+  perFile: 1_500 * 1024 * 1024,
+  totalUncompressed: 4 * 1024 * 1024 * 1024,
+} as const
+
 /** Bytes as a human reads them, for the refusals and progress lines. */
 export function humanBytes(n: number): string {
   if (n >= 1024 * 1024 * 1024) return `${Math.round((n / (1024 * 1024 * 1024)) * 10) / 10} GB`

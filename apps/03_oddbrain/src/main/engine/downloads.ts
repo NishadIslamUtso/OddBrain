@@ -13,7 +13,7 @@ import { spawn } from 'node:child_process'
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
-import { ENGINE_DOWNLOADS, MAX_DOWNLOAD_BYTES, humanBytes, isOfficialDownloadHost, isOfficialUrl, parseShaLine } from '../../shared/lib/engineDownloads'
+import { ENGINE_DOWNLOADS, MAX_DOWNLOAD_BYTES, RUNTIME_ZIP_LIMITS, humanBytes, isOfficialDownloadHost, isOfficialUrl, parseShaLine } from '../../shared/lib/engineDownloads'
 
 export type DownloadTick = { engine: string; got: number; total: number | null; phase: 'downloading' | 'staged' | 'error'; answer?: string }
 
@@ -26,6 +26,95 @@ export type InstallRecord = {
 }
 
 type FetchLike = (url: string) => Promise<{ ok: boolean; status?: number; headers?: { get(name: string): string | null }; arrayBuffer?: () => Promise<ArrayBuffer>; body?: unknown }>
+
+/** How often the progress line moves. 8 MB is smooth on a fast link and quiet
+ * on a slow one; a tick per chunk would redraw the row hundreds of times a second. */
+export const PROGRESS_TICK_BYTES = 8 * 1024 * 1024
+
+type ReplyLike = {
+  headers?: { get(name: string): string | null }
+  arrayBuffer?: () => Promise<ArrayBuffer>
+  body?: unknown
+}
+
+type StreamReader = {
+  read(): Promise<{ done: boolean; value?: Uint8Array | undefined }>
+  cancel?: (reason?: unknown) => Promise<unknown> | unknown
+}
+
+/** The offer outgrew the cap. Its own class so the answer can say WHICH cap. */
+export class CapExceeded extends Error {}
+
+/**
+ * Read a whole reply: streaming when the transport offers a body, falling back
+ * to `arrayBuffer()` when it does not (the test fakes, and any transport that
+ * buffers for us).
+ *
+ * Streaming buys two real things on Ollama's 1.47 GB zip. The progress line
+ * moves while bytes arrive instead of jumping from nothing to done in one step.
+ * And the size cap is enforced IN FLIGHT, so a hostile offer is cut off at the
+ * cap rather than after the whole thing has been pulled down and held in memory.
+ *
+ * The shape is about memory. When the server declares a length inside the cap,
+ * one buffer is allocated once and filled in place. Gathering chunks and joining
+ * them afterwards would hold the archive twice over at the end — about 3 GB of
+ * peak for a 1.47 GB file, on the owner's 8 GB machine.
+ */
+export async function readReplyBytes(
+  reply: ReplyLike,
+  cap: number,
+  onProgress: (got: number, total: number | null) => void,
+): Promise<Uint8Array> {
+  const declared = Number(reply.headers?.get('content-length') ?? '0')
+  const total = declared > 0 && declared <= cap ? declared : null
+  const reader = (reply.body as { getReader?: () => StreamReader } | undefined)?.getReader?.()
+
+  if (!reader) {
+    const bytes = new Uint8Array((await reply.arrayBuffer?.()) ?? new ArrayBuffer(0))
+    if (bytes.length > cap) throw new CapExceeded('cap')
+    onProgress(bytes.length, total ?? bytes.length)
+    return bytes
+  }
+
+  const fill = total === null ? null : new Uint8Array(total)
+  const chunks: Uint8Array[] = []
+  let got = 0
+  let lastTick = 0
+  try {
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      if (!value || value.length === 0) continue
+      got += value.length
+      if (got > cap) throw new CapExceeded('cap')
+      if (fill) fill.set(value, got - value.length)
+      else chunks.push(value)
+      if (got - lastTick >= PROGRESS_TICK_BYTES) {
+        lastTick = got
+        onProgress(got, total)
+      }
+    }
+  } finally {
+    await Promise.resolve(reader.cancel?.()).catch(() => undefined)
+  }
+  onProgress(got, total ?? got)
+
+  if (fill) {
+    // A declared length that does not match what arrived is a broken or lying
+    // transfer. Saying so beats handing the unpacker a truncated archive.
+    if (got !== total) throw new Error(`declared ${humanBytes(total as number)} but sent ${humanBytes(got)}`)
+    return fill
+  }
+  // No declared length: copy the chunks once into a single buffer. A spread
+  // here would blow the stack on a large download.
+  const out = new Uint8Array(got)
+  let at = 0
+  for (const chunk of chunks) {
+    out.set(chunk, at)
+    at += chunk.length
+  }
+  return out
+}
 
 export type DownloadManager = {
   start(engine: string): Promise<{ ok: boolean; answer: string }>
@@ -169,9 +258,13 @@ export function createDownloadManager(options: {
       }
       let bytes: Uint8Array
       try {
-        bytes = new Uint8Array((await reply.arrayBuffer?.()) ?? new ArrayBuffer(0))
+        bytes = await readReplyBytes(reply, MAX_DOWNLOAD_BYTES, (got, total) =>
+          onTick({ engine, got, total, phase: 'downloading' }),
+        )
       } catch (failure) {
-        const answer = `The download broke midway: ${(failure as Error).message}`
+        const answer = failure instanceof CapExceeded
+          ? `${info.host} sent more than the ${humanBytes(MAX_DOWNLOAD_BYTES)} cap. The download was cut off at the cap; nothing was installed.`
+          : `The download broke midway: ${(failure as Error).message}`
         onTick({ engine, got: 0, total: null, phase: 'error', answer })
         return { ok: false, answer }
       }
@@ -201,7 +294,12 @@ export function createDownloadManager(options: {
       // A zip for the app's own runtime is unpacked right away; an installer
       // script waits for its own run permission.
       if (info.kind === 'zip') {
-        const unpacked = await unzipArchive(bytes, join(root, engine, 'app'))
+        // A runtime zip gets runtime caps. Ollama's official Windows archive
+        // measures 87 entries, 1.94 GB unpacked, 692 MB biggest file — the
+        // pack-sized defaults refuse it, which is how the app came to download
+        // the real thing in full and then blame the publisher for its own cap.
+        // Theme and skill packs keep the strict defaults; they are not runtimes.
+        const unpacked = await unzipArchive(bytes, join(root, engine, 'app'), RUNTIME_ZIP_LIMITS)
         if (!unpacked.ok) {
           const answer = `The archive could not be unpacked: ${unpacked.answer}`
           onTick({ engine, got: 0, total: null, phase: 'error', answer })
