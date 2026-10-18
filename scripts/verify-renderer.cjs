@@ -4,7 +4,7 @@ const { failureAnnotation } = require('./verify-contracts.cjs');
 const { spawn } = require('node:child_process');
 const http = require('node:http'), fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const APP = path.resolve(__dirname, '../apps/03_oddbrain');
-const evidence = path.resolve(process.env.ODDBRAIN_VERIFY_DIR || path.join(os.tmpdir(), 'oddbrain-verification'));
+const evidence = path.resolve(process.env.ODDBRAIN_VERIFY_DIR || path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'oddbrain-verification'));
 fs.mkdirSync(evidence, { recursive: true });
 const port = 5174, url = `http://127.0.0.1:${port}/`;
 const server = spawn(process.execPath, [path.join(APP, 'node_modules/vite/bin/vite.js'), '--config', 'vite.web.config.ts', '--host', '0.0.0.0', '--port', String(port), '--strictPort'], { cwd: APP, stdio: ['ignore', 'pipe', 'pipe'] });

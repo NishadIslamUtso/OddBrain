@@ -5,7 +5,7 @@ const fs = require('node:fs'), path = require('node:path'), os = require('node:o
 const { spawnSync } = require('node:child_process');
 const { smokeResult, unsignedNotice } = require('./verify-contracts.cjs');
 const APP = path.resolve(__dirname, '../apps/03_oddbrain');
-const evidence = path.resolve(process.env.ODDBRAIN_VERIFY_DIR || path.join(os.tmpdir(), 'oddbrain-verification'));
+const evidence = path.resolve(process.env.ODDBRAIN_VERIFY_DIR || path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'oddbrain-verification'));
 fs.mkdirSync(evidence, { recursive: true });
 const report = { platform: process.platform, status: 'running', notice: unsignedNotice(), checks: [] };
 function execute(name, command, args, env = {}) {

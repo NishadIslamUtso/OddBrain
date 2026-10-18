@@ -7,7 +7,7 @@ const { spawnSync } = require('node:child_process');
 const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
 const { smokeResult, unitResult } = require('./verify-contracts.cjs');
 const ROOT = path.resolve(__dirname, '..'), APP = path.join(ROOT, 'apps/03_oddbrain');
-const evidence = path.resolve(process.env.ODDBRAIN_VERIFY_DIR || path.join(os.tmpdir(), 'oddbrain-verification'));
+const evidence = path.resolve(process.env.ODDBRAIN_VERIFY_DIR || path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'oddbrain-verification'));
 fs.mkdirSync(evidence, { recursive: true });
 const report = { schema: 1, platform: process.platform, node: process.version, commit: spawnSync('git', ['rev-parse', 'HEAD'], { cwd: ROOT, encoding: 'utf8' }).stdout.trim(), commands: [], status: 'running' };
 function save() { fs.writeFileSync(path.join(evidence, 'gate.json'), JSON.stringify(report, null, 2) + '\n'); }

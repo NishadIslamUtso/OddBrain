@@ -31,7 +31,7 @@ Local logs: `/home/user/verification-lane/{install,types,unit,build,smoke}.log`.
 ### CI receipts and commands
 
 - Before these verification edits, brief tip `21d9061` had [run 39122931670](https://github.com/NishadIslamUtso/OddBrain/actions/runs/39122931670): Windows passed; Linux failed at Smoke. Log download was blocked at the Actions results host; the cause is **not diagnosed** and is not declared a flake.
-- New CI result: **pending**. A historical green run is not evidence for the new verifier.
+- New CI result: **pending**. Initial patch `1339965` / run `39124288845` failed workflow validation before jobs; corrected job environment handling uses runtime `RUNNER_TEMP`, not an unavailable job-level expression. A historical green run is not evidence for the new verifier.
 - `scripts/verify-gate.cjs` runs the brief's exact clean-install → Electron install → typecheck → Vitest → build → **`npm run smoke`** sequence, stopping at the first failed command. JSON records the checked commit, actual exit codes, derived test totals and the exact smoke verdict. No retries, warning suppression, signing bypass or forged success.
 - Smoke accepts exactly one `SMOKE OK SCROLL OK … errors=0 warnings=0` verdict. A zero app exit with `SCROLL FAILED`, `SCROLL skipped`, absent or repeated verdicts still fails the wrapper.
 - CI uploads JSON/logs/screenshots, including failure receipts. Temporary app profiles, generated pairing material and vault state are excluded from artifact uploads. Artifact names include the source SHA.

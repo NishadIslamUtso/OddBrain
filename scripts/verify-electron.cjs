@@ -7,7 +7,7 @@ const fs = require('node:fs'), os = require('node:os'), path = require('node:pat
 const assert = require('node:assert/strict');
 const APP = path.resolve(__dirname, '../apps/03_oddbrain');
 const { _electron } = require(path.join(APP, 'node_modules/playwright-core'));
-const evidence = path.resolve(process.env.ODDBRAIN_VERIFY_DIR || path.join(os.tmpdir(), 'oddbrain-verification'));
+const evidence = path.resolve(process.env.ODDBRAIN_VERIFY_DIR || path.join(process.env.RUNNER_TEMP || os.tmpdir(), 'oddbrain-verification'));
 fs.mkdirSync(evidence, { recursive: true });
 const root = fs.mkdtempSync(path.join(evidence, 'native-fixture-'));
 const report = { platform: process.platform, status: 'running', fixtureOnly: true, checks: [], errors: [] };

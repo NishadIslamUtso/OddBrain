@@ -6,8 +6,6 @@ jobs:
   linux:
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    env:
-      ODDBRAIN_VERIFY_DIR: ${{ runner.temp }}/oddbrain-verification
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -47,8 +45,6 @@ jobs:
   windows:
     runs-on: windows-latest
     timeout-minutes: 40
-    env:
-      ODDBRAIN_VERIFY_DIR: ${{ runner.temp }}/oddbrain-verification
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4

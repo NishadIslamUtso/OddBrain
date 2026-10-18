@@ -16,7 +16,7 @@
 
 Local fresh `npm ci --ignore-scripts`: 485 packages, npm audit 0 vulnerabilities. Electron install then failed: `TypeError: fetch failed` (sandbox release-asset download restriction). Subsequent diagnostics: typecheck **exit 0**, unit **114 files / 807 tests passed**, build **exit 0**, smoke **exit 1** because Electron is absent. Therefore the **mandatory complete local gate did not pass**, and no local smoke errors/warnings counts are invented. Separate verifier suite: **10 passed / 0 failed**; do not combine that count with application tests.
 
-New CI: **pending**. Last pre-lane brief-tip run [39122931670](https://github.com/NishadIslamUtso/OddBrain/actions/runs/39122931670) passed Windows and failed Linux Smoke. Downloading its detailed log hit a blocked Actions results host; no cause is claimed. Older green runs do not validate this patch.
+New CI: initial verification commit `1339965` was rejected during workflow validation (no jobs); the invalid job-level `runner.temp` reference was removed. Helpers now use the runtime `RUNNER_TEMP` environment variable. Corrected CI: **pending**. Last pre-lane brief-tip run [39122931670](https://github.com/NishadIslamUtso/OddBrain/actions/runs/39122931670) passed Windows and failed Linux Smoke. Downloading its detailed log hit a blocked Actions results host; no cause is claimed. Older green runs do not validate this patch.
 
 Windows artifact: **pending manual workflow start** on this branch. Prior API dispatch returned 403; the owner chose manual start, not a new installer push trigger. That permission decision is preserved. No installer or installed acceptance is claimed.
 
