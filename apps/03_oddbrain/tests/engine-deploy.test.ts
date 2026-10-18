@@ -111,11 +111,35 @@ test('mcp: one list, two native formats, local and remote servers', () => {
 test('mcp: a deploy writes both config files into the workspace', () => {
   const root = mkdtempSync(join(tmpdir(), 'oddbrain-mcp-'))
   try {
-    const written = deployMcp([{ name: 'files', command: 'npx', args: ['files-mcp'] }], root)
+    const { written, kept } = deployMcp([{ name: 'files', command: 'npx', args: ['files-mcp'] }], root)
     assert.equal(written.length, 2)
+    assert.deepEqual(kept, [], 'nothing was there to keep')
     assert.match(readFileSync(join(root, '.mcp.json'), 'utf8'), /files-mcp/)
     assert.match(readFileSync(join(root, '.agents', 'mcp_config.json'), 'utf8'), /files-mcp/)
     assert.ok(readdirSync(join(root, '.agents')).includes('mcp_config.json'))
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('mcp: a config the app did not write is kept, once, and never overwritten by later saves', () => {
+  const root = mkdtempSync(join(tmpdir(), 'oddbrain-mcp-keep-'))
+  try {
+    // A list a person wrote by hand, holding a server this app has never seen.
+    writeFileSync(join(root, '.mcp.json'), JSON.stringify({ mcpServers: { hand: { command: 'my-tool' } } }), 'utf8')
+    const first = deployMcp([{ name: 'files', command: 'npx', args: ['files-mcp'] }], root)
+    const copy = join(root, '.mcp.json.oddbrain-original')
+    assert.deepEqual(first.kept, [copy])
+    assert.match(readFileSync(copy, 'utf8'), /my-tool/, 'the original bytes survive')
+    assert.match(readFileSync(join(root, '.mcp.json'), 'utf8'), /files-mcp/)
+
+    // The marker records that this folder is now the app's output: later saves
+    // make no further copies and never touch the original.
+    assert.ok(readdirSync(join(root, '.agents')).includes('.oddbrain-mcp-managed'))
+    const second = deployMcp([{ name: 'other', command: 'npx', args: ['other-mcp'] }], root)
+    assert.deepEqual(second.kept, [])
+    assert.match(readFileSync(copy, 'utf8'), /my-tool/)
+    assert.doesNotMatch(readFileSync(copy, 'utf8'), /files-mcp/)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }

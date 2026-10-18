@@ -135,6 +135,11 @@ const ENGINES: readonly EngineId[] = ['claude-code', 'agy']
  */
 const MODEL_PATTERN = /^[\w.:@/-]+$/
 
+/** True for a model name the launch line can carry without a shell seeing it. */
+export function isValidModelName(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 120 && MODEL_PATTERN.test(value)
+}
+
 /**
  * Read engine settings from a parsed settings file without ever throwing —
  * the same promise the rest of the settings make. Anything missing, unknown

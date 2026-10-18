@@ -17,8 +17,8 @@ import { loadAppFlags, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
 import { registerStagingRoot, setBinaryOverride, binaryOverride } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
-import { dirname, join, resolve } from 'node:path'
-import { existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
+import { copyFileSync, existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
 import { createVaultService, resolveVaultRoot } from './vault/service'
@@ -36,7 +36,10 @@ import {
 import { cloudEnabled, normalizePermissions } from '../shared/lib/permissions'
 import { registerArtifactIpc } from './artifacts/ipc'
 import { createEngineSocket, type EngineSocket } from './engine/socket'
-import { normalizeEngine } from '../shared/lib/engine'
+import { isValidModelName, normalizeEngine } from '../shared/lib/engine'
+import { normalizeMcpServers, readMcpList } from '../shared/lib/mcp'
+import { openLogin, readAuthStatus } from './engine/authStatus'
+import { readOllamaVersion } from './engine/ollamaVersion'
 import { APPROVAL_MODES, type ApprovalMode, type EngineAvailability, type EngineEvent, type EngineId, type EngineModelEntry } from '../shared/lib/engine'
 import { ENGINE_IMAGE_MIMES, MAX_ENGINE_IMAGE_CHARS as ENGINE_IMAGE_CHARS, MAX_ENGINE_ATTACHMENTS as ENGINE_IMAGE_LIMIT } from '../shared/lib/media'
 import { listCheckpoints, restoreCheckpoint, inspectCheckpoint } from './engine/checkpoints'
@@ -1127,18 +1130,49 @@ function registerBridges(): void {
   })
 
   // The one MCP list, stored once, deployed to every engine's config.
-  handle('mcp:read', () => {
+  //
+  // A list that cannot be parsed is reported, not shown as empty: an empty
+  // screen next to a Save button is how a hand-edited list would disappear.
+  handle('mcp:read', (): { servers: McpServer[]; problem: string } => {
     try {
-      return JSON.parse(readFileSync(mcpFile, 'utf8')) as { servers: McpServer[] }
+      return readMcpList(readFileSync(mcpFile, 'utf8'))
     } catch {
-      return { servers: [] as McpServer[] }
+      return { servers: [], problem: '' } // No file yet: an empty list, honestly empty.
     }
   })
 
-  handle('mcp:write', (_event, payload: { servers: McpServer[] }): { ok: boolean; written: string[] } => {
-    const servers = Array.isArray(payload?.servers) ? payload.servers.slice(0, 100) : []
-    writeFileSync(mcpFile, JSON.stringify({ servers }), 'utf8')
-    return { ok: true, written: deployMcp(servers, settings.engine.workspace || vaultRoot()) }
+  handle('mcp:write', (_event, payload: { servers: McpServer[] }): { ok: boolean; written: string[]; answer: string } => {
+    // The window validates too, but main is the door: a forged payload gets
+    // the same refusal, and nothing half-valid is written to an engine config.
+    const normalized = normalizeMcpServers(payload?.servers)
+    if (normalized.problems.length) {
+      return { ok: false, written: [], answer: normalized.problems[0] }
+    }
+    // A list this app could not fully read is kept before it is replaced. One
+    // it could read was on screen, so replacing it is the person's decision.
+    let kept = ''
+    if (existsSync(mcpFile)) {
+      const existing = readMcpList(readFileSync(mcpFile, 'utf8'))
+      const copy = `${mcpFile}.original`
+      if (existing.problem && !existsSync(copy)) {
+        try { copyFileSync(mcpFile, copy); kept = copy } catch { kept = '' }
+      }
+    }
+    // Written beside it and renamed: a crash mid-write leaves the old list, not half a list.
+    writeFileSync(`${mcpFile}.tmp`, JSON.stringify({ servers: normalized.servers }), 'utf8')
+    renameSync(`${mcpFile}.tmp`, mcpFile)
+    const deployed = deployMcp(normalized.servers, settings.engine.workspace || vaultRoot())
+    const keptCopies = [...(kept ? [kept] : []), ...deployed.kept]
+    const keptNote = keptCopies.length
+      ? ` The list that was there before is kept beside it (${keptCopies.map(path => basename(path)).join(', ')}).`
+      : ''
+    return {
+      ok: true,
+      written: deployed.written,
+      answer: (normalized.servers.length
+        ? `${normalized.servers.length} tool server${normalized.servers.length === 1 ? '' : 's'} written to ${deployed.written.length} engine file${deployed.written.length === 1 ? '' : 's'}.`
+        : 'The tool server list is empty; both engine configs were rewritten empty.') + keptNote,
+    }
   })
 
   // Mods (Phase 1): a pack is a folder with a manifest. Install = the person
@@ -1545,10 +1579,28 @@ function registerBridges(): void {
   })
 
   handle('engine:model', (_event, model: string, provider?: string): { ok: boolean; answer: string } => {
-    const clean = normalizeEngine({ ...settings.engine, model, cloudProvider: provider === 'anthropic' ? 'anthropic' : '' })
+    // A typed name is allowed — the CLI knows names this app cannot enumerate —
+    // but only in the shape a model name can take. Empty still means default.
+    const typed = typeof model === 'string' ? model.trim() : ''
+    if (typed && !isValidModelName(typed)) {
+      return { ok: false, answer: 'Model names use letters, digits, dots, colons, @, / and dashes only; nothing was changed.' }
+    }
+    const clean = normalizeEngine({ ...settings.engine, model: typed, cloudProvider: provider === 'anthropic' ? 'anthropic' : '' })
     settings = writeSettings(settingsFile, { ...settings, engine: clean })
     return { ok: true, answer: clean.cloudProvider ? `brain set to ${clean.model} via ${clean.cloudProvider}` : `brain set to ${clean.model}` }
   })
+
+  // Is the engine actually signed in? The CLI answers for itself; agy does not.
+  handle('engine:auth-status', (_event, id?: string): Promise<unknown> =>
+    readAuthStatus(id === 'agy' ? 'agy' : 'claude-code'),
+  )
+
+  // Open the CLI's own login in a terminal. The app starts the CLI; it never
+  // receives the credentials and never runs an OAuth flow in its own window.
+  handle('engine:open-login', () => openLogin())
+
+  // Which Ollama is answering, and whether it can serve Claude Code's door.
+  handle('engine:ollama-version', () => readOllamaVersion())
 
   // "Open a folder" — the engine's workplace, chosen once and remembered.
   handle('engine:pick-workspace', async (): Promise<{ ok: boolean; answer: string }> => {

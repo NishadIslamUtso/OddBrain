@@ -2,7 +2,7 @@
 import { test, expect } from 'vitest'
 import { createCanvas } from '@napi-rs/canvas'
 import { createZip } from '../src/main/vault/zip'
-import { decodeDocument, extracted, officeText, readDocumentZip } from '../src/main/media/documents'
+import { decodeDocument, extracted, officeText, pdfAssetBase, readDocumentZip } from '../src/main/media/documents'
 import { mediaKind } from '../src/main/media/formats'
 import { speechScript } from '../src/main/media/windowsSpeech'
 import { attachmentsFromMedia } from '../src/renderer/src/hooks/useMediaAttachments'
@@ -24,6 +24,15 @@ test('UTF-8 and UTF-16 documents decode; binary, encrypted legacy Office and ove
   await expect(decodeDocument('secret.docx', Buffer.from('d0cf11e0a1b11ae10000', 'hex'))).rejects.toThrow(/Encrypted/)
   await expect(decodeDocument('large.txt', Buffer.alloc(2_000_001, 65))).rejects.toThrow(/2 MB/)
 })
+test('pdf.js asset urls keep a forward slash on Windows paths', () => {
+  // pdf.js rejects a base that does not end with "/" and then reads it with
+  // fs.readFile. A Windows join produced "...\\cmaps\\" and broke PDFs only on
+  // Windows; both shapes must normalise to the same accepted form.
+  expect(pdfAssetBase('C:\\app\\node_modules\\pdfjs-dist', 'cmaps')).toBe('C:/app/node_modules/pdfjs-dist/cmaps/')
+  expect(pdfAssetBase('/home/app/node_modules/pdfjs-dist', 'cmaps')).toBe('/home/app/node_modules/pdfjs-dist/cmaps/')
+  expect(pdfAssetBase('/home/app/pdfjs-dist/', 'cmaps')).toBe('/home/app/pdfjs-dist/cmaps/')
+})
+
 test('PDF extraction uses the actual parser and states page/image coverage', async () => {
   const result = await decodeDocument('example.pdf', pdf('fixture PDF words'))
   expect(result.text).toContain('fixture PDF words'); expect(result.disclosure).toContain('1 of 1 pages'); expect(result.disclosure).toContain('not interpreted')

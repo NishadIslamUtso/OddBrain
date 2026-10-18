@@ -20,7 +20,7 @@
  * with `url` for both, and the exact translation is confirmed at the agy
  * Windows check rather than guessed now.
  */
-import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 
 /** A skill as the app's vault keeps it: three fields, all plain. */
@@ -164,12 +164,36 @@ export function mcpForAgy(servers: McpServer[]): string {
   return `${JSON.stringify({ mcpServers: out }, null, 2)}\n`
 }
 
+/**
+ * The first write into a folder is the only one that can destroy something.
+ *
+ * The workspace is the person's own folder: it may already hold a `.mcp.json`
+ * they wrote by hand, or one another tool wrote. Overwriting it silently would
+ * throw away servers this app never knew about. So the first time OddBrain
+ * writes here it keeps whatever was there, and leaves a marker saying so.
+ * Later writes are the app's own output, and making copies of that helps nobody.
+ */
+const MANAGED = '.oddbrain-mcp-managed'
+
+export type McpDeploy = { written: string[]; kept: string[] }
+
 /** Write the canonical list into both engines' config files in the workspace. */
-export function deployMcp(servers: McpServer[], workspace: string): string[] {
-  mkdirSync(join(workspace, '.agents'), { recursive: true })
+export function deployMcp(servers: McpServer[], workspace: string): McpDeploy {
+  const agents = join(workspace, '.agents')
+  mkdirSync(agents, { recursive: true })
   const claudePath = join(workspace, '.mcp.json')
-  const agyPath = join(workspace, '.agents', 'mcp_config.json')
+  const agyPath = join(agents, 'mcp_config.json')
+  const marker = join(agents, MANAGED)
+  const kept: string[] = []
+  if (!existsSync(marker)) {
+    for (const file of [claudePath, agyPath]) {
+      if (!existsSync(file)) continue
+      const copy = `${file}.oddbrain-original`
+      try { copyFileSync(file, copy); kept.push(copy) } catch { /* A read-only folder is reported by the write below. */ }
+    }
+    writeFileSync(marker, 'OddBrain writes this folder\u2019s engine tool-server configs. Files kept on this first write end in .oddbrain-original.\n', 'utf8')
+  }
   writeFileSync(claudePath, mcpForClaude(servers), 'utf8')
   writeFileSync(agyPath, mcpForAgy(servers), 'utf8')
-  return [claudePath, agyPath]
+  return { written: [claudePath, agyPath], kept }
 }
