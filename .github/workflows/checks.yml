@@ -77,3 +77,14 @@ jobs:
             Get-Content smoke.log -Tail 24 | ForEach-Object { Write-Host "::error title=Native smoke::${_}" }
             exit $status
           }
+      - name: Validate unsigned Windows alpha package (not published)
+        working-directory: apps/03_oddbrain
+        timeout-minutes: 20
+        shell: pwsh
+        run: |
+          npm run dist:win 2>&1 | Tee-Object -FilePath installer.log
+          $status = $LASTEXITCODE
+          if ($status -ne 0) {
+            Get-Content installer.log -Tail 24 | ForEach-Object { Write-Host "::error title=Installer build::${_}" }
+            exit $status
+          }
