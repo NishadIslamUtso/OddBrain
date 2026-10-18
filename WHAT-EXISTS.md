@@ -7,8 +7,9 @@
 > 114 test files / 808 tests, tsc clean, build green, offline preview green.
 > This file describes the REMAKE branch (`arena/0bd5478b-oddbrain`): main's
 > features and fixes, rebuilt onto the approved session UI (8 layouts, 8 looks,
-> 9 palettes + app default, 4 styles, 18 Settings sections). CI has not run on
-> this branch yet — nothing was pushed without your word.
+> 9 palettes + app default, 4 styles, 18 Settings sections). CI is GREEN on this
+> branch (linux: types, tests, the renderer checks in Chromium, build, electron
+> smoke — windows: the same without the renderer step; pushed on your word).
 
 ---
 
@@ -63,7 +64,7 @@
 5. **CI has two known flakes** (fixed-sleep races). One is root-fixed (`engine-media`). Protocol if one shows: identical commit green on the other branch ⇒ re-run failed jobs before suspecting code.
 6. **Unsigned installer** — Windows shows "unknown publisher". No certificate exists; stated, not hidden.
 7. **The two real-machine bugs you reported 2026-10-18 — FIXED IN CODE, pending your machine.** ① App found no Ollama and the desktop app quits fully, so you had to run `ollama serve` by hand → now the app starts your installed copy at boot (`%LOCALAPPDATA%\Programs\Ollama\ollama.exe` → PATH → staged copy), the Ollama card has "Start the brain door", and the honest answer names which copy started. ② agy not found → "Point to the exe…" on the agy card persists your pick in `userData/engine-binaries.json` and it beats every probe/launch; "Use automatic detection" undoes it. Both covered by 7 new tests (99 files / 723 total). Install the newest CI artifact and check on the TUF A15 — that closes them for real.
-8. **Checks that could not run in this workspace.** This environment has no Chromium and no Electron binary (their download hosts are outside the sandbox's allowed list), so `npm run test:ui` (renderer checks), the Electron smoke run and `scripts/check-electron-automation.cjs` were **not executed here**. Unit tests, `tsc`, `electron-vite build` and the offline preview build all ran and are green (114 files / 808 tests). CI must run the rest before anything is claimed; one local baseline run also saw the known `watch-fire` timeout (§4.5 protocol applies).
+8. **Where each check actually runs now.** The renderer checks (`npm run test:ui` — four scripts: full acceptance, turns, standalone viewer, motion) **run in CI on linux** (added 2026-10-18; they never had a step before) and were also run **in this workspace** against a locally assembled Chromium — all four green. Electron smoke runs in CI on both OSes (the workspace itself has no display/Electron runtime, so `scripts/check-electron-automation.cjs` remains an owner-machine check — deliberately NOT added to CI blind, since it cannot be verified from here). Known fixes carried along: the turns check's mock now models the bridge's dictation member, and the launch-overlay wait no longer races the 2620ms intro against a fixed 3000ms sleep. One local baseline run saw the known `watch-fire` timeout (§4.5 protocol applies).
 
 ## 5. THE LAWS (kept, and what made me keep them)
 
