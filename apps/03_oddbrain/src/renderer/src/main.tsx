@@ -1,22 +1,15 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
-import App from './App'
-import ErrorBoundary from './components/ErrorBoundary'
-import AppBoundary from './ui/AppBoundary'
-import { applyStoredLook } from './state/look'
-import { applyStoredAppearance } from './state/appearance'
-import './styles/globals.css'
-import './styles/desktop.css'
+import App from './app/App'
+import { ErrorBoundary } from './components/ErrorBoundary'
+import './styles.css'
 
-const container = document.getElementById('root')
-if (!container) throw new Error('Root container is missing from index.html')
-
-// Before the first paint, so a chosen accent does not flash the default first.
-applyStoredAppearance()
-applyStoredLook()
-
-createRoot(container).render(
+const root = document.getElementById('root')
+if (!root) throw new Error('OddBrain root element is missing.')
+createRoot(root).render(
   <StrictMode>
-    <ErrorBoundary label="OddBrain"><AppBoundary><App /></AppBoundary></ErrorBoundary>
-  </StrictMode>
+    <ErrorBoundary>
+      <App />
+    </ErrorBoundary>
+  </StrictMode>,
 )

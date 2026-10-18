@@ -1,7 +1,0 @@
-{
-  "name": "Deep Sea",
-  "appearance": {
-    "accent": "teal"
-  },
-  "css": ":root { --color-bg: #071413; --color-card: #0d1e1c; --color-panel: #102623; --color-line: #1e403b; --color-ink: #dff5f0; --color-muted: #7faea5; --font-sans: 'Segoe UI', system-ui, sans-serif; } .rounded-xl { border-radius: 22px; } h1, h2 { font-family: 'Palatino Linotype', Palatino, serif; } [class*='bg-card'] { box-shadow: inset 0 0 0 1px #14332e; }"
-}

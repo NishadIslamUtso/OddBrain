@@ -1,7 +1,0 @@
-{
-  "name": "Dawn",
-  "appearance": {
-    "accent": "amber"
-  },
-  "css": ":root { --color-bg: #151009; --color-card: #201812; --color-panel: #261d15; --color-line: #3b2e1d; --color-ink: #f3ead9; --color-muted: #ae9d7e; --font-sans: 'Palatino Linotype', Palatino, Georgia, serif; } .rounded-xl { border-radius: 20px; } [class*='bg-card'] { box-shadow: inset 0 1px 0 #332612; }"
-}

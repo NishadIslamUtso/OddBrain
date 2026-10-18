@@ -12,16 +12,16 @@
     "noEmit": true,
     "skipLibCheck": true,
     "esModuleInterop": true,
-    "allowSyntheticDefaultImports": true,
-    "resolveJsonModule": true,
-    "isolatedModules": true,
-    "verbatimModuleSyntax": false,
-    "types": ["node"],
-    "baseUrl": ".",
-    "paths": {
-      "@/*": ["src/renderer/src/*"],
-      "@shared/*": ["src/shared/*"]
-    }
+    "types": ["node", "vite/client"],
+    "resolveJsonModule": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx", "electron.vite.config.ts"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "electron.vite.config.ts",
+    "vite.web.config.ts",
+    "vitest.config.mts",
+    "tests/**/*.ts",
+    "tests/**/*.tsx"
+  ]
 }

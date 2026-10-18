@@ -1,7 +1,0 @@
-{
-  "name": "Midnight Violet",
-  "appearance": {
-    "accent": "violet"
-  },
-  "css": ":root { --color-bg: #0d0a1a; --color-card: #161126; --color-panel: #1c1533; --color-line: #322655; --color-ink: #eae6ff; --color-muted: #9d92c9; --font-sans: 'Segoe UI', system-ui, sans-serif; } h1, h2 { font-family: Georgia, 'Times New Roman', serif; letter-spacing: 0.01em; } .rounded-xl { border-radius: 18px; } [class*='bg-card'] { box-shadow: inset 0 1px 0 #2a1f4d; }"
-}

@@ -1,119 +1,59 @@
-# The gate, on every push, on both operating systems. Linux always ran it;
-# Windows (the target OS) joined 2026-10-17 as allow-failure until it ran
-# green once — and when it did, the training wheels came off the same day.
-# A red X here fails the push now. It earned that.
+# Validate the UI-first desktop rebuild on Linux and Windows. A green browser build
+# alone is not evidence that Electron's preload and the packaged renderer work.
 name: checks
 on: [push, pull_request]
+
 jobs:
   linux:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - name: Install
-        working-directory: apps/03_oddbrain
-        run: npm install --no-audit --no-fund
-      - name: Types
-        working-directory: apps/03_oddbrain
-        run: npx tsc --noEmit -p tsconfig.json
-      - name: Tests
-        working-directory: apps/03_oddbrain
-        run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-linux.xml
-      - name: Linux speaks
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const p = 'apps/03_oddbrain/junit-linux.xml';
-            if (fs.existsSync(p)) {
-              const raw = fs.readFileSync(p, 'utf8');
-              const lines = [];
-              for (const suite of raw.split(/(?=<testsuite )/)) {
-                const head = suite.match(/<testsuite name="([^"]+)"[^>]*failures="(\d+)" errors="(\d+)"/);
-                if (!head || (head[2] === '0' && head[3] === '0')) continue;
-                lines.push('FAILED SUITE ' + head[1] + ' (' + head[2] + ' failures, ' + head[3] + ' errors)');
-                for (const m of suite.matchAll(/<testcase classname="[^"]*" name="([^"]*)"[^>]*>\s*<failure message="([^"]*)"/g)) {
-                  lines.push('  - ' + m[1] + ' — ' + m[2].slice(0, 800));
-                }
-              }
-              if (lines.length) {
-                let body = lines.join('\n');
-                if (body.length > 40000) body = body.slice(0, 40000) + '\n...truncated';
-                await github.rest.repos.createCommitComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  commit_sha: context.sha,
-                  body: 'linux failures, in its own words:\n\n' + body
-                });
-              }
-            }
-      - name: Build
-        working-directory: apps/03_oddbrain
-        run: npm run build
-      - name: Smoke — the window opens and the console is clean
-        working-directory: apps/03_oddbrain
-        timeout-minutes: 5
-        env:
-          ELECTRON_DISABLE_SANDBOX: 1
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64
-          xvfb-run -a npx electron . --smoke
-
-  windows:
-    runs-on: windows-latest
-    permissions:
-      contents: write
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/03_oddbrain/package-lock.json
       - name: Install
         working-directory: apps/03_oddbrain
         run: npm ci --no-audit --no-fund
-      - name: Types
+      - name: Types and formatting
         working-directory: apps/03_oddbrain
-        run: npx tsc --noEmit -p tsconfig.json
+        run: npm run typecheck && npm run format:check
       - name: Tests
         working-directory: apps/03_oddbrain
-        run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-windows.xml
-      - name: Windows speaks
-        if: always()
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const p = 'apps/03_oddbrain/junit-windows.xml';
-            if (fs.existsSync(p)) {
-              const raw = fs.readFileSync(p, 'utf8');
-              const lines = [];
-              for (const suite of raw.split(/(?=<testsuite )/)) {
-                const head = suite.match(/<testsuite name="([^"]+)"[^>]*failures="(\d+)" errors="(\d+)"/);
-                if (!head || (head[2] === '0' && head[3] === '0')) continue;
-                lines.push('FAILED SUITE ' + head[1] + ' (' + head[2] + ' failures, ' + head[3] + ' errors)');
-                for (const m of suite.matchAll(/<testcase classname="[^"]*" name="([^"]*)"[^>]*>\s*<failure message="([^"]*)"/g)) {
-                  lines.push('  - ' + m[1] + ' — ' + m[2].slice(0, 800));
-                }
-              }
-              if (lines.length) {
-                let body = lines.join('\n');
-                if (body.length > 40000) body = body.slice(0, 40000) + '\n...truncated';
-                await github.rest.repos.createCommitComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  commit_sha: context.sha,
-                  body: 'windows failures, in its own words:\n\n' + body
-                });
-              }
-            }
-      - name: Build
+        run: npm test
+      - name: Build desktop and browser preview
         working-directory: apps/03_oddbrain
-        run: npm run build
-      - name: Smoke — the window opens and the console is clean
+        run: npm run build && npm run build:web
+      - name: Native window smoke
         working-directory: apps/03_oddbrain
         timeout-minutes: 5
-        shell: pwsh
-        run: npx electron . --smoke
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64
+          xvfb-run -a npm run smoke
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: apps/03_oddbrain/package-lock.json
+      - name: Install
+        working-directory: apps/03_oddbrain
+        run: npm ci --no-audit --no-fund
+      - name: Types and formatting
+        working-directory: apps/03_oddbrain
+        run: npm run typecheck && npm run format:check
+      - name: Tests
+        working-directory: apps/03_oddbrain
+        run: npm test
+      - name: Build desktop and browser preview
+        working-directory: apps/03_oddbrain
+        run: npm run build && npm run build:web
+      - name: Native window smoke
+        working-directory: apps/03_oddbrain
+        timeout-minutes: 5
+        run: npm run smoke

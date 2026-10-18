@@ -1,57 +1,47 @@
-# The installer, made by machines: every push to v3 or main packages the
-# Windows exe on a real Windows runner and uploads it as an artifact anyone
-# (the owner, a judge) can download from the run page - no local build needed.
-# Push a tag v* and the exe + its sha256 attach to a GitHub Release.
-name: installer
+# Manual alpha package only. Do not auto-publish an installer until this rebuild
+# has passed a real Windows acceptance run on the owner's machine.
+name: Windows alpha package
 on:
-  push:
-    branches: [v3, main]
-    tags: ['v*']
   workflow_dispatch:
-concurrency:
-  group: installer-${{ github.ref }}
-  cancel-in-progress: true
 
 jobs:
-  windows-installer:
+  windows-package:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+          cache: npm
+          cache-dependency-path: apps/03_oddbrain/package-lock.json
       - name: Install
         working-directory: apps/03_oddbrain
         run: npm ci --no-audit --no-fund
-      - name: Build and package the installer
+      - name: Test
+        working-directory: apps/03_oddbrain
+        run: npm run typecheck && npm test
+      - name: Build unsigned Windows installer
         working-directory: apps/03_oddbrain
         run: npm run dist:win
-      - name: Prove it - sha256 into the summary
+      - name: Write installer SHA-256
         working-directory: apps/03_oddbrain
         shell: pwsh
         run: |
-          $h = (Get-FileHash dist/OddBrain-Setup-0.9.0.exe -Algorithm SHA256).Hash.ToLower()
-          "$h  OddBrain-Setup-0.9.0.exe" | Out-File -Encoding ascii dist/OddBrain-Setup-0.9.0.exe.sha256
-          Add-Content $env:GITHUB_STEP_SUMMARY "## Installer built"
-          Add-Content $env:GITHUB_STEP_SUMMARY '```'
-          Add-Content $env:GITHUB_STEP_SUMMARY "sha256: $h"
-          Add-Content $env:GITHUB_STEP_SUMMARY '```'
-      - name: Upload the artifact (30 days)
+          $installer = Get-ChildItem dist -Filter 'OddBrain-Setup-*.exe' | Select-Object -First 1
+          if (-not $installer) { throw 'No installer was built.' }
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($installer.Name)" | Out-File -Encoding ascii "$($installer.FullName).sha256"
+          Add-Content $env:GITHUB_STEP_SUMMARY "Unsigned alpha package: $($installer.Name)"
+          Add-Content $env:GITHUB_STEP_SUMMARY "SHA-256: $hash"
+      - name: Upload alpha installer (30 days)
         uses: actions/upload-artifact@v4
         with:
-          name: OddBrain-Setup-${{ github.sha }}
+          name: OddBrain-alpha-${{ github.sha }}
           path: |
-            apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe
-            apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe.sha256
+            apps/03_oddbrain/dist/OddBrain-Setup-*.exe
+            apps/03_oddbrain/dist/OddBrain-Setup-*.exe.sha256
           retention-days: 30
           if-no-files-found: error
-      - name: Attach to the release (on a version tag only)
-        if: startsWith(github.ref, 'refs/tags/v')
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: pwsh
-        run: |
-          gh release create "$env:GITHUB_REF_NAME" --generate-notes --title "OddBrain $env:GITHUB_REF_NAME" dist/OddBrain-Setup-0.9.0.exe dist/OddBrain-Setup-0.9.0.exe.sha256
