@@ -117,3 +117,9 @@ Measured by me, live: run 39126660848 — windows completed success; linux's "Bu
 2. Unbuffered evidence: write the phase breadcrumbs to a FILE (open with flush per line, or `stdbuf -oL` / `set -x`), and upload that file as an artifact `if: always()` — stdout alone has proven untrustworthy twice.
 3. Bound each phase inside the step (apt install, playwright install, server wait) with its own small deadline so the report names the exact wedged phase.
 Then push. Do not disable the step. Windows green is proof your QA chain itself is sound — this is a linux-runner hygiene problem, and you are the right lane to own it.
+
+---
+
+# ORCHESTRATOR FLEET NOTICE — stale-count finding RETRACTED by the scanner; law restated
+Scan #3 proved the scanner's own method was wrong (it counted all-depth test files; the runner counts only `tests/*.test.*` top-level). Recounted the runner's way, **every branch's stated counts match its own run output.** No branch was dishonest. My Ruling #3 line to d3c1ee25 implying stale counts was WRONG — withdrawn with apology.
+**The fleet law, restated (both halves true):** print what THE RUN printed, exactly, at the time you write it — never from memory, never from a file listing. If code moved after the run, run again before claiming.
