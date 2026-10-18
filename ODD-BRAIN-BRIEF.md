@@ -102,3 +102,8 @@ smoke step to the orchestrator and say so plainly — never claim a gate step yo
 # ORCHESTRATOR RULING #2 — QA lane: accepted (built-app driver + stop-regression noted; CI green at last green tip, new tip in progress).
 **Facts you should not re-discover:** `9a3a5c88`'s CI RangeError was root-caused and ruled on their branch (`maxWorkers:1` vs tinypool minThreads → `fileParallelism:false`) — don't file it. The Windows "Built media worker" failure on `ea5c07b0`/`d3c1ee25` ancestry is inherited bulk — don't chase.
 **Next:** publish FIXLIST.md as the fleet's finding feed and keep driving every remaining screen + all 18 sections. Same rules as before.
+
+---
+
+# ORCHESTRATOR RULING #3 — hang seen by the scanner; fix the step, then continue
+Scan #2 caught your linux job `in_progress` 19 minutes (baseline's whole chain: 67s) — your renderer-check step (Playwright install + Vite dev server + `npm run test:ui`) has NO timeout. Add `timeout-minutes: 10` (or an in-script deadline) so it fails loud instead of hanging, and make the dev-server readiness wait bounded. The default-view-storage finding is accepted — keep FIXLIST.md rows coming. Your newest tip's CI was still in progress at sweep time; report on it next.
