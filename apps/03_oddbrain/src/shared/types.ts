@@ -38,6 +38,8 @@ export type Artifact = {
 export type AttachmentKind = 'image' | 'text'
 
 export type Attachment = {
+  /** What was decoded, sampled or sent to a chosen provider; travels with the work order. */
+  extraction?: string
   id: string
   name: string
   size?: number

@@ -1,13 +1,14 @@
 import { useEffect, useState } from 'react'
-import { Volume2, Square as StopSquare } from 'lucide-react'
+import ReadAloudButton from '../ui/ReadAloudButton'
 import type { Artifact, Message } from '@shared/types'
 import type { ElementPick } from '@shared/lib/artifacts'
-import { ttsSupported } from '@shared/lib/media'
 import { THINKING_OPEN_EVENT, setThinkingOpen, thinkingOpenNow } from '@shared/lib/thinkingOpen'
 import { parseCloudModel } from '@shared/lib/providers'
 import type { ArtifactView } from '@/state/artifactView'
 import ArtifactCard from './ArtifactCard'
 import BrainMark from './BrainMark'
+import CopyText from '../ui/CopyText'
+import { useLook } from '../ui/LookContext'
 
 /**
  * One turn in the conversation.
@@ -17,40 +18,6 @@ import BrainMark from './BrainMark'
  * app's mark beside it. Thinking, when the model reports it separately, is folded
  * away rather than mixed into the answer.
  */
-
-/**
- * Read one reply aloud, with the window's own voice. Its own component so the
- * speaking state is a hook that never depends on which branch rendered.
- */
-function SpeakButton({ text }: { text: string }) {
-  const [speaking, setSpeaking] = useState(false)
-  if (!ttsSupported()) return null
-  const toggle = (): void => {
-    if (speaking) {
-      window.speechSynthesis.cancel()
-      setSpeaking(false)
-      return
-    }
-    const voice = new SpeechSynthesisUtterance(text)
-    voice.onend = () => setSpeaking(false)
-    voice.onerror = () => setSpeaking(false)
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(voice)
-    setSpeaking(true)
-  }
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      aria-label={speaking ? 'Stop reading aloud' : 'Read aloud'}
-      title={speaking ? 'Stop reading aloud' : 'Read this reply aloud'}
-      className="mt-2 flex items-center gap-1 rounded-lg border border-line px-1.5 py-0.5 text-[10.5px] text-muted hover:text-ink"
-    >
-      {speaking ? <StopSquare size={10} /> : <Volume2 size={10} />}
-      {speaking ? 'Stop' : 'Listen'}
-    </button>
-  )
-}
 
 export default function MessageRow({
   message,
@@ -83,11 +50,13 @@ export default function MessageRow({
   /** The artifact the error belongs to, so it is not printed on every card. */
   rewriteErrorFor?: string
 }) {
+  const look = useLook()
   if (message.role === 'user') {
     return (
       <div className="flex justify-end">
-        <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-2xl bg-card px-4 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
+        <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-[14px_14px_4px_14px] bg-card px-3.5 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
           {message.content}
+          <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div>
           {message.editedAt && <span className="mt-1 block text-[11px] text-muted">edited</span>}
           {(message.attachments || []).length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5">
@@ -115,16 +84,16 @@ export default function MessageRow({
     return () => window.removeEventListener(THINKING_OPEN_EVENT, follow)
   }, [])
   return (
-    <div className="flex gap-3.5">
+    <div className="flex gap-3">
       <span className="mt-0.5 shrink-0">
-        <BrainMark size={26} />
+        <BrainMark size={18} />
       </span>
       <div className="min-w-0 flex-1">
         {message.thinking ? (
           <details
             open={thinkingOpen || undefined}
             onToggle={(event) => setThinkingOpen((event.target as HTMLDetailsElement).open)}
-            className="mb-2 rounded-lg border border-line bg-panel/60 px-3 py-2"
+            className="mb-2 py-2"
           >
             <summary className="cursor-pointer text-[12px] text-muted">
               Thinking{streaming ? ' (still going)' : ''}
@@ -139,17 +108,18 @@ export default function MessageRow({
           <p className="mb-2 text-[12px] text-muted">{message.stage}</p>
         ) : null}
 
-        {message.content ? (
+        {message.content && (look.streamReplies || !streaming) ? (
           <div className="whitespace-pre-wrap break-words text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
             {message.content}
           </div>
         ) : null}
-        {message.content && message.status !== 'streaming' ? <SpeakButton text={message.content} /> : null}
+        {message.content && message.status !== 'streaming' ? <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div> : null}
+        {message.content && message.status !== 'streaming' ? <ReadAloudButton text={message.content} /> : null}
 
         {streaming && !message.content && !message.stage ? (
           <p className="text-[13px] text-muted">Thinking…</p>
         ) : null}
-        {streaming && message.content ? (
+        {streaming && message.content && look.streamReplies ? (
           <span className="caret ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 bg-accent" />
         ) : null}
 

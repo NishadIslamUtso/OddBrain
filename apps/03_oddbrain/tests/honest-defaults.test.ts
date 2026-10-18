@@ -56,9 +56,9 @@ test('the engine picker states installation in words, not a green dot', () => {
   assert.match(composer, /not installed/)
 })
 
-test('the title-bar dot is alive only while a turn is live', () => {
-  const app = readFileSync(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8')
-  assert.match(app, /engineAlive=\{engineStore\(\)\.turn\?\.state === 'running'\}/)
+test('the title bar has no decorative status claims', () => {
+  const title = readFileSync(new URL('../src/renderer/src/components/TitleBar.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(title.slice(title.indexOf('  return ')), /engineAlive|bg-ok|bg-warn|bg-muted|Live|Local/)
 })
 
 test('the engine strip is collapsible and never hides a permission question', () => {

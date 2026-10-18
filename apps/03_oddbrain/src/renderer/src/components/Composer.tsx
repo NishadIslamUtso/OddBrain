@@ -1,5 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronDown, CookingPot, Cpu, FolderOpen, Layers, ListOrdered, Map, Mic, MicOff, Paperclip, Play, ScrollText, Square, Swords, X } from 'lucide-react'
+import { useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { ArrowUp, ChevronDown, CookingPot, Cpu, FolderOpen, Layers, ListOrdered, Map, MoreHorizontal, Mic, MicOff, Paperclip, Play, ScrollText, Square, Swords, X } from 'lucide-react'
+import { filterPrompts, loadPrompts } from '@shared/lib/prompts'
+import useDictation from '../hooks/useDictation'
 import { modelLabel } from '@shared/lib/engine'
 import type { Project } from '@shared/lib/projects'
 import type { Attachment } from '@shared/types'
@@ -11,6 +13,9 @@ import { getEngineApi } from '@/platform/bridge'
 import { vaultGet, type VaultReply } from '@shared/lib/vault'
 import { useEngine, type EngineTurn } from '@/state/engine'
 import useDismiss from '@/hooks/useDismiss'
+import BriefContext from '../ui/BriefContext'
+import ComposerSurface from '../ui/ComposerSurface'
+import { LookActions, useLook } from '../ui/LookContext'
 
 /**
  * The composer.
@@ -40,6 +45,7 @@ export default function Composer({
   /** Pictures and files waiting to ride with the next send. */
   attachments = [],
   onFiles,
+  fileTools,
   onDetach,
 }: {
   value: string
@@ -56,63 +62,23 @@ export default function Composer({
   onProject?: (id: string | null) => void
   attachments?: Attachment[]
   /** Hand the app the files a person picked or pasted; it reads and refuses honestly. */
+  fileTools?: ReactNode
   onFiles?: (files: File[]) => void
   onDetach?: (id: string) => void
 }) {
   const box = useRef<HTMLTextAreaElement | null>(null)
   const [boxOpen, setBoxOpen] = useState<'engine' | 'models' | null>(null)
   const [cook, setCook] = useState(false)
-  const [listening, setListening] = useState(false)
+  const [tools, setTools] = useState(false)
+  const toolsRef = useRef<HTMLDivElement | null>(null)
+  const look = useLook(), changeLook = useContext(LookActions)
+  useDismiss(toolsRef, () => setTools(false), tools)
+  const dictation = useDictation(value, onChange)
+  const listening = dictation.active
   const fileInput = useRef<HTMLInputElement | null>(null)
-  const recognition = useRef<{ stop: () => void } | null>(null)
   const pickerRef = useRef<HTMLDivElement | null>(null)
   useDismiss(pickerRef, () => setBoxOpen(null), boxOpen !== null)
-
-  /**
-   * Dictation: the window's own speech recognition (Chromium's), words into
-   * the draft. Where the machine has no microphone or no listener, the button
-   * says so instead of pretending. The notice rides the app's own channel.
-   */
-  const toggleDictation = (): void => {
-    if (listening) {
-      recognition.current?.stop()
-      return
-    }
-    type SpeechCtor = new () => {
-      lang: string
-      interimResults: boolean
-      continuous: boolean
-      start: () => void
-      stop: () => void
-      onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
-      onerror: (() => void) | null
-      onend: (() => void) | null
-    }
-    const Ctor = (globalThis as unknown as { webkitSpeechRecognition?: SpeechCtor }).webkitSpeechRecognition
-    if (typeof Ctor !== 'function') {
-      window.dispatchEvent(new CustomEvent('app:notice', { detail: 'This window has no speech listener: dictation needs a microphone.' }))
-      return
-    }
-    try {
-      const ear = new Ctor()
-      ear.lang = navigator.language || 'en-US'
-      ear.interimResults = false
-      ear.continuous = true
-      ear.onresult = (event) => {
-        let said = ''
-        for (let i = 0; i < event.results.length; i += 1) said += `${event.results[i][0].transcript} `
-        if (said.trim()) onChange(`${value ? `${value.trimEnd()} ` : ''}${said.trim()}`)
-      }
-      ear.onerror = () => setListening(false)
-      ear.onend = () => setListening(false)
-      ear.start()
-      recognition.current = ear
-      setListening(true)
-    } catch {
-      setListening(false)
-      window.dispatchEvent(new CustomEvent('app:notice', { detail: 'Could not open the microphone. Nothing was recorded.' }))
-    }
-  }
+  const toggleDictation = (): void => { void dictation.toggle() }
 
   // Grow with the text, up to a point, then scroll. A composer that stays one
   // line high while you write a paragraph hides what you are writing.
@@ -123,7 +89,12 @@ export default function Composer({
     element.style.height = `${Math.min(element.scrollHeight, 200)}px`
   }, [value])
 
-  const canSend = (value.trim().length > 0 || attachments.length > 0) && !busy
+  const [slashDismissed, setSlashDismissed] = useState(false), [slashIndex, setSlashIndex] = useState(0)
+  useEffect(() => { setSlashDismissed(false); setSlashIndex(0) }, [value])
+  const promptChoices = value.startsWith('/') && !/\s/.test(value.slice(1)) ? filterPrompts(loadPrompts(), value.slice(1)) : []
+  const slashOpen = !slashDismissed && !busy && !listening && promptChoices.length > 0
+  const pickPrompt = (index: number): void => { const chosen = promptChoices[index]; if (chosen) { onChange(chosen.body); setSlashDismissed(true); box.current?.focus() } }
+  const canSend = (value.trim().length > 0 || attachments.length > 0) && !busy && !listening
 
   /** Files pasted straight onto the box ride like picked files. */
   const paste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
@@ -135,6 +106,13 @@ export default function Composer({
   }
 
   const keydown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (slashOpen && ['ArrowDown', 'ArrowUp', 'Escape', 'Tab', 'Enter'].includes(event.key)) {
+      event.preventDefault()
+      if (event.key === 'Escape') setSlashDismissed(true)
+      else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') setSlashIndex(index => (index + (event.key === 'ArrowDown' ? 1 : -1) + promptChoices.length) % promptChoices.length)
+      else pickPrompt(Math.min(slashIndex, promptChoices.length - 1))
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
       if (canSend) onSend()
@@ -147,8 +125,10 @@ export default function Composer({
   }
 
   return (
-    <div className="shrink-0 px-6 pb-4">
-      <div className="rounded-2xl border border-line bg-card focus-within:border-accent/50">
+    <div className="ob-composer-host shrink-0 px-6 pb-4">
+      <BriefContext />
+      <ComposerSurface>
+        {slashOpen ? <ul id="composer-prompts" role="listbox" aria-label="Prompt templates" className="max-h-[160px] overflow-y-auto border-b border-line p-2">{promptChoices.map((prompt, index) => <li key={prompt.id} id={`composer-prompt-${index}`} role="option" aria-selected={index === slashIndex}><button type="button" className="w-full px-2 py-1 text-left text-[12px] hover:bg-panel" onClick={() => pickPrompt(index)}><strong>/{prompt.name}</strong> · {prompt.hint}</button></li>)}</ul> : null}
         <textarea
           ref={box}
           value={value}
@@ -156,10 +136,14 @@ export default function Composer({
           onKeyDown={keydown}
           onPaste={paste}
           rows={1}
-          placeholder="How can I help you today?"
+          placeholder="Ask anything"
           aria-label="Message"
+          aria-controls={slashOpen ? "composer-prompts" : undefined}
+          aria-activedescendant={slashOpen ? `composer-prompt-${slashIndex}` : undefined}
           className="block max-h-[200px] w-full resize-none bg-transparent px-4 pt-3.5 text-[14px] leading-relaxed text-ink outline-none placeholder:text-muted"
         />
+        {dictation.active ? <div role="status" className="px-4 py-2 text-[12px] text-muted">{dictation.label}<button type="button" className="ml-3 underline" onClick={dictation.cancel}>Cancel dictation</button></div> : null}
+        {fileTools}
         {attachments.length > 0 && onDetach ? (
           <ul className="flex flex-wrap gap-1.5 px-4 pt-2" aria-label="Attached">
             {attachments.map(entry => (
@@ -177,12 +161,10 @@ export default function Composer({
           </ul>
         ) : null}
         <div className="flex items-center gap-1.5 px-2.5 pb-2 pt-1" ref={pickerRef}>
-          <ProjectDropdown projects={projects} project={project} onProject={onProject} />
           <input
             ref={fileInput}
             type="file"
             multiple
-            accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py"
             className="hidden"
             onChange={event => {
               const files = Array.from(event.target.files ?? [])
@@ -194,7 +176,8 @@ export default function Composer({
             type="button"
             onClick={() => fileInput.current?.click()}
             aria-label="Attach"
-            title="Attach a picture, a video (its frames), or a text file"
+            title="Attach a document, image, audio or video"
+            disabled={listening}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:text-ink"
           >
             <Paperclip size={13} />
@@ -204,16 +187,28 @@ export default function Composer({
             onClick={toggleDictation}
             aria-label={listening ? 'Stop dictation' : 'Dictate'}
             aria-pressed={listening}
-            title={listening ? 'Listening. Press again to stop.' : 'Speak into the box: the window\u2019s own listener types what you say'}
+            title={listening ? 'Press again to stop. Use Cancel to discard.' : 'Dictate using the mode selected in Voice & files'}
+            disabled={busy && !listening}
             className={`flex h-7 w-7 items-center justify-center rounded-lg ${listening ? 'text-warn' : 'text-muted hover:text-ink'}`}
           >
             {listening ? <MicOff size={13} /> : <Mic size={13} />}
           </button>
-          <RecipeButton />
-          <MapButton onInsert={(map) => onChange(value.trim() ? `${value.trimEnd()}\n\n${map}\n` : `${map}\n`)} />
           <span className="ml-auto" />
           <EngineChip open={boxOpen === 'engine'} onToggle={() => setBoxOpen(boxOpen === 'engine' ? null : 'engine')} />
           <ModelChip open={boxOpen === 'models'} onToggle={() => setBoxOpen(boxOpen === 'models' ? null : 'models')} />
+          <div className="ob-more-tools" ref={toolsRef}>
+            <button type="button" className="ob-icon-button" onClick={() => setTools(v => !v)} aria-label="More chat tools" aria-expanded={tools} title="More chat tools"><MoreHorizontal size={15} /></button>
+            {tools ? <div className="ob-tools-popup" role="dialog" aria-label="Chat tools">
+              <ProjectDropdown projects={projects} project={project} onProject={onProject} />
+              <RecipeButton />
+              <MapButton onInsert={map => onChange(value.trim() ? `${value.trimEnd()}\n\n${map}\n` : `${map}\n`)} />
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { setCook(true); setTools(false) }}><CookingPot size={14} />Cook context</button>
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:battle', { detail: value })); setTools(false) }}><Swords size={14} />Brain battle</button>
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:split', { detail: value })); setTools(false) }}><ListOrdered size={14} />Split a task</button>
+              <button type="button" aria-pressed={look.showThinking} onClick={() => changeLook({ showThinking: !look.showThinking })}><ScrollText size={14} />Thinking details<span>{look.showThinking ? 'On' : 'Off'}</span></button>
+              <button type="button" onClick={() => { window.dispatchEvent(new Event('app:show-journal')); setTools(false) }}><ListOrdered size={14} />Turn journal</button>
+            </div> : null}
+          </div>
           <span className="ml-auto flex items-center gap-2">
             {busy ? (
               <button
@@ -240,41 +235,8 @@ export default function Composer({
             </button>
           </span>
         </div>
-      </div>
-
-      {value.trim() && !busy ? (
-        <div className="relative px-1 pt-1.5">
-          <button
-            type="button"
-            onClick={() => setCook(open => !open)}
-            aria-expanded={cook}
-            title="Cook this prompt: pull matching vault notes in as [Title: line] context, preview, then send"
-            className="flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <CookingPot size={11} aria-hidden />
-            Cook This Prompt
-          </button>
-          {cook ? <CookDialog draft={value} onDone={(next) => { if (next !== null) onChange(next); setCook(false) }} /> : null}
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent('app:battle', { detail: value }))}
-            title="Battle: run this prompt on two brains and pick the better answer (blind, private tally)"
-            className="ml-1.5 flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <Swords size={11} aria-hidden />
-            Battle
-          </button>
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent('app:split', { detail: value }))}
-            title="Split: the engine breaks this work order into steps, then the app runs them one by one"
-            className="ml-1.5 flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <ListOrdered size={11} aria-hidden />
-            Split
-          </button>
-        </div>
-      ) : null}
+      </ComposerSurface>
+      {cook ? <CookDialog draft={value} onDone={next => { if (next !== null) onChange(next); setCook(false) }} /> : null}
       {preview ? <p className="px-1 pt-2 text-[12px] text-muted">{preview}</p> : null}
       {notice ? <p className="px-1 pt-2 text-[12px] text-warn">{notice}</p> : null}
     </div>

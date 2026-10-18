@@ -31,7 +31,7 @@ const respondWith = (status: number, ok: boolean): void => {
 }
 
 const loadWriter = async () =>
-  (await import('../../extension/lib/vault-writer.js')) as {
+  (await import('../../../extension/lib/vault-writer.js')) as {
     queueCapture(payload: unknown): Promise<void>
     flushQueue(): Promise<void>
   }

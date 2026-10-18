@@ -1,87 +1,80 @@
-# WHAT EXISTS — the real state of every surface
+# OddBrain: what exists and what still needs work
 
-> Replaces the earlier two-doc setup (HANDOVER.md + DECISIONS.md were bloat —
-> this one file is the truth). Every surface of the app, three columns:
-> **what it does now · why it is kept · its honest state** (works / works-with
-> gaps / broken-and-how / unproven). Written 2026-10-18.
-> 99 test files / 723 tests, tsc clean, build green, smoke clean, CI green.
+Updated 2026-10-18. This working tree integrates the recovered v2 UI into baseline `a6c7807`; it does not replace main with the older package. Working branch: `arena/cc83a507-oddbrain`. No Windows release was made.
 
----
+## Current verification
 
-## 1. THE CORE — works
+- **830 tests in 120 files pass.** TypeScript, the Electron production bundles and the web production build pass. The three parked JSX-era tests were rewritten against the current compiler and rendered composer; none remain parked.
+- All **six browser-check scripts pass** against the real React renderer, including the full appearance inventory, engine-event fixtures, motion, offline export, new settings, attachments and slash templates.
+- Layout checks include **1536×824** usable desktop space and **1280×768** content space. Native sizing uses Electron's logical work area; it does not apply 125% scale twice.
+- The built worker actually decoded text, Office and image fixtures. A real FFmpeg executable processed a short video and audio fixture; encrypted-document refusal, cancellation and unchanged original files were checked. Linux correctly refuses Windows speech recognition rather than substituting another service.
+- The official Claude Code **2.1.302** CLI actually added a local fixture marketplace, installed/listed/enabled/disabled/uninstalled an inert plugin in an isolated test profile. Per-action flags and marketplace-list JSON were checked. No real plugin was installed into the owner's profile.
+- **Full `npm audit`: 0 advisories**, including development dependencies. Vitest/build tooling and decoder dependencies were updated. Node 22.13 or newer is required.
+- Provider transports, microphone lifecycle and speech-voice selection have fixture coverage, **not live-provider or physical-device acceptance**. The Electron runtime download failed here; no installed Windows, signed-in Claude/agy, installer or native multi-window acceptance is claimed.
 
-| Surface | What it does · why it is like that | State |
+## App surfaces
+
+| Surface | Purpose and operation | Current state / limits |
 |---|---|---|
-| **The turn** | One send path for everything. Words stream live; thinking folds; a file-touch raises a card with the real diff/command → **Allow** takes the old file copy FIRST (failed keep ⇒ deny, never allow blind) → **Deny** reaches the engine as a real deny → every change **Restore**-able byte-exact, including brand-new files. Gears: Ask me / Plan first / Auto-edits / Full speed (Full speed turns cards off and says so on the gear itself). | **Works.** Proven against real claude v2.1.300+ (deny needs `message`; `manual`+`stdio` makes the CLI ask). Not yet proven by YOU on the TUF A15 with a signed-in claude — that is the acceptance bar. |
-| **claude-code engine** | Spawned by absolute path, shell-quoted (your username has spaces — three bugs taught this), machine PATH merged from the registry, staged-folder probes first. Empty model = engine runs as itself (the invented `gemma4:cloud` is banned and migrates out of saved settings). Named brain rides its door; no brain forces no door (the retry-forever bug is dead; from retry 3 the line tells you to sign in). | **Works** (detection + launch + wire proven locally & CI). A **signed-in live turn on your machine is still unproven** — you have not run it yet. |
-| **agy engine** | Same detection/launch care. Wire implemented (stdin stream-json, `--conversation` resume, reads `event:'result'`). Pictures refused with a spoken reason (its picture shape is unverified). Model list appears only signed-in (plan-gated by Google). | **Works-with-gaps:** a signed-in live turn was **never driven** — recorded unproven until you run it. |
-| **Ollama (local brains)** | Not an engine — the free brain server. The app knocks `127.0.0.1:11434` and counts the brains. **At boot it now starts the server itself** — your INSTALLED copy first (`%LOCALAPPDATA%\Programs\Ollama\ollama.exe`, then PATH scan, staged copy last) — so the desktop app quitting fully no longer means no door. Stop kills only what the app started (pid in `userData/ollama/serve.pid`). "Model stays loaded" = `OLLAMA_KEEP_ALIVE=-1` (a JSON number — the string form is invalid), a machine flag + runtime env. | **Works** (unit-proven: found/start/honest-answer tests; server-side proven live). **Broken path:** the in-app downloader — see §4. |
-| **Permission cards + checkpoints** | The heart of "reviewable, undoable". Card shows tool, summary, diff/detail. Checkpoint index writes are queued per folder (30 concurrent = 30 records). | **Works** (the CI flake here was root-fixed: waits on real events, not sleeps). |
-| **Restore / Activity journal** | Every change journaled; restore is byte-exact; handoff writes the turn into the vault AND copies it. | **Works.** |
+| Chat and engine turns | One engine send path; model and engine selection, streaming/final-only output, thinking disclosure, Stop, work queue, attachments, compact/queued brief, handoff, review, journal and project selection. Extra composer tools are under More. | Integrated. The engine's own model choice remains the default. Real authenticated turns still need Windows verification. |
+| Permissions and restore | Allow/Deny uses the engine's request IDs. With Auto-keep on, a checkpoint must succeed before allowing supported writes. Copies can be inspected and restored. | Fixture-tested. Turning Auto-keep off prevents new copies but keeps old restores. agy and full-speed bypasses cannot be promised the same write interception. |
+| Automatic review | Optional text-only second pass after successful work and idle. Normal work preempts it. Manual review uses the same tool-free transport. | Integrated and unit-tested. No agent CLI, tools, commands or approval dispatch in this reviewer. Auto-review and external review default off; unavailable model routes are explained rather than silently replaced. |
+| Artifacts | Preview, rewrite/version restore, type filters, search, sorting, source access, pop-out, PDF/export and disk Trash recovery. | Integrated. Delete/restore collision and path checks are tested. Actual Windows PDF/pop-out behavior remains unverified. |
+| Projects / Today / Vault / Brain / Code | Project grouping and rename; daily records; vault folder/structure/conflicts/links; memory graph; repository workspaces. | Retained in the new shell. Folder dialogs and real-data scale need installed-app acceptance. |
+| Settings | Profile and utilities; appearance; engine/downloads; connectors; provider keys and access; memory; rules/hooks/recipes/skills/watch; pack store and engine-marketplace selector; Voice & files; inference/performance/system controls. | Retained. Sidebar footer is only the name and brain button opening Settings. Utility actions moved, not deleted. |
+| Quick ask | Global shortcut opens the small window using the same engine and permission flow. Refused sends keep the draft. | Browser refusal test passes. Native global shortcut and multi-window behavior require installed-app verification. |
 
-## 2. THE SCREENS — what is really on each
+## Appearance and motion
 
-| Screen | What is on it · why | State |
+| Surface | Purpose and operation | Current state / limits |
 |---|---|---|
-| **Chat** | Transcript with streaming, thinking blocks (collapsed until you open one — then always open, one shared flag), find-in-conversation (max 6 hits), rewrite with versions, voice (local TTS) on replies, caret, quiet scrollbars, mascot pairing words (flavour, never replacing the honest state name). | **Works.** The scroll chain is PROVEN by the smoke run on every build (it forces overflow and demands real movement — your "chat doesn't scroll" bug can't return silently). |
-| **Engine strip** (above composer) | The turn's record: engine · model · vault · phase · tokens; Stop/Copy/Edit/Hand off/Compact/Review; the work line when busy. **Collapsible** (your wish), **force-unfolds while a permission waits** (Allow can never hide). | **Works.** |
-| **Composer** | Model menu leads with "the engine's own choice — its own login", then only machine-produced models (cloud chips / GB sizes); engine picker states "not installed" in words, never a dot; attachments; project picker; global busy→queue ("In the line"). | **Works.** |
-| **Sidebar** | Search, New chat, nav (Chat/Artifacts/Today/Projects/Vault/Brain), honest "No conversations yet", profile row (initials + idle mascot) into Settings. | **Works.** |
-| **Engine bay** (Settings→Engine) | Engine cards with `installed · 2.1.302` on the face, path on hover, **Re-scan** (skips the 30s cache; detection probes npm dir, `.local\bin`, Programs, and the app's staging ground FIRST); downloads column; watch setup; model/gear/vault pickers. | **Works** for detection+launch. **The downloads column's Ollama button is the broken path** (§4). |
-| **Connectors** | Three cards (Claude Code / agy / Ollama): the machine's actual answer in words + the one action that improves it (Use this engine / copyable install line / official page / knock on 11434 and count brains). **Check all** re-asks every door. Ollama card: **"Start the brain door"** starts the found binary (your installed copy first) and says which copy answered; install-it-yourself route stays (`winget install Ollama.Ollama`, copyable). Claude Code + agy cards: **"Point to the exe…"** — pick the binary in a dialog; it persists in `userData/engine-binaries.json`, beats every probe and every launch; **"Use automatic detection"** clears it; re-validated at boot. | **Works** (99-file suite covers find/start/override paths). On YOUR machine still to be seen live: agy via the pointed exe, Ollama auto-start — you run the newest build and check. |
-| **Vault view** | Folder choose/default, structure seeding (00 System…10 People, templates, CLAUDE.md/AGENTS.md rulebooks), conflict settle (Keep-mine/Use-new/Both/Combine, recorded), link checks (dead/ambiguous; templates exempt). | **Works** (tested). Unproven on your machine at real scale. |
-| **Brain view** | Memory map: canvas force graph — resolved links only, 400-node cap; details compressed collapsible. | **Works** (1 test). Cosmetic scale unproven. |
-| **Artifacts** | Every engine-written file previews (HTML/MD/code/SVG/charts), pop-out window, PDF export, rewrite with versions + restore, artifact styling with the 16 design token sets. | **Works** (many tests). PDF path unproven on your machine. |
-| **Today** | Day view from the vault/journal. | **Works** (3 tests). Thin — it is the least-developed screen. |
-| **Projects** | Group work by project; composer rides the project. | **Works** (5 tests). |
-| **First run** | 3 steps: name (prefilled from the machine — your `""` lesson), engine pick (real detection), vault folder (default one click). Animated brain greets. | **Works.** |
-| **Quick-ask window** | Global hotkey, minimal box, "the same engine, the same cards". Menu bar: every item does a real thing. Single instance (second launch focuses the first). | **Works** (hotkey unproven on your machine). |
+| Original look collection | Eight presets, eight layouts, nine palettes, four interface styles; independent typography, spacing, reading size/width and motion choices. | Integrated into the actual renderer, not a mock HTML replacement. Existing reading sizes remain the defaults. |
+| Home / Chat miniature | Uses the same React shell, sidebar, brain, composer surface and message components. | Browser-tested. Selection changes are reflected in the miniature and workspace. |
+| Appearance tools | Compare looks/structures, taste quiz, shortlist, verdicts/notes, saved custom mixes, import/export and standalone HTML preview. | Integrated; offline HTML reopens in ordinary files, viewer wrappers and opaque sandboxes. |
+| Existing extra themes | All 16 design systems and pack styles remain available in addition to the eight original presets. Artifact styling keeps its catalog. | Fixed the integration conflict where inline palette variables masked these themes. Selected system colours match the miniature in browser checks. |
+| Mascot | All 77 owner SVG scenes, eight role assignments, speed/pause/reduced-motion controls; interactive Home brain and task-linked activity scenes/words. | Catalog and behavior tests pass. No replacement generated artwork. |
+| Launch | Full-window assembly and animated wordmark once per normal app process; manual replay; no quick-window splash. | Browser-tested, including reduced motion. Process gate is unit-tested; installed Windows launch still needs checking. |
 
-## 3. THE FEATURE PANES (Settings)
+## Engines, runtime and privacy
 
-| Pane | What · why | State |
+| Surface | Purpose and operation | Current state / limits |
 |---|---|---|
-| **Appearance** | **Design system gallery FIRST** — all 16 (Claude, Linear, Apple, Stripe, Notion, Vercel, Airbnb, Glassmorphism, Neobrutalism, Editorial, Retro, Dashboard, Shadcn, Minimal, Modern, Default) applied to EVERY screen via the app's tokens (palette/type/radii/shadows); system owns accent+reading type while active; one look at a time. Then: theme, 5 accents (WCAG-checked ink), width, text size, font, motion (System/Calm/Balanced/Playful/Still), mascot words, row explanations. | **Works** (7 dedicated tests; whole-token-set pin so a skeleton can't return). |
-| **Connectors** | See §2. | **Works.** |
-| **Agent access** | Per-provider enables + capture switch; keyed providers are the ones a permission can govern. | **Works.** |
-| **Hooks / House rules / Recipes / Skills catalog / Memory** | Hooks = tool-call hooks; House rules = deployed rulebooks; Recipes = reusable orders; Skills catalog = deploys real skills into the engines' own skill folders; Memory = the pass button (goes through the one send path). | **Work** (tested). Real-data runs on your machine: unproven. |
-| **Watch** (bay) | Folder change → order after quiet; deletions don't fire; its own writes suppressed one cooldown. | **Works** (tested). |
-| **Plugins/Mods** | Pack store: folder+https indexes, sha-256 digests, tamper refusal BEFORE install, starter/looks/prompt-starters/anthropic-skills shipped, export-as-pack, pack themes = FULL stylesheets (anti-skeleton law, tested). | **Works.** **Store phases 2–3 (Claude Code marketplace, agy catalog) DO NOT EXIST yet** — design approved, build awaits your go. |
-| **Models / Performance / System** | Provider keys (ride the ENGINE's env; machine credentials stripped; clearing a key stops only an engine launched with THAT key), inference sizes to your 8GB/4GB, startup/warm/keep-loaded machine flags. | **Works** (tested; keep-alive number-form per Ollama FAQ). |
-| **Browser control** | Playwright-MCP driving through the engine. | **Works-with-gaps:** unproven live. |
+| Claude Code and agy discovery | Automatic detection plus explicit executable picker, persisted override and reset to automatic. | Newer main fixes retained and unit-tested. agy authenticated wire remains unproven. |
+| Ollama startup | Start the installed copy first, then PATH/staged fallback; stop only the app-owned runtime. Preserve keep-loaded settings. | Newer main behavior retained. Fixed the warm-start check to await its asynchronous status. User-machine startup/warm behavior is unverified. |
+| Runtime downloads | Official endpoint/redirect restrictions; streaming disk download and SHA-256 record; separately approved installer execution. Runtime ZIPs extract into a fresh directory before replacing a previous installation. | Reworked and fixture-tested. Runtime limits: 512 entries, 1.5 GiB per file, 4 GiB total. Pack limits stay unchanged. Size/CRC checks, unsafe paths, aliases, links, duplicates and encryption fail without replacing the old runtime. The full official Ollama ZIP has **not** been downloaded or installed here. |
+| Provider access | Saved keys, per-provider permission gates and global external-inference switch. | Retained, with review routes covered by privacy tests. No new automatic provider fallback. Actual provider credentials stay with the app. |
+| Capture and browser control | Paired extension relay, capture permissions/outbox handling and engine-driven browser tools. | Existing code/tests retained. Extension capture and real Playwright-MCP use need user-machine verification. |
+| Pack store | Explicit source refresh; pinned digests, pack installation/export, skills/prompts/themes. | Existing implementation retained. This is separate from engine-owned marketplaces. |
 
-## 4. BROKEN / GAP LIST — the honest one
+## Voice and attachments
 
-1. **In-app Ollama download — still broken against the real file.** (The RUNNING problem is FIXED in code 2026-10-18: the app no longer needs the downloader to have a door — it starts your installed Ollama at boot. Awaiting your machine to confirm.) Measured 2026-10-17: the zip is **1.47 GB**, unpacks to **1.94 GB**, biggest file **692 MB**. The 400 MB download cap was raised to 2.5 GB, but the UNPACK step still uses pack-sized limits (200 MB/file, 400 MB total) and refuses the official archive. **The exact fix is specified and was once written** (runtime limits 512 files / 1.5 GB/file / 4 GB total + streaming progress) — discarded when you said bench the downloader. Say the word and it lands in minutes. Workaround today: `winget install Ollama.Ollama` — the app finds it automatically.
-2. **Store phases 2–3 don't exist** (Claude Code plugin marketplaces; agy catalog). Design is final (`ENGINE-STORES-DESIGN.md`); awaits your go; needs a live probe of `claude plugin marketplace` on your machine before any claim.
-3. **agy signed-in live turn — never driven.** The wire is built and unit-proven; the real thing is not. **agy-not-found on your machine — fixed in code 2026-10-18:** "Point to the exe…" on the agy card, pick `agy.exe` once, it persists and beats every probe; if the auto probe still misses, the pointed exe is used. Awaiting your machine.
-4. **The full acceptance checklist is unrun** — real turn → Allow/Deny → Restore → always-loaded → startup → extension capture, by YOU, on the TUF A15, on the newest build. This is the actual bar for "works".
-5. **CI has two known flakes** (fixed-sleep races). One is root-fixed (`engine-media`). Protocol if one shows: identical commit green on the other branch ⇒ re-run failed jobs before suspecting code.
-6. **Unsigned installer** — Windows shows "unknown publisher". No certificate exists; stated, not hidden.
-7. **The two real-machine bugs you reported 2026-10-18 — FIXED IN CODE, pending your machine.** ① App found no Ollama and the desktop app quits fully, so you had to run `ollama serve` by hand → now the app starts your installed copy at boot (`%LOCALAPPDATA%\Programs\Ollama\ollama.exe` → PATH → staged copy), the Ollama card has "Start the brain door", and the honest answer names which copy started. ② agy not found → "Point to the exe…" on the agy card persists your pick in `userData/engine-binaries.json` and it beats every probe/launch; "Use automatic detection" undoes it. Both covered by 7 new tests (99 files / 723 total). Install the newest CI artifact and check on the TUF A15 — that closes them for real.
+| Feature | Purpose and operation | Current state / limits |
+|---|---|---|
+| Read aloud | Listen on a completed reply uses an installed on-device voice; Stop/unmount cancels it. | No silent network voice. Real Windows voices still need device acceptance. |
+| Offline dictation | The composer microphone button runs Windows System.Speech using the chosen installed recognition language. Final words append to the draft, never auto-send. | Single user-triggered utterance, bounded duration. Missing language/microphone support is reported. The browser preview only permits explicit on-device Web Speech support. |
+| Provider dictation | Choose recording mode, transcription provider and exact model in **Settings → Voice & files**, then press Dictate. Stop uploads; Cancel discards. | Main-process permission ticket before audio-only access; 60-second/24 MiB recording cap. Revocation/cancellation, late permission results and late transcripts are tested. No physical microphone or paid-provider test here. |
+| Documents and images | Local-first UTF-8/UTF-16 text/code, PDF text, Word/Excel/PowerPoint OOXML and ODF extraction; signature-checked image normalization. | Worker timeout 30 seconds, 192 MiB V8 heap; 50 MiB input, 12,000-character excerpt, 50 PDF pages. Office ZIP/XML and image dimensions/output are bounded. No macro execution or local OCR; layouts, scanned content and unsupported/corrupt/encrypted files are disclosed or refused. |
+| Audio and video | Uses the owner's installed FFmpeg, selected with a native file picker or found on PATH. Audio can use Windows offline recognition; video produces sampled stills. | Audio covers at most 120 seconds. At most three video frames within the first 30 seconds, including short clips. Video frames do **not** include an audio transcript. No automatic decoder download or DRM bypass. |
+| Explicit provider extraction | Each original source offers a separate upload/transcription action naming the chosen provider and model. A changed selection is refused, not substituted. | Anthropic/OpenAI PDF and supported images; Gemini PDF/images/audio/video; custom Responses endpoint. Transcription adapters: OpenAI/Groq/Gemini/custom. Model capabilities still apply. Access/key/global-external gates are checked in main; no retries or redirects. |
+| Original files and coverage | Original File objects stay available for retry/discard until sending; temporary local decoding never rewrites originals. Extraction coverage travels with quoted source data to the engine. | Eight waiting sources, four derived engine attachments. Insufficient slots refuse rather than silently drop content. Failed fallback retains and labels the previous extraction. |
 
-## 5. THE LAWS (kept, and what made me keep them)
+**Jarvis, wake word and continuous background voice remain parked.**
 
-- **Honesty over polish** — your "fake green dots / fake model names". Words, never colored claims; no invented names; retries name the fix; crashed panes speak (error boundary). Kept because one lie costs more than ten features.
-- **"Not your skeleton"** — themes carry the ENTIRE style; a test refuses shipped themes without stylesheets.
-- **Engines are exactly two**; Ollama is a brain server. Your law.
-- **The engine installs its own things** (marketplaces via its own carded commands — never hand-copied folders).
-- **Capture everything, default ON** (blocklist honored; your overrule of the judges, twice).
-- **Desktop only · English only · local-first · no telemetry**; the interface must work with no connection.
-- **One landing = one commit** to both branches; CI is the truth; artifacts are the only builds you install.
-- **Your machine is the acceptance lab.** CI-green ≠ world-clean.
+## Engine marketplaces
 
-## 6. SECURITY WALLS (each behind a real attack — kept because each was earned)
+- **Settings → Plugins → Source** retains the entire OddBrain pack store and adds Claude Code marketplaces and agy status.
+- Claude browsing explicitly reads a public GitHub `owner/repository` catalog, with filtering and provenance. Nothing refreshes on launch. Sources/cache/downloads are bounded and browsing is cancellable.
+- Add/install/update/enable/disable/uninstall require a one-minute, one-use, window-bound approval of the exact executable and argument list. Non-install actions verify the engine's registered marketplace repository before approval and again before execution. Uninstall preserves plugin data.
+- CLI capability is probed per action. No `-y`, automatic helper-command approval, invented command fallback or shell interpolation of catalog text. A plugin that requests a marketplace-declared helper command must be reviewed in the CLI's own terminal. Cancellation cannot undo changes already completed; inspect the installed list before retrying.
+- **agy catalog installation remains unavailable:** no verified upstream catalog/install adapter is configured. Engine detection and executable selection are retained; the UI explains the limitation instead of inventing a store.
 
-Parsed-origin IPC guard (a judge's `@attacker.example` smuggle killed the regex version) · navigation lock · extension pairing token (401 + drop, never queue page content without consent) · outbox semantics (200 delivered / 401-403 drop with metadata / 5xx keep — the old flush deleted on any error) · manifest loopback grant (the relay literally had no permission) · classic sendResponse (Promise-onMessage breaks pre-148 Chromium) · checkpoints before Allow · per-folder queued checkpoint index (30 concurrent = 30 records) · zip walls (declared AND measured caps; traversal refused; a forged zero once smuggled real bytes) · download pins by host (publishers' own redirects once broke byte-exact pins) · command arrays + `MODEL_PATTERN` + shell-quoting only on Windows engine spawns · Electron fuses · CSP (no remote anything) · loopback-http interface (never `file://`).
+## Remaining acceptance and deferred work
 
-## 7. NUMBERS (measured, kept because they are the machine's truth)
+1. Installed Windows acceptance: launch at the owner's display scale; signed-in turn → Allow/Deny → Restore; executable overrides; Ollama start/warm/keep-loaded; native dialogs, shortcut, PDF/pop-out and extension capture. No installer was produced here; unsigned-installer warnings still apply.
+2. Physical microphone/speaker and installed Windows recognition-language checks, plus explicitly chosen real-provider file/transcription requests. Fixtures prove routing and cancellation logic, not provider/model quality or device operation.
+3. agy catalog integration needs a verified upstream interface. Claude marketplace-declared helper-command approval is deliberately left to the CLI terminal, not silently accepted by the app.
+4. README/repository presentation cleanup and all-screen publication screenshots remain deferred until the owner installs and confirms the app.
 
-Ollama zip **1.47 GB → 1.94 GB, 87 entries, max 692 MB** · download cap **2.5 GB** · unpack pack-limits **200 MB/file, 400 MB total** (the broken part) · stderr tail **600 chars** · detection cache **30 s** · PATH re-read **5 min** · a11y caps **400/12/120 announced** · memory graph **400 nodes** · find bar **6 hits** · thinking budget **31999 (Extended only)** · keep-alive **-1 (number)** · installer **~96 MB, en-US only, one click, keeps your data on uninstall**.
+## Repeating the checks
 
----
-
-*This file is the single truth now. HANDOVER.md and DECISIONS.md are superseded
-by it and should be deleted in the next landing unless you want them kept.*
-Update it every landing — a stale truth-file is a lie with better manners.
-Written at `7ad6b7c`, 2026-10-17.
+From `apps/03_oddbrain`: `npm ci`, `npm test`, `npm run build`, `npm run build:web`. Run `npm run dev:web`, then `npm run test:ui` with an installed Playwright Chromium. `ODDBRAIN_UI_URL`, `ODDBRAIN_QA_DIR` and optional `ODDBRAIN_BROWSER_OPTIONS` (a JSON launch-options file) configure the browser checks. After a production build, `ODDBRAIN_TEST_FFMPEG=/path/to/ffmpeg npm run test:media-runtime` exercises the built worker and real local media decoding using generated fixtures; it downloads nothing. Generated previews, QA screenshots, caches and recovered archives are ignored, not source deliverables.

@@ -2,15 +2,15 @@
   "name": "oddbrain",
   "version": "0.9.0",
   "private": true,
-  "description": "OddBrain — a local-first desktop assistant. Your files, your models, your machine.",
+  "description": "OddBrain \u2014 a local-first desktop assistant. Your files, your models, your machine.",
   "author": "",
   "license": "Apache-2.0",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "dev:web": "vite --config vite.web.config.ts",
-    "build": "npm run typecheck && electron-vite build",
-    "build:web": "vite build --config vite.web.config.ts",
+    "build": "npm run typecheck && electron-vite build && node scripts/build-ui-preview.mjs",
+    "build:web": "node scripts/build-ui-preview.mjs && vite build --config vite.web.config.ts",
     "start": "electron-vite preview",
     "preview:web": "vite preview --config vite.web.config.ts --port 4174",
     "typecheck": "tsc --noEmit -p tsconfig.json",
@@ -19,13 +19,21 @@
     "smoke": "electron-vite build && electron . --smoke",
     "dist:win": "npm run build && electron-builder --win",
     "dist:win:dir": "npm run build && electron-builder --win --dir",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "dist:linux": "npm run build && electron-builder --linux",
+    "build:ui-preview": "node scripts/build-ui-preview.mjs",
+    "test:ui": "node scripts/check-ui.cjs && node scripts/check-ui-turns.cjs && node scripts/check-ui-standalone.cjs && node scripts/check-ui-motion.cjs && node scripts/check-ui-integration.cjs && node scripts/check-ui-media.cjs",
+    "test:media-runtime": "node scripts/check-media-runtime.cjs"
   },
   "dependencies": {
+    "@napi-rs/canvas": "^1.0.11",
+    "fast-xml-parser": "^5.11.2",
+    "image-size": "^2.0.4",
     "lucide-react": "^0.469.0",
+    "pdfjs-dist": "^6.4.299",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "yaml": "^2.9.1",
+    "yauzl": "^3.4.0",
     "zustand": "^5.0.2"
   },
   "devDependencies": {
@@ -35,6 +43,7 @@
     "@types/node": "^22.10.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
+    "@types/yauzl": "^3.4.0",
     "@vitejs/plugin-react": "^4.7.0",
     "electron": "^41.10.7",
     "electron-builder": "^26.15.3",
@@ -45,12 +54,12 @@
     "tailwindcss": "^4.0.0",
     "typescript": "^5.7.2",
     "vite": "^6.4.4",
-    "vitest": "^2.1.9"
+    "vitest": "^5.0.5"
   },
   "overrides": {
-    "sprintf-js": "^1.1.2"
+    "@electron/get": "^5.1.0"
   },
   "engines": {
-    "node": ">=22.12"
+    "node": ">=22.13"
   }
 }
