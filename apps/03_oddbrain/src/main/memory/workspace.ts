@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { VaultFiles } from '../vault/files'
 import { yamlDocument } from '../vault/text'
 import { excluded, readPatterns } from '../vault/blacklist'
-import { changeMemory, chapterEvidence, staleBasis, mergedProfiles, emptyMemory, parseMemoryProposals, type MemoryAction, type MemorySource, type MemoryWorkspace } from '../../shared/lib/memoryWorkspace'
+import { changeMemory, chapterEvidence, staleBasis, mergedProfiles, emptyMemory, memoryStateProblem, parseMemoryProposals, type MemoryAction, type MemorySource, type MemoryWorkspace } from '../../shared/lib/memoryWorkspace'
 const hash = (s: string): string => createHash('sha256').update(s).digest('hex')
 const STATE = '06 Review/Organizer/state.json'
 const AI = new Set(['oddbrain','chatgpt','claude','gemini','aistudio','deepseek','arena','glm','kimi','grok','qwen','mistral','perplexity','copilot','poe'])
@@ -10,8 +10,10 @@ export function createMemoryWorkspace(files: VaultFiles, clock: () => string = (
   function read(): MemoryWorkspace {
     const raw = files.read(STATE)
     if (!raw) return emptyMemory()
-    const s = JSON.parse(raw)
-    if (s.version !== 1 || !['jobs','proposals','accounts','people','merges','projectionWarnings'].every(k => Array.isArray(s[k])) || !s.preferences || typeof s.preferences.enabled !== 'boolean' || typeof s.preferences.allowExternal !== 'boolean' || typeof s.preferences.model !== 'string' || !Number.isInteger(s.revision)) throw Error('Memory state needs repair. It was not replaced or reset.')
+    let s: MemoryWorkspace
+    try { s = JSON.parse(raw) } catch { throw Error('Memory state is not readable as JSON. It was not replaced or reset.') }
+    const problem = memoryStateProblem(s)
+    if (problem) throw Error(`Memory state needs repair: ${problem}. It was not replaced or reset.`)
     s.discoveryWarnings ||= []
     return s
   }

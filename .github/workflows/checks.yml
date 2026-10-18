@@ -119,6 +119,22 @@ jobs:
       - name: Tests
         working-directory: apps/03_oddbrain
         run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-windows.xml
+      # Windows has no Chromium here, so exactly one test may skip: the browser
+      # fixture. Anything else that starts skipping is a change nobody asked
+      # for, and would otherwise pass as green.
+      - name: Exactly one permitted skip
+        working-directory: apps/03_oddbrain
+        run: |
+          node -e '
+            const xml = require("fs").readFileSync("junit-windows.xml", "utf8");
+            const suites = [...xml.matchAll(/<testsuite name="([^"]+)"[^>]*skipped="(\d+)"/g)].filter(m => Number(m[2]));
+            const total = suites.reduce((n, m) => n + Number(m[2]), 0);
+            if (total !== 1 || suites.length !== 1 || !suites[0][1].endsWith("conversation-runner.test.ts")) {
+              console.error("unexpected skips: " + JSON.stringify(suites.map(m => [m[1], m[2]])));
+              process.exit(1);
+            }
+            console.log("one skip, and it is the browser fixture");
+          '
       - name: Windows speaks
         if: always()
         uses: actions/github-script@v7

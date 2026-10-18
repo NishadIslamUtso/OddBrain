@@ -101,6 +101,63 @@ export function parseMemoryProposals(raw: string, source: MemorySource, evidence
   })
 }
 
+/**
+ * Is this the state this app writes?
+ *
+ * The file is plain JSON in the vault, where anything else with file access can
+ * edit it. Before this check, a record missing its `source` was accepted on the
+ * way in and blew up with a TypeError — a stack trace — the moment somebody
+ * clicked approve. A damaged file should say so in one sentence instead.
+ * Only the fields the code actually reads are required; unknown ones are kept.
+ */
+export function memoryStateProblem(state: unknown): string {
+  const s = state as Record<string, any>
+  if (!s || typeof s !== 'object' || s.version !== 1) return 'it is not a version 1 memory state'
+  if (!Number.isInteger(s.revision) || s.revision < 0) return 'its revision is not a number'
+  for (const key of ['jobs', 'proposals', 'accounts', 'people', 'merges', 'discoveryWarnings', 'projectionWarnings']) {
+    if (!Array.isArray(s[key])) return `its ${key} is not a list`
+  }
+  const p = s.preferences
+  if (!p || typeof p !== 'object' || typeof p.enabled !== 'boolean' || typeof p.allowExternal !== 'boolean' || typeof p.model !== 'string') return 'its preferences are incomplete'
+  const source = (v: any): string => {
+    if (!v || typeof v !== 'object') return 'is missing its source'
+    if (typeof v.id !== 'string' || typeof v.path !== 'string' || typeof v.title !== 'string') return 'has an unreadable source'
+    if (typeof v.provider !== 'string' || typeof v.conversation !== 'string' || typeof v.message !== 'string') return 'has an unreadable source'
+    if (typeof v.role !== 'string' || typeof v.speaker !== 'string' || typeof v.account !== 'string') return 'has an unreadable source'
+    if (typeof v.observed !== 'string' || typeof v.hash !== 'string') return 'has an unreadable source'
+    if (!['people', 'ai', 'classroom', 'confirmed'].includes(String(v.kind))) return 'has an unknown source kind'
+    if (!Number.isFinite(v.start) || !Number.isFinite(v.end) || v.start < 0 || v.end < v.start) return 'has an impossible source range'
+    if (v.basis !== undefined && (!Array.isArray(v.basis) || v.basis.some((b: any) => !b || typeof b.id !== 'string' || !Number.isInteger(b.revision)))) return 'has an unreadable chapter basis'
+    return ''
+  }
+  for (const job of s.jobs) {
+    if (!job || typeof job !== 'object' || typeof job.id !== 'string' || typeof job.error !== 'string') return 'a queued item is unreadable'
+    if (!['queued', 'done', 'blocked'].includes(String(job.state)) || !Number.isInteger(job.attempts)) return 'a queued item is unreadable'
+    if (source(job.source)) return `a queued item ${source(job.source)}`
+  }
+  for (const item of s.proposals) {
+    if (!item || typeof item !== 'object' || typeof item.id !== 'string') return 'an interpretation is unreadable'
+    if (!['profile', 'journal', 'story', 'capsule'].includes(String(item.kind))) return 'an interpretation has an unknown destination'
+    if (!['pending', 'approved', 'rejected'].includes(String(item.state))) return 'an interpretation has an unknown state'
+    if (!Number.isInteger(item.revision) || !Array.isArray(item.history)) return 'an interpretation is unreadable'
+    for (const key of ['subject', 'title', 'text', 'quote', 'date', 'uncertainty', 'model']) if (typeof item[key] !== 'string') return 'an interpretation has a missing field'
+    if (!['ai', 'you'].includes(String(item.authored))) return 'an interpretation has an unknown author'
+    if (source(item.source)) return `an interpretation ${source(item.source)}`
+  }
+  for (const person of s.people) {
+    if (!person || typeof person !== 'object' || typeof person.id !== 'string' || typeof person.name !== 'string' || typeof person.notes !== 'string') return 'a person is unreadable'
+  }
+  for (const account of s.accounts) {
+    if (!account || typeof account !== 'object' || typeof account.id !== 'string' || typeof account.label !== 'string') return 'a linked account is unreadable'
+    if (typeof account.provider !== 'string' || typeof account.scope !== 'string' || !(account.person === null || typeof account.person === 'string')) return 'a linked account is unreadable'
+  }
+  for (const merge of s.merges) {
+    if (!merge || typeof merge !== 'object' || typeof merge.id !== 'string' || typeof merge.from !== 'string' || typeof merge.to !== 'string') return 'a merge record is unreadable'
+    if (!Array.isArray(merge.accounts) || typeof merge.at !== 'string' || typeof merge.undone !== 'boolean') return 'a merge record is unreadable'
+  }
+  return ''
+}
+
 export function staleBasis(source: MemorySource, state: MemoryWorkspace): boolean {
   return !!source.basis?.some(b => !state.proposals.some(p => p.id === b.id && p.revision === b.revision && p.state === 'approved'))
 }
