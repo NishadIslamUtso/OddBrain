@@ -1,104 +1,99 @@
 # Report to the orchestrator
 
 Branch: `arena/495d260c-oddbrain`. Lane: audit and comparison (scanner).
-Baseline: `main` `a6c7807`. Scan #2 written 2026-10-18 12:10 UTC.
-Ruling obeyed: #2 (PASS, add the two columns, keep scans coming, keep grading
-`cc83a507` inventory-only).
+Baseline: `main` `a6c7807`. Written 2026-10-18 12:30 UTC.
+Scan #3 in `BRANCH-COMPARISON.md`.
+
+## Correction first: my stale-count finding was wrong
+
+You adopted it as fleet law, and ruling #3 repeats it on other branches. Please
+read this before it costs a lane.
+
+I counted test files at any depth. The runner counts only
+`tests/*.test.{js,cjs,ts}`; `tests/pending/` never runs. Baseline shows the
+mistake: 102 files on disk at all depths, 99 run, vitest prints **99 files /
+723 tests**.
+
+Recounted correctly:
+
+| Branch | Its claim | Top-level files | Verdict |
+|---|---|---|---|
+| `d3c1ee25` | 114 / 807 | 114 | matches |
+| `ea5c07b0` | 117 / 807 | 118 | one test added after the count |
+| `0bd5478b` | 114 / 808 | 115 | one added after |
+| `6d6aabbf` | 113 / 815 | 113 | matches |
+| `9a3a5c88` | 104 / 749 | 104 | matches |
+| `81a07155` | 112 / 797 | 112 | matches |
+
+**No branch's number contradicts its own run.** The ruling's "your notice says
+114/807 while the tree carries 117 files" compares a run output to a file
+listing that includes three unrun files. The rule "print what the run printed"
+is still right; the evidence I gave for it was not.
 
 ## Top block
 
-**DEAD:** none. Every work branch was pushed inside the last half hour.
-`cc83a507` last pushed at 10:18 UTC and is inventoried only, so it is not
-counted dead.
+**DEAD:** none. All work branches pushed within 30 minutes of the scan.
+`cc83a507` at 10:18 UTC, inventory only.
 
-**COLLISIONS:** six UI branches still overlap 97–113 files pairwise.
-**`9a3a5c88` is now separable:** it shares only 6–13 files with any other
-branch, all plumbing (`package.json`, `main/index.ts`, `App.tsx`, `ChatView`,
-`Composer`, `shared/lib/attachments.ts`, `shared/types.ts`, plus the brief).
-It is the only lane that merges cleanly on top of a chosen UI branch.
+**COLLISIONS:** unchanged. Six UI branches share 97–113 files pairwise.
+`9a3a5c88` stays separable at 6–14.
 
-**HONESTY BREACHES:** still none proven. Drift continues, and one CI state is
-misleading rather than false:
+**HONESTY:** no breach found. The one flag I raised is retracted above.
 
-1. **Stale counts** (tree counts from `git ls-tree`):
-   `d3c1ee25` 114/807 vs 117 files; `ea5c07b0` 117/807 vs 121;
-   `0bd5478b` 114/808 vs 118; `6d6aabbf` 113/815 vs 116;
-   `9a3a5c88` 103/744 vs 106. `81a07155` and `9781cd95` still quote baseline
-   99/723 while holding 115 and 118 files. `cc83a507` states no number.
-2. **`0bd5478b`'s linux job is hung, not failed.** Running since 11:56:37;
-   baseline's whole linux chain takes 67 seconds. The step it added is the
-   renderer check (Playwright install, Vite, `npm run test:ui`). It needs a
-   `timeout-minutes` on that step. Until it resolves, its state is unknown.
-3. **`d3c1ee25`'s new renderer gate has never passed.** Both OS jobs now fail at
-   `Actual renderer checks (fixture limitations recorded)`. Different failure
-   from the last scan.
-4. No branch reintroduces `gemma4:cloud` as a default. Guard comments only.
-5. `9a3a5c88`'s report declares NOT COMPLETE and names its own out-of-lane
-   edits. Honest.
+**CI, step level:** `d3c1ee25` fails its own `Actual renderer checks` on both OS
+(`Renderer server did not become ready`, `verify-renderer.cjs:29`);
+`ea5c07b0` fails windows at `Built media worker`; `9781cd95` moved from linux
+smoke red to windows tests red; `cc83a507` windows tests red; `0bd5478b`'s linux
+job has run 8+ minutes against a 67-second baseline chain.
 
-Full detail: `BRANCH-COMPARISON.md`.
+**New evidence on the renderer step:** I ran `d3c1ee25`'s `verify-renderer.cjs`
+against a local tree. The readiness wait passed and the script entered
+`check-ui.cjs`. Vite 6.4.4 and Vite 7.3.7 both print
+`Local: http://localhost:<port>/` under `--host 0.0.0.0`, so the matcher is not
+version-sensitive. The failure is environmental in that job; its own
+`renderer-server.log` artifact would name it, and I cannot download artifacts
+from this sandbox.
 
-## Gate, run on this tip at 12:07 UTC
+## Gate, from the run just executed (12:25 UTC)
 
 | Step | Result |
 |---|---|
-| `npm ci --ignore-scripts` | exit 0 via the lockfile-verified offline cache (see last report); 479 packages |
-| `node node_modules/electron/install.js` | **failed twice**: default host and `ELECTRON_MIRROR=https://npmmirror.com/mirrors/electron/` both answer `fetch failed`. Neither host is reachable from this sandbox. |
 | `npx tsc --noEmit -p tsconfig.json` | 0 errors |
-| `npx vitest run` | 99 files, 723 tests, all passed (second run; see flake note) |
-| `npm run build` | green, three bundles built |
-| `npm run smoke` | **not run**, needs the missing Electron binary. Left to the orchestrator, as the channel note allows. |
+| `npx vitest run` | **99 files / 723 tests passed** |
+| `npm run build` | green: 720 ms / 21 ms / 2.85 s |
+| `npm run smoke` | not run. Electron install failed twice this session, default host and the mirror tip. |
 
-**Flake, recorded rather than smoothed over:** the first full run this turn was
-`1 failed | 722 passed (723)`, failing
-`tests/watch-fire.test.ts > a real change fires the order once, through the one
-send path; the cooldown holds`. The file then passed alone three times in a row,
-and the full suite passed on re-run. It is a timing-sensitive test in baseline
-code on a loaded sandbox, not branch content. Expect the same in other lanes'
-runs; a single red on that test is not evidence against anybody.
+No flake this run; the suite was clean on the first attempt.
 
 ## CI on this branch
 
-The tip `59190ec` carries 4/4 successful jobs (checks linux and windows,
-installer linux and windows). Earlier tips failed one linux job at two different
-steps on byte-identical content, then passed when the same tree was pushed
-again. CI state for this branch is content-independent noise; the gate table
-above is the real evidence.
+`4143830` carries 4/4 successful jobs. The tip is unchanged since the last
+report; nothing new was pushed before this one.
 
 ## What exists now
 
 | File | Role |
 |---|---|
-| `BRANCH-COMPARISON.md` | Scan #2: status table with the two new columns, 221-id coverage, capability matrix, guard presence, merge risk, method, limits |
+| `BRANCH-COMPARISON.md` | Scan #3, with the correction at the top and the runner-scoped counting rule in Method |
 | `REPORT-TO-ORCHESTRATOR.md` | This file |
-| `00_LIVING_DOCS/SOURCE-ARTIFACTS.md` | Index of uploaded designs, source patch, archives, with SHA-256 |
-| `ODD-BRAIN-BRIEF.md` | The orchestrator's brief and rulings, unchanged |
+| `00_LIVING_DOCS/SOURCE-ARTIFACTS.md` | Designs, patch, archives, checksums |
+| `ODD-BRAIN-BRIEF.md` | Brief and rulings |
 
-`git diff --stat a6c7807 HEAD` lists four Markdown files, 505 lines added, no
-`src/`, no `tests/`, no workflows.
-
-## Ported from session-v2, refused
-
-Nothing ported in this lane, by design. Commits `479d2b2`, `b6373e3`,
-`2da3914`, `ba90a78` carry the earlier session-UI merge; `git diff a6c7807
-ba90a78` still shows it. Refused: any feature code, session-v2's simulation
-code, and the retired `DELIVERY-2026-10-18.md` claim sheet.
+Product diff against baseline: none. Documentation only.
 
 ## Unproven
 
-- Runtime behaviour behind the 221-id coverage. No branch was executed.
-- Test counts per branch. I count files from git, I do not install eight suites.
-- `0bd5478b`'s linux job; still running at scan time.
-- Smoke on my own tip, for the download reason above.
+- Runtime behaviour behind the 221-id coverage; no branch was executed.
+- Per-branch test totals; they are read from reports, not re-run.
+- `0bd5478b`'s linux job, still running at scan time.
+- Smoke here, for the download reason above.
 
-## Collisions with other lanes
+## Question for the ruling
 
-None. This branch touches no product path. The UI branches collide with each
-other, not with this one.
+None that blocks the scan. The correction above is the thing that needs your
+action; it is a retraction of my own finding, not a request.
 
 ## Milestone
 
-Scanner deliverable is current and the ruling's two columns are live.
-Next scan due about 18:10 UTC or on the next sweep, whichever comes first.
-No question needs a ruling, so nothing was filed in
-`QUESTIONS-TO-ORCHESTRATOR.md`.
+Scan #3 is current, the two columns are maintained, and the correction is
+committed with the evidence. Stopping here.
