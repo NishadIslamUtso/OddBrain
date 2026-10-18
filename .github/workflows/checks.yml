@@ -20,9 +20,30 @@ jobs:
       - name: Types
         working-directory: apps/03_oddbrain
         run: npx tsc --noEmit -p tsconfig.json
+      # Installed before the suite runs, so the browser-only test is a real test
+      # here instead of a permanent skip. It reads a page through the real
+      # content reader into a real temporary vault.
+      - name: Browser for the browser-only tests
+        working-directory: apps/03_oddbrain
+        run: |
+          npx playwright-core install --with-deps chromium
+          printf '{"headless":true}\n' > browser-options.json
       - name: Tests
         working-directory: apps/03_oddbrain
+        env:
+          ODDBRAIN_BROWSER_OPTIONS: browser-options.json
         run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-linux.xml
+      # A skipped test passes the step it is in. This makes "green" mean every
+      # test that exists on this OS actually ran.
+      - name: No test may quietly skip
+        working-directory: apps/03_oddbrain
+        run: |
+          node -e '
+            const xml = require("fs").readFileSync("junit-linux.xml", "utf8");
+            const skipped = [...xml.matchAll(/skipped="(\d+)"/g)].reduce((n, m) => n + Number(m[1]), 0);
+            if (skipped) { console.error("skipped tests: " + skipped); process.exit(1); }
+            console.log("no skipped tests");
+          '
       - name: Linux speaks
         if: always()
         uses: actions/github-script@v7
@@ -51,22 +72,8 @@ jobs:
                 });
               }
             }
-      # One test in the suite is browser-only and skips itself without a
-      # configured browser, so it never ran on a push. It reads a real page
-      # through the real content reader into a real temporary vault. Chromium is
-      # cheap on a Linux runner; that turns a permanent skip into a check.
-      - name: Browser for the browser-only test
-        working-directory: apps/03_oddbrain
-        run: |
-          npx playwright-core install --with-deps chromium
-          printf '{"headless":true}\n' > browser-options.json
-      - name: The conversation reader, in a real browser
-        working-directory: apps/03_oddbrain
-        env:
-          ODDBRAIN_BROWSER_OPTIONS: browser-options.json
-        run: npx vitest run tests/conversation-runner.test.ts
       # The extension's popup and companion, against the preview server that
-      # serves the real files. Also browser-only, also never run on a push.
+      # serves the real files. Browser-only, so it never ran on a push before.
       - name: The extension companion, in a real browser
         working-directory: extension
         env:
