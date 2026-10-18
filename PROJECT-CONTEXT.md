@@ -44,12 +44,12 @@ Port the selected desktop UI/UX from `origin/arena/cc83a507-oddbrain` onto the f
 
 **Renderer shell/navigation slice:** committed as `a56a486` on top of `3bfba4e`; documentation follow-up is `cfe79e9`. The slice adds the shared desktop shell styling, horizontal navigation, approval counts, and collapsed-sidebar destinations while preserving the existing send, bridge, and AV contracts. No main-process, preload, shared backend, security, AV decoder, dependency, or lockfile changes were made.
 
-**Build-warning and initial-load follow-up (current uncommitted work):**
+**Build-warning and initial-load follow-up (commit `7721935`):**
 
 - Moved CSS Highlight API rules from `globals.css` to `lib/findHighlightStyles.ts`, injected before React renders, and updated tests to protect both highlight styling and the optimizer-safe CSS source.
 - Lazy-loaded route views, conditional overlays, and `EnginePanel` behind React `Suspense` fallbacks. Motion SVGs now load as per-scene async chunks with caching and in-flight request sharing; motion timing is gated on the asset being ready.
 - The corrected-build reference `origin/clean-build` at `6835309` was reviewed read-only. Its PDF.js Windows font-data path change is outside the renderer-only scope and was not imported. Its documentation deletions were not copied; `PROJECT-CONTEXT.md` remains the one authoritative context file while operational docs are retained.
 - Latest `npm run build:web`: **no CSS Highlight optimizer warnings and no >500 kB chunk advisory**. The web entry JS is **477.36 kB (146.42 kB gzip)**; the PDF chunk is 455.17 kB. Scene assets are emitted separately. `npm test` passed **106 files / 756 tests**; `npm run typecheck`, `npm run build`, `npm run build:web`, and `git diff --check` all passed. Vitest still prints its unrelated Vite CJS Node API deprecation notice.
-- Preview remains on port 5174. Local Electron smoke has not been rerun; the earlier sandbox Electron download failure remains recorded above. CI run `39133252677` passed Linux and Windows for `cfe79e9`, but does not cover this current uncommitted follow-up.
+- Preview remains on port 5174 and returned HTTP 200; a screenshot/visual review has not been completed. Local Electron smoke was not rerun, but CI run `39134392056` passed Linux and Windows, including the Electron smoke step, for `7721935`. The earlier sandbox Electron download failure remains recorded above.
 
-**Next:** visually recheck the live preview, review/commit this build-cleanup slice on the fixed branch, then continue appearance/look preferences and selectable shell layouts. Keep chat/home/composer and graph ports renderer-only and behavior-compatible.
+**Next:** visually recheck the live preview, then continue appearance/look preferences and selectable shell layouts. Keep chat/home/composer and graph ports renderer-only and behavior-compatible.
