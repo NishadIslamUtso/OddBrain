@@ -40,7 +40,7 @@ something you can read, approve, undo, and find again later.
 ## Run it
 
 Requirements: Windows 10/11 x64 for the desktop build; Node.js 22.13 or newer.
-Linux and macOS run the checks, not the product.
+CI runs the same checks on Linux; neither Linux nor macOS is a supported product target.
 
 ```bash
 npm ci            # dependencies exactly as locked
