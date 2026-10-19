@@ -12,6 +12,8 @@ export type SmokeFacts = {
   ready: boolean
   errors: number
   warnings: number
+  /** The window actually became visible, i.e. someone could have seen it. */
+  visible: boolean
   /** The captured frame was empty. */
   blank: boolean
   /** `SCROLL OK`, `SCROLL BROKEN …`, `SCROLL FAILED …`, or the not-run line. */
@@ -20,6 +22,7 @@ export type SmokeFacts = {
 
 export function smokeFailure(facts: SmokeFacts): string {
   if (!facts.ready) return 'the interface did not reach a painted, mounted state within 8s'
+  if (!facts.visible) return 'the window never became visible'
   if (facts.blank) return 'the window photographed blank after four attempts'
   if (facts.scrollLine.startsWith('SCROLL BROKEN')) return `the message list did not scroll (${facts.scrollLine})`
   if (facts.scrollLine.startsWith('SCROLL FAILED')) return `the scroll probe could not run (${facts.scrollLine})`

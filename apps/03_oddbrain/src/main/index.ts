@@ -1823,6 +1823,25 @@ function createWindow(): BrowserWindow {
   return window
 }
 
+/**
+ * Wait until the window is really visible, asking for it explicitly.
+ *
+ * `show: false` plus `show()` on `ready-to-show` is right for the app: no white
+ * flash. But a hidden window photographs as an empty image, and `ready-to-show`
+ * is an event about painting, not a promise about the compositor. In the smoke
+ * run the window must be visible before the frame is captured, because that is
+ * exactly what this run claims to prove.
+ */
+async function waitForVisible(window: BrowserWindow, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    if (window.isVisible()) return true
+    window.show()
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  return window.isVisible()
+}
+
 /** Poll the renderer until it says it is on screen, or give up. */
 async function waitForRenderer(window: BrowserWindow, timeoutMs: number): Promise<boolean> {
   const deadline = Date.now() + timeoutMs
@@ -1879,10 +1898,13 @@ function runSmoke(window: BrowserWindow): void {
             scrollLine = `SCROLL FAILED ${(probeError as Error).message}`
           }
         }
-        // A frame can be blank while it is still painting; a blank after three
-        // tries, 250 ms apart, is real.
+        // A hidden window captures as an empty image, so prove it is visible
+        // first. Then, for a frame that is still painting, ask for a repaint and
+        // capture again; a blank after four tries is real.
+        const visible = await waitForVisible(window, 4000)
         let image = await window.webContents.capturePage()
         for (let attempt = 1; attempt <= 3 && image.isEmpty(); attempt += 1) {
+          window.webContents.invalidate()
           await new Promise(resolve => setTimeout(resolve, 250))
           image = await window.webContents.capturePage()
         }
@@ -1891,16 +1913,18 @@ function runSmoke(window: BrowserWindow): void {
         const title = window.getTitle()
         const blank = image.isEmpty()
         console.log(
-          `SMOKE ${blank ? 'BLANK' : 'OK'} ready=${ready ? 'yes' : 'no'} ${scrollLine} title="${title}" size=${bounds.width}x${bounds.height} ` +
+          `SMOKE ${blank ? 'BLANK' : 'OK'} ready=${ready ? 'yes' : 'no'} visible=${visible ? 'yes' : 'no'} ${scrollLine} title="${title}" size=${bounds.width}x${bounds.height} ` +
             `in ${Date.now() - started}ms errors=${consoleErrors.length} warnings=${consoleWarnings.length}`
         )
         for (const line of consoleErrors.slice(0, 10)) console.log(`  ERROR: ${line}`)
         for (const line of consoleWarnings.slice(0, 10)) console.log(`  WARN:  ${line}`)
         if (!ready) console.log('  ERROR: the renderer never reached readyState complete with the shell mounted')
+        if (!visible) console.log('  ERROR: the window never became visible, so nothing could be photographed')
         // The rule the owner set: a WARNING is already a failure. The smoke
         // run is the console-clean gate, so it enforces the whole sentence.
         const reason = smokeFailure({
           ready,
+          visible,
           errors: consoleErrors.length,
           warnings: consoleWarnings.length,
           blank,

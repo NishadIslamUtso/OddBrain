@@ -156,11 +156,14 @@ here is a plan.
   two-character escape; the test that passes a NUL entry name still passes.
 - The native smoke run no longer waits a fixed 1.5 seconds for a window to
   paint. It polls (bounded at 8 s) for `readyState === 'complete'` with the
-  shell mounted, retries a blank frame up to four captures, and its verdict
-  lives in `src/main/smoke.ts` with tests instead of one boolean expression.
-  Every failure now names its cause in one sentence, and the workflow copies
-  those lines into the check annotations, so the reason is readable from the
-  API even when the artifact cannot be downloaded.
+  shell mounted, **proves the window is visible** before photographing it
+  (a hidden window captures as an empty image — the actual cause reported by
+  the first run that could speak: `SMOKE BLANK ready=yes … errors=0
+  warnings=0`), asks for a repaint and retries a blank frame up to four
+  captures, and its verdict lives in `src/main/smoke.ts` with tests instead of
+  one boolean expression. Every failure now names its cause in one sentence,
+  and the workflow copies those lines into the check annotations, so the reason
+  is readable from the API even when the artifact cannot be downloaded.
 - Repository health checked, not assumed: `git fsck --full --strict` clean (one
   dangling commit is the owner's tip kept in the object store), all three packs
   verify, the index matches HEAD, no case-insensitive path collisions, no

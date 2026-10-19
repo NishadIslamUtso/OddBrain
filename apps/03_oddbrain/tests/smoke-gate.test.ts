@@ -11,6 +11,7 @@ import { smokeFailure } from '../src/main/smoke'
 
 const passed = {
   ready: true,
+  visible: true,
   errors: 0,
   warnings: 0,
   blank: false,
@@ -25,6 +26,10 @@ test('every way the window can fail names itself in words', () => {
   assert.equal(
     smokeFailure({ ...passed, ready: false, scrollLine: 'SCROLL not run: the interface was not on screen within 8s' }),
     'the interface did not reach a painted, mounted state within 8s'
+  )
+  assert.equal(
+    smokeFailure({ ...passed, visible: false }),
+    'the window never became visible'
   )
   assert.equal(smokeFailure({ ...passed, blank: true }), 'the window photographed blank after four attempts')
   assert.equal(
@@ -53,11 +58,15 @@ test('a scroll proof that did not run is not a pass either', () => {
 
 test('the first thing that went wrong is the reason, not the last', () => {
   assert.equal(
-    smokeFailure({ ready: false, blank: true, errors: 4, warnings: 2, scrollLine: 'SCROLL skipped' }),
+    smokeFailure({ ready: false, visible: false, blank: true, errors: 4, warnings: 2, scrollLine: 'SCROLL skipped' }),
     'the interface did not reach a painted, mounted state within 8s'
   )
   assert.equal(
     smokeFailure({ ...passed, blank: true, errors: 4, warnings: 2 }),
     'the window photographed blank after four attempts'
+  )
+  assert.equal(
+    smokeFailure({ ...passed, visible: false, blank: true, errors: 4 }),
+    'the window never became visible'
   )
 })
