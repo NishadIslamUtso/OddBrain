@@ -1,3 +1,4 @@
+import type { McpReview } from '@shared/lib/mcpReview'
 import EngineStoreSource from './EngineStoreSource'
 import { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
@@ -30,6 +31,7 @@ function SharedMcpServersSection(): React.JSX.Element {
   const [url, setUrl] = useState('')
   const [note, setNote] = useState('')
   const [problem, setProblem] = useState('')
+  const [review, setReview] = useState<{ preview: McpReview; next: McpServerEntry[] } | null>(null)
   const [busy, setBusy] = useState(false)
 
   // The labelled sample is browser storage, and says so on every save. Anything
@@ -50,12 +52,10 @@ function SharedMcpServersSection(): React.JSX.Element {
   const save = async (next: McpServerEntry[]): Promise<boolean> => {
     setBusy(true); setNote('')
     try {
-      const reply = await bridge.mcp.write(next)
-      setNote(reply.answer)
-      if (reply.ok) { setServers(next); return true }
-      return false
+      if (sample) { const reply = await bridge.mcp.write(next); setNote(reply.answer); if (reply.ok) { setServers(next); return true }; return false }
+      const preview = await bridge.mcp.preview(next); setReview({ preview, next }); return false
     } catch {
-      setNote('The tool server list was not written. Nothing changed.')
+      setNote('The connector changes could not be prepared. No files changed.')
       return false
     } finally { setBusy(false) }
   }
@@ -77,9 +77,7 @@ function SharedMcpServersSection(): React.JSX.Element {
     <section className="ob-connector-row" aria-label="Tool servers (MCP)">
       <header><h3>Tool servers</h3><span>{servers.length ? `${servers.length} listed` : 'None listed'}</span></header>
       <p className="ob-control-scope">
-        One MCP list, written into both engines' own config files. A local server is a program an engine
-        will start when it uses a tool; add only what you trust. Tool calls still meet the engine's
-        permission cards.
+        Review exact file changes before saving. Native engines may start local server programs or contact remote servers as soon as they reload configuration. Tool approval rules do not sandbox server startup. Authentication and successful use are checked separately.
       </p>
       {!loaded ? <p className="ob-control-scope">Reading the list…</p> : servers.length ? (
         <ul className="mt-1 divide-y divide-line">
@@ -89,7 +87,7 @@ function SharedMcpServersSection(): React.JSX.Element {
                 <strong>{server.name}</strong>
                 <code className="block truncate text-[11px] text-muted" title={describeMcpServer(server)}>{describeMcpServer(server)}</code>
               </span>
-              <button type="button" disabled={busy || (isDemo && !sample)} aria-label={`Remove ${server.name}`} title={`Remove ${server.name}`}
+              <button type="button" disabled={busy || !!review || (isDemo && !sample)} aria-label={`Remove ${server.name}`} title={`Remove ${server.name}`}
                 onClick={() => void save(servers.filter((entry) => entry.name !== server.name))}>
                 <Trash2 size={12} />
               </button>
@@ -108,15 +106,16 @@ function SharedMcpServersSection(): React.JSX.Element {
         {kind === 'stdio' ? (
           <>
             <input aria-label="Command" placeholder="command, e.g. npx" value={command} onChange={(event) => setCommand(event.target.value)} />
-            <input aria-label="Arguments" placeholder="arguments, e.g. -y some-mcp-server@latest" value={args} onChange={(event) => setArgs(event.target.value)} />
+            <input aria-label="Arguments" placeholder="arguments, e.g. --yes package-name@exact-version" value={args} onChange={(event) => setArgs(event.target.value)} />
           </>
         ) : (
           <input aria-label="Server URL" placeholder="https://example.com/mcp" value={url} onChange={(event) => setUrl(event.target.value)} />
         )}
         <div className="ob-inline-actions">
-          <button type="button" disabled={busy || (isDemo && !sample) || !name.trim()} onClick={() => void add()}>Add server</button>
+          <button type="button" disabled={busy || !!review || (isDemo && !sample) || !name.trim()} onClick={() => void add()}>Add server</button>
         </div>
       </div>
+      {review && <section aria-label="Review connector configuration"><h4>Review connector configuration</h4><p>{review.preview.explanation}</p><p>These diffs can contain private native settings. They are not sent to a provider.</p>{review.preview.changes.map(file => <details key={file.path} open><summary>{file.path}</summary><pre className="whitespace-pre-wrap break-words">{file.diff}</pre></details>)}{(['deny', 'allow'] as const).map(decision => <button key={decision} type="button" disabled={busy} onClick={() => { setBusy(true); void bridge.mcp.decide(review.preview.token, decision).then(reply => { setNote(reply.answer); if (reply.ok && decision === 'allow') { setServers(review.next); setName(''); setCommand(''); setArgs(''); setUrl('') }; setReview(null) }).catch(() => { setReview(null); setNote('The configuration decision could not be confirmed. Reload the list before retrying.') }).finally(() => setBusy(false)) }}>{decision === 'allow' ? 'Allow these file changes once' : 'Deny changes'}</button>)}</section>}
       {problem ? <p role="status" className="ob-control-scope text-warn">{problem}</p> : null}
       {sample ? <p className="ob-control-scope">Sample workspace: this list is browser storage and is never written into an engine config.</p> : null}
       {isDemo && !sample ? <p className="ob-control-scope">Reading and writing tool servers needs the desktop app.</p> : null}

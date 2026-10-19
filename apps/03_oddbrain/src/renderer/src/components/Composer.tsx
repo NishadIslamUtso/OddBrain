@@ -1,3 +1,5 @@
+import PromptEditor from '../ui/PromptEditor'
+import { draftLease, replaceDraft, looksLikeNativeSlashCommand } from '@shared/lib/chatDraft'
 import { insertFileMentions } from '@shared/lib/fileMentions'
 import SavedDrafts from '../ui/SavedDrafts'
 import { AGY_APPROVAL_CHOICES, AGY_APPROVAL_NOTE } from '@shared/lib/engineApproval'
@@ -37,6 +39,7 @@ import { LookActions, useLook } from '../ui/LookContext'
  */
 export default function Composer({
   value,
+  draftScope = 'unscoped',
   onChange,
   onSend,
   onStop,
@@ -53,6 +56,7 @@ export default function Composer({
   onDetach,
 }: {
   value: string
+  draftScope?: string
   onChange: (value: string) => void
   onSend: () => void
   onStop: () => void
@@ -73,18 +77,26 @@ export default function Composer({
   const box = useRef<HTMLTextAreaElement | null>(null)
   const [boxOpen, setBoxOpen] = useState<'engine' | 'models' | null>(null)
   const [cook, setCook] = useState(false)
+  const [editor, setEditor] = useState<{ scope: string; text: string } | null>(null)
+  const cookBase = useRef({ scope: draftScope, text: value })
+  const lease = useRef(draftLease()), picking = useRef(false), currentScope = useRef(draftScope)
+  if (currentScope.current !== draftScope) { currentScope.current = draftScope; lease.current.invalidate() }
+  useEffect(() => { if (busy) lease.current.invalidate() }, [busy])
+  const sendDraft = () => { if (looksLikeNativeSlashCommand(liveDraft.current)) { setFileNote('Native slash commands need a verified engine action. Choose a saved prompt template or use the engine’s supported controls; nothing was sent.'); return }; lease.current.invalidate(); onSend() }
   const [savedDrafts, setSavedDrafts] = useState(false)
   const [fileNote, setFileNote] = useState(''), [pickingFiles, setPickingFiles] = useState(false)
   const liveDraft = useRef(value); liveDraft.current = value
   const mounted = useRef(true)
-  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; lease.current.invalidate() } }, [])
   const mentionFiles = async () => {
     if (isDemo) { setFileNote('File references require the desktop picker. No paths or files were sent.'); return }
-    if (pickingFiles) return
+    if (picking.current) return
+    picking.current = true
+    const request = lease.current.begin()
     setPickingFiles(true)
-    try { const paths = await bridge.engine.pickFiles(); if (mounted.current && paths.length) { onChange(insertFileMentions(liveDraft.current, paths)); setFileNote('Paths inserted, not file contents. The engine uses its own tools and permissions when you send.') } }
-    catch (e) { if (mounted.current) setFileNote((e as Error).message || 'Files could not be selected.') }
-    finally { if (mounted.current) setPickingFiles(false) }
+    try { const paths = await bridge.engine.pickFiles(); if (mounted.current && lease.current.current(request) && paths.length) { onChange(insertFileMentions(liveDraft.current, paths)); setFileNote('Paths inserted, not file contents. The engine uses its own tools and permissions when you send.') } }
+    catch (e) { if (mounted.current && lease.current.current(request)) setFileNote((e as Error).message || 'Files could not be selected.') }
+    finally { picking.current = false; if (mounted.current) setPickingFiles(false) }
   }
   const [tools, setTools] = useState(false)
   const toolsRef = useRef<HTMLDivElement | null>(null)
@@ -123,6 +135,9 @@ export default function Composer({
   }
 
   const keydown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.nativeEvent.isComposing) return
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'e') { event.preventDefault(); setEditor({ scope: draftScope, text: value }); return }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 's') { event.preventDefault(); setSavedDrafts(true); return }
     if (slashOpen && ['ArrowDown', 'ArrowUp', 'Escape', 'Tab', 'Enter'].includes(event.key)) {
       event.preventDefault()
       if (event.key === 'Escape') setSlashDismissed(true)
@@ -132,7 +147,7 @@ export default function Composer({
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      if (canSend) onSend()
+      if (canSend) sendDraft()
       return
     }
     if (event.key === 'Escape') {
@@ -222,7 +237,8 @@ export default function Composer({
               <button type="button" disabled={listening || pickingFiles} onClick={() => { void mentionFiles(); setTools(false) }}><Paperclip size={14} />Mention files</button>
               <button type="button" disabled={listening} onClick={() => { setSavedDrafts(true); setTools(false) }}><ScrollText size={14} />Saved drafts</button>
               <MapButton onInsert={map => onChange(value.trim() ? `${value.trimEnd()}\n\n${map}\n` : `${map}\n`)} />
-              <button type="button" disabled={!value.trim() || busy} onClick={() => { setCook(true); setTools(false) }}><CookingPot size={14} />Cook context</button>
+              <button type="button" onClick={() => { setEditor({ scope: draftScope, text: value }); setTools(false) }}>Edit prompt text · Ctrl+Shift+E</button>
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { cookBase.current = { scope: draftScope, text: value }; setCook(true); setTools(false) }}><CookingPot size={14} />Cook context</button>
               <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:battle', { detail: value })); setTools(false) }}><Swords size={14} />Brain battle</button>
               <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:split', { detail: value })); setTools(false) }}><ListOrdered size={14} />Split a task</button>
               <button type="button" aria-pressed={look.showThinking} title="Only shows thinking supplied by the engine. This does not change reasoning effort or request an explanation." onClick={() => changeLook({ showThinking: !look.showThinking })}><ScrollText size={14} />Show thinking<span>{look.showThinking ? 'On' : 'Off'}</span></button>
@@ -244,7 +260,7 @@ export default function Composer({
             ) : null}
             <button
               type="button"
-              onClick={onSend}
+              onClick={sendDraft}
               disabled={!canSend}
               aria-label="Send"
               title="Send (Enter)"
@@ -257,9 +273,11 @@ export default function Composer({
           </span>
         </div>
       </ComposerSurface>
-      {savedDrafts ? <SavedDrafts draft={value} insert={text => onChange(value ? `${value}\n\n${text}` : text)} close={() => setSavedDrafts(false)} /> : null}
-      {cook ? <CookDialog draft={value} onDone={next => { if (next !== null) onChange(next); setCook(false) }} /> : null}
+      {editor ? <PromptEditor initial={editor.text} apply={text => onChange(replaceDraft({ scope: currentScope.current, text: liveDraft.current }, editor, text))} close={() => setEditor(null)} /> : null}
+      {savedDrafts ? <SavedDrafts draft={value} insert={text => onChange(liveDraft.current ? `${liveDraft.current}\n\n${text}` : text)} close={() => setSavedDrafts(false)} /> : null}
+      {cook ? <CookDialog draft={value} onDone={next => { if (next !== null) { try { onChange(replaceDraft({ scope: currentScope.current, text: liveDraft.current }, cookBase.current, next)) } catch { setFileNote('Cook result was not inserted because the draft changed. Reopen Cook context for the current draft; your draft and attachments are unchanged.') } } setCook(false) }} /> : null}
       {preview ? <p className="px-1 pt-2 text-[12px] text-muted">{preview}</p> : null}
+      {looksLikeNativeSlashCommand(value) && !slashOpen ? <p className="ob-control-scope">Native slash commands cannot be sent as ordinary prompts. Use a verified engine action.</p> : null}
       {fileNote ? <p role="status" className="px-1 pt-2 text-[12px] text-muted">{fileNote}</p> : null}
       {notice ? <p className="px-1 pt-2 text-[12px] text-warn">{notice}</p> : null}
     </div>

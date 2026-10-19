@@ -51,7 +51,7 @@ export function scopeBoard<T extends { workspace: string }, TDone extends { work
 }
 
 export const MAX_LINKED_FILES = 24
-export const MAX_DONE_CARDS = 40
+export const MAX_DONE_CARDS = 4000
 
 const cleanWorkspace = (value: unknown): string => {
   if (typeof value !== 'string') return ''
@@ -84,7 +84,7 @@ export function normalizeBoard(value: unknown): SessionsBoard {
       const files = (entry as { files?: unknown })?.files
       if (!Array.isArray(files)) continue
       const clean: string[] = []
-      for (const path of files.slice(0, MAX_LINKED_FILES)) {
+      for (const path of files) {
         const ok = cleanPath(path)
         if (ok && !clean.includes(ok)) clean.push(ok)
       }
@@ -92,10 +92,10 @@ export function normalizeBoard(value: unknown): SessionsBoard {
     }
   }
   if (Array.isArray(record['done'])) {
-    for (const entry of (record['done'] as unknown[]).slice(0, MAX_DONE_CARDS)) {
+    for (const entry of record['done'] as unknown[]) {
       const card = (entry ?? {}) as Record<string, unknown>
       const workspace = cleanWorkspace(card['workspace'])
-      const sessionId = typeof card['sessionId'] === 'string' ? card['sessionId'].slice(0, 128) : ''
+      const sessionId = typeof card['sessionId'] === 'string' ? card['sessionId'] : ''
       if (!workspace || !sessionId) continue
       out.done.push({ workspace, sessionId, endedAt: typeof card['endedAt'] === 'string' ? card['endedAt'].slice(0, 40) : '' })
     }
@@ -116,7 +116,8 @@ export function linkFiles(
   let added = 0
   for (const path of paths) {
     const clean = cleanPath(path)
-    if (!clean || next.includes(clean) || next.length >= MAX_LINKED_FILES) continue
+    if (!clean || next.includes(clean)) continue
+    if (next.length >= MAX_LINKED_FILES) throw Error(`A thread supports ${MAX_LINKED_FILES} linked files. Nothing was added; choose fewer files.`)
     next.push(clean)
     added += 1
   }
@@ -133,12 +134,14 @@ export function unlinkFile(board: SessionsBoard, workspace: string, path: string
 /**
  * A thread is done: the engine must forget the resume id (the caller does
  * that through the engine door — this only moves the card), and the card
- * stays as history. Dropping the oldest history when the pile grows.
+ * stays as history. Capacity refuses a new entry rather than evicting an old one.
  */
 export function markDone(board: SessionsBoard, workspace: string, sessionId: string, endedAt: string): SessionsBoard {
   const key = cleanWorkspace(workspace)
   if (!key || !sessionId) return board
-  const done = [{ workspace: key, sessionId, endedAt }, ...board.done.filter(card => card.workspace !== key)].slice(0, MAX_DONE_CARDS)
+  const older = board.done.filter(card => card.workspace !== key || card.sessionId !== sessionId)
+  if (older.length >= MAX_DONE_CARDS) throw Error('Session board capacity reached. No IDs were forgotten; export or explicitly remove older cards first.')
+  const done = [{ workspace: key, sessionId, endedAt }, ...older]
   const continuing = { ...board.continuing }
   delete continuing[key]
   return { continuing, done }

@@ -14,7 +14,7 @@ test('real storage creation failure refuses before any engine send', () => {
 test('a mid-stream recording failure requests stop and never forwards subsequent false success', () => {
  const archive={begin:vi.fn(()=> 'id'),append:vi.fn(()=>{throw Error('Disk full; engine stop requested')})},stop=vi.fn(),receive=vi.fn()
  const answer=dispatchRecordedTurn(archive,input,forward=>{forward({kind:'delta',text:'cannot persist'});forward({kind:'done',text:'false success'});return{ok:true,answer:'started'}},stop,receive)
- expect(answer.ok).toBe(false);expect(stop).toHaveBeenCalled();expect(receive.mock.calls).toEqual([[{kind:'error',text:'Disk full; engine stop requested'}]])
+ expect(answer.ok).toBe(false);expect(stop).toHaveBeenCalled();expect(receive.mock.calls).toEqual([[{kind:'error',text:'Disk full; engine stop requested',transcriptId:'id'}]])
 })
 test('native refusal and synchronous dispatch exceptions retain error records without inventing completion', () => {
  for(const throws of [false,true]) {const archive={begin:vi.fn(()=> 'id'),append:vi.fn()},stop=vi.fn()

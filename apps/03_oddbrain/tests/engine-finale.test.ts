@@ -1,3 +1,5 @@
+import { bridge } from '../src/renderer/src/platform/bridge'
+import type { WorkQueueItem } from '../src/shared/lib/workQueue'
 import { effortTarget } from '../src/shared/lib/engineCapabilities'
 // @vitest-environment jsdom
 import test from 'node:test'
@@ -110,6 +112,8 @@ type CoreFake = {
 }
 
 function withCoreFake(): CoreFake {
+  let queued: WorkQueueItem[] = []; let serial = 0
+  bridge.engine.queue = { read: async () => [...queued], enqueue: async prompt => { queued.push({ id: String(++serial), prompt, status: 'queued', eligible: true, notice: '', route: '', at: new Date().toISOString() }); return [...queued] }, cancel: async id => { queued = queued.filter(q => q.id !== id); return [...queued] }, resume: async () => [...queued], hold: async id => { queued = queued.map(q => q.id === id ? { ...q, status: 'blocked', eligible: false } : q) }, history: async () => ({ items: [], next: '' }) }
   const fake: CoreFake = { listener: null, sent: [], journalKept: [], thinking: null, usage: { inTokens: 100, outTokens: 50, durationMs: 300, costUsd: 0.002 }, busyHold: false }
   ;(window as unknown as Record<string, unknown>).api = {}
   ;(window as unknown as Record<string, unknown>).engineApi = {
@@ -125,7 +129,8 @@ function withCoreFake(): CoreFake {
       fake.thinking = mode
       return { ok: true, answer: mode }
     },
-    send: async (prompt: string) => {
+    send: async (prompt: string, _cwd: string, _pictures: unknown, _context: unknown, queuedId?: string) => {
+      if (queuedId) queued = queued.filter(q => q.id !== queuedId)
       fake.sent.push(prompt)
       if (!fake.busyHold) {
         setTimeout(() => {
@@ -190,11 +195,11 @@ test('the line: busy sends park, drain in order when the engine frees, holds sto
   resetEngineForTests()
   const store = engineStore()
   await store.send('the running task')
-  const one = store.enqueue('parked one')
-  const two = store.enqueue('parked two')
+  await store.enqueue('parked one'); const one = store.line[0]
+  await store.enqueue('parked two')
   assert.equal(store.line.length, 2)
   assert.equal(fake.sent.length, 1, 'parked work orders are not sent while the engine works')
-  store.removeFromLine(one.id)
+  await store.removeFromLine(one.id)
   assert.equal(store.line.length, 1)
   assert.equal(store.line[0]?.prompt, 'parked two')
   // Hold: a sequencer is driving; the line must not jump in between its steps.

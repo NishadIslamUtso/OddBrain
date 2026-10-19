@@ -54,13 +54,18 @@ test('the code screen reads the real threads and clears them for real', async ()
   assert.equal(store.settings.approval, 'ask')
 })
 
-test('the code screen opens from its project, wired to the real doors', () => {
+test('Projects preserves the real session controls while Code routes are retired', () => {
   const read = (relative: string): string => readFileSync(`${process.cwd()}/${relative}`, 'utf8')
   // His pick (2026-10-16): Code lives inside Projects — not a global nav item.
   const nav = read('src/renderer/src/components/AppNav.tsx')
   const projects = read('src/renderer/src/components/ProjectsView.tsx')
-  assert.match(projects, /onViewBoard/)
-  const view = read('src/renderer/src/components/CodeView.tsx')
+  assert.match(projects, /ProjectSessions/)
+  assert.ok(!nav.includes("id: 'code'"))
+  const app = read('src/renderer/src/App.tsx')
+  assert.match(app, /resolveSavedView/)
+  assert.match(app, /migrateHistoryLocation/)
+  assert.ok(!app.includes('<CodeView'))
+  const view = read('src/renderer/src/components/ProjectSessions.tsx')
   assert.match(view, /engine\s*\.\s*sessions\(\)/)
   assert.match(view, /forgetSession/)
   assert.match(view, /Back to the vault/)

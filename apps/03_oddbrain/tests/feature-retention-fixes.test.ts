@@ -17,7 +17,7 @@ test('trash recovery preserves title, content and every stored version, without 
     const restored = restoreTrash(root, trash.items[0].key);expect(restored.ok).toBe(true)
     if (!restored.ok) throw Error(restored.error)
     expect(restored.item.id).not.toBe('test-art');expect(restored.item.versionCount).toBe(2);expect(restored.item.title).toBe('Original title')
-    const old = read(root, restored.item.id, 0), current = read(root, restored.item.id), active = read(root, 'test-art')
+    const old = read(root, restored.item.id, 1), current = read(root, restored.item.id), active = read(root, 'test-art')
     expect(old.ok && old.content).toBe('<h1>one</h1>');expect(current.ok && current.content).toBe('<h1>two</h1>');expect(active.ok && active.content).toBe('<p>do not overwrite</p>')
     expect(listTrash(root).items).toHaveLength(0)
   } finally { rmSync(root, { recursive: true, force: true }) }

@@ -73,6 +73,7 @@ export type Citation = { id: string; url: string; label: string }
 export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error'
 
 export type Message = {
+  nativeRecord?: { pictures?: number; artifacts?: import('./lib/nativeArtifacts').NativeArtifactLink[]; transcriptId: string; chatId: string; engine: 'claude-code' | 'agy'; sessionId: string | null; context?: import('./lib/nativeConversation').ContextReceipt }
   id: string
   role: Role
   content: string

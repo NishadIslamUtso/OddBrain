@@ -26,14 +26,14 @@ for(const [button,dialog] of [['Compare looks','Compare appearance'],['Taste qui
 await p.setViewportSize({width:940,height:620});await p.getByRole('button',{name:'Reset appearance',exact:true}).click();await tab('Layout');
 for(let i=0;i<8;i++){
  await p.locator('.ob-layout-choice').nth(i).click();await p.getByRole('button',{name:'Try in workspace',exact:true}).click();
- for(const view of ['Chat','Artifacts','Today','Projects','Vault','Brain','Code']){
+ for(const view of ['Chat','Artifacts','Today','Projects','Vault','Brain']){
   await p.keyboard.press('Control+k');await p.getByRole('combobox',{name:'Search everything',exact:true}).fill(view);await p.locator('.ob-command-results>button').filter({hasText:new RegExp('^'+view)}).first().click();await p.waitForTimeout(35);
   const g=await p.evaluate(()=>{const m=document.querySelector('.ob-shell-content');return {layout:document.documentElement.dataset.obLayout,root:document.documentElement.scrollWidth,main:m.clientWidth,scroll:m.scrollWidth,viewport:innerWidth,view:JSON.parse(localStorage.getItem('ai-assistant.view'))};});r.geometry.push(g);assert(g.root<=942&&g.scroll<=g.main+2,JSON.stringify(g));
   if(view==='Chat'){const send=p.getByRole('button',{name:'Send',exact:true});const bb=await send.boundingBox();assert(bb&&bb.x+bb.width<=942&&bb.y+bb.height<=622);}
  }
  await setting('Appearance');await tab('Layout');
 }
-r.checks.push('All eight real layouts × seven native screens at 940×620, no detected horizontal overflow/clipped send');
+r.checks.push('All eight real layouts × six active screens at 940×620, no detected horizontal overflow/clipped send');
 await p.setViewportSize({width:1440,height:900});await p.getByRole('button',{name:'Reset appearance',exact:true}).click();await p.getByRole('button',{name:'Try in workspace',exact:true}).click();await p.screenshot({timeout:30000,animations:'disabled',path:path.join(QA,'app-final-home.png')});await setting('Appearance');await tab('Details');await p.screenshot({timeout:30000,animations:'disabled',path:path.join(QA,'app-final-appearance.png')});
 assert.equal(r.errors.length,0);assert.equal(r.consoleErrors.length,0);assert.equal(r.unexpectedRequests.length,0);
 }catch(e){r.failure=e.stack;console.error(e.stack);process.exitCode=1;}finally{fs.writeFileSync(path.join(QA,'app-acceptance-results.json'),JSON.stringify(r,null,2));console.log(JSON.stringify(r,null,2));await b.close()}})();

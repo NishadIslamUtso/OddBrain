@@ -1,5 +1,7 @@
+import type { CatalogSkillReview } from '@shared/lib/installedSkills'
+import NativeSkills from './NativeSkills'
 import EngineStoreSource from './EngineStoreSource'
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Check, Download } from 'lucide-react'
 import { SKILL_CATALOG } from '@shared/lib/skillCatalog'
 import { bridge, isDemo } from '@/platform/bridge'
@@ -14,18 +16,18 @@ import { bridge, isDemo } from '@/platform/bridge'
  */
 function SharedSkillsCatalogSection() {
   const [installed, setInstalled] = useState<Record<string, { ok: boolean; answer: string }>>({})
+  const [review, setReview] = useState<CatalogSkillReview | null>(null)
+  const alive = useRef(true)
+  useEffect(() => { alive.current = true; return () => { alive.current = false; void bridge.skills.cancelCatalog?.().catch(() => {}) } }, [])
   const [busy, setBusy] = useState('')
 
   const install = (name: string): void => {
     if (busy) return
     setBusy(name)
-    void bridge.skills
-      .installCatalog(name)
-      .then((answer) => {
-        setInstalled((previous) => ({ ...previous, [name]: { ok: answer.ok, answer: answer.answer } }))
-      })
-      .catch(() => setInstalled(previous => ({ ...previous, [name]: { ok: false, answer: 'Installation failed. Check the connection and try again.' } })))
-      .finally(() => setBusy(''))
+    void Promise.resolve().then(() => bridge.skills.planCatalog(name))
+      .then(reply => { if (alive.current) setReview(reply) })
+      .catch(error => { if (alive.current) setInstalled(previous => ({ ...previous, [name]: { ok: false, answer: (error as Error).message || 'Installation inspection failed. Nothing was installed.' } })) })
+      .finally(() => { if (alive.current) setBusy('') })
   }
 
   return (
@@ -38,6 +40,7 @@ function SharedSkillsCatalogSection() {
       {isDemo ? (
         <p className="text-[12px] text-muted">This preview cannot reach the machine, the real app installs from here.</p>
       ) : null}
+      {review && <section aria-label="Review skill installation"><h4>{review.name}: pinned installation review</h4><p>{review.notice}</p><p>Revision: <code>{review.revision}</code></p><p>Destinations: {review.destinations.join(' · ')}</p><details open><summary>Complete manifest</summary><pre className="whitespace-pre-wrap break-words">{review.manifest}</pre></details>{review.requirements?.map(file => <details key={file.path}><summary>Declared requirements: {file.path}</summary><pre className="whitespace-pre-wrap break-words">{file.text}</pre></details>)}{review.unread?.map(note => <p key={note}>{note}</p>)}<details><summary>All package files ({review.files.length})</summary><ul>{review.files.map(file => <li key={file}>{file}</li>)}</ul></details>{(['deny', 'allow'] as const).map(decision => <button type="button" key={decision} disabled={!!busy} onClick={() => { setBusy(review.name); void bridge.skills.decideCatalog(review.token, decision).then(answer => { if (!alive.current) return; setInstalled(previous => ({ ...previous, [review.name]: { ok: answer.ok && decision === 'allow', answer: answer.answer } })); setReview(null) }).catch(() => { if (alive.current) { setInstalled(previous => ({ ...previous, [review.name]: { ok: false, answer: 'The installation result could not be confirmed. Inspect installed files before retrying.' } })); setReview(null) } }).finally(() => { if (alive.current) setBusy('') }) }}>{decision === 'allow' ? 'Allow pinned installation' : 'Deny installation'}</button>)}</section>}
       <ul className="flex flex-col gap-1.5">
         {SKILL_CATALOG.map((skill) => {
           const result = installed[skill.name]
@@ -52,7 +55,7 @@ function SharedSkillsCatalogSection() {
               <button
                 type="button"
                 onClick={() => install(skill.name)}
-                disabled={Boolean(busy) || isDemo}
+                disabled={Boolean(busy) || !!review || isDemo}
                 aria-label={`Install the ${skill.name} skill`}
                 className={`flex shrink-0 items-center gap-1 rounded-lg border px-2.5 py-1 text-[11.5px] ${
                   done ? 'border-ok/50 text-ok' : 'border-line text-muted hover:text-ink'
@@ -70,5 +73,5 @@ function SharedSkillsCatalogSection() {
 }
 
 export default function SkillsCatalogSection() {
-  return <EngineStoreSource kind="skills"><SharedSkillsCatalogSection /></EngineStoreSource>
+  return <EngineStoreSource kind="skills"><SharedSkillsCatalogSection /><NativeSkills /></EngineStoreSource>
 }

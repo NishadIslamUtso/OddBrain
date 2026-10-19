@@ -265,3 +265,26 @@ test('the socket: agy refusing pictures is a REFUSAL, not a start', async () => 
   assert.equal(answer.ok, false, 'nothing was sent, so nothing started')
   assert.equal(answer.answer, AGY_PICTURES_ANSWER, 'the honest reason is what the person sees')
 })
+
+
+test('failed fresh-session removal blocks dispatch and retries the same identity', () => {
+  const fake = fakeEngine(), writes: string[] = []; let fail = true
+  const socket = createEngineSocket({ load: () => 'old-native-id', save: (key) => { writes.push(key); if (fail) throw Error('disk unavailable') } })
+  const input = { cwd: '/work', settings: DEFAULT_ENGINE, onEvent: () => {}, spawnProcess: (() => fake.child) as never }
+  assert.equal(socket.send('first', input).ok, true)
+  assert.throws(() => socket.fresh(), /disk unavailable/)
+  assert.equal(socket.send('must not silently resume', input).ok, false)
+  fail = false; socket.fresh()
+  assert.deepEqual(writes, ['claude-code::/work', 'claude-code::/work'])
+})
+
+test('a failed new session-ID save keeps the full observed ID and stops instead of silently losing continuity', () => {
+  const fake = fakeEngine(), rec = recorder()
+  const socket = createEngineSocket({ load: () => '', save: () => { throw Error('read-only index') } })
+  assert.equal(socket.send('Task', { cwd: '/work', settings: DEFAULT_ENGINE, onEvent: rec.on, spawnProcess: (() => fake.child) as never }).ok, true)
+  const id = 'native-' + 'a'.repeat(120)
+  fake.child.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'system', subtype: 'init', session_id: id }) + '\n'))
+  assert.ok(rec.events.some(event => event.kind === 'session' && event.id === id))
+  assert.ok(rec.events.some(event => event.kind === 'error' && /work may have started/.test(event.text)))
+  assert.equal(fake.child.killed, true); assert.equal(socket.turnBusy(), false)
+})

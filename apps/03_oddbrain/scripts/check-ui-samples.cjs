@@ -67,13 +67,13 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     for (const layout of ['Classic sidebar', 'Top bar', 'Rail + list', 'Command first', 'List + detail', 'Bento dashboard', 'Console', 'Floating window']) {
       await settings('Appearance'); await page.locator('.ob-appearance-tabs').getByRole('button', { name: 'Layout', exact: true }).click()
       await page.locator('.ob-layout-options').getByRole('button', { name: layout, exact: true }).click(); await page.getByRole('button', { name: 'Try in workspace', exact: true }).click()
-      for (const screen of ['Chat', 'Projects', 'Artifacts', 'Vault', 'Brain', 'Today', 'Code']) {
+      for (const screen of ['Chat', 'Projects', 'Artifacts', 'Vault', 'Brain', 'Today']) {
         await view(screen)
         const geometry = await page.evaluate(() => { const main = document.querySelector('.ob-shell-content'); return { root: document.documentElement.scrollWidth, width: main.clientWidth, content: main.scrollWidth } })
         assert(geometry.root <= 942 && geometry.content <= geometry.width + 2, `${layout}/${screen}: ${JSON.stringify(geometry)}`)
       }
     }
-    report.checks.push('All eight layouts × seven populated screens fit the 940×620 minimum without horizontal page overflow')
+    report.checks.push('All eight layouts × six populated screens fit the 940×620 minimum without horizontal page overflow')
     assert.deepEqual(report.errors, []); assert.deepEqual(report.apiRequests, [])
   } catch (error) { report.failure = error.stack; process.exitCode = 1 }
   finally { fs.writeFileSync(path.join(output, 'sample-acceptance.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2)); await browser.close() }

@@ -1,3 +1,4 @@
+import { engineCommandRefusal } from '../../shared/lib/engineCommandPolicy'
 /**
  * agy's native event protocol. Schema evidence: CLI headless documentation and
  * third-party 1.3.2 catalog/DTO evidence; native signed-in acceptance is separate.
@@ -139,6 +140,8 @@ export function startAgySession(input: EngineStartInput & { spawnProcess?: typeo
 
   return {
     send(prompt: string, images: Array<{ mime: string; data: string }> = []): boolean {
+      const commandRefusal = engineCommandRefusal(prompt)
+      if (commandRefusal) { refusalReason = commandRefusal; return false }
       // Do not drop images or invent an unsupported wire block.
       if (images.length) {
         refusalReason = AGY_PICTURES_ANSWER
@@ -155,9 +158,10 @@ export function startAgySession(input: EngineStartInput & { spawnProcess?: typeo
       refusalReason = ''
       return reason
     },
-    answer(): void {
+    answer(): boolean {
       // The documented stream protocol rejects control_response messages.
       // Never turn a UI decision into a fake approval or a permission-rule edit.
+      return false
     },
     stop(): void {
       if (!isRunning()) return

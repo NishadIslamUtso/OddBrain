@@ -4,10 +4,12 @@ import { transcriptMarkdown, type Transcript, type TranscriptHeader } from '@sha
 import { downloadText } from '../lib/downloadText'
 import CopyText from './CopyText'
 
-export default function TranscriptHistory() {
+export default function TranscriptHistory({ initialId = '' }: { initialId?: string } = {}) {
   const [entries, setEntries] = useState<TranscriptHeader[]>([]), [next, setNext] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [selected, setSelected] = useState<Transcript | null>(null)
+  const [query, setQuery] = useState('')
   const generation = useRef(0), mounted = useRef(true)
   useEffect(() => { mounted.current = true; void load(); return () => { mounted.current = false; generation.current++ } }, [])
+  useEffect(() => { if (initialId) void read(initialId) }, [initialId])
   async function load(before = '') {
     const own = ++generation.current; setBusy(true)
     try {
@@ -28,13 +30,24 @@ export default function TranscriptHistory() {
     } catch (e) { if (mounted.current && own === generation.current) setNotice((e as Error).message) }
     finally { if (mounted.current && own === generation.current) setBusy(false) }
   }
+  async function exportRaw(id: string) {
+    const own = ++generation.current; setBusy(true)
+    try {
+      const reply = await bridge.transcripts.raw?.(id)
+      if (!mounted.current || own !== generation.current) return
+      if (!reply || !reply.ok) throw Error(reply && !reply.ok ? reply.error : 'Original transcript export is unavailable here.')
+      downloadText(reply.value.content, `turn-${id}.ndjson`)
+    } catch (error) { if (mounted.current && own === generation.current) setNotice((error as Error).message) }
+    finally { if (mounted.current && own === generation.current) setBusy(false) }
+  }
   const markdown = selected ? transcriptMarkdown(selected) : ''
   return <section aria-label="Full engine transcripts">
     <p className="ob-control-scope">Text recorded by this app from now on, including tool activity and engine-supplied thinking. Older journal summaries cannot be expanded. Image bytes are not included; native tool summaries may be abbreviated. Records live in app storage, not the vault: export them for a separate backup. Opening a record does not resume or run anything.</p>
     <button type="button" disabled={busy} className="ob-small-button" onClick={() => void load()}>Refresh transcripts</button>
-    {entries.length ? <ul>{entries.map(e => <li key={e.id}><button type="button" disabled={busy} className="ob-text-button" onClick={() => void read(e.id)}>{e.title}</button><p className="ob-control-scope">{e.at} · {e.engine} · {e.model || 'Engine default'}</p></li>)}</ul> : <p>{busy ? 'Reading transcripts…' : 'No full transcripts loaded.'}</p>}
+    <label>Find loaded transcript titles<input type="search" value={query} onChange={event => setQuery(event.target.value)} /></label><p>Search applies only to loaded titles, not all original text or native sessions. Load older transcripts for more titles.</p>
+    {entries.length ? <ul>{entries.filter(entry => entry.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(e => <li key={e.id}><button type="button" disabled={busy} className="ob-text-button" onClick={() => void read(e.id)}>{e.title}</button><p className="ob-control-scope">{e.at} · {e.engine} · {e.model || 'Engine default'}</p></li>)}</ul> : <p>{busy ? 'Reading transcripts…' : 'No transcript titles loaded.'}</p>}
     {next ? <button type="button" disabled={busy} onClick={() => void load(next)}>Load older transcripts</button> : null}
-    {selected ? <article><h3>{selected.header.title}</h3><p className="ob-control-scope">{selected.state} · Private text: review before sharing. This copy does not include native history from before recording began.</p><div className="ob-inline-actions"><CopyText text={markdown} label="Copy full transcript" /><button type="button" onClick={() => downloadText(markdown, `turn-${selected.header.id}.md`)}>Export Markdown</button></div><pre className="whitespace-pre-wrap break-words">{markdown}</pre></article> : null}
+    {selected ? <article><h3>{selected.header.title}</h3><button type="button" disabled={busy} onClick={() => void read(selected.header.id)}>Refresh this transcript</button><p className="ob-control-scope">{selected.state} · Private text: review before sharing. This copy does not include native history from before recording began.</p><div className="ob-inline-actions"><CopyText text={markdown} label="Copy full transcript" /><button type="button" onClick={() => downloadText(markdown, `turn-${selected.header.id}.md`)}>Export Markdown</button></div><button type="button" onClick={() => downloadText(JSON.stringify(selected, null, 2), `turn-${selected.header.id}.json`)}>Export recorded events JSON</button><button type="button" disabled={busy} onClick={() => void exportRaw(selected.header.id)}>Export original record</button><p>Tool output is an app-recorded event, not proof of successful execution. Native session IDs in events are observations only, not verified resume authorization.</p><pre className="whitespace-pre-wrap break-words">{markdown}</pre></article> : null}
     {notice ? <p role="status">{notice}</p> : null}
   </section>
 }

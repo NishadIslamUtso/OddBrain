@@ -26,7 +26,7 @@ export async function runReview(): Promise<boolean> {
   if (!answer.trim()) { error = 'There is no completed answer to review.'; emit(); return false }
   running = true; error = ''; emit()
   try {
-    const result = await getAutomationApi().review({ prompt: turn.prompt, answer })
+    const result = await getAutomationApi().review({ prompt: turn.prompt, answer, transcriptId: turn.transcriptId })
     if (!result.ok || !result.record) throw Error(result.error || 'The review did not complete.')
     manual = result.record; return true
   } catch (failure) { error = String((failure as Error).message || failure); return false }

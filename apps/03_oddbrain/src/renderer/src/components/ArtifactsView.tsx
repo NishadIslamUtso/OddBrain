@@ -40,6 +40,7 @@ type Props = {
   onQueryChange?: (query: string) => void
   onAskChange?: (title: string, source: string) => void
   focusId?: string
+  focusVersion?: number
   items: ArtifactSummary[]
   loading: boolean
   error: string
@@ -87,12 +88,13 @@ export default function ArtifactsView({
   onOpenInChat,
   note = '',
   focusId = '',
+  focusVersion,
   onLibraryChanged,
   onQueryChange,
   onAskChange,
 }: Props) {
   const [selectedId, setSelectedId] = useState(focusId)
-  useEffect(() => { if (focusId) { setSelectedId(focusId); setVersion(null) } }, [focusId])
+  useEffect(() => { if (focusId) { setSelectedId(focusId); setVersion(focusVersion ?? null); setTypeFilter('all'); onQueryChange?.('') } }, [focusId, focusVersion])
   const [version, setVersion] = useState<number | null>(null)
   const [shown, setShown] = useState<Shown>({ id: '', version: 0, content: '', error: '' })
   const [said, setSaid] = useState('')
@@ -113,8 +115,8 @@ export default function ArtifactsView({
   const recover = async (key: string): Promise<void> => { setRestoring(key); try { const reply = await bridge.artifacts.trashRestore(key); if (!reply.ok) throw Error(reply.error); setTrash(old => old?.filter(item => item.key !== key) || []); setSelectedId(reply.item.id); onLibraryChanged?.(); setSaid('Recovered with all stored versions. Existing active artifacts were not overwritten.') } catch (error) { setTrashError(String((error as Error).message)) } finally { setRestoring('') } }
 
   const selected = useMemo(
-    () => matching.find(item => item.id === selectedId) || matching[0] || null,
-    [matching, selectedId]
+    () => matching.find(item => item.id === selectedId) || (focusId && focusId === selectedId ? null : matching[0]) || null,
+    [matching, selectedId, focusId]
   )
 
   // A line from the app (adoption, usually) is shown the same way as one of

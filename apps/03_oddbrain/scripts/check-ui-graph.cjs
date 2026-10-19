@@ -38,7 +38,7 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
       assert.equal(await page.locator('button button').count(), 0)
     }
     await page.getByRole('button', { name: 'OddBrain, new chat', exact: true }).first().click()
-    for (const view of ['Artifacts', 'Projects', 'Vault', 'Brain', 'Today', 'Code']) {
+    for (const view of ['Artifacts', 'Projects', 'Vault', 'Brain', 'Today']) {
       await page.keyboard.press('Control+k'); await page.getByRole('combobox', { name: 'Search everything' }).fill(view)
       await page.locator('.ob-command-results>button').filter({ hasText: new RegExp('^' + view) }).first().click()
       assert.equal(await page.locator('[aria-label="' + view + '"] .ob-screen-header .ob-mascot svg').count(), 1)

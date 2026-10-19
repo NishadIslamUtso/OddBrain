@@ -84,7 +84,25 @@ The model picker distinguishes **CLI login**, **Anthropic API** and Ollama route
 - **Skills / Plugins / Connectors → engine catalog → Inspect package** reads a commit-pinned public GitHub inventory, README and supported dependency declarations. It never installs or executes package code. Unsupported sources, incomplete trees and linked packages are refused. This is not a security audit, authentication check or native compatibility proof; native installation may resolve another revision.
 - **Settings → AI & connections → Engine** has **Restart connection** for idle processes and a reviewable **Setup summary (redacted)**. Restart keeps the native resume ID and reconnects on the next send; it is not a native plugin-reload guarantee. The setup summary omits paths, addresses, account details, model names and task text. It does not certify sign-in or connector health.
 
-Native text records live in private app storage, **outside vault backups**. Export important records separately. The limit is 32 MB per turn with no automatic deletion of older records. These are app-owned per-turn records, not grouped native-session history, archive import, or recovery of text that was previously clipped. The broader authorized backlog remains in progress; account/archive import remains on hold.
+Native text records live in private app storage, **outside vault backups**. Export important records separately. The limit is 32 MB per turn with no automatic deletion of older records. These are app-owned per-turn records linked to app chats, not an import of pre-existing native/account history or recovery of text that was previously clipped. The broader authorized backlog remains in progress; account/archive import remains on hold.
+
+## Projects and native conversations
+
+Projects hold shared instructions, goals and explicitly selected references; a working folder is optional. The retired Code screen’s session board, folder controls and permission controls are in Projects. Old saved Code routes open Projects.
+
+- Native resume IDs are scoped by **engine, working folder and app chat**. Follow-ups request that chat’s saved session; side questions create a separate app identity and seed a fresh native context with the selected stored message text. Legacy folder-only IDs are retained, not silently assigned to new chats.
+- Shared instructions/goals and per-chat preferences are resolved at dispatch. Reference contents require both an explicit file-picker authorization for that project and its inclusion switch. Working-folder changes require separate owner authorization. Additional-folder references do not grant filesystem access.
+- The recorded request carries source fingerprints and coverage. The text limit is 24,000 characters per reference, 64,000 for shared project context and 100,000 for the complete composed request. Oversized, unreadable, linked or partially extracted references refuse the send rather than silently sending a prefix. Native engines can independently read their working folder through their own tools and permissions.
+- Completed native text is copied into the saved chat with its original transcript link. Storage failures are reported; the main-process transcript remains the durable original. Image bytes are not embedded in these text records. A receipt describes the current request, not everything retained in native session history.
+- Changed standalone HTML/SVG files in the working folder’s `artifacts/` directory can be added to the artifact library after a reported successful native turn, with exact version links. Automatic inspection is bounded to 200 entries, depth three, 2 MB per file and 16 MB total. Original files stay untouched. This is observed file evidence, not proof of engine authorship, tests passing or real-time native artifact parity.
+
+## Reviewed native files and extensions
+
+App instructions now travel with requests instead of rewriting native global rule files on each send. Project/global rule-file changes, checkpoint restores and skill authoring use explicit diff review and one-use approvals. Existing text outside app-managed rule blocks is preserved.
+
+Skills can be inspected and authored from Settings. Both engines receive the native `<skill>/SKILL.md` folder format. Curated catalog installation first pins and retains the complete package, shows its manifest, file inventory and supported dependency declarations, and installs those same bytes only after approval. Existing skill directories are not overwritten. This does not install dependencies or prove portability, loading, authentication or successful use.
+
+Shared MCP edits preview exact configuration changes before saving. Unrelated native fields and servers are preserved; changed files invalidate approval. Read-only inspection exposes user, workspace and supported project-local declarations without returning environment/auth values. Native server startup can execute programs or contact endpoints, so the review explicitly warns about that. OAuth and interactive authentication remain with the native engine. Native stores, schemas and target-machine behavior still need installed-runtime acceptance.
 
 ## Browser companion
 

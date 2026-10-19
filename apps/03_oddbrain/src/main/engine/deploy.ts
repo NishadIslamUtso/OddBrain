@@ -9,8 +9,7 @@ import { normalizeMcpServers, readMcpList } from '../../shared/lib/mcp'
  * the places the engines already read:
  *
  *   skills   Claude Code → ~/.claude/skills/<name>/SKILL.md (frontmatter)
- *            agy          → <workspace>/.agents/skills/<name>.md (the file
- *                           name becomes its slash command)
+ *            agy          → <workspace>/.agents/skills/<name>/SKILL.md
  *   mcp      both         → <workspace>/.mcp.json and
  *                           <workspace>/.agents/mcp_config.json
  *
@@ -89,8 +88,8 @@ export function toClaudeSkill(skill: VaultSkill): { relative: string; content: s
 
 export function toAgySkill(skill: VaultSkill): { relative: string; content: string } {
   const name = cleanName(skill.name)
-  // agy: the file name IS the slash command, so the file lands flat.
-  return { relative: `${name}.md`, content: `${frontmatter(skill)}${skill.body}\n` }
+  // Native agent-skills format: one folder with SKILL.md, not a flat command file.
+  return { relative: join(name, 'SKILL.md'), content: `${frontmatter(skill)}${skill.body}\n` }
 }
 
 /** Write one skill into both engines' own folders. Returns where it landed. */
@@ -107,7 +106,7 @@ export function deploySkill(
 
   const agy = toAgySkill(skill)
   const agyPath = join(targets.agySkillsDir, agy.relative)
-  mkdirSync(targets.agySkillsDir, { recursive: true })
+  mkdirSync(dirname(agyPath), { recursive: true })
   writeFileSync(agyPath, agy.content, 'utf8')
   written.push(agyPath)
   return written

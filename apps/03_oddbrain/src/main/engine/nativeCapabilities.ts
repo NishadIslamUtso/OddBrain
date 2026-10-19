@@ -26,7 +26,8 @@ export function parseClaudeCapabilities(raw: unknown, settings: EngineSettings):
   if (frame.type !== 'control_response' || frame.response?.request_id !== REQUEST_ID) return null
   const data = frame.response?.response
   if (frame.response.subtype !== 'success' || !Array.isArray(data?.models)) throw Error('Unsupported initialize response.')
-  const rows = data.models.slice(0, 500).filter((m: any) => m && typeof m.value === 'string' && isValidModelName(m.value))
+  if (data.models.length > 500 || data.models.some((m: any) => !m || !isValidModelName(m.value)) || new Set(data.models.map((m: any) => m.value)).size !== data.models.length) throw Error('Incomplete or ambiguous native model catalog.')
+  const rows = data.models
   const models: EngineModelEntry[] = []
   for (const m of rows) if (!models.some(row => row.name === m.value)) models.push({
     name: m.value, displayName: typeof m.displayName === 'string' ? m.displayName.slice(0, 160) : m.value,

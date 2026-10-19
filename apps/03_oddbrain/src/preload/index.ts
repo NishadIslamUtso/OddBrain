@@ -1,3 +1,5 @@
+import type { SkillDraft } from '../shared/lib/installedSkills'
+import type { NativeConversation, NativeSessionLink, NativeContextTarget } from '../shared/lib/nativeConversation'
 import { type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
 import type { ThinkingMode } from '../shared/lib/engine'
 import type { MemoryBridge } from '../shared/lib/memoryWorkspace'
@@ -35,7 +37,7 @@ import type {
 /** The engine, exactly as the window may touch it: ask, task, answer, watch. */
 const engineApi = {
   /** The chosen engine, whether it is working, and what it last said. */
-  read: (): Promise<{ engine: EngineSettings; running: boolean; history: EngineEvent[] }> =>
+  read: (): Promise<{ engine: EngineSettings; running: boolean; history: EngineEvent[]; lastSequence?: number; active?: { transcriptId: string; chatId?: string; prompt: string }; busy?: boolean }> =>
     ipcRenderer.invoke('engine:read'),
   /** Choose which engine thinks inside the app. */
   pick: (id: EngineId): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:pick', id),
@@ -105,10 +107,12 @@ const engineApi = {
   pickWorkspace: (): Promise<{ ok: boolean; answer: string }> =>
     ipcRenderer.invoke('engine:pick-workspace'),
   /** Hand the engine a task. Events arrive through `onEvent` from then on. */
-  send: (prompt: string, cwd: string, pictures?: Array<{ mime: string; data: string }>): Promise<{ ok: boolean; answer: string }> =>
-    ipcRenderer.invoke('engine:send', prompt, cwd, pictures),
+  send: (prompt: string, cwd: string, pictures?: Array<{ mime: string; data: string }>, conversation?: NativeConversation, queuedId?: string): Promise<{ ok: boolean; answer: string; transcriptId?: string }> =>
+    ipcRenderer.invoke('engine:send', prompt, cwd, pictures, conversation, queuedId),
   /** What the app kept before allowed writes, and the way back. */
   checkpoints: {
+    preview: (copy: string, original: string) => ipcRenderer.invoke('engine:checkpoint:preview', copy, original),
+    decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('engine:checkpoint:decide', token, decision),
     list: (): Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }> =>
       ipcRenderer.invoke('engine:checkpoints:list'),
     restore: (copy: string, original?: string): Promise<{ ok: boolean; answer: string }> =>
@@ -188,6 +192,8 @@ const engineApi = {
 }
 
 const automationApi: AutomationBridge = {
+  history: (before?: string) => ipcRenderer.invoke('automation:history', before),
+  saved: (id: string) => ipcRenderer.invoke('automation:saved', id),
   read: () => ipcRenderer.invoke('automation:read'),
   update: (patch: Partial<AutomationPreferences>) => ipcRenderer.invoke('automation:update', patch),
   models: () => ipcRenderer.invoke('automation:models'),
@@ -210,7 +216,7 @@ const marketplaceApi: MarketplaceBridge = {
   confirm: (token, engine) => ipcRenderer.invoke('market:confirm', token, engine), cancel: engine => ipcRenderer.invoke('market:cancel', engine),
 }
 const api = {
-  transcripts: { list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
+  transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
   media: mediaApi, marketplace: marketplaceApi,
   automation: automationApi,
   memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,
@@ -243,21 +249,27 @@ const api = {
     },
   },
   projects: {
+    attach: (projectId: string) => ipcRenderer.invoke('projects:attach', projectId),
     read: (): Promise<Project[]> => ipcRenderer.invoke('projects:read'),
-    write: (projects: Project[]): Promise<{ ok: boolean; projects: Project[] }> =>
-      ipcRenderer.invoke('projects:write', projects),
+    write: (projects: Project[], expected?: Project[]): Promise<{ ok: boolean; projects: Project[] }> =>
+      ipcRenderer.invoke('projects:write', projects, expected),
     blank: (name: string): Promise<Project> => ipcRenderer.invoke('projects:new', name),
   },
   engine: {
+    queue: { read: () => ipcRenderer.invoke('queue:read'), hold: (id: string) => ipcRenderer.invoke('queue:hold', id), enqueue: (prompt: string, conversation?: NativeConversation) => ipcRenderer.invoke('queue:enqueue', prompt, conversation), resume: (id: string, acknowledge?: boolean) => ipcRenderer.invoke('queue:resume', id, acknowledge), cancel: (id: string) => ipcRenderer.invoke('queue:cancel', id), history: (before?: string) => ipcRenderer.invoke('queue:history', before) },
+    contextTarget: (input: NativeConversation): Promise<NativeContextTarget> => ipcRenderer.invoke('engine:context-target', input),
+    chatSessions: (chatId: string): Promise<NativeSessionLink[]> => ipcRenderer.invoke('engine:chat-sessions', chatId),
     setWorkspace: (folder: string): Promise<{ ok: boolean; answer: string }> =>
       ipcRenderer.invoke('engine:workspace-set', folder),
     sessions: (): Promise<Array<{ workspace: string; sessionId: string }>> => ipcRenderer.invoke('engine:sessions'),
     boardRead: (): Promise<unknown> => ipcRenderer.invoke('sessions:board-read'),
-    boardWrite: (board: unknown): Promise<{ ok: boolean }> => ipcRenderer.invoke('sessions:board-write', board),
+    boardWrite: (board: unknown, expected: unknown): Promise<{ ok: boolean }> => ipcRenderer.invoke('sessions:board-write', board, expected),
     pickFiles: (): Promise<string[]> => ipcRenderer.invoke('sessions:pick-files'),
     forgetSession: (workspace: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('engine:sessions-forget', workspace),
     openFolder: (folder: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('app:open-folder', folder),
     checkpoints: {
+    preview: (copy: string, original: string) => ipcRenderer.invoke('engine:checkpoint:preview', copy, original),
+    decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('engine:checkpoint:decide', token, decision),
       inspect: (copy: string): Promise<{ ok: boolean; content?: string; clipped?: boolean; answer?: string }> => ipcRenderer.invoke('engine:checkpoint:inspect', copy),
       list: (): Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }> =>
         ipcRenderer.invoke('engine:checkpoints:list'),
@@ -266,6 +278,9 @@ const api = {
     },
   },
   houseRules: {
+    previewGlobal: (engine: 'claude-code' | 'agy') => ipcRenderer.invoke('rules:preview-global', engine),
+    previewProject: (projectId: string, engine: 'claude-code' | 'agy') => ipcRenderer.invoke('rules:preview-project', projectId, engine),
+    decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('rules:decide', token, decision),
     read: (): Promise<{ rules: HouseRules; defaults: HouseRules }> => ipcRenderer.invoke('houserules:read'),
     write: (rules: HouseRules): Promise<{ ok: boolean; written: string[] }> =>
       ipcRenderer.invoke('houserules:write', rules),
@@ -309,6 +324,13 @@ const api = {
     test: (id: string): Promise<CloudTestAnswer> => ipcRenderer.invoke('cloud:test', id),
   },
   skills: {
+    planCatalog: (name: string) => ipcRenderer.invoke('skills:plan-catalog', name),
+    decideCatalog: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('skills:decide-catalog', token, decision),
+    cancelCatalog: () => ipcRenderer.invoke('skills:cancel-catalog'),
+    inventory: (engine: 'claude-code' | 'agy') => ipcRenderer.invoke('skills:inventory', engine),
+    inspectInstalled: (engine: 'claude-code' | 'agy', id: string) => ipcRenderer.invoke('skills:inspect-installed', engine, id),
+    previewCreate: (draft: SkillDraft) => ipcRenderer.invoke('skills:preview-create', draft),
+    decideCreate: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('skills:decide-create', token, decision),
     /** Install one skill from the app's own catalog, into every engine. */
     installCatalog: (name: string): Promise<{ ok: boolean; answer: string; written?: string[] }> =>
       ipcRenderer.invoke('skills:install-catalog', name),
@@ -338,6 +360,9 @@ const api = {
       ipcRenderer.invoke('mods:community-index'),
   },
   mcp: {
+    preview: (servers: unknown) => ipcRenderer.invoke('mcp:preview', servers),
+    decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('mcp:decide', token, decision),
+    inventory: (engine: 'claude-code' | 'agy') => ipcRenderer.invoke('mcp:inventory', engine),
     /** The one MCP server list, and which engine configs it was deployed to. */
     read: (): Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>; problem: string }> =>
       ipcRenderer.invoke('mcp:read'),

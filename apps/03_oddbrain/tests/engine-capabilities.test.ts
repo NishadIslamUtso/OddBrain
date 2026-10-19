@@ -51,7 +51,7 @@ test('native metadata never claims saved-key, Ollama, or alternate-provider pari
   expect(parse({ account: undefined }).effort.status).toBe('unverified')
 })
 test('unsafe IDs cannot reach a native model picker', () => {
-  expect(parse({ models: [{ value: '--effort' }, { value: 'a; echo unsafe' }, null] }).models).toEqual([])
+  expect(() => parse({ models: [{ value: '--effort' }, { value: 'a; echo unsafe' }, null] })).toThrow(/catalog/)
 })
 test('effort is scoped to the engine, provider, model, endpoint and workspace', () => {
   const selected = { ...settings, thinking: 'high' as const, effortTarget: effortTarget(settings) }

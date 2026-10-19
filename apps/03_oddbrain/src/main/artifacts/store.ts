@@ -366,7 +366,8 @@ export function read(root: string, id: unknown, version?: unknown): ReadAnswer {
   const { index } = readIndex(root)
   const record = index.items.find(item => item.id === id)
   if (!record) return { ok: false, error: 'That artifact is not in the library any more.' }
-  const wanted = Number.isInteger(version) ? Math.min(Math.max((version as number) - 1, 0), record.versions.length - 1) : record.current
+  if (version !== undefined && (!Number.isInteger(version) || (version as number) < 1 || (version as number) > record.versions.length)) return { ok: false, error: 'That exact artifact version is unavailable. No other version was substituted.' }
+  const wanted = version === undefined ? record.current : (version as number) - 1
   try {
     const content = readFileSync(versionPath(root, record, wanted), 'utf8')
     return { ok: true, item: summarize(root, record), content, version: wanted + 1 }

@@ -128,7 +128,7 @@ test('deployBuiltInSkills writes only where an engine already lives', t => {
   const written = deployBuiltInSkills({ claudeSkillsDir: join(home, '.claude', 'skills'), agySkillsDir: join(workspace, '.agents', 'skills') })
   assert.equal(written.length, 2)
   const claudeFile = readFileSync(join(home, '.claude', 'skills', 'browser-page', 'SKILL.md'), 'utf8')
-  const agyFile = readFileSync(join(workspace, '.agents', 'skills', 'browser-page.md'), 'utf8')
+  const agyFile = readFileSync(join(workspace, '.agents', 'skills', 'browser-page', 'SKILL.md'), 'utf8')
   assert.match(claudeFile, /onui/)
   assert.match(agyFile, /onui/)
 })

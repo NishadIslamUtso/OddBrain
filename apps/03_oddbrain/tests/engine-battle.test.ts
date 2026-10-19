@@ -181,7 +181,7 @@ test('the honest bump counter counts tool failures and retries', async () => {
 })
 
 test('a ghost checkpoint restores to nothing: the engine-created file is deleted', async () => {
-  const { takeCheckpoint, restoreCheckpoint } = await import('../src/main/engine/checkpoints')
+  const { takeCheckpoint, restoreCheckpoint, createReviewedCheckpoints } = await import('../src/main/engine/checkpoints')
   const dir = await mkdtemp(join(tmpdir(), 'ghost-'))
   const target = join(dir, 'created-by-engine.md')
   // The checkpoint taken BEFORE the file exists is a ghost.
@@ -192,7 +192,8 @@ test('a ghost checkpoint restores to nothing: the engine-created file is deleted
   // The engine creates it.
   await writeFile(target, 'the engine made me')
   // Restore the ghost: the created file goes away.
-  const answer = await restoreCheckpoint(dir, '')
+  const review = createReviewedCheckpoints(dir), preview = await review.preview('', target)
+  const answer = review.decide(preview.token, 'allow')
   assert.equal(answer.ok, true, answer.answer)
   await assert.rejects(() => access(target), 'the created file is gone, as if the engine never wrote it')
   // A real checkpoint is untouched by a ghost restore with nothing left.
@@ -201,10 +202,9 @@ test('a ghost checkpoint restores to nothing: the engine-created file is deleted
   const kept = await takeCheckpoint(dir, real, 1729075200001)
   assert.equal(kept?.existed, true)
   const again = await restoreCheckpoint(dir, '')
-  // The ghost's record was used up by the first restore, so the second one
-  // honestly reports that there is nothing left to remove.
+  // A legacy call cannot bypass a fresh review; snapshots are retained.
   assert.equal(again.ok, false)
-  assert.match(again.answer, /No record says/)
+  assert.match(again.answer, /requires an exact diff review/)
   assert.equal(await readFile(real, 'utf8'), 'old words', 'the real file stood untouched')
   await rm(dir, { recursive: true, force: true })
 })

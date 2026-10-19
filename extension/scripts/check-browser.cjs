@@ -326,7 +326,19 @@ fs.mkdirSync(dir, { recursive: true });
     // Content script insertion, explicit prompt cooking, and extraction in an actual DOM.
     const content = await context.newPage();
     content.on("pageerror", (e) => errors.push(e.stack || e.message));
-    await content.goto(target + "/preview/index.html");
+    // A real HTTP origin is needed, not the preview app. Loading preview.js
+    // and then replacing its DOM races its awaited looks.json fetch: it resumes
+    // against a removed #look and throws at select.append. Keep this fixture
+    // independent; do not swallow page errors or add timing-dependent sleeps.
+    const fixtureRequests = [];
+    content.on("request", request => {
+      if (/\/preview\/(looks\.json|preview\.js)(?:[?#]|$)/.test(request.url()))
+        fixtureRequests.push(request.url());
+    });
+    await content.route(target + "/preview/content-fixture", route =>
+      route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><html><head></head><body></body></html>" }),
+    );
+    await content.goto(target + "/preview/content-fixture");
     await content.setContent(
       '<main><h1>Public page</h1><p>Useful public text.</p><form>PRIVATE_FORM<textarea id="first">First draft</textarea><textarea id="second">Second draft</textarea></form><div contenteditable="true" id="editable">PRIVATE_EDITOR</div><p style="display:none">PRIVATE_HIDDEN</p></main>',
     );
@@ -519,11 +531,12 @@ fs.mkdirSync(dir, { recursive: true });
     await ui()
       .getByRole("button", { name: "Discard waiting capture", exact: true })
       .waitFor({ state: "hidden" });
+    assert.deepEqual(fixtureRequests, [], "content fixtures must not run the preview controller");
     assert.deepEqual(errors, []);
     fs.writeFileSync(
       path.join(dir, "browser-acceptance.json"),
       JSON.stringify(
-        { ok: true, lookSurfaceScreenChecks: 64, minPanelWidth: 280, errors },
+        { ok: true, contentFixtureIsolated: true, lookSurfaceScreenChecks: 64, minPanelWidth: 280, errors },
         null,
         2,
       ),

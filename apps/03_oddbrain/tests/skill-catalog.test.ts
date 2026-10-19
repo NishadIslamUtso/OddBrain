@@ -68,14 +68,14 @@ test('an install pins a commit and preserves instructions, license and support f
     assert.equal(result.ok, true)
     if (!result.ok) return
     assert.equal(result.revision, REVISION)
-    assert.equal(result.written.length, 7, 'three complete Claude files, three agy support files, and agy command file')
+    assert.equal(result.written.length, 6, 'each engine gets the three original pinned files, without a rewritten flat command')
     assert.equal(readFileSync(join(root, 'claude', 'docx', 'scripts', 'tool.py'), 'utf8'), 'print("ok")\n')
     assert.equal(readFileSync(join(root, 'agy', 'docx', 'LICENSE.txt'), 'utf8'), 'license bytes\n')
-    const agy = readFileSync(join(root, 'agy', 'docx.md'), 'utf8')
+    const agy = readFileSync(join(root, 'agy', 'docx', 'SKILL.md'), 'utf8')
     const parsed = parseSkillMd(agy)
     assert.equal(parsed.name, 'docx')
     assert.match(parsed.description, /quoted/)
-    assert.match(parsed.body, /Support files.*\.agents\/skills\/docx/s)
+    assert.equal(agy, readFileSync(join(root, 'claude', 'docx', 'SKILL.md'), 'utf8'), 'both native manifests retain the identical pinned original')
     const header = /^---\n([\s\S]*?)\n---/.exec(agy)?.[1] ?? ''
     assert.equal(typeof (parseYaml(header) as { description?: unknown }).description, 'string', 'generated frontmatter remains valid YAML')
 
@@ -115,8 +115,8 @@ test('the door refuses names outside the catalog and reports network or archive 
 test('the face lists the catalog and installs through the guarded IPC door', () => {
   const read = (relative: string): string => readFileSync(`${process.cwd()}/${relative}`, 'utf8')
   assert.match(read('src/renderer/src/components/SettingsView.tsx'), /id: 'skills'/)
-  assert.match(read('src/renderer/src/components/SkillsCatalogSection.tsx'), /installCatalog/)
-  assert.match(read('src/main/index.ts'), /skills:install-catalog/)
-  assert.match(read('src/preload/index.ts'), /skills:install-catalog/)
-  assert.match(read('src/renderer/src/platform/bridge.ts'), /installCatalog/)
+  assert.match(read('src/renderer/src/components/SkillsCatalogSection.tsx'), /planCatalog/)
+  assert.match(read('src/main/index.ts'), /skills:plan-catalog/)
+  assert.match(read('src/preload/index.ts'), /skills:plan-catalog/)
+  assert.match(read('src/renderer/src/platform/bridge.ts'), /planCatalog/)
 })

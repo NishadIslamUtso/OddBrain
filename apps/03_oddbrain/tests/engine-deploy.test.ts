@@ -37,7 +37,7 @@ test('skills: each engine gets its own exact shape, from one vault entry', () =>
   assert.match(claude.relative, /lint-house[/\\]SKILL\.md$/)
   assert.match(claude.content, /^---\nname: lint-house\ndescription: "Run the linters"\n---/)
   const agy = toAgySkill(skill)
-  assert.equal(agy.relative, 'lint-house.md', 'agy: the file name is the slash command')
+  assert.equal(agy.relative, join('lint-house', 'SKILL.md'), 'agy uses an agent-skill folder manifest')
   assert.match(agy.content, /Do the lint dance\./)
 })
 

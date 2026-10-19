@@ -1,3 +1,5 @@
+import { noLinkedPath } from './configTransaction'
+import { createFileReviewService } from './reviewedFileChange'
 /**
  * Checkpoints: the file's old self, kept the moment before the engine changes
  * it. The idea is Replit's and Claude Code's (auto-snapshot before a risky
@@ -5,7 +7,7 @@
  * One file, one copy, honest names: the epoch the copy was taken, the file it
  * was taken FROM. Restore puts that copy back exactly where it came from.
  */
-import { copyFile, mkdir, readFile, readdir, rm, writeFile, lstat, realpath, open } from 'node:fs/promises'
+import { mkdir, readFile, readdir, writeFile, lstat, realpath, open, rename } from 'node:fs/promises'
 import { createHash, randomUUID } from 'node:crypto'
 import { join, basename, sep } from 'node:path'
 
@@ -78,51 +80,53 @@ export async function snapshotFile(
  * named by its ORIGINAL path — many files can be created in one turn, and
  * "the first ghost in the index" once deleted the wrong one of them.
  */
-export async function restoreCheckpoint(dir: string, copy: string, original = ''): Promise<{ ok: boolean; answer: string }> {
-  // The restore's index update rides the same chain as rememberCheckpoint:
-  // a restore racing a fresh checkpoint must not erase the new record.
-  return withIndex(dir, async (index) => {
-    if (!copy) {
-      const ghost = original
-        ? index.find(entry => entry.existed === false && !entry.copy && entry.original === original)
-        : index.find(entry => entry.existed === false && !entry.copy)
-      if (!ghost) return { ok: false, answer: 'No record says that file was created by the engine.' }
-      try {
-        await rm(ghost.original, { force: true })
-        await writeIndex(dir, index.filter(entry => entry !== ghost))
-        return { ok: true, answer: `Removed ${ghost.original} (it did not exist before the engine)` }
-      } catch (failure) {
-        return { ok: false, answer: `Could not remove: ${(failure as Error).message}` }
+export async function restoreCheckpoint(_dir: string, _copy: string, _original = ''): Promise<{ ok: boolean; answer: string }> {
+  return { ok: false, answer: 'Restore now requires an exact diff review and a one-use approval. Open Review restore and preview the exact change first; no files were changed.' }
+}
+
+/** Main-process singleton. Renderer supplies indexed identifiers only, never replacement bytes. */
+export function createReviewedCheckpoints(dir: string) {
+  const service = createFileReviewService()
+  return {
+    async preview(copy: string, original: string) {
+      const entry = (await readIndex(dir)).find(row => copy ? row.copy === copy && row.original === original : row.existed === false && !row.copy && row.original === original)
+      if (!entry) throw Error('Checkpoint not indexed for this exact file.')
+      noLinkedPath(entry.original)
+      let bytes: Buffer | null = null
+      if (entry.existed !== false) {
+        noLinkedPath(entry.copy)
+        const info = await lstat(entry.copy), root = await realpath(dir), file = await realpath(entry.copy)
+        if (!info.isFile() || !file.startsWith(root + sep) || info.size > 2_000_000) throw Error('Checkpoint is linked, outside its directory, or exceeds the review limit.')
+        bytes = await readFile(file)
       }
-    }
-    const inside = copy.startsWith(dir)
-    if (!inside) return { ok: false, answer: 'That copy is not one of this app\'s checkpoints.' }
-    const byCopy = index.find(entry => entry.copy === copy)
-    if (!byCopy) return { ok: false, answer: 'That copy has no record of where it came from.' }
-    try {
-      await copyFile(copy, byCopy.original)
-      await writeIndex(dir, index.filter(entry => entry !== byCopy))
-      return { ok: true, answer: `Restored ${byCopy.original}` }
-    } catch (failure) {
-      return { ok: false, answer: `Could not restore: ${(failure as Error).message}` }
-    }
-  })
+      return service.prepare(entry.original, bytes, 'restore')
+    },
+    decide: service.decide,
+    reviewedPath: service.reviewedPath,
+  }
 }
 
 /** The checkpoints folder's own little index: one JSON line per copy. */
 export type CheckpointRecord = { copy: string; original: string; at: string; existed?: boolean }
 
 async function readIndex(dir: string): Promise<CheckpointRecord[]> {
-  try {
-    return JSON.parse(await readFile(join(dir, 'index.json'), 'utf8')) as CheckpointRecord[]
-  } catch {
-    return []
-  }
+  noLinkedPath(join(dir, 'index.json'))
+  let text: string
+  try { text = await readFile(join(dir, 'index.json'), 'utf8') }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return []; throw error }
+  const records: unknown = JSON.parse(text)
+  if (!Array.isArray(records) || records.some(row => !row || typeof row.original !== 'string' || typeof row.copy !== 'string' || typeof row.at !== 'string' || (row.existed !== undefined && typeof row.existed !== 'boolean'))) throw Error('Checkpoint index damaged. Original records were not changed.')
+  return records
 }
 
 export async function writeIndex(dir: string, records: CheckpointRecord[]): Promise<void> {
+  if (records.length > 10_000) throw Error('Checkpoint index reached 10,000 entries. No older records were evicted.')
+  noLinkedPath(dir)
   await mkdir(dir, { recursive: true })
-  await writeFile(join(dir, 'index.json'), JSON.stringify(records.slice(-200), null, 2))
+  const temporary = join(dir, `index-${randomUUID()}.tmp`)
+  await writeFile(temporary, JSON.stringify(records, null, 2), { flag: 'wx', mode: 0o600 })
+  noLinkedPath(join(dir, 'index.json'))
+  await rename(temporary, join(dir, 'index.json'))
 }
 
 /** One chain per checkpoints folder: index READ-modify-writes never interleave. */

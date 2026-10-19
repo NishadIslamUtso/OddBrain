@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import { createReviewedCheckpoints } from '../src/main/engine/checkpoints'
 import test from 'node:test'
 import { engineStore, resetEngineForTests } from '../src/renderer/src/state/engine'
 import assert from 'node:assert/strict'
@@ -63,6 +64,11 @@ test('the composer carries the media front door, the ear, and honest titles', ()
   const composer = read('../src/renderer/src/components/Composer.tsx')
     })
 
+async function reviewedRestore(dir: string, copy: string, original: string) {
+  const review = createReviewedCheckpoints(dir), preview = await review.preview(copy, original)
+  return review.decide(preview.token, 'allow')
+}
+
 test('checkpoint rules: file tools only, honest names', () => {
   assert.equal(checkpointWorthTaking('Write'), true)
   assert.equal(checkpointWorthTaking('Edit'), true)
@@ -79,11 +85,11 @@ test('a checkpoint keeps the old self; restore puts it back', async () => {
   const kept = await takeCheckpoint(dir, file, 1729075200000)
   assert.ok(kept, 'a file with content is kept')
   await writeFile(file, 'the engine rewrote everything')
-  const restored = await restoreCheckpoint(dir, kept?.copy ?? '')
+  const restored = await reviewedRestore(dir, kept?.copy ?? '', file)
   assert.equal(restored.ok, true, restored.answer)
   assert.equal(await readFile(file, 'utf8'), 'the first words', 'the old self came back')
   const listed = await listCheckpoints(dir)
-  assert.equal(listed.length, 0, 'a restored checkpoint leaves the list — it is used, not pending')
+  assert.equal(listed.length, 1, 'original snapshots remain available; approval tokens are one-use')
   await rm(dir, { recursive: true, force: true })
 })
 
@@ -97,19 +103,19 @@ test('a file that does not exist yet is kept as a ghost; restoring removes it; a
   assert.equal(snap.existed, false)
   assert.equal(snap.copy, '')
   await writeFile(ghost, 'born later', 'utf8')
-  const unmade = await restoreCheckpoint(dir, '')
+  const unmade = await reviewedRestore(dir, '', ghost)
   assert.equal(unmade.ok, true, unmade.answer)
-  assert.match(unmade.answer, /did not exist before the engine/)
+  assert.match(unmade.answer, /removed; previous bytes retained/)
   await assert.rejects(() => stat(ghost), 'ghost restore removes the file')
   const kept = await takeCheckpoint(dir, join(dir, 'real.md'), Date.now())
   assert.equal(kept?.existed, false, 'a second never-existed path is a ghost too, not a kept copy')
   const foreign = await restoreCheckpoint(dir, join(tmpdir(), 'elsewhere-copy.md'))
   assert.equal(foreign.ok, false)
-  assert.match(foreign.answer, /not one of this app's checkpoints/)
+  assert.match(foreign.answer, /requires an exact diff review/)
   const empty = await mkdtemp(join(tmpdir(), 'ckpt3-'))
   const noRecord = await restoreCheckpoint(empty, join(empty, 'orphan-copy.md'))
   assert.equal(noRecord.ok, false)
-  assert.match(noRecord.answer, /no record of where it came from/)
+  assert.match(noRecord.answer, /requires an exact diff review/)
   await rm(dir, { recursive: true, force: true })
   await rm(empty, { recursive: true, force: true })
 })
@@ -144,6 +150,7 @@ test('the Allow answer leaves only AFTER the checkpoint finished (no race)', asy
     onEvent: () => undefined,
     spawnProcess: (() => child) as unknown as typeof spawn,
   })
+  assert.equal(session.send('Update notes'), true)
   // the engine asks to Write; the owner allows
   ;(child as unknown as { stdout: EventEmitter }).stdout.emit('data', Buffer.from(
     JSON.stringify({ type: 'control_request', request_id: 'r1', request: { subtype: 'can_use_tool', tool_name: 'Write', input: { file_path: target } } }) + '\n',
@@ -170,7 +177,7 @@ test('a ghost checkpoint is listed and its restore is the undo of a creation', a
   assert.ok(listed.some(record => record.original === target && record.existed === false), 'the ghost is listed')
   writeFileSync(target, 'the engine made this', 'utf8')
   const ghost = listed.find(record => record.original === target)!
-  const answer = await restoreCheckpoint(dir, ghost.copy) // copy === ''
+  const answer = await reviewedRestore(dir, ghost.copy, target) // copy === ''
   assert.equal(answer.ok, true)
   assert.equal(existsSync(target), false)
 })
@@ -229,6 +236,7 @@ test('the engine takes the checkpoint the instant an Allow would change a file',
     }
     assert.ok(predicate(), `the engine never ${what}`)
   }
+  assert.equal(session.send('Update the draft'), true)
   child.stdout.emit('data', Buffer.from(JSON.stringify({
     type: 'control_request',
     request_id: 'w-1',
@@ -304,14 +312,14 @@ test('two created files are undone one at a time, each by its own name', async (
   await writeFile(first, 'created')
   await writeFile(second, 'created')
   // Undo the SECOND ghost by name: the first file must survive untouched.
-  const unmade = await restoreCheckpoint(dir, '', second)
+  const unmade = await reviewedRestore(dir, '', second)
   assert.equal(unmade.ok, true, unmade.answer)
-  assert.match(unmade.answer, /beta\.md/)
+  assert.ok(unmade.recoveryPath); assert.equal(await readFile(unmade.recoveryPath!, 'utf8'), 'created')
   await assert.rejects(() => stat(second), 'the named file is gone')
   assert.equal(await readFile(first, 'utf8'), 'created', 'the other creation is untouched')
   const listed = await listCheckpoints(dir)
-  assert.equal(listed.length, 1, 'only the undone ghost left the list')
-  assert.equal(listed[0].original, first)
+  assert.equal(listed.length, 2, 'both original checkpoint records are retained')
+  assert.ok(listed.some(entry => entry.original === first))
   await rm(dir, { recursive: true, force: true })
 })
 
@@ -364,6 +372,7 @@ test('a checkpoint that cannot be saved DENIES the change — the guarantee fail
     onEvent: () => undefined,
     spawnProcess: (() => child) as unknown as typeof spawn,
   })
+  assert.equal(session.send('Update notes'), true)
   ;(child as unknown as { stdout: EventEmitter }).stdout.emit('data', Buffer.from(
     JSON.stringify({ type: 'control_request', request_id: 'r9', request: { subtype: 'can_use_tool', tool_name: 'Write', input: { file_path: target } } }) + '\n',
   ))

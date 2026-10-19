@@ -1,9 +1,10 @@
+import ChangeReview from './ChangeReview'
 import { sampleEnabled } from '@shared/lib/sampleWorkspace'
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import ReadAloudButton from '../ui/ReadAloudButton'
 import { useLook } from '../ui/LookContext'
-import { Copy, Eye, Handshake, ListOrdered, Minimize2, Pencil, Wrench, FilePen, Terminal, Search, CircleCheck, TriangleAlert, Square, X } from 'lucide-react'
+import { Copy, Eye, Handshake, Minimize2, Pencil, Wrench, FilePen, Terminal, Search, CircleCheck, TriangleAlert, Square, X } from 'lucide-react'
 import { buildHandoff, handoffFileName } from '@shared/lib/handoff'
 import { PHASE_LABEL, phaseFromTurn, WAITING_LOADER, type MotionRole } from '@shared/lib/motionKit'
 import { Mascot } from '../motion/Mascot'
@@ -26,20 +27,23 @@ import { clearReviewError, runReview, useReview } from '@/state/review'
  */
 type Kept = { copy: string; original: string; at: string; existed?: boolean }
 
-export default function EnginePanel() {
+export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
   const engine = useEngine()
   const turn = engine.turn
   const [handed, setHanded] = useState('')
   // What the app kept before allowed writes this session, and what a restore said.
   const [kept, setKept] = useState<Kept[]>([])
   const [restored, setRestored] = useState('')
+  const [restoreTarget, setRestoreTarget] = useState<Kept | null>(null), [showAllKept, setShowAllKept] = useState(false)
+  const restorePort = useMemo(() => restoreTarget ? { preview: () => bridge.engine.checkpoints.preview(restoreTarget.copy, restoreTarget.original), decide: (token: string, decision: 'allow' | 'deny') => bridge.engine.checkpoints.decide(token, decision) } : undefined, [restoreTarget])
   const finished = turn?.state === 'done' || turn?.state === 'error'
   useEffect(() => {
     if (!finished) return
     void bridge.engine.checkpoints.list().then((answer) => {
-      if (answer.ok) setKept(answer.checkpoints.slice(0, 3))
-    })
-  }, [finished])
+      if (answer.ok) setKept(answer.checkpoints)
+      else setRestored('The checkpoint index could not be read. Its original was not changed.')
+    }).catch(() => setRestored('Kept files could not be read. No restore was attempted.'))
+  }, [finished, turn])
   const phase: MotionRole = turn ? phaseFromTurn(turn) : 'resting'
   const [compacting, setCompacting] = useState(false)
   const compact = useCompact()
@@ -63,6 +67,8 @@ export default function EnginePanel() {
       /* storage refused — the fold lives only for this visit */
     }
   }
+  if (engine.ambient.busy && turn?.state !== 'running') return <p role="status">Another task is active. <button type="button" onClick={() => void bridge.quick.open()}>Open active work and approvals</button></p>
+  if (chatId !== undefined && turn?.chatId && turn.chatId !== chatId) return turn.state === 'running' ? <p role="status">Work continues in another chat. <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('app:open-chat', { detail: turn.chatId }))}>Open that chat</button></p> : null
   // No live turn: the card waits, but the record of earlier sessions still
   // shows — a fresh window should know what happened here before it opened.
   if (!turn) {
@@ -234,24 +240,6 @@ export default function EnginePanel() {
       {review.running ? <p className="ob-control-scope" role="status">A text-only review is running. It cannot run app tools or answer approvals.</p> : null}
       {review.record ? <details className="ob-review-report"><summary>Review report · {review.record.model || 'not sent'} · {review.record.state}<span>{review.record.prompt}</span></summary><pre>{review.record.text || review.record.error}</pre><p className="ob-control-scope">Text evidence only; files and tests were not independently inspected.{review.record.clipped ? ' This report covers a bounded excerpt.' : ''}</p></details> : null}
 
-      {engine.line.length ? (
-        <div className="mt-1.5 rounded-lg border border-line bg-bg px-2 py-1.5" aria-label="Work waiting in the line">
-          <div className="flex items-center justify-between gap-2">
-            <p className="flex items-center gap-1 text-[11.5px] font-medium text-ink">
-              <ListOrdered size={10} aria-hidden /> In the line: {engine.line.length}
-            </p>
-            <button type="button" onClick={() => engine.clearLine()} className="text-[11px] text-muted hover:text-ink">Clear the line</button>
-          </div>
-          <ul className="mt-1 space-y-0.5">
-            {engine.line.map(item => (
-              <li key={item.id} className="flex items-start justify-between gap-2 text-[11.5px] text-muted">
-                <span className="min-w-0 flex-1 truncate">▸ {item.prompt}</span>
-                <button type="button" onClick={() => engine.removeFromLine(item.id)} aria-label="Remove from the line" className="shrink-0 text-muted hover:text-warn">×</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
 
       {compact.notice ? (
         <p role="status" className="mt-1.5 rounded-lg border border-line bg-bg px-2 py-1 text-[11.5px] leading-relaxed text-ink">
@@ -276,7 +264,7 @@ export default function EnginePanel() {
         <div className="mt-2 rounded-lg border border-line bg-bg p-2">
           <p className="text-[11px] text-muted">Kept before the engine changed a file, newest first:</p>
           <ul className="mt-1 flex flex-col gap-1">
-            {kept.map(entry => (
+            {kept.slice(0, showAllKept ? kept.length : 3).map(entry => (
               <li key={entry.copy || entry.original} className="flex items-center gap-2 text-[11.5px]">
                 <span className="min-w-0 flex-1 truncate text-muted" title={entry.original}>
                   {entry.original.split(/[\\/]/).filter(Boolean).at(-1)} · {new Date(entry.at).toLocaleTimeString()}
@@ -287,21 +275,16 @@ export default function EnginePanel() {
                   title={entry.existed === false
                     ? `Remove ${entry.original} — the engine created it; it did not exist before`
                     : `Put the older self of ${entry.original} back`}
-                  onClick={() => {
-                    // The original path rides along so the right ghost is the
-                    // one undone — several files can be created in one turn.
-                    void bridge.engine.checkpoints.restore(entry.copy, entry.original).then((answer) => {
-                      setRestored(answer.answer)
-                      if (answer.ok) setKept(current => current.filter(row => !(row.copy === entry.copy && row.original === entry.original)))
-                    })
-                  }}
+                  onClick={() => setRestoreTarget(entry)}
                   className="rounded-lg border border-line px-2 py-0.5 text-[11px] text-muted hover:text-ink"
                 >
-                  {entry.existed === false ? 'Undo the creation' : 'Restore'}
+                  {entry.existed === false ? 'Review removal' : 'Review restore'}
                 </button>
               </li>
             ))}
           </ul>
+          {kept.length > 3 ? <button type="button" onClick={() => setShowAllKept(!showAllKept)}>{showAllKept ? 'Show latest three' : `Show all ${kept.length} kept files`}</button> : null}
+          {restorePort ? <div><ChangeReview port={restorePort} label="Review checkpoint restore" /><button type="button" onClick={() => setRestoreTarget(null)}>Close restore review</button></div> : null}
           {restored ? <p className="mt-1 text-[11px] text-muted">{restored}</p> : null}
         </div>
       ) : null}

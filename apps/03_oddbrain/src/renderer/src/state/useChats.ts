@@ -21,6 +21,8 @@ export type ChatState = {
   /** The raw setter, for the chat hook: replies stream into a message in place,
    *  which is a different kind of edit from opening or deleting a chat. */
   setChats: (update: Chat[] | ((previous: Chat[]) => Chat[])) => void
+  /** Durably save before a native send or a branch is opened. */
+  commit: (change: (previous: Chat[]) => Chat[]) => boolean
   currentChat: string
   open: (chatId: string) => void
   create: () => string
@@ -92,9 +94,19 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
     [setChats]
   )
 
+  const commit = useCallback((change: (previous: Chat[]) => Chat[]): boolean => {
+    try {
+      const key = workspaceKey(CHATS_KEY), raw = localStorage.getItem(key)
+      const previous = raw === null ? chats : normalizeChats(JSON.parse(raw))
+      const next = normalizeChats(change(previous))
+      localStorage.setItem(key, JSON.stringify(next))
+      setChats(next); return true
+    } catch { onWarning?.('The conversation could not be saved. Original storage was not replaced; keep this window open and export important text.'); return false }
+  }, [chats, setChats, onWarning])
+
   const value = useMemo<ChatState>(
-    () => ({ chats, setChats, currentChat, open, create, remove, rename, pin, setProject }),
-    [chats, setChats, currentChat, open, create, remove, rename]
+    () => ({ commit, chats, setChats, currentChat, open, create, remove, rename, pin, setProject }),
+    [commit, chats, setChats, currentChat, open, create, remove, rename]
   )
 
   return value

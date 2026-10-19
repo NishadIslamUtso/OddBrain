@@ -12,11 +12,11 @@ import { selectedEffort } from '../../shared/lib/engineCapabilities'
  * many tasks: a second task while the engine is idle goes to the same
  * process; only a task arriving while another is still running is refused.
  */
-import type { EngineEvent } from '../../shared/lib/engine'
+import type { EngineEvent, EngineId } from '../../shared/lib/engine'
 import { startClaudeCodeSession, type EngineSession, type EngineStartInput } from './claudeCode'
 import { startAgySession } from './agy'
 
-export type EngineAnswer = { ok: boolean; answer: string }
+export type EngineAnswer = { ok: boolean; answer: string; transcriptId?: string }
 
 export type EngineSocket = {
   /** Which provider's key the LIVE process was launched with, if any. */
@@ -28,6 +28,7 @@ export type EngineSocket = {
     spawnProcess?: typeof import('node:child_process').spawn
   }): EngineAnswer
   current(): EngineSession | null
+  currentTarget(): { engine: EngineId; workspace: string; chatId?: string } | null
   /** True only while a TASK is in flight, not merely while the process lives. */
   turnBusy(): boolean
   running(): boolean
@@ -53,16 +54,19 @@ export type SessionMemory = {
  * nothing to agy and vice versa, so a shared key would hand one engine the
  * other's resume id.
  */
-export const sessionKey = (engineId: string, cwd: string): string => `${engineId}::${cwd}`
+export const sessionKey = (engineId: string, cwd: string, chatId?: string): string => chatId
+  ? `v2:${JSON.stringify([engineId, cwd, chatId])}` : `${engineId}::${cwd}`
 
 export const noSessionMemory: SessionMemory = { load: () => '', save: () => undefined }
 
 export function createEngineSocket(memory: SessionMemory = noSessionMemory): EngineSocket {
   let session: EngineSession | null = null
-  let sessionEngine: string | null = null
+  let sessionEngine: EngineId | null = null
   let busy = false
   let activeInput: EngineStartInput | null = null
   let currentCwd = ''
+  let currentChatId: string | undefined
+  let unfinishedForget = ''
   let generation = 0
   // What the live session was STARTED with. The engine's launch flags fix its
   // model and approval gear for the life of the process, so a changed setting
@@ -92,7 +96,13 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       // Persisted per workspace, so the next launch of the app can continue
       // this conversation where it left off. (The live process is tracked by
       // `session` itself; the memory matters only after the process is gone.)
-      memory.save(sessionKey(input.settings.id, input.cwd), event.id)
+      try { memory.save(sessionKey(input.settings.id, input.cwd, input.chatId), event.id) }
+      catch {
+        input.onEvent(event) // retain the complete observed ID in the durable turn record
+        busy = false
+        input.onEvent({ kind: 'error', text: 'The native resume ID could not be saved. Stop requested; work may have started. Inspect this turn’s transcript before retrying, and repair session storage first.' })
+        session?.stop(); return
+      }
     }
     input.onEvent(event)
   }
@@ -116,9 +126,10 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
 
   return {
     send(prompt: string, input: EngineStartInput & { images?: Array<{ mime: string; data: string }> }): EngineAnswer {
+      if (unfinishedForget) return { ok: false, answer: 'The previous fresh-session request could not be saved. Retry Fresh session before sending; the old native context was not silently resumed.' }
       if (busy) return { ok: false, answer: 'An engine is already working. Stop it first, or wait for it to finish.' }
       // Both engines are wired: claude-code on its stream-json wire, agy on
-      // its own (verified against the real v1.4.0 binary). An engine that is
+      // its own documented stream (live signed-in acceptance remains separate). An engine that is
       // missing from the machine says so honestly at spawn time — the branch
       // below routes to the right adapter by the setting, nothing else.
       // A different engine was picked: the old process is not asked to speak
@@ -143,7 +154,7 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
         sessionThinking !== selectedEffort(input.settings) ||
         sessionBaseUrl !== input.settings.baseUrl ||
         sessionKeyFingerprint !== (input.auth?.apiKey ?? null) ||
-        currentCwd !== input.cwd
+        currentCwd !== input.cwd || currentChatId !== input.chatId
       if (session?.isRunning() && !gearChanged) {
         if (busy) {
           return { ok: false, answer: 'An engine is already working. Stop it first, or wait for it to finish.' }
@@ -166,9 +177,13 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       // Fresh start. If this engine+workspace had a session before the app
       // (or the engine) closed, continue it — the owner's conversation is not
       // lost just because a process ended.
+      let resumeId: string
+      try { resumeId = memory.load(sessionKey(input.settings.id, input.cwd, input.chatId)) }
+      catch { return { ok: false, answer: 'Saved sessions could not be read. The original index is retained; no message was sent or fresh session silently substituted.' } }
       activeInput = input
-      session = start({ ...input, resumeId: memory.load(sessionKey(input.settings.id, input.cwd)) })
+      session = start({ ...input, resumeId })
       currentCwd = input.cwd
+      currentChatId = input.chatId
       sessionModel = input.settings.model
       sessionProvider = input.settings.cloudProvider
       sessionCommand = command
@@ -191,6 +206,7 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       return { ok: true, answer: 'started' }
     },
     current: () => session,
+    currentTarget: () => sessionEngine && currentCwd ? { engine: sessionEngine, workspace: currentCwd, ...(currentChatId ? { chatId: currentChatId } : {}) } : null,
     usedAuthProvider: () => sessionAuthProvider,
     turnBusy: () => busy,
     running: () => session?.isRunning() === true,
@@ -203,7 +219,7 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       activeInput = null
       // Forget per engine+workspace: the gear is going away with the process,
       // so a stale id must not survive under a different key shape either.
-      if (sessionEngine && currentCwd) memory.save(sessionKey(sessionEngine, currentCwd), '')
+      const forgottenKey = sessionEngine && currentCwd ? sessionKey(sessionEngine, currentCwd, currentChatId) : unfinishedForget
       sessionEngine = null
       sessionModel = null
       sessionProvider = null
@@ -214,6 +230,8 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       sessionKeyFingerprint = null
       sessionAuthProvider = null
       currentCwd = ''
+      currentChatId = undefined
+      if (forgottenKey) { unfinishedForget = forgottenKey; memory.save(forgottenKey, ''); unfinishedForget = '' }
     },
   }
 }

@@ -38,7 +38,7 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
     'You work in the folder the app gives you. The app shows your work, so keep machine-readable output exact and your words plain.',
   artifacts:
     'Anything visual or shareable, a page, a chart, a diagram, a document, is written as a standalone file in the ' +
-    'artifacts/ folder of the workspace (HTML, SVG or Markdown), so the app can show it live. ' +
+    'artifacts/ folder of the workspace (HTML, SVG or Markdown), so the app can inspect changed standalone HTML/SVG files after the turn and add them to its artifact library. Markdown remains in the working folder. File observation is not an automatic quality check. ' +
     'Never describe what you could build: build the file.',
   permissions:
     'When a step needs approval, use the engine\u2019s own approval channel; the app shows it to the owner as a card. ' +
@@ -65,7 +65,7 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
 export const REMEMBERING_SECTION =
   'You keep a memory file at 06 Review/Memory/engine-notes.md in your working folder. ' +
   'When you learn something worth keeping for future sessions — a decision made, a preference shown, a fact learned, work left open — ' +
-  'append it under a heading like \'## 2026-10-16\' for today, one short line per item. ' +
+  'append it under a YYYY-MM-DD heading for the actual current date, one short line per item. If the date is unknown, ask rather than invent it. ' +
   'Never delete or rewrite lines that are already there; if nothing is worth keeping, write nothing. ' +
   'Your writes go through the usual approval channel, so the owner sees every change before it lands.'
 

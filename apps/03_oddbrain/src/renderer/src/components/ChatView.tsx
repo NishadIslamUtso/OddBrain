@@ -1,3 +1,6 @@
+import WorkQueue from './WorkQueue'
+import type { ContextDefaults } from '@shared/lib/chatContext'
+import ChatContextPanel from './ChatContextPanel'
 import { chatMarkdown } from '@shared/lib/transcripts'
 import { downloadText } from '../lib/downloadText'
 import CopyText from '../ui/CopyText'
@@ -51,6 +54,8 @@ export default function ChatView({
   fileTools,
   onDetach,
   mascotWords = true,
+  onBranch,
+  contextDefaults,
 }: {
   chat: Chat | null
   draft: string
@@ -86,6 +91,8 @@ export default function ChatView({
   project?: string | null
   onProject?: (id: string | null) => void
   /** Appearance > Mascot mood words: the little word under the mascot. */
+  contextDefaults?: ContextDefaults
+  onBranch?: (messageId: string) => void
   mascotWords?: boolean
 }) {
   const scroller = useRef<HTMLDivElement | null>(null)
@@ -124,8 +131,8 @@ export default function ChatView({
     follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80
   }
 
-  const home = messages.length === 0 && !engine.turn && !engine.ambient.busy
-  const composer = <Composer value={draft} onChange={setDraft} onSend={onSend} onStop={onStop} busy={busy} notice={notice} preview={preview} projects={projects} project={project} onProject={onProject} attachments={attachments} onFiles={onFiles} fileTools={fileTools} onDetach={onDetach} />
+  const home = messages.length === 0 && (!engine.turn || (!!engine.turn.chatId && engine.turn.chatId !== chat?.id)) && !engine.ambient.busy
+  const composer = <Composer draftScope={chat?.id || `new:${project || "none"}`} value={draft} onChange={setDraft} onSend={onSend} onStop={onStop} busy={busy} notice={notice} preview={preview} projects={projects} project={project} onProject={onProject} attachments={attachments} onFiles={onFiles} fileTools={fileTools} onDetach={onDetach} />
   return <main className={`ob-chat-view ${home ? 'ob-chat-home' : ''}`}>
     <div ref={scroller} data-find-root data-find-scroll onScroll={trackScroll} className="ob-chat-scroller">
       {home ? <div className="ob-home-stack">
@@ -133,14 +140,15 @@ export default function ChatView({
         <BattleSection /><SplitSection />
         {composer}
         <HomeStarters onPick={setDraft} />
-        <EnginePanel />
+        <EnginePanel chatId={chat?.id || ''} />
       </div> : <div className="ob-transcript mx-auto w-full max-w-[var(--chat-width)] px-6 py-6">
         <div className="flex flex-col gap-7">{messages.map(message => <MessageRow key={message.id} message={message} artifacts={viewsForMessage(message.id, message.artifacts, liveArtifacts)} tokens={tokens} highlightId={highlightId} onRewrite={onRewrite} onRestore={onRestore} busyArtifactId={busyArtifactId} rewriteStage={rewriteStage} rewriteError={rewriteError} rewriteErrorFor={rewriteErrorFor} />)}</div>
-        <div className="ob-engine-transcript"><EnginePanel /></div>
+        <div className="ob-engine-transcript">{engine.turn?.state !== 'running' && chat?.messages.some(m => m.nativeRecord?.transcriptId === engine.turn?.transcriptId) ? <details><summary>Last run details and kept files</summary><EnginePanel chatId={chat?.id || ''} /></details> : <EnginePanel chatId={chat?.id || ''} />}</div>
       </div>}
     </div>
+    <WorkQueue />
     {!home ? <><BattleSection /><SplitSection /><EngineActivity words={mascotWords} />{composer}</> : null}
-    {chat && chat.messages.length > 0 ? <CaptureCapsule chat={chat} /> : null}
+    {chat && chat.messages.length > 0 ? <><ChatContextPanel key={chat.id} chat={chat} draft={draft} branch={onBranch} defaults={contextDefaults} /><CaptureCapsule chat={chat} /></> : null}
   </main>
 }
 

@@ -77,7 +77,7 @@ export function extracted(name: string, text: string, disclosure: string): Media
   const trimmed = text.trim()
   if (!trimmed) throw Error('No text could be extracted. This may be scanned, empty, encrypted or use an unsupported encoding.')
   const clipped = trimmed.length > MAX_EXTRACTED_TEXT
-  return { ok: true, name, text: trimmed.slice(0, MAX_EXTRACTED_TEXT), disclosure: disclosure + (clipped ? ` Only the first ${MAX_EXTRACTED_TEXT.toLocaleString('en-US')} of ${trimmed.length.toLocaleString('en-US')} extracted characters are attached; the rest was not read by the engine.` : '') }
+  return { ok: true, name, textComplete: !clipped, text: trimmed.slice(0, MAX_EXTRACTED_TEXT), disclosure: disclosure + (clipped ? ` Only the first ${MAX_EXTRACTED_TEXT.toLocaleString('en-US')} of ${trimmed.length.toLocaleString('en-US')} extracted characters are attached; the rest was not read by the engine.` : '') }
 }
 export async function decodeDocument(name: string, bytes: Buffer): Promise<MediaResult> {
   const ext = name.toLowerCase().split('.').pop() || ''
@@ -110,7 +110,8 @@ export async function decodeDocument(name: string, bytes: Buffer): Promise<Media
         text += `\n[Page ${page}]\n` + content.items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join(''); read++
       }
       if (!text.replace(/\[Page \d+\]/g, '').trim()) throw Error('This PDF has no extractable text. Use the selected vision provider for OCR, or attach an OCR export.')
-      return extracted(name, text, `Local PDF text extraction: ${read} of ${doc.numPages} pages. Images, diagrams and layout were not interpreted.`)
+      const result = extracted(name, text, `Local PDF text extraction: ${read} of ${doc.numPages} pages. Images, diagrams and layout were not interpreted.`)
+      return { ...result, textComplete: result.textComplete === true && read === doc.numPages, pages: { read, total: doc.numPages } }
     } finally { await task.destroy() }
   }
   if (['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp'].includes(ext)) {

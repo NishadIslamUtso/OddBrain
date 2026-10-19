@@ -1,10 +1,10 @@
 import { noLinkedPath } from './configTransaction'
 import { boundedResponse } from '../network/boundedResponse'
-import { lstatSync, unlinkSync, copyFileSync, constants, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { lstatSync, copyFileSync, constants, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve, sep } from 'node:path'
 import { fromBuffer, type Entry, type ZipFile } from 'yauzl'
 import type { CatalogSkill } from '../../shared/lib/skillCatalog'
-import { parseSkillMd, toAgySkill, type VaultSkill } from './deploy'
+import { parseSkillMd, type VaultSkill } from './deploy'
 
 const MAX_ARCHIVE_BYTES = 10_000_000
 const MAX_FILES = 200
@@ -178,12 +178,10 @@ export function deploySkillBundle(entry: CatalogSkill, bundle: SkillBundle, targ
     if (!safeRelative(path) || bytes.length > MAX_FILE_BYTES || size > MAX_EXPANDED_BYTES) throw Error('A skill file is unsafe or exceeds the size limit.')
   }
   const skill: VaultSkill = { name: parsed.name === entry.name ? parsed.name : `${entry.name} (${parsed.name})`, description: parsed.description || entry.what, body: parsed.body }
-  const agy = toAgySkill({ name: entry.name, description: skill.description, body: `Support files for this skill are preserved in .agents/skills/${entry.name}/. Resolve scripts/, references/, assets/ and examples/ from that directory.\n\n${skill.body}` })
-  const roots = [join(targets.claudeSkillsDir, entry.name), join(targets.agySkillsDir, entry.name)], agyPath = join(targets.agySkillsDir, agy.relative)
-  if (new Set([...roots, agyPath].map(p => resolve(p).toLowerCase())).size !== 3) throw Error('Engine skill destinations overlap.')
-  for (const path of [...roots, agyPath]) absent(path)
+  const roots = [join(targets.claudeSkillsDir, entry.name), join(targets.agySkillsDir, entry.name)]
+  if (new Set(roots.map(p => resolve(p).toLowerCase())).size !== 2) throw Error('Engine skill destinations overlap.')
+  for (const path of roots) absent(path)
   const owned: string[] = [], staging: string[] = [], written: string[] = []
-  let commandWritten = false
   try {
     for (const destination of roots) {
       noLinkedPath(destination); mkdirSync(dirname(destination), { recursive: true })
@@ -202,12 +200,10 @@ export function deploySkillBundle(entry: CatalogSkill, bundle: SkillBundle, targ
       }
       written.push(...[...bundle.files.keys()].map(relative => join(roots[index], relative)))
     }
-    noLinkedPath(agyPath); writeFileSync(agyPath, agy.content, { flag: 'wx' }); commandWritten = true; written.push(agyPath)
     if (!readFileSync(join(roots[0], 'SKILL.md')).length) throw Error('The installed skill is empty.')
     return { skill, written }
   } catch (error) {
     const failed: string[] = []
-    if (commandWritten) { try { unlinkSync(agyPath) } catch { failed.push(agyPath) } }
     for (const path of owned) { try { rmSync(path, { recursive: true, force: true }) } catch { failed.push(path) } }
     if (failed.length) throw Error(`Skill install failed and cleanup needs attention: ${failed.join(', ')}`)
     throw error

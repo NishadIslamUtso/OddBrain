@@ -1,3 +1,5 @@
+import type { WorkQueueItem } from '@shared/lib/workQueue'
+import type { NativeConversation, ContextReceipt } from '@shared/lib/nativeConversation'
 import { effortTarget } from '@shared/lib/engineCapabilities'
 import type { ThinkingMode } from '@shared/lib/engine'
 import { selectEngine } from '@shared/lib/engine'
@@ -22,7 +24,7 @@ import type {
   EngineUsage,
 } from '@shared/lib/engine'
 import { DEFAULT_ENGINE } from '@shared/lib/engine'
-import { getEngineApi } from '@/platform/bridge'
+import { getEngineApi, bridge } from '@/platform/bridge'
 
 /** One finished thing the engine said, already shaped for drawing. */
 export type EngineItem =
@@ -33,6 +35,7 @@ export type EngineItem =
   | { kind: 'error'; text: string }
 
 /** A question from the engine that a person must answer. */
+const answering = new WeakSet<object>()
 export type EnginePermission = { requestId: string; tool: string; summary: string; detail?: string }
 
 /** The engine's brains, as its own door reports them. */
@@ -53,6 +56,9 @@ export type PullState = {
 
 /** One work order, from the moment it is sent to the moment it lands. */
 export type EngineTurn = {
+  chatId?: string
+  transcriptId?: string
+  context?: ContextReceipt
   prompt: string
   items: EngineItem[]
   /**
@@ -93,6 +99,7 @@ export type EngineState = {
   totals: ContextTotals
   /** Work orders waiting to run when the current turn closes. */
   line: LineItem[]
+  queueError: string
   /** Finished turns kept from before this window opened. */
   journal: JournalEntry[]
 }
@@ -104,7 +111,7 @@ export type ContextTotals = {
   costUsd: number
 }
 
-export type LineItem = { id: number; prompt: string }
+export type LineItem = WorkQueueItem
 
 export type JournalEntry = {
   at: string
@@ -119,7 +126,7 @@ type EngineStore = EngineState & {
   /** Wire the bridge up once: read the settings, listen for events. */
   init(): Promise<void>
   setOn(value: boolean): void
-  send(prompt: string, pictures?: Array<{ mime: string; data: string }>): Promise<{ ok: boolean; answer: string }>
+  send(prompt: string, pictures?: Array<{ mime: string; data: string }>, conversation?: NativeConversation, queuedId?: string): Promise<{ ok: boolean; answer: string; transcriptId?: string }>
   answer(allow: boolean): Promise<void>
   stop(): Promise<void>
   /** Fold one wire event into the turn. Public so tests can drive it directly. */
@@ -137,11 +144,14 @@ type EngineStore = EngineState & {
   /** Requested reasoning effort, bound to the inspected route; persists. */
   setThinking(mode: ThinkingMode, target: string): Promise<{ ok: boolean; answer: string }>
   /** Park a work order for when the current turn closes. */
-  enqueue(prompt: string): LineItem
-  removeFromLine(id: number): void
-  clearLine(): void
+  enqueue(prompt: string, conversation?: NativeConversation): Promise<void>
+  removeFromLine(id: string): Promise<void>
+  clearLine(): Promise<void>
+  refreshLine(): Promise<void>
+  resumeLine(id: string, acknowledgeUncertain?: boolean): Promise<void>
   /** "Open a folder": pick where the engine works; persists. */
   pickWorkspace(): Promise<void>
+  setWorkspace(folder: string): Promise<{ ok: boolean; answer: string }>
   /** Ask the machine which engines really exist. */
   checkEngines(fresh?: boolean): Promise<void>
   /** Bring a brain home; progress lands in `pull`. */
@@ -161,6 +171,7 @@ const state: EngineState = {
   ambient: { busy: false, note: '', updatedAt: null },
   totals: { turns: 0, inTokens: 0, outTokens: 0, costUsd: 0 },
   line: [],
+  queueError: '',
   journal: [],
 }
 
@@ -178,7 +189,7 @@ const lineHeld = (): boolean => [...lineHolds].some(hold => hold())
 /** A finished turn is recorded once, whichever event closes it first. */
 const journaled = new WeakSet<EngineTurn>()
 
-let lineId = 0
+let draining = false, queueRequest = 0
 let drainTimer: ReturnType<typeof setTimeout> | null = null
 
 const usageLine = (usage: EngineUsage | null): string =>
@@ -190,6 +201,7 @@ const usageLine = (usage: EngineUsage | null): string =>
 const afterTurnClosed = (turn: EngineTurn): void => {
   if (journaled.has(turn)) return
   journaled.add(turn)
+  if (replaying) return // replay is not another execution or another journal entry
   const record = {
     at: new Date().toISOString(),
     prompt: turn.prompt,
@@ -214,17 +226,24 @@ const afterTurnClosed = (turn: EngineTurn): void => {
 
 /** The line: parked work orders, run in order when the engine is free. */
 const drainLine = (): void => {
-  if (lineHeld()) return
-  const turn = state.turn
-  if (turn && turn.state === 'running') return
-  const next = state.line[0]
+  if (lineHeld() || sending || draining || state.ambient.busy || state.turn?.state === 'running') return
+  const next = state.line.find(item => item.status === 'queued' && item.eligible)
   if (!next) return
-  setState({ line: state.line.slice(1) })
-  void store.send(next.prompt)
+  draining = true
+  void store.send(next.prompt, [], next.conversation, next.id).then(async answer => {
+    if (!answer.ok && answer.answer.includes('could not be confirmed')) { try { await bridge.engine.queue.hold(next.id) } catch { setState({ queueError: 'Queue response is uncertain. Inspect recorded work before retrying.' }) } }
+  }).finally(async () => {
+    // Never remove before acknowledgement. Main owns the one-use handoff and
+    // retains failures/uncertainty, including a lost response after dispatch.
+    await store.refreshLine(); draining = false
+    // A refused/unknown request is not an invitation to retry in a loop.
+  })
 }
 
+let lastSequence = 0, replaying = false
 let subscribed = false
-let initializing = false
+let initialization: Promise<void> | null = null
+let sending = false, sendGeneration = 0
 let modelRequest = 0
 let version = 0
 const listeners = new Set<() => void>()
@@ -244,6 +263,10 @@ const repeats = { key: '', count: 0 }
 
 /** Fold one wire event into the current turn, whatever order they arrive in. */
 const ingest = (event: EngineEvent): void => {
+  if (event.sequence !== undefined) {
+    if (!Number.isSafeInteger(event.sequence) || event.sequence <= lastSequence) return
+    lastSequence = event.sequence
+  }
   // The engine's existence is not a per-turn fact: even with no task under
   // way, a closed engine must dim its light.
   if (event.kind === 'closed') state.alive = false
@@ -267,10 +290,19 @@ const ingest = (event: EngineEvent): void => {
     state.ambient = { busy: true, note, updatedAt: new Date().toISOString() }
   }
   const turn = state.turn
+  if (turn && ((event.chatId && turn.chatId && event.chatId !== turn.chatId) || (event.transcriptId && turn.transcriptId && event.transcriptId !== turn.transcriptId))) {
+    state.ambient = { busy: !['done', 'error', 'closed'].includes(event.kind), note: 'Work in another conversation', updatedAt: new Date().toISOString() }; emit(); if (!state.ambient.busy && state.line.length) queueMicrotask(drainLine); return
+  }
+  if (turn) {
+    if (event.chatId) turn.chatId = event.chatId
+    if (event.transcriptId) turn.transcriptId = event.transcriptId
+    if (event.context) turn.context = event.context
+  }
   if (!turn) {
     if (event.kind === 'done' || event.kind === 'error' || event.kind === 'closed') {
       state.ambient = { busy: false, note: '', updatedAt: state.ambient.updatedAt }
     }
+    emit(); if (!state.ambient.busy && state.line.length) queueMicrotask(drainLine)
     return
   }
   if (event.kind === 'session') {
@@ -402,14 +434,18 @@ const store: EngineStore = {
   get line() {
     return state.line
   },
+  get queueError() { return state.queueError },
   get journal() {
     return state.journal
   },
 
   async init(): Promise<void> {
-    if (subscribed || initializing) return
-    initializing = true
+    if (subscribed) return
+    if (initialization) return initialization
+    initialization = (async () => {
     const api = getEngineApi()
+    const buffered: EngineEvent[] = []; let hydrated = false
+    const unsubscribe = api.onEvent(event => { if (hydrated) ingest(event); else buffered.push(event) })
     try {
       const read = await api.read()
       setState({ settings: read.engine, alive: read.running })
@@ -424,9 +460,11 @@ const store: EngineStore = {
       const worthShowing = remembered.some((event) =>
         ['status', 'text', 'thinking', 'tool', 'permission', 'done', 'error'].includes(event.kind)
       )
-      if (worthShowing && !state.turn) {
+      if ((worthShowing || read.active) && !state.turn) {
         state.turn = {
-          prompt: '(from before this window opened)',
+          prompt: read.active?.prompt || '(from before this window opened)',
+          chatId: read.active?.chatId || remembered.find(event => event.chatId)?.chatId,
+          transcriptId: read.active?.transcriptId,
           items: [],
           permissions: [],
           // Replayed as if live; reconciled with the machine below.
@@ -434,7 +472,8 @@ const store: EngineStore = {
           sessionId: null,
           usage: null,
         }
-        for (const event of remembered) ingest(event)
+        replaying = true
+        try { for (const event of remembered) ingest(event) } finally { replaying = false }
         // The engine being gone changes the story: a still-"running" replay
         // is closed honestly, and a question it still waits on is dropped —
         // nobody can answer it anymore.
@@ -447,9 +486,11 @@ const store: EngineStore = {
         }
         emit()
       }
-    } finally {
-      initializing = false
-    }
+      if (Number.isSafeInteger(read.lastSequence)) lastSequence = Math.max(lastSequence, read.lastSequence!)
+      hydrated = true
+      for (const event of buffered) ingest(event)
+      buffered.length = 0
+    } catch (error) { if (typeof unsubscribe === 'function') unsubscribe(); throw error }
     // The record of earlier sessions, bounded and read-only.
     const earlier = api.journal?.list?.()
     if (earlier && typeof earlier.then === 'function') {
@@ -459,7 +500,6 @@ const store: EngineStore = {
         })
         .catch(() => undefined)
     }
-    api.onEvent(ingest)
     api.onPullEvent((tick) => {
       const record = (tick && typeof tick === 'object' ? tick : {}) as Record<string, unknown>
       const status = typeof record.status === 'string' ? record.status : ''
@@ -470,6 +510,9 @@ const store: EngineStore = {
       setState({ pull: { ...state.pull, status, error, fraction } })
     })
     subscribed = true
+    await store.refreshLine()
+    })()
+    try { await initialization } finally { initialization = null }
   },
 
   setOn(value: boolean): void {
@@ -477,19 +520,24 @@ const store: EngineStore = {
     if (state.on) void store.init()
   },
 
-  async send(prompt: string, pictures: Array<{ mime: string; data: string }> = []): Promise<{ ok: boolean; answer: string }> {
-    if (state.turn?.state === 'running') {
+  async send(prompt: string, pictures: Array<{ mime: string; data: string }> = [], conversation?: NativeConversation, queuedId?: string): Promise<{ ok: boolean; answer: string; transcriptId?: string }> {
+    if (sending || state.ambient.busy || state.turn?.state === 'running') {
       return { ok: false, answer: 'The engine is already working on the last task.' }
     }
     // Hydrate BEFORE the first send, not beside it: a cold window that sends
     // immediately must go out with the real engine and folder, not defaults.
+    sending = true; const own = sendGeneration
+    try {
     await store.init()
+    if (own !== sendGeneration) return { ok: false, answer: 'Send canceled before dispatch. Your draft was not sent.' }
+    if (store.turn?.state === 'running') return { ok: false, answer: 'The engine is already working on the last task.' }
     repeats.key = ''
     repeats.count = 0
-    const turn: EngineTurn = { prompt, items: [], permissions: [], state: 'running', sessionId: null, usage: null, pictures: pictures.length }
+    const turn: EngineTurn = { chatId: conversation?.chatId, prompt, items: [], permissions: [], state: 'running', sessionId: null, usage: null, pictures: pictures.length }
     setState({ turn })
-    const answer = await getEngineApi().send(prompt, '', pictures)
-    if (answer.ok) state.alive = true
+    const answer = await getEngineApi().send(prompt, '', pictures, conversation, queuedId)
+    if (answer.transcriptId) turn.transcriptId = answer.transcriptId
+    if (answer.ok) { state.alive = true; emit() }
     if (!answer.ok) {
       // The refusal is the result, shown where the work would have appeared —
       // the same honesty rule the rest of the app follows.
@@ -498,15 +546,25 @@ const store: EngineStore = {
       emit()
     }
     return answer
+    } catch {
+      const answer = 'The send could not be confirmed. Inspect the transcript before retrying; your draft is retained.'
+      if (store.turn?.state === 'running' && state.turn) { state.turn.state = 'error'; state.turn.items.push({ kind: 'error', text: answer }); emit() }
+      return { ok: false, answer }
+    } finally { sending = false; if (state.line.length) queueMicrotask(drainLine) }
   },
 
   async answer(allow: boolean): Promise<void> {
     const turn = state.turn
     const permission = turn?.permissions[0]
-    if (!permission) return
-    turn.permissions = turn.permissions.slice(1)
-    emit()
-    await getEngineApi().answer(permission.requestId, allow)
+    if (!turn || !permission || answering.has(permission)) return
+    answering.add(permission)
+    try {
+      const reply = await getEngineApi().answer(permission.requestId, allow)
+      if (state.turn !== turn) return
+      if (reply.ok) turn.permissions = turn.permissions.filter(p => p !== permission)
+      else turn.items.push({ kind: 'status', text: 'The engine did not accept that permission response. It may have expired; no approval is assumed.' })
+    } catch { if (state.turn === turn) turn.items.push({ kind: 'status', text: 'The permission response could not be delivered. No approval is assumed.' }) }
+    finally { answering.delete(permission); emit() }
   },
 
   running(): boolean {
@@ -554,24 +612,30 @@ const store: EngineStore = {
     return answer
   },
 
-  enqueue(prompt: string): LineItem {
-    lineId += 1
-    const item: LineItem = { id: lineId, prompt }
-    state.line = [...state.line, item]
-    emit()
-    // Nothing running? The line is a straight pass-through.
-    if (!state.turn || state.turn.state !== 'running') drainLine()
-    return item
+  async enqueue(prompt: string, conversation?: NativeConversation): Promise<void> {
+    const own = ++queueRequest, items = await bridge.engine.queue.enqueue(prompt, conversation)
+    if (own !== queueRequest) return
+    setState({ line: items, queueError: '' }); drainLine()
   },
-
-  removeFromLine(id: number): void {
-    state.line = state.line.filter(item => item.id !== id)
-    emit()
+  async refreshLine(): Promise<void> {
+    const own = ++queueRequest
+    try { const line = await bridge.engine.queue.read(); if (own !== queueRequest) return; setState({ line, queueError: '' }); if (!draining && !sending) queueMicrotask(drainLine) }
+    catch (error) { if (own !== queueRequest) return; setState({ queueError: (error as Error).message || 'Saved queue could not be read. No automatic task was started.' }) }
   },
-
-  clearLine(): void {
-    state.line = []
-    emit()
+  async resumeLine(id: string, acknowledgeUncertain = false): Promise<void> {
+    const own = ++queueRequest
+    try { const line = await bridge.engine.queue.resume(id, acknowledgeUncertain); if (own !== queueRequest) return; setState({ line, queueError: '' }); drainLine() }
+    catch (error) { if (own !== queueRequest) return; setState({ queueError: (error as Error).message }) }
+  },
+  async removeFromLine(id: string): Promise<void> {
+    const own = ++queueRequest
+    try { const line = await bridge.engine.queue.cancel(id); if (own !== queueRequest) return; setState({ line, queueError: '' }) }
+    catch (error) { if (own !== queueRequest) return; setState({ queueError: (error as Error).message }) }
+  },
+  async clearLine(): Promise<void> {
+    // Explicit removal archives the records; it never pretends to stop work.
+    for (const item of [...state.line].filter(item => item.status !== 'starting')) await store.removeFromLine(item.id)
+    if (state.line.some(item => item.status === 'starting')) setState({ queueError: 'In-flight handoffs were retained. Use Stop on active work if needed.' })
   },
 
   async checkEngines(fresh = false): Promise<void> {
@@ -600,12 +664,19 @@ const store: EngineStore = {
     return answer
   },
 
+  async setWorkspace(folder: string): Promise<{ ok: boolean; answer: string }> {
+    const answer = await bridge.engine.setWorkspace(folder)
+    if (answer.ok) setState({ settings: { ...state.settings, workspace: answer.answer } })
+    return answer
+  },
+
   async pickWorkspace(): Promise<void> {
     const answer = await getEngineApi().pickWorkspace()
     if (answer.ok) setState({ settings: { ...state.settings, workspace: answer.answer } })
   },
 
   async stop(): Promise<void> {
+    sendGeneration++
     await getEngineApi().stop()
     // Belt and suspenders: the 'closed' event also closes the turn, but the
     // person who pressed Stop should never wait for a wire to agree.
@@ -663,10 +734,11 @@ export function usePermissionsWaiting(): number {
 
 /** Test seam: put the store back to its first day. */
 export function resetEngineForTests(): void {
-  modelRequest++
+  modelRequest++; sendGeneration++; sending = false; lastSequence = 0; replaying = false
   subscribed = false
   state.on = false
   state.turn = null
+  state.line = []; state.queueError = ''; draining = false; queueRequest++
   state.settings = { ...DEFAULT_ENGINE }
   state.models = { loading: false, entries: [], error: '' }
   state.detection = { loading: false, engines: [] }

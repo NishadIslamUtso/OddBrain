@@ -1,3 +1,4 @@
+import { sanitizeEnvironment } from './claudeCode'
 /**
  * The engine's own sign-in state, asked rather than assumed.
  *
@@ -11,7 +12,7 @@
  * login exists, which method it uses, and where the config lives.
  */
 import { execFile, spawn } from 'node:child_process'
-import { enginePathSync, resolveEngineCommand, shellSafeCommand } from './enginePath'
+import { enginePathSync, resolveEngineCommand } from './enginePath'
 
 export type AuthStatusAnswer = {
   ok: boolean
@@ -28,8 +29,8 @@ export function parseClaudeAuth(raw: string): { loggedIn: boolean; method: strin
     if (!value || typeof value !== 'object' || typeof value.loggedIn !== 'boolean') return null
     return {
       loggedIn: value.loggedIn,
-      method: typeof value.authMethod === 'string' ? value.authMethod : '',
-      provider: typeof value.apiProvider === 'string' ? value.apiProvider : '',
+      method: ['none', 'oauth', 'oauth_token', 'api_key', 'apiKey', 'claude.ai'].includes(String(value.authMethod)) ? String(value.authMethod) : '',
+      provider: ['firstParty', 'anthropic', 'bedrock', 'vertex', 'foundry'].includes(String(value.apiProvider)) ? String(value.apiProvider) : '',
     }
   } catch {
     return null
@@ -128,18 +129,18 @@ export function readAuthStatus(
       answer: 'This connection has no verified agy sign-in check. Run `agy` once in a terminal; its credentials stay with it.',
     })
   }
-  const platform = options.platform ?? process.platform
   const run = options.runner ?? ((command, args, done) => {
     execFile(
       command,
       args,
-      { shell: platform === 'win32', timeout: options.timeoutMs ?? 8000, env: { ...process.env, PATH: enginePathSync() } },
+      { shell: false, windowsHide: true, maxBuffer: 128_000, timeout: options.timeoutMs ?? 8000, env: { ...sanitizeEnvironment(process.env), PATH: enginePathSync() } },
       (error, stdout, stderr) => done(error, typeof stdout === 'string' ? stdout : '', typeof stderr === 'string' ? stderr : ''),
     )
   })
   const command = options.command ?? resolveEngineCommand('claude-code')
+  if (/\.(cmd|bat)$/i.test(command)) return Promise.resolve({ ok: false, loggedIn: false, method: '', provider: '', answer: 'Sign-in inspection requires the native Claude executable, not a shell shim.' })
   return new Promise((resolve) => {
-    run(shellSafeCommand(command, platform), ['auth', 'status'], (error, stdout, stderr) => {
+    try { run(command, ['auth', 'status'], (_error, stdout, stderr) => {
       // The CLI prints this JSON on stderr (verified against 2.1.302), so both
       // streams are read. A parsed answer is the answer even when the exit code
       // is noisy; only unparseable output is a failed question.
@@ -148,16 +149,9 @@ export function readAuthStatus(
         resolve({ ok: true, ...parsed, answer: authSentence(parsed) })
         return
       }
-      const detail = String(stderr || stdout || (error as Error | undefined)?.message || '').trim().slice(-300)
-      resolve({
-        ok: false,
-        loggedIn: false,
-        method: '',
-        provider: '',
-        answer: detail
-          ? `Claude Code did not answer its sign-in question: ${detail}`
-          : 'Claude Code did not answer its sign-in question. Is it installed?',
-      })
-    })
+      resolve({ ok: false, loggedIn: false, method: '', provider: '',
+        answer: 'Claude Code did not answer its sign-in question with a supported report. Check its native installation and sign-in in a terminal; raw diagnostic output is not shared.' })
+    }) } catch { resolve({ ok: false, loggedIn: false, method: '', provider: '', answer: 'Claude Code did not answer its sign-in question. No task was sent.' }) }
+
   })
 }

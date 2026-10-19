@@ -1,3 +1,5 @@
+import { validContextReceipt } from '../shared/lib/nativeConversation'
+import { validNativeArtifacts } from '../shared/lib/nativeArtifacts'
 import { appendFileSync, closeSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
@@ -5,7 +7,7 @@ import type { EngineEvent, EngineId } from '../shared/lib/engine'
 import type { Transcript, TranscriptHeader, TranscriptPage } from '../shared/lib/transcripts'
 import { noLinkedPath } from './engine/configTransaction'
 
-const headerValid = (h: any, id: string): h is TranscriptHeader => h?.id === id && ['claude-code', 'agy'].includes(h.engine) && ['at', 'model', 'workspace', 'title'].every(k => typeof h[k] === 'string') && Number.isSafeInteger(h.pictures) && h.pictures >= 0
+const headerValid = (h: any, id: string): h is TranscriptHeader => h?.id === id && (h.chatId === undefined || (typeof h.chatId === 'string' && /^[a-zA-Z0-9_.:-]{1,256}$/.test(h.chatId))) && (h.context === undefined || validContextReceipt(h.context)) && ['claude-code', 'agy'].includes(h.engine) && ['at', 'model', 'workspace', 'title'].every(k => typeof h[k] === 'string') && Number.isSafeInteger(h.pictures) && h.pictures >= 0
 const eventValid = (e: any): e is EngineEvent => e && (e.kind === 'closed' || (['delta', 'text', 'status', 'thinking', 'done', 'error'].includes(e.kind) && typeof e.text === 'string' && (e.kind !== 'done' || e.alreadyDisplayed === undefined || typeof e.alreadyDisplayed === 'boolean')) || (e.kind === 'session' && typeof e.id === 'string') || (e.kind === 'tool' && typeof e.name === 'string' && typeof e.summary === 'string') || (e.kind === 'permission' && typeof e.requestId === 'string' && typeof e.tool === 'string' && typeof e.summary === 'string' && (e.detail === undefined || typeof e.detail === 'string') && (e.file === undefined || typeof e.file === 'string')))
 const ID = /^\d{13}-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 export const TRANSCRIPT_LIMIT = 32_000_000
@@ -19,11 +21,11 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
   }
   const line = (value: unknown) => JSON.stringify(value) + '\n'
   return {
-    begin(input: { prompt: string; engine: EngineId; model: string; workspace: string; pictures: number }): string {
+    begin(input: { userPrompt?: string; chatId?: string; context?: import('../shared/lib/nativeConversation').ContextReceipt; prompt: string; engine: EngineId; model: string; workspace: string; pictures: number }): string {
       noLinkedPath(root); mkdirSync(root, { recursive: true, mode: 0o700 })
       const id = `${Date.now()}-${randomUUID()}`
-      const header: TranscriptHeader = { id, at: new Date().toISOString(), engine: input.engine, model: input.model, workspace: input.workspace, title: input.prompt.replace(/\s+/g, ' ').slice(0, 120), pictures: input.pictures }
-      const bytes = line({ header }) + line({ prompt: input.prompt })
+      const header: TranscriptHeader = { id, at: new Date().toISOString(), engine: input.engine, model: input.model, workspace: input.workspace, title: input.prompt.replace(/\s+/g, ' ').slice(0, 120), pictures: input.pictures, ...(input.chatId ? { chatId: input.chatId } : {}), ...(input.context ? { context: input.context } : {}) }
+      const bytes = line({ header }) + line({ prompt: input.prompt, ...(input.userPrompt !== undefined ? { userPrompt: input.userPrompt } : {}) })
       if (Buffer.byteLength(bytes) > limit) throw Error('The transcript exceeds the storage limit. Nothing was sent.')
       writeFileSync(path(id), bytes, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
       active.set(id, Buffer.byteLength(bytes)); return id
@@ -48,7 +50,7 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
         let fd: number | undefined
         try {
           const file = path(id); if (!lstatSync(file).isFile()) throw Error()
-          fd = openSync(file, 'r'); const buffer = Buffer.alloc(16_384), n = readSync(fd, buffer, 0, buffer.length, 0)
+          fd = openSync(file, 'r'); const buffer = Buffer.alloc(128_000), n = readSync(fd, buffer, 0, buffer.length, 0)
           const raw = buffer.subarray(0, n).toString('utf8'); const end = raw.indexOf('\n'); if (end < 0) throw Error()
           const header = JSON.parse(raw.slice(0, end)).header as TranscriptHeader
           if (!headerValid(header, id)) throw Error()
@@ -56,6 +58,14 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
         } catch { damaged = true } finally { if (fd !== undefined) closeSync(fd) }
       }
       return { entries, next: files.length > 50 ? files[49] : '', notice: damaged ? 'Some records could not be read. Their original files have not been changed.' : '' }
+    },
+    /** Coordinator-only raw export endpoint. Includes damaged trailing entries, without repair.
+     * Invalid UTF-8 is refused instead of replaced. Never expose a general file path reader. */
+    raw(id: string): { content: string; bytes: number; format: 'ndjson' } {
+      const file = path(id), info = lstatSync(file)
+      if (!info.isFile() || info.size > limit) throw Error('Raw record exceeds the export limit or is not a regular file. Original unchanged.')
+      const bytes = readFileSync(file)
+      return { content: new TextDecoder('utf-8', { fatal: true }).decode(bytes), bytes: bytes.length, format: 'ndjson' }
     },
     read(id: string): Transcript {
       const file = path(id), stat = lstatSync(file)
@@ -65,16 +75,16 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
       const raw = new TextDecoder('utf-8', { fatal: true }).decode(bytes.subarray(0, completeAt)), lines = raw.split('\n')
       lines.pop() // Empty trailing field, or the incomplete final write.
       const header = JSON.parse(lines.shift() || '{}').header as TranscriptHeader
-      const prompt = JSON.parse(lines.shift() || '{}').prompt
-      if (!headerValid(header, id) || typeof prompt !== 'string') throw Error('The transcript header is damaged. Its original is unchanged.')
+      const request = JSON.parse(lines.shift() || '{}'), prompt = request.prompt
+      if (!headerValid(header, id) || typeof prompt !== 'string' || (request.userPrompt !== undefined && typeof request.userPrompt !== 'string')) throw Error('The transcript header is damaged. Its original is unchanged.')
       const events: EngineEvent[] = []
       for (const line of lines) {
-        try { const e = JSON.parse(line).event; if (!eventValid(e)) throw Error(); events.push(e) }
+        try { const e = JSON.parse(line).event; if (!eventValid(e) || (e.transcriptId !== undefined && e.transcriptId !== id) || (e.chatId !== undefined && e.chatId !== header.chatId) || (e.context !== undefined && !validContextReceipt(e.context)) || (e.artifacts !== undefined && !validNativeArtifacts(e.artifacts))) throw Error(); events.push(e) }
         catch { incomplete = true; break }
       }
       const last = events.at(-1)
       const state = incomplete ? 'interrupted' : last?.kind === 'done' ? 'done' : last?.kind === 'error' ? 'error' : active.has(id) ? 'running' : 'interrupted'
-      return { header, prompt, events, state, incomplete }
+      return { header, prompt, events, state, incomplete, ...(typeof request.userPrompt === 'string' ? { userPrompt: request.userPrompt } : {}) }
     },
   }
 }

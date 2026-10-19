@@ -12,7 +12,7 @@ export function normalizeMedia(raw: unknown): MediaPreferences {
   return { provider: text(v.provider), model: text(v.model), transcriptionProvider: text(v.transcriptionProvider), transcriptionModel: text(v.transcriptionModel), dictation: v.dictation === 'provider' ? 'provider' : 'local', language: /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(v.language || '') ? v.language! : 'en-US', ffmpeg: text(v.ffmpeg, 4096) }
 }
 export type MediaInput = { name: string; mime: string; bytes: Uint8Array; route: 'local' | 'provider' | 'transcribe'; expected?: { provider: string; model: string } }
-export type MediaResult = { ok: boolean; name: string; text?: string; images?: { name: string; mime: string; data: string }[]; disclosure?: string; error?: string; fallbackAllowed?: boolean }
+export type MediaResult = { textComplete?: boolean; pages?: { read: number; total: number }; ok: boolean; name: string; text?: string; images?: { name: string; mime: string; data: string }[]; disclosure?: string; error?: string; fallbackAllowed?: boolean }
 export type MediaBridge = {
   authorizeRecording(expected: { provider: string; model: string }): Promise<MediaResult>
   onCancelled(listener: () => void): () => void

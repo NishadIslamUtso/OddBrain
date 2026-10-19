@@ -140,9 +140,9 @@ test('the wire: a second turn that says the same words is not shown twice', () =
   const events = parser.feed(turn() + turn())
   assert.deepEqual(events, [
     { kind: 'delta', text: 'Same words.' },
-    { kind: 'done', text: 'Same words.' },
+    { kind: 'done', text: 'Same words.', alreadyDisplayed: true },
     { kind: 'delta', text: 'Same words.' },
-    { kind: 'done', text: 'Same words.' },
+    { kind: 'done', text: 'Same words.', alreadyDisplayed: true },
   ])
 })
 
@@ -255,6 +255,8 @@ test('a session: a permission card can be allowed, and the answer is on the wire
     onEvent: rec.on,
     spawnProcess: (() => fake.child) as unknown as typeof import('node:child_process').spawn,
   })
+  assert.equal(session.send('Requested task'), true)
+  fake.written.length = 0
   fake.child.stdout.emit(
     'data',
     Buffer.from(
@@ -281,6 +283,8 @@ test('a session: a denial carries a message — the real CLI rejects a bare deny
     onEvent: rec.on,
     spawnProcess: (() => fake.child) as unknown as typeof import('node:child_process').spawn,
   })
+  assert.equal(session.send('Requested task'), true)
+  fake.written.length = 0
   fake.child.stdout.emit(
     'data',
     Buffer.from(
@@ -334,8 +338,8 @@ test('a session: a missing engine becomes a sentence, not a crash', async () => 
   })
   await new Promise((resolve) => setImmediate(resolve))
   const error = rec.last('error') as Extract<EngineEvent, { kind: 'error' }>
-  assert.match(error.text, /not found/i)
-  assert.match(error.text, /npm install -g @anthropic-ai\/claude-code/)
+  assert.match(error.text, /could not start/i)
+  assert.match(error.text, /native executable/)
   assert.equal(session.send('anything'), false)
 })
 

@@ -6,7 +6,7 @@ import ConnectorsSection from '../src/renderer/src/components/ConnectorsSection'
 const fixture = vi.hoisted(() => ({
   engine: { settings: { id: 'claude-code' }, detection: { loading: false, engines: [{ id: 'claude-code', found: true, version: 'fixture', path: '/fixture/claude' }, { id: 'agy', found: true, version: 'fixture', path: '/fixture/agy' }] }, checkEngines: vi.fn(), pick: vi.fn() },
   api: { binaryOverride: vi.fn(), clearBinary: vi.fn(), pickBinary: vi.fn(), authStatus: vi.fn(), ollamaVersion: vi.fn(), openLogin: vi.fn(), models: vi.fn(), downloads: { serveStatus: vi.fn(), serveStart: vi.fn(), serveStop: vi.fn(), start: vi.fn(), run: vi.fn() } },
-  mcp: { read: vi.fn(), write: vi.fn() },
+  mcp: { read: vi.fn(), write: vi.fn(), preview: vi.fn(), decide: vi.fn() },
 }))
 vi.mock('../src/renderer/src/state/engine', () => ({ useEngine: () => fixture.engine }))
 vi.mock('../src/renderer/src/platform/bridge', () => ({ getEngineApi: () => fixture.api, isDemo: false, bridge: { mcp: fixture.mcp } }))
@@ -19,6 +19,7 @@ beforeEach(() => {
   fixture.api.authStatus.mockResolvedValue({ ok: true, loggedIn: true, method: 'oauth', provider: 'firstParty', answer: 'Signed in with oauth.' })
   fixture.api.ollamaVersion.mockResolvedValue({ ok: true, version: '0.15.2', compatible: true, answer: 'Ollama 0.15.2 is new enough.' })
   fixture.api.openLogin.mockResolvedValue({ ok: true, answer: 'A terminal should have opened.' })
+  fixture.mcp.preview.mockResolvedValue({ token: 'review-one', changes: [], explanation: 'Fixture review', expiresAt: Date.now() + 10000 }); fixture.mcp.decide.mockResolvedValue({ ok: true, answer: 'Reviewed files saved' });
   fixture.mcp.read.mockResolvedValue({ servers: [] }); fixture.mcp.write.mockResolvedValue({ ok: true, written: [], answer: 'Fixture list written.' })
   fixture.api.downloads.serveStart.mockResolvedValue({ ok: true, answer: 'Started fixture.' }); fixture.api.downloads.serveStop.mockResolvedValue({ ok: true, answer: 'Stopped fixture.' })
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
@@ -67,7 +68,8 @@ test('tool servers are listed, removed and added through the one MCP list', asyn
   expect(host.textContent).toContain('old-mcp')
   const remove = host.querySelector('[aria-label="Remove old"]') as HTMLButtonElement
   await click(remove)
-  expect(fixture.mcp.write).toHaveBeenCalledWith([])
+  expect(fixture.mcp.preview).toHaveBeenCalledWith([]); expect(fixture.mcp.write).not.toHaveBeenCalled(); expect(fixture.mcp.decide).not.toHaveBeenCalled()
+  await click(button('Allow these file changes once')); expect(fixture.mcp.decide).toHaveBeenCalledWith('review-one', 'allow')
 
   const set = (label: string, value: string) => {
     const input = host.querySelector(`input[aria-label="${label}"]`) as HTMLInputElement
@@ -81,7 +83,7 @@ test('tool servers are listed, removed and added through the one MCP list', asyn
     set('Arguments', '-y files-mcp')
   })
   await click(button('Add server'))
-  expect(fixture.mcp.write).toHaveBeenCalledWith([{ name: 'files', command: 'npx', args: ['-y', 'files-mcp'] }])
+  expect(fixture.mcp.preview).toHaveBeenCalledWith([{ name: 'files', command: 'npx', args: ['-y', 'files-mcp'] }]); expect(fixture.mcp.write).not.toHaveBeenCalled()
 })
 
 test('a bad tool server is refused before anything is written', async () => {

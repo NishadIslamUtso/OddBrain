@@ -43,9 +43,9 @@ export function resetSamples(): void {
 export const sampleTime = (): string => new Date().toISOString()
 export function sampleProjects(): Project[] {
   return [
-    { id: 'sample-workshop', name: 'Community workshop', instruction: 'Use plain language. Keep plans practical and easy to revise.', folder: '/Sample workspace/Workshop', createdAt: sampleTime() },
-    { id: 'sample-garden', name: 'Balcony garden', instruction: 'Compare low-maintenance options. Separate observations from assumptions.', folder: '/Sample workspace/Garden', createdAt: sampleTime() },
-    { id: 'sample-website', name: 'Small website', instruction: 'Use semantic HTML, keyboard-friendly controls and no remote dependencies.', folder: '/Sample workspace/Website', createdAt: sampleTime() },
+    { id: 'sample-workshop', name: 'Community workshop', instruction: 'Use plain language. Keep plans practical and easy to revise.', folder: '/Sample workspace/Workshop', createdAt: sampleTime(), goals: [], references: [] },
+    { id: 'sample-garden', name: 'Balcony garden', instruction: 'Compare low-maintenance options. Separate observations from assumptions.', folder: '/Sample workspace/Garden', createdAt: sampleTime(), goals: [], references: [] },
+    { id: 'sample-website', name: 'Small website', instruction: 'Use semantic HTML, keyboard-friendly controls and no remote dependencies.', folder: '/Sample workspace/Website', createdAt: sampleTime(), goals: [], references: [] },
   ]
 }
 export function sampleChats(): Chat[] {

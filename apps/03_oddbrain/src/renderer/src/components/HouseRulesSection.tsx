@@ -1,16 +1,10 @@
+import NativeRuleReview from './NativeRuleReview'
 import { useEffect, useState } from 'react'
 import { bridge } from '@/platform/bridge'
 import type { HouseRules } from '@shared/lib/houseRules'
 
-/**
- * The rulebook, editable.
- *
- * These five texts are the app's canonical instructions — the same rules that
- * ride Claude Code as CLAUDE.md and agy as AGENTS.md, in the marked block of
- * each engine's own global file. Saving writes once and deploys everywhere;
- * the owner's own words in those files are never touched. A blank field
- * simply falls back to the default rule — never an empty rule.
- */
+/** App-owned instructions travel with requests. Changes to native global files
+ * use their own exact, one-use file review instead of automatic deployment. */
 
 const FIELDS: Array<{ key: keyof HouseRules; label: string; hint: string; rows: number }> = [
   { key: 'identity', label: 'Who you are', hint: 'What the engine is inside this app', rows: 3 },
@@ -40,10 +34,10 @@ export default function HouseRulesSection() {
       const answer = await bridge.houseRules.write(rules)
       setStatus(
         answer.ok
-          ? `Saved and delivered to ${answer.written.length} engine${answer.written.length === 1 ? '' : 's'}.`
+          ? 'Saved for future app requests. Native global files were not changed.'
           : 'Saving needs the desktop app, this window is the interface only.',
       )
-    } finally {
+    } catch (error) { setStatus((error as Error).message || 'Instructions could not be saved; originals are unchanged.') } finally {
       setSaving(false)
     }
   }
@@ -67,14 +61,14 @@ export default function HouseRulesSection() {
           />
         </label>
       ))}
-      <div className="flex items-center gap-2"><button type="button" className="ob-small-button" disabled={saving} onClick={() => { void bridge.houseRules.read().then(answer => { setRules(answer.defaults); setStatus('Defaults loaded. Save and deliver to apply them.') }).catch(() => setStatus('Defaults could not be read.')) }}>Restore defaults</button>
+      <div className="flex items-center gap-2"><button type="button" className="ob-small-button" disabled={saving} onClick={() => { void bridge.houseRules.read().then(answer => { setRules(answer.defaults); setStatus('Defaults loaded. Save to use them in future app requests.') }).catch(() => setStatus('Defaults could not be read.')) }}>Restore defaults</button>
         <button
           type="button"
           onClick={() => void save()}
           disabled={saving}
           className="rounded-lg bg-accent px-3 py-1.5 text-[12.5px] font-medium text-[var(--accent-ink)] hover:bg-accent/90 disabled:opacity-50"
         >
-          {saving ? 'Delivering…' : 'Save and deliver to every engine'}
+          {saving ? 'Saving…' : 'Save app instructions'}
         </button>
         {status ? (
           <p className="text-[11.5px] text-muted" role="status">
@@ -83,9 +77,9 @@ export default function HouseRulesSection() {
         ) : null}
       </div>
       <p className="text-[11px] text-muted">
-        Blank fields fall back to the default rule. The rules land as a marked block inside each engine's own file, as
-        Claude Code's CLAUDE.md and agy's GEMINI.md, and nothing you wrote around that block is ever touched.
+        Blank fields fall back to the default rule. These instructions accompany app requests. Native global files remain unchanged until you review and allow a separate file change.
       </p>
+      <NativeRuleReview />
     </div>
   )
 }

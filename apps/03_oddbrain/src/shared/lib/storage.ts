@@ -1,3 +1,5 @@
+import { validContextReceipt } from './nativeConversation'
+import { validNativeArtifacts } from './nativeArtifacts'
 import type { Chat, Message, Settings } from '../types'
 
 export const DEFAULT_MODEL = 'qwen2.5:3b'
@@ -42,6 +44,7 @@ export function normalizeChats(value: unknown): Chat[] {
     if (!chat || typeof chat.id !== 'string' || typeof chat.title !== 'string') {
       throw new Error('Invalid chat history.')
     }
+    if (chat.messages !== undefined && !Array.isArray(chat.messages)) throw new Error('Invalid message history. Original storage must not be replaced.')
     const messages: Message[] = Array.isArray(chat.messages) ? chat.messages : []
     const bad = messages.some(
       message =>
@@ -49,6 +52,7 @@ export function normalizeChats(value: unknown): Chat[] {
         typeof message.id !== 'string' ||
         !['user', 'assistant'].includes(message.role) ||
         typeof message.content !== 'string' ||
+        (message.nativeRecord !== undefined && (!message.nativeRecord || typeof message.nativeRecord.transcriptId !== 'string' || typeof message.nativeRecord.chatId !== 'string' || !['claude-code', 'agy'].includes(message.nativeRecord.engine) || !(message.nativeRecord.sessionId === null || typeof message.nativeRecord.sessionId === 'string') || (message.nativeRecord.context !== undefined && !validContextReceipt(message.nativeRecord.context)) || (message.nativeRecord.artifacts !== undefined && !validNativeArtifacts(message.nativeRecord.artifacts)) || (message.nativeRecord.pictures !== undefined && (!Number.isSafeInteger(message.nativeRecord.pictures) || message.nativeRecord.pictures < 0)))) ||
         (message.artifacts &&
           (!Array.isArray(message.artifacts) ||
             message.artifacts.some(

@@ -180,7 +180,7 @@ export function normalizeEngine(raw: unknown): EngineSettings {
  * as they arrive: text becomes bubbles, tool entries become activity cards,
  * a permission becomes an approve/deny card, done/error closes the turn.
  */
-export type EngineEvent =
+export type EngineEvent = { sequence?: number; artifacts?: import('./nativeArtifacts').NativeArtifactLink[]; chatId?: string; transcriptId?: string; context?: import('./nativeConversation').ContextReceipt } & (
   | { kind: 'status'; text: string }
   | { kind: 'text'; text: string }
   | { kind: 'tool'; name: string; summary: string }
@@ -193,6 +193,7 @@ export type EngineEvent =
   | { kind: 'done'; text: string; usage?: EngineUsage; alreadyDisplayed?: boolean }
   | { kind: 'error'; text: string; usage?: EngineUsage }
   | { kind: 'closed' }
+)
 
 /**
  * A short human sentence about a tool call — what it touches, not its whole

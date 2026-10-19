@@ -53,10 +53,11 @@ export default function MessageRow({
   const look = useLook()
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end">
+      <div className="flex justify-end" data-message-id={message.id}>
         <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-[14px_14px_4px_14px] bg-card px-3.5 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
           {message.content}
           <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div>
+          {!!message.nativeRecord?.pictures && <p className="mt-1 text-[11px] text-muted">{message.nativeRecord.pictures} image(s) accompanied this request. This text record does not contain the image bytes.</p>}
           {message.editedAt && <span className="mt-1 block text-[11px] text-muted">edited</span>}
           {(message.attachments || []).length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5">
@@ -84,7 +85,7 @@ export default function MessageRow({
     return () => window.removeEventListener(THINKING_OPEN_EVENT, follow)
   }, [])
   return (
-    <div className="flex gap-3">
+    <div className="flex gap-3" data-message-id={message.id}>
       <span className="mt-0.5 shrink-0">
         <BrainMark size={18} />
       </span>
@@ -156,6 +157,8 @@ export default function MessageRow({
           </ul>
         ) : null}
 
+        {!!message.nativeRecord?.artifacts?.length && <section aria-label="Observed artifact files"><p className="text-[12px] text-muted">These standalone files changed during the turn. File observation is not a test result or proof of authorship.</p>{message.nativeRecord.artifacts.map(item => <button type="button" key={item.id} className="ob-text-button" onClick={() => window.dispatchEvent(new CustomEvent('app:open-artifact', { detail: { id: item.id, version: item.version } }))}>Open {item.title} · v{item.version}</button>)}</section>}
+        {message.status === 'stopped' && <p role="status" className="mt-2 text-[12px] text-muted">Interrupted. The recorded text may be incomplete; no successful finish was confirmed.</p>}
         {message.error ? <p className="mt-2 text-[12px] text-warn">{message.error}</p> : null}
 
         {message.status === 'complete' && typeof message.ms === 'number' ? (

@@ -10,12 +10,16 @@ export function normalizeAutomation(raw: unknown): AutomationPreferences {
     autoReview: !badModel && v.autoReview === true, allowExternalReview: !badModel && v.allowExternalReview === true,
     reviewModel: typeof v.reviewModel === 'string' && /^[\w.:@/\-]*$/.test(v.reviewModel) ? v.reviewModel.trim().slice(0, 300) : '' }
 }
-export type ReviewInput = { prompt: string; answer: string }
+export type ReviewInput = { prompt: string; answer: string; transcriptId?: string; sourceComplete?: boolean }
 export type ReviewTask = ReviewInput & { id: string; engine: EngineSettings; automatic: boolean; at: string }
-export type ReviewRecord = { id: string; prompt: string; model: string; automatic: boolean; at: string; state: 'queued' | 'running' | 'done' | 'error' | 'canceled'; text: string; error: string; verdict: ReviewVerdict | null; clipped: boolean }
-export type AutomationView = { preferences: AutomationPreferences; current: ReviewRecord | null; reports: ReviewRecord[]; queued: number; desktop: boolean }
+export type ReviewRecord = { id: string; prompt: string; model: string; automatic: boolean; at: string; state: 'queued' | 'running' | 'done' | 'error' | 'canceled' | 'held' | 'interrupted'; text: string; error: string; verdict: ReviewVerdict | null; clipped: boolean }
+export type AutomationView = { preferences: AutomationPreferences; current: ReviewRecord | null; reports: ReviewRecord[]; queued: number; desktop: boolean; storageNotice?: string; historyNext?: string }
+export type ReviewHistoryPage = { records: ReviewRecord[]; next: string; notice: string }
+export type SavedReview = { task: ReviewTask; record: ReviewRecord; events: Array<Omit<ReviewRecord, 'prompt'>> }
 export type ReviewerModel = { name: string; label: string; external: boolean }
 export type AutomationBridge = {
+  history(before?: string): Promise<ReviewHistoryPage>
+  saved(id: string): Promise<SavedReview>
   read(): Promise<AutomationView>
   update(patch: Partial<AutomationPreferences>): Promise<{ ok: boolean; view: AutomationView; error?: string }>
   models(): Promise<{ ok: boolean; models: ReviewerModel[]; error?: string }>

@@ -1,3 +1,5 @@
+import NativeMcpInventory from './NativeMcpInventory'
+import NativeSkills from './NativeSkills'
 import { useState, type ReactNode } from 'react'
 import EngineMarketplace from './EngineMarketplace'
 
@@ -20,7 +22,7 @@ export default function EngineStoreSource({ kind, children }: { kind: 'skills' |
       {source === 'shared' ? (
         children
       ) : (
-        <EngineMarketplace key={source} engine={source === 'agy' ? 'agy' : 'claude-code'} focus={kind} />
+        <div key={source}>{kind === 'skills' ? <NativeSkills engine={source === 'agy' ? 'agy' : 'claude-code'} /> : <NativeMcpInventory engine={source === 'agy' ? 'agy' : 'claude-code'} />}<EngineMarketplace engine={source === 'agy' ? 'agy' : 'claude-code'} focus={kind} /></div>
       )}
     </div>
   )

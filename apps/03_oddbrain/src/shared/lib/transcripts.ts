@@ -1,11 +1,12 @@
 import type { EngineEvent, EngineId } from './engine'
 import type { Chat } from '../types'
 
-export type TranscriptHeader = { id: string; at: string; engine: EngineId; model: string; workspace: string; title: string; pictures: number }
-export type Transcript = { header: TranscriptHeader; prompt: string; events: EngineEvent[]; state: 'running' | 'done' | 'error' | 'interrupted'; incomplete: boolean }
+export type TranscriptHeader = { chatId?: string; context?: import('./nativeConversation').ContextReceipt; id: string; at: string; engine: EngineId; model: string; workspace: string; title: string; pictures: number }
+export type Transcript = { userPrompt?: string; header: TranscriptHeader; prompt: string; events: EngineEvent[]; state: 'running' | 'done' | 'error' | 'interrupted'; incomplete: boolean }
 export type TranscriptPage = { entries: TranscriptHeader[]; next: string; notice: string }
 export type TranscriptResult<T> = { ok: true; value: T } | { ok: false; error: string }
 export type TranscriptBridge = {
+  raw?(id: string): Promise<TranscriptResult<{ content: string; bytes: number; format: 'ndjson' }>>
   list(before?: string): Promise<TranscriptResult<TranscriptPage>>
   read(id: string): Promise<TranscriptResult<Transcript>>
 }
