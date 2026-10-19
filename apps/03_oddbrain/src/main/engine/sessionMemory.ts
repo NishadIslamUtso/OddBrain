@@ -30,14 +30,17 @@ export function createSessionMemory(file: string) {
       if (Object.keys(data).length > 20_000 || bytes.length > 2_000_000) throw Error('Saved-session capacity reached. No earlier sessions were removed.')
       noLinkedPath(file); mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
       const temporary = file + '.pending-' + randomUUID()
+      let owned = false
       try {
-        writeFileSync(temporary, bytes, { flag: 'wx', mode: 0o600 })
-        const fd = openSync(temporary, 'r'); try { fsyncSync(fd) } finally { closeSync(fd) }
+        // Windows FlushFileBuffers requires a writable handle. Keep the same
+        // exclusive descriptor for writing and syncing; never reopen read-only.
+        const fd = openSync(temporary, 'wx', 0o600); owned = true
+        try { writeFileSync(fd, bytes); fsyncSync(fd) } finally { closeSync(fd) }
         const current = configBytes(file)
         if ((original === null) !== (current === null) || (original && current && !original.equals(current))) throw Error('Saved sessions changed while saving. Nothing was replaced.')
         noLinkedPath(file); renameSync(temporary, file)
         if (!readFileSync(file).equals(bytes)) throw Error('Saved sessions could not be verified on disk.')
-      } finally { if (existsSync(temporary)) unlinkSync(temporary) }
+      } finally { if (owned && existsSync(temporary)) unlinkSync(temporary) }
     },
     list(engine?: EngineId): SavedEngineSession[] {
       return Object.entries(read()).flatMap(([key, sessionId]) => {

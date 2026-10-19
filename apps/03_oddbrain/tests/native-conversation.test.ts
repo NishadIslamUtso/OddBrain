@@ -122,6 +122,7 @@ describe('native conversation routing and archive association', () => {
     const socket = createEngineSocket(memory), base = { cwd: '/shared', settings: DEFAULT_ENGINE, spawnProcess: spawn as never, onEvent: () => {} }
     expect(socket.send('A', { ...base, chatId: 'chat-a' }).ok).toBe(true)
     children[0].stdout.emit('data', Buffer.from(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'native-a' }) + '\n' + JSON.stringify({ type: 'result', subtype: 'success', result: 'answer' }) + '\n'))
+    expect(memory.load(sessionKey(DEFAULT_ENGINE.id, '/shared', 'chat-a'))).toBe('native-a')
     expect(socket.send('B', { ...base, chatId: 'chat-b' }).ok).toBe(true)
     expect(launches[1]).not.toContain('--resume'); expect(children[0].killed).toBe(true)
     children[1].stdout.emit('data', Buffer.from(JSON.stringify({ type: 'result', subtype: 'success', result: 'B answer' }) + '\n'))

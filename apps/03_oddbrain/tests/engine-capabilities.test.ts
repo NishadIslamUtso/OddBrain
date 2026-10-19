@@ -135,7 +135,12 @@ test('inspection jobs coalesce per window, cancel when the route changes, and di
 
 test('dispatch rechecks persisted effort before sending and guards a changed executable', () => {
   const main = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8')
-  const send = main.slice(main.indexOf("'engine:send'"), main.indexOf('// Bringing a brain home'))
+  const start = main.indexOf('const sendNative = async'), end = main.indexOf("handle('queue:read'")
+  expect(start).toBeGreaterThan(0); expect(end).toBeGreaterThan(start)
+  const send = main.slice(start, end)
+  const entry = main.slice(main.indexOf("handle('engine:send'"), main.indexOf('// Bringing a brain home'))
+  expect(entry).toContain('if (!queuedId) return sendNative(')
+  expect(entry).toContain('const answer = await sendNative(')
   expect(send.indexOf('await checkEffortSelection(usedEngine')).toBeGreaterThan(0)
   expect(send.indexOf('await checkEffortSelection(usedEngine')).toBeLessThan(send.indexOf('dispatchRecordedTurn(turnArchive'))
   expect(send).toContain('usedCommand !== resolveEngineCommand(usedEngine.id)')
