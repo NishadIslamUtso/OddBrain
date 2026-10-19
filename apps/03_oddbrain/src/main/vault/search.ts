@@ -12,6 +12,8 @@
  *
  *   - every word must appear somewhere in the file (AND), like Obsidian's
  *     default search, so a second word narrows instead of scattering;
+ *   - words in quotes must appear as that phrase, so `"tin roof"` does not
+ *     return a page where `tin` is at the top and `roof` is at the bottom;
  *   - the whole phrase, the title and the path are worth more than one
  *     occurrence deep in a paragraph;
  *   - a match in a captured message reports the conversation it belongs to,
@@ -97,6 +99,21 @@ export function searchTerms(query: string): string[] {
 }
 
 /**
+ * Runs the writer wrapped in quotes. Those words are meant as a phrase, so
+ * every quoted run has to appear exactly; the rest of the query is unchanged.
+ * A stray opening quote with no closing one is not a phrase — the words are
+ * still searched, which is what a half-typed query should do.
+ */
+export function searchPhrases(query: string): string[] {
+  const phrases: string[] = []
+  for (const match of query.matchAll(/["\u201c\u201d]([^"\u201c\u201d]+)["\u201c\u201d]/g)) {
+    const phrase = fold(match[1]).replace(/\s+/g, ' ').trim()
+    if (phrase && !phrases.includes(phrase)) phrases.push(phrase)
+  }
+  return phrases
+}
+
+/**
  * The text after a YAML frontmatter block, and how many lines were skipped so a
  * reported line number still points into the real file. Captured messages carry
  * their metadata there; matching a URL in the header is not a content match.
@@ -125,7 +142,7 @@ function countOf(hay: string, needle: string): number {
  * a tie. Whole lines, trimmed around the first match rather than cut at the
  * left edge, so a hit in a long paragraph still shows the words that matched.
  */
-function snippetOf(body: string, terms: string[]): { line: number; text: string; start: number; end: number; matches: number } {
+function snippetOf(body: string, terms: string[], phrases: string[] = []): { line: number; text: string; start: number; end: number; matches: number } {
   const lines = body.split('\n')
   let best = { index: -1, found: 0 }
   let matches = 0
@@ -141,7 +158,10 @@ function snippetOf(body: string, terms: string[]): { line: number; text: string;
   }
   const raw = (best.index >= 0 ? lines[best.index] : lines.find(line => line.trim()) || '').trimEnd()
   const hay = fold(raw)
-  let anchor = -1
+  // Show the quoted phrase from its start when the line holds it; otherwise
+  // fall back to the earliest word.
+  const phraseAt = phrases.map(phrase => hay.indexOf(phrase)).filter(at => at >= 0).sort((a, b) => a - b)[0]
+  let anchor = phraseAt ?? -1
   for (const term of terms) {
     const at = hay.indexOf(term)
     if (at !== -1 && (anchor === -1 || at < anchor)) anchor = at
@@ -269,9 +289,13 @@ export function createVaultSearch(files: VaultFiles, now: () => number = Date.no
   function search(request: SearchRequest): SearchAnswer {
     const query = request.query.trim()
     const terms = searchTerms(query)
+    const phrases = searchPhrases(query)
     const limit = Math.min(MAX_HITS, Math.max(1, Math.round(request.limit ?? 30)))
     const kind = request.kind || 'all'
     if (!terms.length) return { ok: true, query, terms, hits: [], scanned: { files: 0, bytes: 0, capped: false, partial: 0 } }
+    // The query without its quote marks: `"tin roof"` should still earn the
+    // whole-phrase bonus for `tin roof`.
+    const plain = fold(query).replace(/["\u201c\u201d]/g, '').replace(/\s+/g, ' ').trim()
 
     const walk = files.walkFiles('', '.md', MAX_FILES)
     const hits: SearchHit[] = []
@@ -303,17 +327,20 @@ export function createVaultSearch(files: VaultFiles, now: () => number = Date.no
       const { body, skipped } = bodyOf(file.text)
       const hay = fold(body)
       if (!terms.every(term => hay.includes(term))) continue
+      if (!phrases.every(phrase => hay.includes(phrase))) continue
 
       const title = conversation?.title || path.split('/').pop()!.replace(/\.md$/, '')
       const titleHay = fold(title)
       const pathHay = fold(path)
       let score = 0
-      if (hay.includes(fold(query))) score += 8
+      if (plain && hay.includes(plain)) score += 8
       for (const term of terms) {
         if (titleHay.includes(term)) score += 6
         if (pathHay.includes(term)) score += 2
         score += Math.min(countOf(hay, term), 10)
       }
+      // A file that says the quoted phrase more often is the better answer.
+      for (const phrase of phrases) score += Math.min(countOf(hay, phrase), 5)
       // Words near each other say more than the same words on opposite pages.
       const positions = terms.map(term => hay.indexOf(term)).filter(at => at >= 0)
       if (positions.length > 1 && Math.max(...positions) - Math.min(...positions) < 400) score += 5
@@ -322,7 +349,7 @@ export function createVaultSearch(files: VaultFiles, now: () => number = Date.no
         if (age < 7 * 86_400_000) score += 3
         else if (age < 30 * 86_400_000) score += 1
       }
-      const snip = snippetOf(body, terms)
+      const snip = snippetOf(body, terms, phrases)
       const hit: SearchHit = {
         path,
         kind: fileKind,

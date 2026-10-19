@@ -6,6 +6,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { startLocalApi } from '../src/main/api/server'
 import { createVaultService } from '../src/main/vault/service'
+import { searchPhrases } from '../src/main/vault/search'
 
 /**
  * Search over everything the vault holds.
@@ -253,6 +254,51 @@ test('the three messages kept from a long conversation are its best three, not i
     assert.equal(roof.hits.length, 3)
     assert.match(roof.hits[0].path, /\/messages\/0{63}8\.md$/, 'the phrase message ranks first even though it is last in the walk')
     assert.ok(roof.hits.slice(1).every(hit => !hit.path.endsWith('8.md')), 'the other two are different messages')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('quoted words must be that phrase, not the same words pages apart', () => {
+  const { root, service } = vaultWith({
+    'Projects/Together.md': '# Together\n\nWe fixed the tin roof before the rain.\n',
+    'Projects/Apart.md': '# Apart\n\nThe tin arrived on Tuesday. The rest of that week was dry, and by Friday the\nold roof was finally gone.\n',
+    'Projects/Repeated.md': '# Repeated\n\nThe tin roof leaked. Later the tin roof was patched, and the tin roof held.\n',
+  })
+  try {
+    const loose = service.search({ query: 'tin roof' })
+    assert.equal(loose.hits.length, 3, 'unquoted words match any file holding both')
+    const exact = service.search({ query: '"tin roof"' })
+    assert.deepEqual(exact.terms, ['tin', 'roof'])
+    assert.equal(exact.hits.length, 2, 'the file where the words are apart is not a phrase match')
+    assert.ok(exact.hits.every(hit => hit.path !== 'Projects/Apart.md'))
+    assert.equal(exact.hits[0].path, 'Projects/Repeated.md', 'more uses of the phrase rank higher')
+    assert.equal(exact.hits[1].path, 'Projects/Together.md')
+    assert.equal(exact.hits[0].snippet.text.includes('tin roof'), true, 'the snippet shows the phrase')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
+
+test('quotes are read in both styles, and a half-typed one is not a phrase', () => {
+  const { root, service } = vaultWith({
+    'Projects/Curly.md': '# Curly\n\nThe greenhouse stayed warm all winter.\n',
+  })
+  try {
+    assert.deepEqual(searchPhrases('"tin roof"'), ['tin roof'])
+    assert.deepEqual(searchPhrases('\u201cgreenhouse stayed\u201d warm'), ['greenhouse stayed'])
+    assert.deepEqual(searchPhrases('"Tin   Roof"'), ['tin roof'], 'case and spacing are folded')
+    assert.deepEqual(searchPhrases('"same" "same"'), ['same'], 'a repeat is one phrase')
+    assert.deepEqual(searchPhrases('"unfinished'), [], 'an unclosed quote is not a phrase')
+    assert.deepEqual(searchPhrases('""'), [], 'empty quotes mean nothing')
+
+    const halfTyped = service.search({ query: '"greenhouse' })
+    assert.deepEqual(halfTyped.terms, ['greenhouse'], 'the word is still searched')
+    assert.equal(halfTyped.hits.length, 1)
+
+    const curly = service.search({ query: '\u201cgreenhouse stayed\u201d' })
+    assert.equal(curly.hits.length, 1, 'curly quotes work like straight ones')
+    assert.equal(curly.hits[0].path, 'Projects/Curly.md')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
