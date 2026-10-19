@@ -83,19 +83,20 @@ type TestOptions = {
 type TestFn = {
   (name: string, body: Body): void
   (name: string, options: TestOptions, body: Body): void
+  (name: string, body: Body, options: TestOptions): void
   skip: (name: string, body?: Body) => void
   todo: (name: string) => void
   before: (body: () => unknown) => void
   after: (body: () => unknown) => void
 }
 
-const test = ((name: string, optionsOrBody: TestOptions | Body, maybeBody?: Body) => {
-  // node:test takes options as the second argument. Vitest 4+ also wants them
-  // there. Forwarding them matters: a test that says 20 s and silently gets the
-  // 5 s default is a test whose timeout is a comment.
-  const options = typeof optionsOrBody === 'function' ? {} : optionsOrBody
-  const body = (typeof optionsOrBody === 'function' ? optionsOrBody : maybeBody) as Body
-  vitestTest(name, options as never, context => {
+const test = ((name: string, optionsOrBody: TestOptions | Body, bodyOrOptions?: Body | TestOptions) => {
+  // Support node:test's canonical options-before-body form and the legacy
+  // body-before-options calls already used in this suite. Neither may silently
+  // lose its deadline when forwarded to Vitest.
+  const options = typeof optionsOrBody === 'function' ? (bodyOrOptions as TestOptions | undefined) ?? {} : optionsOrBody
+  const body = (typeof optionsOrBody === 'function' ? optionsOrBody : bodyOrOptions) as Body
+  vitestTest(name, options, async context => {
     const mock = createMock(() => {})
     const hooks: Array<() => unknown> = []
     const ctx: TestContext = {
@@ -104,23 +105,14 @@ const test = ((name: string, optionsOrBody: TestOptions | Body, maybeBody?: Body
       skip: () => context.skip(),
       after: (fn: () => unknown) => hooks.push(fn),
     }
-    const finish = () => {
-      for (const fn of hooks.reverse()) fn()
-      mock.restore()
+    try {
+      return await body(ctx)
+    } finally {
+      // Synchronous throws must clean up too, and an after-hook failure must
+      // never leak a mocked global into the next test.
+      try { for (const fn of hooks.reverse()) await fn() }
+      finally { mock.restore() }
     }
-    const result = body(ctx)
-    // Both paths have to restore: a failing test that stubbed fetch would
-    // otherwise leak the stub into the next one.
-    return Promise.resolve(result).then(
-      value => {
-        finish()
-        return value
-      },
-      error => {
-        finish()
-        throw error
-      }
-    )
   })
 }) as TestFn
 

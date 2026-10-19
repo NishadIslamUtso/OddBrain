@@ -5,13 +5,17 @@ importScripts(
   "lib/appearance.js",
   "lib/page-extract.js",
   "lib/conversation-adapters.js",
+  "lib/conversation-outbox.js",
+  "lib/conversation-delivery.js",
 );
 const DEFAULT_PATTERNS = ["bank.com/*"];
 async function api(path, options = {}) {
   const res = await fetch(`${await localApiBase()}${path}`, {
     ...options,
     headers: await pairHeaders(!!options.body),
-    signal: AbortSignal.timeout(6000),
+    signal: options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(6000)])
+      : AbortSignal.timeout(6000),
   });
   const data = await res.json().catch(() => ({}));
   return { ...data, ok: res.ok && data.ok !== false, status: res.status };
@@ -77,6 +81,8 @@ async function changeBlacklist(patterns) {
   const clean = [...new Set(patterns.map((p) => p.trim()))];
   await chrome.storage.local.set({ blacklistPending: clean });
   await chrome.storage.sync.set({ excluded_patterns: clean });
+  interruptConversations();
+  await pruneConversations();
   return syncBlacklist();
 }
 async function connection() {
@@ -87,6 +93,7 @@ async function connection() {
       error: "Pair with the desktop app to save to your vault.",
     };
   try {
+    const identity = await conversationIdentity();
     const health = await api("/health");
     if (health.status === 401)
       return {
@@ -100,7 +107,13 @@ async function connection() {
         ok: false,
         error: health.error || "This port did not answer as OddBrain.",
       };
-    return { ok: true, captures: health.captures, available: health.available };
+    await rememberConversationDestination(health, identity);
+    return {
+      ok: true,
+      captures: health.captures,
+      available: health.available,
+      durableCapture: /^[a-f0-9]{64}$/.test(health.capture_target || ""),
+    };
   } catch {
     return {
       ok: false,
@@ -309,7 +322,7 @@ async function conversationAccess(sender, url) {
       allowed: false,
       error: "Conversation collection is paused or disabled for this site.",
     };
-  if (await checkBlacklist(url))
+  if (await conversationExcluded(url))
     return { allowed: false, excluded: true, error: "This page is excluded." };
   if (!(await getPairToken()))
     return {
@@ -328,44 +341,32 @@ async function conversationAccess(sender, url) {
   return { allowed: true, site };
 }
 async function conversationRelay(payload, sender) {
+  const access = await conversationAccess(sender, payload?.url);
+  if (!access.allowed) return { ok: false, ...access };
+  const c = payload?.conversation;
+  if (
+    !c ||
+    c.adapter !== access.site.id ||
+    c.provider !== access.site.name ||
+    typeof c.key !== "string" ||
+    !c.key.startsWith(access.site.id + ":") ||
+    new URL(c.url).origin !== new URL(payload.url).origin
+  )
+    throw Error("Conversation identity does not match the current site.");
+  if (payload.op === "delivery") {
+    await flushConversations();
+    return {
+      ok: true,
+      ...(await conversationOutbox.receipts(payload.receipts)),
+    };
+  }
+  if (payload.op === "media-state") return conversationMediaState(payload);
+  if (!["messages", "media-part", "media-finish"].includes(payload.op))
+    throw Error("Unsupported conversation operation.");
   return withOutbox(async () => {
-    const access = await conversationAccess(sender, payload?.url);
-    if (!access.allowed) return { ok: false, ...access };
-    const c = payload?.conversation;
-    if (
-      !c ||
-      c.adapter !== access.site.id ||
-      c.provider !== access.site.name ||
-      typeof c.key !== "string" ||
-      !c.key.startsWith(access.site.id + ":") ||
-      new URL(c.url).origin !== new URL(payload.url).origin
-    )
-      throw Error("Conversation identity does not match the current site.");
-    try {
-      const result = await api("/conversation-sync", {
-        method: "POST",
-        body: JSON.stringify(payload),
-      });
-      if (result.ok && result.changed > 0)
-        await recordActivity({
-          type: "conversation",
-          title: String(c.title || "").slice(0, 500),
-          url: payload.url,
-          captured_at: new Date().toISOString(),
-          success: true,
-          reason: result.changed + " new or changed message observations saved",
-        });
-      if (!result.ok && result.status === 404)
-        result.error =
-          "Update the desktop app: this version does not support incremental conversation saving.";
-      return result;
-    } catch {
-      return {
-        ok: false,
-        error:
-          "The desktop app is unavailable. Keep the conversation open; saving will retry.",
-      };
-    }
+    const fresh = await conversationAccess(sender, payload.url);
+    if (!fresh.allowed) return { ok: false, ...fresh };
+    return queueConversation(payload);
   });
 }
 async function conversationProgress(msg, sender) {
@@ -380,8 +381,8 @@ async function conversationProgress(msg, sender) {
   const clean = {
     state: String(s.state || "").slice(0, 100),
     detail: String(s.detail || "").slice(0, 1000),
-    saved: Math.max(0, Math.min(100000, Number(s.saved) || 0)),
-    total: Math.max(0, Math.min(100000, Number(s.total) || 0)),
+    saved: Math.max(0, Math.min(256 * 1024 * 1024, Number(s.saved) || 0)),
+    total: Math.max(0, Math.min(256 * 1024 * 1024, Number(s.total) || 0)),
     media: String(s.media || "").slice(0, 50),
     at: Date.now(),
   };
@@ -499,11 +500,21 @@ async function dispatch(msg, sender) {
       return insertCapsule(msg.capsule);
     case "ob-flush": {
       const status = await connection();
-      if (status.offline) return status;
+      if (!status.ok) return status;
       await syncBlacklist();
+      for (const row of await conversationOutbox.list())
+        await conversationOutbox.mark(row.id, "");
       await flushQueue();
+      await flushConversations();
       return { ok: true };
     }
+    case "ob-conversation-outbox":
+      return { ok: true, ...(await conversationQueueSummary()) };
+    case "ob-conversation-discard":
+      return withOutbox(async () => ({
+        ok: true,
+        ...(await clearConversations(msg.id)),
+      }));
     case "ob-pair":
       return withOutbox(async () => {
         if (
@@ -526,6 +537,8 @@ async function dispatch(msg, sender) {
         ) {
           if (!msg.confirmChange)
             throw Error("Confirm changing the paired app first.");
+          await clearConversations();
+          await chrome.storage.local.remove("conversationDestination");
           await chrome.storage.local.set({
             queue: [],
             capsules: [],
@@ -544,6 +557,8 @@ async function dispatch(msg, sender) {
       });
     case "ob-forget":
       return withOutbox(async () => {
+        await clearConversations();
+        await chrome.storage.local.remove("conversationDestination");
         await chrome.storage.local.set({
           queue: [],
           capsules: [],
@@ -558,6 +573,7 @@ async function dispatch(msg, sender) {
       });
     case "ob-clear-queue":
       return withOutbox(async () => {
+        await clearConversations();
         await chrome.storage.local.set({ queue: [] });
         return { ok: true };
       });
@@ -715,7 +731,11 @@ chrome.contextMenus.onClicked.addListener((info, tab) => {
 });
 // Upgrades revoke the obsolete grant without touching saved visit records.
 async function revokeLegacyHistory() {
-  try { await chrome.permissions.remove({ permissions: ["history"] }); } catch { /* Not granted or no longer declared. No history API is registered. */ }
+  try {
+    await chrome.permissions.remove({ permissions: ["history"] });
+  } catch {
+    /* Not granted or no longer declared. No history API is registered. */
+  }
 }
 void revokeLegacyHistory();
 chrome.permissions.onAdded.addListener(() => {
@@ -723,6 +743,8 @@ chrome.permissions.onAdded.addListener(() => {
   void refreshConversationScripts().catch(() => {});
 });
 chrome.permissions.onRemoved.addListener(() => {
+  interruptConversations();
+  void pruneConversations().catch(() => {});
   void refreshBroadScript().catch(() => {});
   void refreshConversationScripts().catch(() => {});
 });
@@ -730,10 +752,12 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "oddbrain-sync")
     void (async () => {
       const status = await synchronize();
+      await flushConversations();
       if (status.ok) await flushQueue();
     })().catch(() => {});
 });
 chrome.runtime.onStartup.addListener(() => {
+  void flushConversations().catch(() => {});
   void refreshBroadScript().catch(() => {});
   void refreshConversationScripts().catch(() => {});
   void chrome.alarms.create("oddbrain-sync", { periodInMinutes: 1 });
@@ -741,6 +765,20 @@ chrome.runtime.onStartup.addListener(() => {
 
 if (chrome.storage.onChanged)
   chrome.storage.onChanged.addListener((changes, area) => {
+    if (
+      area === "local" &&
+      [
+        "conversationPaused",
+        "autoCaptureAi",
+        "conversationSites",
+        "pairToken",
+        "appPort",
+        "blacklistPending",
+      ].some((key) => changes[key])
+    ) {
+      interruptConversations();
+      void withOutbox(() => pruneConversations()).catch(() => {});
+    }
     if (area === "local" && changes.conversationSites)
       void refreshConversationScripts().catch(() => {});
   });

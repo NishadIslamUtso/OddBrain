@@ -12,23 +12,38 @@ export function createMemoryOrganizer(options: {
     try { store = options.store() } catch (e) { lastFailure = (e as Error).message; return }
     const prefs = store.read().preferences
     if (!prefs.enabled) { status = 'Organizer paused'; return }
-    const configuration = options.configuration() + JSON.stringify(prefs)
+    const signature = options.configuration()
+    // A transport failure pauses this vault/configuration, not every vault.
+    const configuration = JSON.stringify([store.root, signature, prefs])
     if (pausedConfiguration === configuration) return
     const state = store.discover(), job = state.jobs.find(j => j.state === 'queued')
     if (!job) { status = state.jobs.some(j => j.state === 'blocked') ? 'Some sources need attention' : 'No new text waiting'; return }
+    // Finish fallible preflight before taking the active-operation lease.
+    const privacy = store.privacyFingerprint(), root = store.root, preferences = JSON.stringify(prefs)
     const controller = new AbortController(); active = controller; status = 'Preparing interpretations'; lastFailure = ''
-    const privacy = store.privacyFingerprint(), signature = options.configuration(), root = store.root, preferences = JSON.stringify(prefs)
-    const valid = () => !disposed && !options.busy() && options.configuration() === signature && store.privacyFingerprint() === privacy && options.store().root === root && JSON.stringify(store.read().preferences) === preferences
+    const valid = () => {
+      try {
+        return !disposed && !options.busy() && options.configuration() === signature && options.store().root === root && store.privacyFingerprint() === privacy && JSON.stringify(store.read().preferences) === preferences
+      } catch { return false }
+    }
     const gate = setInterval(() => { try { if (!valid()) controller.abort() } catch { controller.abort() } }, 200)
     try {
       const text = store.evidence(job.source)
       let result: { text: string; model: string }
-      try { result = await options.run(ORGANIZER_SYSTEM, JSON.stringify({ source: job.source, text, attachment_notice: 'Attachments are retained as sources but their contents were not analyzed by this text organizer.' }), prefs, AbortSignal.any([controller.signal, AbortSignal.timeout(90000)])) } catch (e) { if (!controller.signal.aborted) pausedConfiguration = configuration; throw e }
+      const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(90000)])
+      try {
+        result = await options.run(ORGANIZER_SYSTEM, JSON.stringify({ source: job.source, text, attachment_notice: 'Attachments are retained as sources but their contents were not analyzed by this text organizer.' }), prefs, signal)
+        // The transport may ignore abort and return after its deadline.
+        signal.throwIfAborted()
+      } catch (e) {
+        if (!controller.signal.aborted && valid()) pausedConfiguration = configuration
+        throw e
+      }
       if (controller.signal.aborted || !valid()) return
       store.complete(job.id, result.text, result.model)
       status = 'Interpretations ready for your review'
     } catch (error) {
-      if (!controller.signal.aborted) { lastFailure = (error as Error).message; store.fail(job.id, lastFailure); status = 'Source needs attention' }
+      if (!controller.signal.aborted && valid()) { lastFailure = (error as Error).message; store.fail(job.id, lastFailure); status = 'Source needs attention' }
     } finally { clearInterval(gate); if (active === controller) active = null }
   }
   const timer = setInterval(() => { void pump().catch(e => { lastFailure = String(e.message || e) }) }, options.intervalMs ?? 10000)

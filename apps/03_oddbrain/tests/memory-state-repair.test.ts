@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -15,6 +15,7 @@ import { emptyMemory, memoryStateProblem } from '../src/shared/lib/memoryWorkspa
  */
 
 const roots: string[] = []
+afterEach(() => { for (const root of roots.splice(0)) rmSync(root, { recursive: true, force: true }) })
 const withState = (patch: Record<string, unknown>) => {
   const root = mkdtempSync(join(tmpdir(), 'ob-memory-repair-')); roots.push(root)
   const vault = createVaultService({ vaultPath: root })
@@ -75,4 +76,24 @@ describe('memoryStateProblem', () => {
     expect(memoryStateProblem({ ...emptyMemory(), jobs: 'none' })).toBe('its jobs is not a list')
     expect(memoryStateProblem({ ...emptyMemory(), preferences: { enabled: 'yes' } })).toBe('its preferences are incomplete')
   })
+})
+
+it('reads older version-1 files without discovery warnings without rewriting them', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ob-memory-legacy-')); roots.push(root)
+  const vault = createVaultService({ vaultPath: root }), state = emptyMemory()
+  delete (state as Partial<typeof state>).discoveryWarnings
+  const raw = JSON.stringify(state), path = '06 Review/Organizer/state.json'
+  vault.files().writeAtomic(path, raw)
+  expect(createMemoryWorkspace(vault.files()).read().discoveryWarnings).toEqual([])
+  expect(vault.files().read(path)).toBe(raw)
+})
+
+it('does not treat an emptied existing state file as a new empty workspace', () => {
+  const root = mkdtempSync(join(tmpdir(), 'ob-memory-empty-')); roots.push(root)
+  const vault = createVaultService({ vaultPath: root }), path = '06 Review/Organizer/state.json'
+  vault.files().writeAtomic(path, '')
+  const store = createMemoryWorkspace(vault.files())
+  expect(() => store.read()).toThrow('not readable as JSON')
+  expect(() => store.act({ type: 'retry', expectedRevision: 0 })).toThrow(path)
+  expect(vault.files().read(path)).toBe('')
 })

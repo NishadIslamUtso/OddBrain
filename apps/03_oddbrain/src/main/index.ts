@@ -997,10 +997,15 @@ function registerBridges(): void {
       for (const window of BrowserWindow.getAllWindows()) window.webContents.send('engine:pull-event', tick)
     }
     try {
+      // The brain door is reached the same way everywhere: model discovery
+      // already refuses redirects on this exact URL, so pull and delete do
+      // too — following one would send a model request somewhere the
+      // settings never named.
       const answer = await fetch(`${door}/api/pull`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: name }),
+        redirect: 'error',
       })
       if (!answer.ok || !answer.body) {
         const why = `the brain door answered ${answer.status}`

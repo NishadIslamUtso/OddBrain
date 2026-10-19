@@ -115,6 +115,8 @@ export function memoryStateProblem(state: unknown): string {
   if (!s || typeof s !== 'object' || s.version !== 1) return 'it is not a version 1 memory state'
   if (!Number.isInteger(s.revision) || s.revision < 0) return 'its revision is not a number'
   for (const key of ['jobs', 'proposals', 'accounts', 'people', 'merges', 'discoveryWarnings', 'projectionWarnings']) {
+    // Older version-1 files predate discovery notices; the reader supplies [].
+    if (key === 'discoveryWarnings' && s[key] === undefined) continue
     if (!Array.isArray(s[key])) return `its ${key} is not a list`
   }
   const p = s.preferences

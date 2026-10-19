@@ -100,6 +100,8 @@
       id: "preview",
       sendMessage: async (msg) => {
         switch (msg.type) {
+          case "ob-conversation-outbox":
+            return { ok: true, count: 0, bytes: 0, conversations: [] };
           case "ob-conversation-settings":
             return { ok: true };
           case "ob-conversation-status":

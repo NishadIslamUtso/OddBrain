@@ -142,14 +142,16 @@ async function sync() {
     const stored = await chrome.storage.local.get({
       appAppearance: null,
       queue: [],
+      conversationOutboxCount: 0,
     });
     if (
       JSON.stringify(stored.appAppearance) !== JSON.stringify(currentAppearance)
     )
       await applyAppearance(stored.appAppearance);
-    $("outbox-footer").textContent = stored.queue.length
-      ? `${stored.queue.length} waiting`
-      : "";
+    $("outbox-footer").textContent =
+      stored.queue.length + stored.conversationOutboxCount
+        ? `${stored.queue.length + stored.conversationOutboxCount} waiting`
+        : "";
     return result;
   } finally {
     syncBusy = false;
@@ -440,7 +442,11 @@ async function openCapsule(c) {
   detail.append(
     actions,
     c.memory_approved
-      ? node("p", "Reviewed memory. Make corrections in OddBrain → Brain → Memory inbox.", "small muted")
+      ? node(
+          "p",
+          "Reviewed memory. Make corrections in OddBrain → Brain → Memory inbox.",
+          "small muted",
+        )
       : action("Edit as a new version", () => editCapsule(c), "text-button"),
   );
   if (c.attachments?.length)
@@ -542,11 +548,14 @@ async function loadActivity() {
     activity: [],
     diagnosticEntry: null,
   });
-  $("queue-count").textContent = queue.length
-    ? `${queue.length} waiting for the app`
+  const conversations = await api({ type: "ob-conversation-outbox" });
+  const groups = conversations.conversations || [];
+  const count = queue.length + groups.length;
+  $("queue-count").textContent = count
+    ? `${count} waiting for the app`
     : "Outbox is clear";
-  $("clear-queue").hidden = !queue.length;
-  $("retry-queue").disabled = !queue.length;
+  $("clear-queue").hidden = !count;
+  $("retry-queue").disabled = !count;
   const waiting = $("queue-list");
   waiting.replaceChildren();
   for (const entry of queue) {
@@ -560,7 +569,45 @@ async function loadActivity() {
     );
     waiting.append(row);
   }
-  if (!queue.length)
+  for (const entry of groups) {
+    const row = node("div", undefined, "activity-item");
+    row.append(
+      node("strong", entry.title || "Conversation"),
+      node(
+        "p",
+        entry.problem ||
+          `${entry.messages ? "Conversation text is queued on this browser. " : ""}${entry.files ? entry.files + " downloaded file" + (entry.files === 1 ? " is" : "s are") + " waiting for OddBrain. " : ""}${entry.incomplete ? "Some file downloads are incomplete. Reopen the source conversation to finish them." : ""}`,
+      ),
+    );
+    const discard = node("button", "Discard waiting capture", "text-button");
+    discard.type = "button";
+    discard.onclick = async () => {
+      if (
+        !(await confirmAction(
+          "Discard this waiting conversation?",
+          "Only its unsaved browser copies will be removed. Your vault is unchanged. An open conversation can queue again unless you pause capture.",
+          "Discard waiting capture",
+        ))
+      )
+        return;
+      const result = await api({
+        type: "ob-conversation-discard",
+        id: entry.id,
+      });
+      if (!result.ok) {
+        notice(
+          result.error || "The waiting capture could not be removed.",
+          true,
+        );
+        return;
+      }
+      await loadActivity();
+      await sync();
+    };
+    row.append(discard);
+    waiting.append(row);
+  }
+  if (!count)
     empty(
       waiting,
       "Nothing waiting.",
@@ -899,7 +946,7 @@ bind("clear-queue", async () => {
   if (
     await confirmAction(
       "Clear waiting captures?",
-      "These captures have not reached your vault. Their content will be removed from this browser.",
+      "These captures have not reached your vault. Their content will be removed from this browser. Open conversations can queue again unless you pause capture.",
       "Clear outbox",
     )
   ) {
@@ -1008,6 +1055,10 @@ chrome.storage.onChanged.addListener((changes, area) => {
   if (area !== "local") return;
   if (changes.appAppearance)
     void applyAppearance(changes.appAppearance.newValue);
+  if (changes.conversationOutboxCount) {
+    void sync();
+    if (activeView === "activity") void loadActivity();
+  }
   if (changes.queue) {
     $("outbox-footer").textContent = changes.queue.newValue?.length
       ? changes.queue.newValue.length + " waiting"

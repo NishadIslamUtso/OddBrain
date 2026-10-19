@@ -348,7 +348,10 @@ export function syncConversation(
     }
     return { ok: true, saved };
   }
-  if (data.op === "media-state") return { ok: true, saved: null };
+  if (data.op === "media-state") {
+    const parts = store.walkFiles(`${media}/parts`, '.part', 513).files.map(path => path.split('/').pop()!.replace(/\.part$/, '')).filter(part => /^[a-f0-9]{64}$/.test(part));
+    return { ok: true, saved: null, parts };
+  }
   if (data.op === "media-part") {
     if (
       !Number.isInteger(data.index) ||

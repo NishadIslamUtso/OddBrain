@@ -9,7 +9,7 @@ const AI = new Set(['oddbrain','chatgpt','claude','gemini','aistudio','deepseek'
 export function createMemoryWorkspace(files: VaultFiles, clock: () => string = () => new Date().toISOString()) {
   function read(): MemoryWorkspace {
     const raw = files.read(STATE)
-    if (!raw) return emptyMemory()
+    if (!raw && !files.exists(STATE)) return emptyMemory()
     let s: MemoryWorkspace
     // Name the file: "repair the state" is not actionable on its own, and this
     // folder is one the person can open.

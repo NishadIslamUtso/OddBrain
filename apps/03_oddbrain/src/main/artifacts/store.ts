@@ -195,11 +195,15 @@ function normalizeRecord(raw: unknown): ArtifactRecord | null {
  * version files still can. The title becomes the id, because inventing one would
  * be worse than admitting we no longer know it.
  */
-function recoverRecord(root: string, id: string): ArtifactRecord | null {
+function recoverRecord(root: string, id: string, indexedFiles?: Set<string>): ArtifactRecord | null {
   if (!validId(id)) return null
   const folder = itemDir(root, id)
   let names: string[]
   try {
+    // Recovery imports real library files only, never linked trees.
+    if (lstatSync(join(root, ITEMS_DIR)).isSymbolicLink()) return null
+    const info = lstatSync(folder)
+    if (info.isSymbolicLink() || !info.isDirectory()) return null
     names = readdirSync(folder)
   } catch {
     return null
@@ -208,10 +212,15 @@ function recoverRecord(root: string, id: string): ArtifactRecord | null {
   let type: ArtifactKind = 'html'
   for (const name of names.sort((a, b) => Number(a.slice(1).split('.')[0]) - Number(b.slice(1).split('.')[0]))) {
     const match = VERSION_FILE_PATTERN.exec(name)
-    if (!match) continue
-    const stats = statSync(join(folder, name))
-    versions.push({ file: name, savedAt: stats.mtime.toISOString() })
-    type = match[2] === 'svg' ? 'svg' : 'html'
+    if (!match || indexedFiles?.has(name)) continue
+    try {
+      const stats = lstatSync(join(folder, name))
+      if (!stats.isFile() || stats.isSymbolicLink()) continue
+      versions.push({ file: name, savedAt: stats.mtime.toISOString() })
+      type = match[2] === 'svg' ? 'svg' : 'html'
+    } catch {
+      // One disappearing/unreadable file must not hide the rest of the library.
+    }
   }
   if (!versions.length) return null
   const first = Date.parse(versions[0].savedAt)
@@ -251,33 +260,49 @@ function readIndex(root: string): { index: Index; recovered: boolean } {
   if (!broken && parsed && typeof parsed === 'object') {
     const rows = (parsed as { items?: unknown }).items
     if (Array.isArray(rows)) {
+      const identities = new Set<string>()
       for (const row of rows) {
         const record = normalizeRecord(row)
         // A row that fails validation is dropped and the library is marked as
         // recovered: silently keeping a malformed row would hand the screen a
         // card it cannot open.
-        if (record) items.push(record)
-        else broken = true
+        if (record && !identities.has(record.id)) {
+          items.push(record)
+          identities.add(record.id)
+        } else broken = true
       }
     } else {
       broken = true
     }
   }
 
-  // Anything on disk that the index does not know about is recovered into it, so
-  // files copied in by hand appear rather than vanish.
-  let known = new Set(items.map(item => item.id))
+  // Reconcile existing records as well as unknown folders: a crash between
+  // writing a version and updating the index must not hide that version forever.
+  const known = new Map(items.map(item => [item.id, item]))
   try {
     for (const name of readdirSync(join(root, ITEMS_DIR))) {
-      if (known.has(name)) continue
-      const record = recoverRecord(root, name)
-      if (record) {
-        items.push(record)
+      const record = known.get(name)
+      // Known versions need no extra stat calls on every read/list operation.
+      const recovered = recoverRecord(root, name, record && new Set(record.versions.map(version => version.file)))
+      if (!recovered) continue
+      if (!record) {
+        items.push(recovered)
+        known.set(name, recovered)
+        broken = true
+        continue
+      }
+      const files = new Set(record.versions.map(version => version.file))
+      for (const version of recovered.versions) {
+        if (files.has(version.file)) continue
+        // Append, rather than sort: public version numbers are array positions.
+        // Preserve title, notes, provenance, and the explicitly selected version.
+        record.versions.push(version)
+        files.add(version.file)
         broken = true
       }
     }
   } catch {
-    // No items folder yet: an empty library, not a problem.
+    // No readable items folder: keep any valid indexed records available.
   }
 
   if (broken && items.length) {
@@ -351,11 +376,27 @@ export function read(root: string, id: unknown, version?: unknown): ReadAnswer {
 }
 
 function writeVersion(root: string, record: ArtifactRecord, content: string, savedAt: string, note?: string): void {
-  const next = record.versions.length + 1
   const folder = itemDir(root, record.id)
   mkdirSync(folder, { recursive: true })
-  const file = `v${next}.${record.type}`
-  writeFileSync(join(folder, file), content, 'utf8')
+  // A repaired index may contain gaps, and a crash can leave an unindexed
+  // version on disk. History is append-only: neither may be overwritten.
+  let next = 1
+  for (const name of [...record.versions.map(version => version.file), ...readdirSync(folder)]) {
+    const match = VERSION_FILE_PATTERN.exec(name)
+    if (match) next = Math.max(next, Number(match[1]) + 1)
+  }
+  let file: string
+  for (;;) {
+    if (!Number.isSafeInteger(next)) throw Error('Artifact version number is outside the supported range.')
+    file = `v${next}.${record.type}`
+    try {
+      writeFileSync(join(folder, file), content, { encoding: 'utf8', flag: 'wx' })
+      break
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      next++
+    }
+  }
   record.versions.push({ file, savedAt, ...(note ? { note: note.slice(0, 300) } : {}) })
   record.current = record.versions.length - 1
 }

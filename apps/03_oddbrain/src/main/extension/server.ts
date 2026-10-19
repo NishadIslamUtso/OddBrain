@@ -1,6 +1,6 @@
 import { normalizeExtensionAppearance, type ExtensionAppearance } from '../../shared/lib/extensionAppearance'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { BODY_LIMIT, readBody } from '../api/body'
 import { handleVaultRequest } from '../vault/routes'
 import type { VaultService } from '../vault/service'
@@ -158,6 +158,15 @@ export function startExtensionApi(options: {
   const mayCapture = (): boolean => (options.mayCapture ? options.mayCapture() : true)
   let pairToken = options.pairToken ?? randomBytes(24).toString('hex')
 
+  function captureTarget(): string | null {
+    if (!service.available()) return null
+    const files = service.files(), path = '.oddbrain/capture-destination'
+    files.writeOnce(path, randomBytes(32).toString('hex'))
+    const identity = files.readHead(path, 128).trim()
+    if (!/^[a-f0-9]{64}$/.test(identity)) throw Error('The vault capture identity is damaged. Restore its original .oddbrain/capture-destination file before replaying queued captures.')
+    return createHash('sha256').update(pairToken + '\n' + service.root + '\n' + identity).digest('hex')
+  }
+
   const server = createServer((request, response) => {
     void handle(request, response).catch(error => {
       if (!response.headersSent) {
@@ -262,6 +271,7 @@ export function startExtensionApi(options: {
           app: 'OddBrain',
           port,
           vault: service.root,
+          capture_target: captureTarget(),
           available: service.available(),
           // So the extension can say "the app has captures switched off" instead
           // of retrying a request that will keep being refused.
@@ -326,6 +336,12 @@ export function startExtensionApi(options: {
       return
     }
 
+    // New clients bind every replay to the original vault. Old unqueued clients
+    // remain compatible; a supplied identity is always enforced before writing.
+    if (route === '/conversation-sync' && body && typeof body === 'object' && 'capture_target' in body && body.capture_target !== captureTarget()) {
+      send(response, 409, { ok: false, code: 'destination-changed', error: 'This capture belongs to a different vault. Reopen its original vault or discard it from the browser outbox.' }, decision.allow)
+      return
+    }
     const reply = handleVaultRequest(service, {
       route,
       method: request.method || 'GET',
