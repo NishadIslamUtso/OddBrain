@@ -20,7 +20,7 @@ Runtime Markdown is intentionally preserved: `vault/Brain/` holds actual vault c
 |---|---|
 | Stage 1: reliable capture | Implemented and published at `9977ae2`; normal browser-restart recovery tested. Not a guarantee of complete account capture or all failures being handled. |
 | Stage 2: useful recall | Pending: search original messages and memory, source-linked recall, grouped interpretation review and shared confirmed facts. |
-| Stage 3: comfortable daily use | Pending: content-first People/Journal/Life Story and unified setup, preserving the approved design and controls. |
+| Stage 3: comfortable daily use | Navigation declutter implemented: grouped Settings, optional Looks lab, People management disclosure. Richer People/Journal/Life Story and unified setup remain pending. |
 | Verified reliability repairs | Integrated after the audit: vault preview guard, chapter-cycle handling, damaged memory-state handling, organizer lifecycle, artifact/checkpoint/key persistence edge cases and test timeout forwarding. Regression cases now run on this branch; see the integration record below. |
 | Documentation | README + this context file; stale `.ai` handovers retired. No runtime Markdown or feature removed. |
 
@@ -54,7 +54,7 @@ The complete appearance inventory, built by the owner personally (authority: SPE
 - **Looks lab**: Compare looks · Taste quiz (5 questions) · My shortlist · gallery · My mixes · Custom look.
 - **All 16 bundled design systems** (Claude, Linear, Apple, Stripe, Notion, Vercel, Airbnb, Glassmorphism, Neobrutalism, Editorial, Retro, Dashboard, Shadcn, Minimal, Modern, Default) applied as complete token sets to every screen.
 - **All 77 mascot SVGs byte-exact** with the 8 real state roles (idle/thinking/working/waiting/done/searching/making/resting) · motion modes Calm/Balanced/Playful/Still + speed/pause.
-- **18 settings sections**, size table per SPEC §2 (15px settings headings, 13px body, 14.5px conversation, 44px bars, 260px sidebar), honest rows only.
+- **8 Settings groups with 17 retained pages**, size table per SPEC §2 (15px settings headings, 13px body, 14.5px conversation, 44px bars, 260px sidebar), honest rows only.
 
 ## Standing product and design decisions
 
@@ -253,3 +253,13 @@ Authorized after the independent audit. Source fixes were adapted from `80fcadb`
 - Retained the actual app, regression tests, CI/build tools, original artwork, extension, runtime vault content, installable skills and licenses. Retained the motion-asset generator and corrected its obsolete output path instead of deleting a useful source tool. README and this file remain the two project documentation files. Runtime Markdown is app content, not disposable documentation.
 
 Validation for this cleanup/switch: 1,071 tests across 155 files passed with real Chromium and zero skips; TypeScript, Electron build and web build passed. The browser motion check exercised the real Settings switch, reload persistence, no startup flash/input blocking when Off, restored opening when On, manual replay and reduced motion. Existing default-value test expectations were updated for the new field, not weakened. Native/account acceptance remains separate.
+
+## Intuitive navigation declutter (2026-10-19)
+
+- Authorized scope: group and relocate controls, not remove features or implement the larger recall/review roadmap. Future recall belongs in existing search, grouped review in Memory inbox and richer profiles in People; add a screen only for a genuinely separate task.
+- Settings now has eight destinations: Appearance; AI & connections; Memory & files; Voice & attachments; Privacy & access; Windows & shortcuts; Advanced tools; About & help. All 17 substantive pages remain. Contextual subnavigation remembers the last page per group during the Settings instance; search spans the groups and retained labels. Stable section IDs preserve existing links and Back behavior.
+- Capture sources has one home in Vault. Settings search, the command palette and legacy `maps` links open that home rather than a duplicate Settings page. Legacy redirects cannot overwrite Appearance's remembered page.
+- Appearance's optional Looks lab contains comparisons, quiz, shortlist, ratings, notes, saved mixes, additional design systems, structure comparisons and imports/exports. Presets, layouts, palettes, styles, typography, motion, original artwork and live preview remain.
+- People shows profile content before administration. Manage person/Manage people reveals linking, merging, editing and identity history; New person reveals and focuses creation. Identity previews, explicit confirmation and undo are unchanged.
+- Hooks, watches, skills, plugins and House rules are under Advanced tools. Second-pass AI review moved from Engine to House rules. Automatic/external review were already off by default and remain so; saved choices are not reset. Code was already outside primary navigation, under Projects/menu; no new removal is claimed.
+- Validation: **1,074 tests across 155 files, zero skips**, including both required real-browser suites; strict JUnit gate passed. TypeScript and Electron/web builds passed. All nine UI suites passed in one final serial run after rebuilding the offline renderer and updating moved-control selectors. Checks cover all 17 pages, search/Back/draft retention, all eight layouts at minimum size, appearance inventory, identity preview/cancel/confirm/undo and Capture sources shortcuts. Cache receipts: `.cache/intuitive/{full.xml,tests.log,build.log,web.log,ui.log}`. Generated receipts are not committed. Native target-machine use, live provider/model quality and CI for this change are not claimed by these local results.

@@ -1,6 +1,7 @@
+import { SETTINGS_AREAS, areaForSection } from '../state/settingsNavigation'
 import SampleWorkspaceControls from '../ui/SampleWorkspaceControls'
 import { captureSamplePage, sampleEnabled } from '@shared/lib/sampleWorkspace'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { bridge, isDemo } from '../platform/bridge'
 import HouseRulesSection from './HouseRulesSection'
@@ -161,7 +162,7 @@ export const SECTIONS: readonly { id: SectionId; title: string; group: string; r
   { id: 'agents', title: 'Agent access', group: 'Access & connections', resettable: true },
   { id: 'connectors', title: 'Connectors', group: 'Access & connections' },
   { id: 'extensions', title: 'Plugins', group: 'Access & connections' },
-  { id: 'media', title: 'Voice & files', group: 'Files & memory' },
+  { id: 'media', title: 'Voice & attachments', group: 'Files & memory' },
   { id: 'vault', title: 'Vault', group: 'Files & memory' },
   { id: 'memory', title: 'Memory', group: 'Files & memory' },
   { id: 'maps', title: 'Capture sources', group: 'Files & memory' },
@@ -172,7 +173,6 @@ export const SECTIONS: readonly { id: SectionId; title: string; group: string; r
   { id: 'system', title: 'System', group: 'Application' },
   { id: 'about', title: 'About & help', group: 'Application' },
 ]
-const GROUPS = [...new Set(SECTIONS.map(section => section.group))]
 const COMPOSED_SECTIONS = new Set<SectionId>(['appearance', 'maps', 'engine', 'connectors', 'extensions', 'media', 'house', 'skills', 'recipes', 'hooks', 'memory', 'vault'])
 
 /** Four glyphs, drawn here rather than pulled from a font or a package. */
@@ -367,6 +367,11 @@ export default function SettingsView({
   const [extension, setExtension] = useState({ listening: false, port: 8765, url: '', error: '' })
   const [permissionProblem, setPermissionProblem] = useState('')
   const [query, setQuery] = useState('')
+  const lastInArea = useRef<Record<string, SectionId>>({})
+  useEffect(() => { if (section !== 'maps') lastInArea.current[areaForSection(section).id] = section }, [section])
+  useEffect(() => {
+    if (open && section === 'maps') window.dispatchEvent(new Event('app:capture-sources'))
+  }, [open, section])
   const [helpNote, setHelpNote] = useState('')
   // Back may change the controlled section while a search is open. Internal
   // selections already updated localSection, so they keep their search text.
@@ -813,7 +818,7 @@ export default function SettingsView({
             : []),
         ],
     appearance: [{ label: 'Appearance', terms: 'display name profile palette theme color colour font size width spacing density motion speed pause mascot brain scenes layout mix preset words explanations compare quiz shortlist', body: <AppearancePanel appearance={appearance} onAppearanceChange={onAppearanceChange} look={look} onLookChange={onLookChange} sidebar={sidebar} onSidebarChange={onSidebarChange} name={profileName} onNameChange={onProfileNameChange} engine={engineState.settings.id} model={engineState.settings.model || 'Choose a model'} onTry={onTryWorkspace} /> }],
-    media: [{ label: 'Voice & files', terms: 'media attachments PDF Word Excel PowerPoint document image audio video FFmpeg transcription dictation speech voice read aloud provider', body: <MediaSettings /> }],
+    media: [{ label: 'Voice & attachments', terms: 'media attachments PDF Word Excel PowerPoint document image audio video FFmpeg transcription dictation speech voice read aloud provider', body: <MediaSettings /> }],
     models: isDemo
       ? [
           {
@@ -1063,6 +1068,7 @@ export default function SettingsView({
         : []),
     ],
     house: [
+      { label: 'Second-pass review', terms: 'automatic second pass review on off report only reviewer local cloud', body: <AutomationControls scope="review" /> },
       { label: 'Auto-keep before a write', terms: 'auto keep before approved write checkpoint backup copies restore', body: <AutomationControls scope="keep" /> },
       {
         label: 'Instructions',
@@ -1071,7 +1077,6 @@ export default function SettingsView({
       },
     ],
     engine: [
-      { label: 'Second-pass review', terms: 'automatic second pass review on off report only reviewer local cloud', body: <AutomationControls scope="review" /> },
       {
         label: 'Engine & workspace',
         terms: 'engine agent claude-code agy model selection approval workspace folder',
@@ -1127,7 +1132,7 @@ export default function SettingsView({
     ],
   }
 
-  const sectionAliases: Partial<Record<SectionId, string>> = { models: 'get api keys provider credentials encryption', connectors: 'install apps extensions connection runtime', extensions: 'plugins community packs marketplace', windows: 'smaller quick window shortcut startup warm runtime', performance: 'model stays loaded keep alive resource memory', maps: 'browsing maps sources reading history timeline', about: 'learn more help about repository', appearance: 'startup animation opening splash display name profile account looks layouts styles palettes fonts motion typography density mixes' }
+  const sectionAliases: Partial<Record<SectionId, string>> = { media: 'voice & files voice & attachments', models: 'get api keys provider credentials encryption', connectors: 'install apps extensions connection runtime', extensions: 'plugins community packs marketplace', windows: 'smaller quick window shortcut startup warm runtime', performance: 'model stays loaded keep alive resource memory', maps: 'browsing maps sources reading history timeline', about: 'learn more help about repository', appearance: 'startup animation opening splash display name profile account looks lab compare quiz shortlist ratings notes design systems layouts styles palettes fonts motion typography density mixes' }
   rowsById.agents = [{ label: 'Cloud inference', terms: 'allow cloud external inference local transport remote model', body: <AutomationControls scope="access" /> }, ...rowsById.agents]
   const needle = query.trim().toLowerCase()
   const rowText = (row: Row): string => `${row.label} ${row.terms || ''}`.toLowerCase()
@@ -1135,12 +1140,14 @@ export default function SettingsView({
   const sectionFound = (id: SectionId): boolean => {
     const meta = SECTIONS.find(entry => entry.id === id)
     if (!meta) return false
-    return meta.title.toLowerCase().includes(needle) || !!sectionAliases[id]?.includes(needle) || rowsById[id].some(matches)
+    return meta.title.toLowerCase().includes(needle) || areaForSection(id).title.toLowerCase().includes(needle) || !!sectionAliases[id]?.includes(needle) || rowsById[id].some(matches)
   }
+
+  const captureSearch = !!needle && 'capture sources browsing maps saved conversations'.includes(needle)
 
   // A search that would leave the open section empty opens the first section it
   // did find, so the pane never sits blank next to a list of results.
-  const visible = SECTIONS.filter(meta => sectionFound(meta.id))
+  const visible = SECTIONS.filter(meta => meta.id !== 'maps' && sectionFound(meta.id))
   useEffect(() => {
     if (!needle || restoringSection) return
     if (visible.some(meta => meta.id === section)) return
@@ -1148,12 +1155,13 @@ export default function SettingsView({
     if (first) setSection(first.id)
   }, [needle, section, visible, restoringSection])
 
-  if (!open) return null
+  if (!open || section === 'maps') return null
 
   const active = SECTIONS.find(meta => meta.id === section) || SECTIONS[0]
+  const area = areaForSection(active.id)
   const allRows = rowsById[active.id]
   const found = allRows.filter(matches)
-  const rows = !needle ? allRows : found.length ? found : (active.title.toLowerCase().includes(needle) || sectionAliases[active.id]?.includes(needle)) ? allRows : []
+  const rows = !needle ? allRows : found.length ? found : (active.title.toLowerCase().includes(needle) || area.title.toLowerCase().includes(needle) || sectionAliases[active.id]?.includes(needle)) ? allRows : []
 
   function resetSection(): void {
     if (section === 'appearance') { onAppearanceChange(DEFAULT_APPEARANCE); onLookChange(DEFAULT_LOOK); onSidebarChange(DEFAULT_SIDEBAR) }
@@ -1180,34 +1188,27 @@ export default function SettingsView({
         </div>
 
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-          {GROUPS.map(group => {
-            const items = visible.filter(meta => meta.group === group)
-            if (!items.length) return null
-            return (
-              <div key={group} className="mb-2">
-                <div className="px-3 py-1.5 text-[11px] text-muted">{group}</div>
-                {items.map(meta => {
-                  const current = meta.id === section
-                  return (
-                    <button
-                      key={meta.id}
-                      type="button"
-                      className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[12.5px] ${
-                        current ? 'bg-accent/15 text-ink' : 'text-muted hover:bg-white/[0.06] hover:text-ink'
-                      }`}
-                      onClick={() => { setSection(meta.id) }}
-                      aria-label={`Section: ${meta.title}`}
-                      aria-current={current ? 'page' : undefined}
-                    >
-                      <SectionIcon id={meta.id} />
-                      {meta.title}
-                    </button>
-                  )
-                })}
-              </div>
-            )
+          {!needle ? SETTINGS_AREAS.map(item => {
+            const current = item.id === area.id
+            const entry = item.sections[0]
+            return <button key={item.id} type="button" className={`ob-settings-area mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12.5px] ${current ? 'bg-accent/15 text-ink' : 'text-muted hover:bg-white/[0.06] hover:text-ink'}`}
+              aria-label={item.sections.length === 1 ? `Section: ${SECTIONS.find(s => s.id === entry)!.title}` : `Settings area: ${item.title}`}
+              aria-current={current ? 'page' : undefined}
+              onClick={() => setSection(lastInArea.current[item.id] || entry)}>
+              <SectionIcon id={entry} />{item.title}
+            </button>
+          }) : SETTINGS_AREAS.map(item => {
+            const results = visible.filter(meta => item.sections.includes(meta.id))
+            if (!results.length) return null
+            return <div key={item.id} className="mb-2"><div className="px-3 py-1.5 text-[11px] text-muted">{item.title}</div>
+              {results.map(meta => <button key={meta.id} type="button" className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[12.5px] ${meta.id === section ? 'bg-accent/15 text-ink' : 'text-muted hover:bg-white/[0.06] hover:text-ink'}`}
+                aria-label={`Section: ${meta.title}`} aria-current={meta.id === section ? 'page' : undefined} onClick={() => setSection(meta.id)}>
+                <SectionIcon id={meta.id} />{meta.title}
+              </button>)}
+            </div>
           })}
-          {!visible.length && <p className="px-3 py-2 text-[12px] text-muted">Nothing matches that.</p>}
+          {captureSearch && <button type="button" className="ob-text-button px-3 py-2" onClick={() => window.dispatchEvent(new Event('app:capture-sources'))}>Open Capture sources in Vault</button>}
+          {!visible.length && !captureSearch && <p className="px-3 py-2 text-[12px] text-muted">Nothing matches that.</p>}
         </nav>
 
         {engineState.turn?.permissions.length ? <div className="border-t border-line p-2"><button type="button" className="ob-text-button" onClick={onTryWorkspace}>Review {engineState.turn.permissions.length} request{engineState.turn.permissions.length === 1 ? '' : 's'}</button></div> : null}
@@ -1219,6 +1220,9 @@ export default function SettingsView({
           {active.resettable && section !== 'appearance' ? <button type="button" className="ob-text-button ml-auto" aria-label="Reset section" onClick={resetSection}>Reset</button> : null}
         </header>
 
+        {!needle && area.sections.length > 1 && <nav className="ob-settings-subsections" aria-label={area.title}>
+          {area.sections.map(id => { const meta = SECTIONS.find(s => s.id === id)!; return <button key={id} type="button" className="ob-text-button" aria-label={`Section: ${meta.title}`} aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}>{meta.title}</button> })}
+        </nav>}
         <div className={`ob-settings-body mx-auto w-full ${section === 'appearance' ? '' : 'max-w-[860px]'} px-5 py-5`}>
           {rows.length === 0 ? (
             <p className="text-[12.5px] text-muted">Nothing here matches “{query.trim()}”.</p>

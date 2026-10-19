@@ -1,3 +1,4 @@
+const { openSettingsSection, ALL_SETTINGS } = require('./settings-navigation.cjs');
 // Isolated graph fixture, never shipped or inserted into the normal app.
 const { chromium } = require('playwright-core')
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict')
@@ -14,13 +15,13 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     await page.goto(base); await page.locator('.ob-launch').waitFor({ state: 'hidden' })
     await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Draft kept through navigation')
     await page.keyboard.press('Control+,')
-    await page.getByRole('button', { name: 'Section: Appearance', exact: true }).click()
-    await page.getByRole('button', { name: 'Section: Connectors', exact: true }).click()
+    await openSettingsSection(page, 'Appearance')
+    await openSettingsSection(page, 'Connectors')
     await page.getByRole('button', { name: 'Back', exact: true }).first().click()
     assert.equal(await page.locator('.ob-settings-content>header h1').textContent(), 'Appearance')
     const search = page.getByRole('textbox', { name: /Search settings/ })
     if (await search.count()) {
-      await search.fill('Voice'); await page.getByRole('button', { name: 'Section: Voice & files', exact: true }).click()
+      await search.fill('Voice'); await openSettingsSection(page, 'Voice & attachments')
       await page.getByRole('button', { name: 'Back', exact: true }).first().click()
       assert.equal(await page.locator('.ob-settings-content>header h1').textContent(), 'Appearance'); assert.equal(await search.inputValue(), '')
     }
@@ -29,10 +30,10 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     await page.getByRole('button', { name: 'Back', exact: true }).first().click()
     assert.equal(await page.locator('.ob-settings-content>header h1').textContent(), 'Appearance')
     report.checks.push('Settings section Back, search restoration, brand New chat and draft preservation')
-    const sections = await page.locator('.ob-settings-navigation button[aria-label^="Section:"]').allTextContents()
-    assert.equal(sections.length, 18)
+    assert.equal(await page.locator('.ob-settings-navigation .ob-settings-area').count(), 8)
+    const sections = ALL_SETTINGS
     for (const title of sections) {
-      await page.getByRole('button', { name: `Section: ${title.trim()}`, exact: true }).click()
+      await openSettingsSection(page, title.trim())
       assert.equal(await page.locator('.ob-settings-content>header h1').textContent(), title.trim())
       assert.equal(await page.locator('button button').count(), 0)
     }
@@ -47,7 +48,7 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
       assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ai-assistant.view'))), view.toLowerCase())
       await page.screenshot({ path: path.join(output, `screen-${view.toLowerCase()}.png`), animations: 'disabled' })
     }
-    report.checks.push('All 18 Settings sections render; working screens use original SVGs; brand and Back preserve the draft from every screen')
+    report.checks.push('All 8 Settings groups render; working screens use original SVGs; brand and Back preserve the draft from every screen')
     // Test the actual canvas component against an explicitly labelled fixture.
     // No global preload replacement and no fabricated data in the app preview.
     const files = Array.from({ length: 90 }, (_, i) => `${['Ideas', 'Reading', 'Work'][i % 3]}/Note ${i + 1}.md`)

@@ -1,32 +1,28 @@
 // @vitest-environment jsdom
 import { act, createElement } from 'react'
 import { createRoot, type Root } from 'react-dom/client'
-import { afterEach, beforeEach, test, expect } from 'vitest'
-import SettingsView, { SECTIONS } from '../src/renderer/src/components/SettingsView'
+import { afterEach, beforeEach, test, expect, vi } from 'vitest'
+import SettingsView, { SECTIONS, type SectionId } from '../src/renderer/src/components/SettingsView'
 import { DEFAULT_APPEARANCE } from '../src/renderer/src/state/appearance'
 import { DEFAULT_LOOK, DEFAULT_SIDEBAR } from '../src/renderer/src/state/look'
 import { DEFAULT_PERMISSIONS } from '../src/shared/lib/permissions'
 import { DEFAULT_INFERENCE } from '../src/renderer/src/state/performance'
+import { SETTINGS_AREAS, areaForSection } from '../src/renderer/src/state/settingsNavigation'
 import { KNOWN_MARKETPLACES } from '../src/shared/lib/marketplace'
 
-/**
- * Every Settings destination, rendered.
- *
- * `scripts/check-ui*.cjs` proves this in a real browser, which is the owner's
- * acceptance bar but cannot run here or in CI. This is the same claim without a
- * browser: all eighteen destinations open, the heading matches, no button sits
- * inside another button, and the two panes the audit asked about really carry
- * their controls. The browser run still owns anything that depends on layout.
- */
+/** Exercise every retained page through its new group. Browser tests own layout. */
 
 const noop = (): void => undefined
 let host: HTMLDivElement
 let root: Root
+let render: (initialSection?: SectionId) => Promise<void>
 beforeEach(async () => {
   Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+  vi.stubGlobal('ResizeObserver', class { observe() {} unobserve() {} disconnect() {} })
+  vi.stubGlobal('matchMedia', (query: string) => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} }))
   host = document.createElement('div'); document.body.append(host); root = createRoot(host)
-  await act(async () => {
-    root.render(createElement(SettingsView, {
+  render = async initialSection => { await act(async () => {
+    root.render(createElement(SettingsView, { initialSection,
       open: true, onClose: noop, vault: { state: 'ready', path: '/vault', error: '', files: 3 },
       onChanged: noop, appearance: DEFAULT_APPEARANCE, onAppearanceChange: noop,
       look: DEFAULT_LOOK, onLookChange: noop, sidebar: DEFAULT_SIDEBAR, onSidebarChange: noop,
@@ -35,29 +31,65 @@ beforeEach(async () => {
       permissions: DEFAULT_PERMISSIONS, onPermissionsChange: noop,
     }))
     await new Promise(resolve => setTimeout(resolve, 40))
-  })
+  }) }
+  await render()
 })
-afterEach(async () => { await act(() => root.unmount()); host.remove() })
+afterEach(async () => { await act(() => root.unmount()); host.remove(); vi.unstubAllGlobals() })
 
-const destinations = (): HTMLButtonElement[] => [...host.querySelectorAll('.ob-settings-navigation button[aria-label^="Section:"]')] as HTMLButtonElement[]
+const destinations = (): HTMLButtonElement[] => [...host.querySelectorAll('.ob-settings-area')] as HTMLButtonElement[]
+const click = async (button: HTMLButtonElement): Promise<void> => { await act(async () => { button.click(); await new Promise(resolve => setTimeout(resolve, 20)) }) }
 const open = async (title: string): Promise<void> => {
-  const button = destinations().find(node => node.textContent?.trim() === title)
-  if (!button) throw new Error(`No destination named ${title}`)
-  await act(async () => { button.click(); await new Promise(resolve => setTimeout(resolve, 20)) })
+  const section = SECTIONS.find(s => s.title === title)!
+  const area = areaForSection(section.id)
+  await click(destinations().find(node => node.textContent?.trim() === area.title)!)
+  if (area.sections.length > 1) await click(host.querySelector(`.ob-settings-subsections [aria-label="Section: ${title}"]`) as HTMLButtonElement)
 }
 
-test('all eighteen destinations open with their own heading and no nested buttons', async () => {
-  expect(destinations()).toHaveLength(18)
-  expect(SECTIONS.map(section => section.title)).toEqual(destinations().map(button => button.textContent?.trim()))
-  for (const { title } of SECTIONS) {
+test('eight task groups expose all seventeen retained pages without nested buttons', async () => {
+  expect(destinations()).toHaveLength(8)
+  expect(destinations().map(button => button.textContent?.trim())).toEqual(SETTINGS_AREAS.map(area => area.title))
+  const ids = SETTINGS_AREAS.flatMap(area => area.sections)
+  expect(new Set(ids).size).toBe(17)
+  expect([...ids].sort()).toEqual(SECTIONS.filter(s => s.id !== 'maps').map(s => s.id).sort())
+  expect(host.querySelector('[aria-label="Section: Capture sources"]')).toBeNull()
+  for (const { title } of SECTIONS.filter(s => s.id !== 'maps')) {
     await open(title)
     expect(host.querySelector('.ob-settings-content > header h1')?.textContent).toBe(title)
     expect(host.querySelectorAll('.ob-settings-content button button')).toHaveLength(0)
+    expect(host.textContent).not.toContain('This page could not render')
   }
-  // Nothing was added to the navigation by inventing a page: the count is the
-  // claim in the README, and it is counted from the same list the rail draws.
-  expect(SECTIONS).toHaveLength(18)
-  expect(new Set(SECTIONS.map(section => section.id)).size).toBe(18)
+})
+
+test('returning to a group remembers its last page instead of restarting setup', async () => {
+  await open('Performance')
+  await open('Appearance')
+  await click(destinations().find(node => node.textContent === 'AI & connections')!)
+  expect(host.querySelector('h1')?.textContent).toBe('Performance')
+})
+
+test('legacy capture-settings links go directly to Vault, not another settings page', async () => {
+  let opened = 0
+  const onOpen = () => { opened++ }
+  window.addEventListener('app:capture-sources', onOpen)
+  try {
+    await render('maps'); expect(opened).toBe(1); expect(host.querySelector('.ob-settings-view')).toBeNull()
+    await render('engine'); await render()
+    await click(destinations().find(node => node.textContent === 'Appearance')!)
+    expect(host.querySelector('h1')?.textContent).toBe('Appearance')
+    expect(opened).toBe(1)
+  }
+  finally { window.removeEventListener('app:capture-sources', onOpen) }
+})
+
+test('direct links open the correct group and extra AI review is kept with advanced tools', async () => {
+  await render('hooks')
+  expect(host.querySelector('.ob-settings-area[aria-current="page"]')?.textContent).toBe('Advanced tools')
+  expect(host.querySelector('h1')?.textContent).toBe('Hooks')
+  await render() // return to an uncontrolled test instance
+  await open('Engine')
+  expect(host.querySelector('[aria-label="Automatic second-pass review"]')).toBeNull()
+  await open('House rules')
+  expect(host.querySelector('[aria-label="Automatic second-pass review"]')).not.toBeNull()
 })
 
 test('Connectors carries the sign-in checks, the Ollama version and the one tool-server list', async () => {

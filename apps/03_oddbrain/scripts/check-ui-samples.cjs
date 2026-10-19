@@ -1,3 +1,4 @@
+const { openSettingsSection } = require('./settings-navigation.cjs');
 const { chromium } = require('playwright-core')
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict')
 const base = process.env.ODDBRAIN_UI_URL || 'http://127.0.0.1:5174/'
@@ -13,14 +14,14 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     page.on('request', request => { if (request.url().includes('/api/') || (/^https?:/.test(request.url()) && !request.url().startsWith(base))) report.apiRequests.push(request.url()) })
     await page.addInitScript(() => { if (window.top !== window) return; if (!localStorage.getItem('ai-assistant.chats')) localStorage.setItem('ai-assistant.chats', JSON.stringify([{ id: 'private-existing', title: 'Keep this work', messages: [] }])) })
     const view = async name => { await page.keyboard.press('Control+k'); await page.getByRole('textbox', { name: 'Search chats and screens' }).fill(name); await page.locator('.ob-command-results>button').filter({ hasText: new RegExp('^' + name) }).first().click() }
-    const settings = async name => { if (!await page.locator('.ob-settings-host').count()) await page.keyboard.press('Control+,'); await page.getByRole('button', { name: 'Section: ' + name, exact: true }).click() }
+    const settings = async name => { if (!await page.locator('.ob-settings-host').count()) await page.keyboard.press('Control+,'); await openSettingsSection(page, name) }
     const close = async () => page.getByRole('button', { name: 'Close settings', exact: true }).click()
     await page.goto(base); await page.locator('.ob-launch').waitFor({ state: 'hidden' })
     assert(await page.getByRole('button', { name: 'Sample workspace', exact: true }).isVisible())
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('oddbrain.sample.data.ai-assistant.chats')).length), 4)
     await settings('Appearance')
     assert.equal(await page.getByRole('button', { name: 'Section: You', exact: true }).count(), 0)
-    assert.equal(await page.locator('.ob-settings-navigation button[aria-label^="Section:"]').count(), 18)
+    assert.equal(await page.locator('.ob-settings-navigation .ob-settings-area').count(), 8)
     await page.getByRole('textbox', { name: 'Your name', exact: true }).fill('Alex')
     await page.locator('.ob-appearance-profile').getByRole('button', { name: 'Save', exact: true }).click()
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ai-assistant.profile')).name), 'Alex')
@@ -39,11 +40,11 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     await view('Vault'); await page.getByRole('button', { name: 'Preferences.md', exact: true }).click(); assert((await page.locator('.ob-vault-view pre').innerText()).includes('concise explanations'))
     await view('Brain'); await page.getByRole('tab', { name: 'Map', exact: true }).click(); await page.locator('.ob-graph canvas').waitFor(); assert((await page.locator('.ob-graph-footer').innerText()).includes('21 of 21 notes'))
     await page.getByRole('button', { name: 'Appearance', exact: true }).click(); await page.screenshot({ path: path.join(output, 'samples-brain.png'), animations: 'disabled' })
-    report.checks.push('18 Settings sections, name in Appearance, neutral 4 GB label; populated Projects/Artifacts/Today/Vault/Brain with working create, duplicate and note preview')
+    report.checks.push('8 Settings groups, name in Appearance, neutral 4 GB label; populated Projects/Artifacts/Today/Vault/Brain with working create, duplicate and note preview')
     await view('Brain'); await page.getByRole('tab', { name: 'Engine notes', exact: true }).click(); assert.equal(await page.locator('[aria-label="Memory files"]>li').count(), 3)
     await settings('Connectors'); await page.getByRole('button', { name: 'Capture sample page', exact: true }).click()
     await page.getByText('Sample page captured. Open Vault → Capture sources to inspect it.', { exact: true }).waitFor()
-    await settings('Capture sources'); await page.getByRole('button', { name: 'Open Capture sources in Vault', exact: true }).click(); await page.getByText('Sample extension capture', { exact: true }).first().waitFor()
+    await page.getByRole('textbox', { name: 'Search settings', exact: true }).fill('Capture sources'); await page.getByRole('button', { name: 'Open Capture sources in Vault', exact: true }).click(); await page.getByText('Sample extension capture', { exact: true }).first().waitFor()
     await page.getByRole('button', { name: 'Show files', exact: true }).click(); await page.getByRole('button', { name: 'Sample extension capture.md', exact: true }).click(); assert((await page.locator('.ob-vault-view pre').innerText()).includes('No extension connected'))
     await page.getByRole('button', { name: 'OddBrain, new chat', exact: true }).first().click()
     await page.getByRole('textbox', { name: 'Message', exact: true }).fill('Show me a sample task')

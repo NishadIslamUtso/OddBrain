@@ -1,3 +1,4 @@
+const { openSettingsSection } = require('./settings-navigation.cjs');
 // Real renderer interactions; native features must remain honestly unavailable
 // in the browser preview. Native providers/microphones are covered separately.
 const { chromium } = require('playwright-core')
@@ -19,7 +20,7 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     await message.press('Enter'); assert(!(await message.inputValue()).startsWith('/sum'))
     await message.fill('A draft that stays here')
     await page.keyboard.press('Control+,')
-    await page.getByRole('button', { name: 'Section: Voice & files', exact: true }).click()
+    await openSettingsSection(page, 'Voice & attachments')
     await page.getByLabel('File extraction provider', { exact: true }).selectOption('openai')
     await page.getByLabel('File extraction model', { exact: true }).fill('chosen-file-model')
     await page.getByLabel('Transcription provider', { exact: true }).selectOption('groq')
@@ -27,7 +28,7 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     await page.getByLabel('Dictation mode', { exact: true }).selectOption('provider')
     await page.getByRole('button', { name: 'Save voice & file settings', exact: true }).click()
     await page.getByText('Preview preferences only; no provider calls are available here.', { exact: true }).waitFor()
-    await page.getByRole('button', { name: 'Section: Plugins', exact: true }).click()
+    await openSettingsSection(page, 'Plugins')
     await page.getByLabel('Plugin source', { exact: true }).selectOption('claude')
     assert(await page.getByRole('button', { name: 'Check installed CLI', exact: true }).isDisabled())
     await page.getByLabel('Plugin source', { exact: true }).selectOption('agy')
@@ -46,6 +47,6 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     await page.getByText('Provider dictation requires the installed desktop app. No audio was recorded.', { exact: true }).waitFor()
     assert.equal(await message.inputValue(), 'A draft that stays here')
     assert.deepEqual(errors, []); assert.deepEqual(outbound, [])
-    console.log('PASS: slash templates, Voice & files settings, retained packs and engine source selector, local attachments, explicit provider labels and honest preview microphone refusal; no outbound uploads.')
+    console.log('PASS: slash templates, Voice & attachments settings, retained packs and engine source selector, local attachments, explicit provider labels and honest preview microphone refusal; no outbound uploads.')
   } finally { await browser.close() }
 })().catch(error => { console.error(error); process.exitCode = 1 })

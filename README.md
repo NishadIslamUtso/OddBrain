@@ -39,6 +39,12 @@ A browser preview is not a substitute for the native Electron app or its IPC/eng
 
 Startup animation: **Settings → Appearance → Brain & motion → Startup animation → On / Off**.
 
+## Finding things
+
+Settings has eight groups, with search across every setting. Appearance experiments are in **Appearance → Looks lab**; hooks, folder watches and extra AI review are under **Advanced tools**. Saved choices are preserved.
+
+**Vault → Capture sources** is the single home for source details. In **People**, content comes first; account linking, merging and history are behind **Manage person**.
+
 ## Browser companion
 
 1. Run the desktop app and select a vault.

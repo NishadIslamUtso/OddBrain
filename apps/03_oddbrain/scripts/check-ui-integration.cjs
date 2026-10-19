@@ -1,3 +1,4 @@
+const { openSettingsSection } = require('./settings-navigation.cjs');
 // Current-main + recovered UI checks at the owner's logical desktop sizes.
 const { chromium } = require('playwright-core')
 const fs = require('node:fs')
@@ -21,7 +22,8 @@ const browserOptions = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.read
     await page.goto(base)
     await page.locator('.ob-launch').waitFor({ state: 'hidden' })
     await page.keyboard.press('Control+,')
-    await page.getByRole('button', { name: 'Section: Appearance', exact: true }).click()
+    await openSettingsSection(page, 'Appearance')
+    await page.getByRole('button', { name: 'Looks lab', exact: true }).click()
     const systems = page.getByRole('group', { name: 'Design system', exact: true })
     assert.equal(await systems.getByRole('button').count(), 17)
     for (const name of ['Linear', 'Apple', 'Neobrutalism', 'Claude']) {
