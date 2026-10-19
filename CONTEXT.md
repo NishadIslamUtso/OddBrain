@@ -87,8 +87,74 @@ The reviewed lanes were integrated selectively, not merged wholesale. The app re
 - **Engines and stores:** cancellation/routing fixes, independent Ollama/Anthropic model discovery, provider-aware model selection and stale-response protection. Switching engines during an active task is refused with an explicit explanation rather than falsely promising a switch. Failed skill installations remain retryable, not marked installed.
 - **Network and attachments:** shared bounded-response handling, strict image-count/base64/size checks, HTTPS provider safeguards, and complete commit-pinned skill bundles with licenses/support files. Existing engine skills are never replaced by a catalog install; remove or relocate them deliberately before reinstalling.
 - **Diagnostics and MCP:** sign-in and Ollama-version diagnostics, editable MCP configuration, verified collision-safe backups and staged multi-file saves. Backup failure stops saving; ordinary replacement failures trigger rollback. This is not power-loss atomic, and symlinked configuration paths are refused.
-- **Recall:** `GET /api/vault/search` ranks notes and captured messages with every word required, quoted words required as that phrase, a phrase/title bonus, a recency tiebreak for conversations, one bounded snippet per hit and an honest `scanned`/`capped`/`partial` report; three message hits per conversation maximum (applied after ranking), 100 results, 64 KB read per file with a cached head. The command palette searches it after 220 ms, discards stale answers, is driven with the arrows and Enter, and opens the file; the Vault screen's own box calls the same search. Links come from the vault's own `[[…]]` resolver, scanned once per Vault visit with an explicit refresh; the panel also lists notes that mention the note's name without linking to it (quoted-name search, minus the notes that already link). Not delivered: embeddings/vector recall (would need a model and an index with visible status), clipboard or screen history (privacy-heavy and outside the capture law), scheduled automations.
+- **Recall:** `GET /api/vault/search` ranks notes and captured messages with every word required, quoted words required as that phrase, a phrase/title bonus, a recency tiebreak for conversations, one bounded snippet per hit and an honest `scanned`/`capped`/`partial` report; three message hits per conversation maximum (applied after ranking), 100 results, 64 KB read per file with a cached head. The command palette searches it after 220 ms, discards stale answers, is driven with the arrows and Enter, says "Searching the vault…" until an answer exists and prints the limit line when the walk stopped short; the Vault screen's own box calls the same search. Links come from the vault's own `[[…]]` resolver, scanned once per Vault visit with an explicit refresh; the panel also lists notes that mention the note's name without linking to it (quoted-name search, minus the notes that already link). Not delivered: embeddings/vector recall (would need a model and an index with visible status), clipboard or screen history (privacy-heavy and outside the capture law), scheduled automations.
 - **Vault repairs:** root-level writes work; dangling/linked paths are refused; source code is no longer hidden by the runtime-vault ignore rule. Markdown export requires a new external destination, refuses incomplete walks and removes its own partial copy on failure. It is not a full backup of media or the memory review database.
+
+## Improvement record — 2026-10-19
+
+What this branch adds and fixes on top of the owner's `9d61f36`, in the order it
+was committed. Every claim below has a test or a CI run named in the PR; nothing
+here is a plan.
+
+**Added**
+
+- `GET /api/vault/search` (`src/main/vault/search.ts`): one ranked search over
+  notes and captured conversations. Every word is required (AND), quoted words
+  are required as that phrase, and the whole phrase, the title, the path and a
+  near pair of words score higher than a distant mention. Each hit carries the
+  line, a bounded snippet marked at the match, and (for a capture) the
+  conversation, provider, URL and role. Limits are explicit: 64 KB per file
+  with a one-minute cached head, 24 MB and 4,000 files per query, 100 results,
+  three message hits per conversation applied **after** ranking, and a
+  `scanned`/`capped`/`partial` report. Template files are skipped.
+- `Ctrl+K` searches that endpoint 220 ms after typing stops and discards stale
+  answers; a hit opens the exact file in the Vault screen. The palette is
+  keyboard-operated (Up/Down/Home/End, Enter runs the chosen row, hover follows,
+  the choice resets on open and on a new query, the chosen row scrolls into
+  view) and announces itself as a listbox/combobox.
+- The palette and the Vault screen's own search box share the same engine; the
+  screen no longer calls the weaker `/grep` (the route remains for other
+  callers).
+- Honest search states: "Searching the vault…" instead of a premature "No
+  matches.", and one plain line when a bound was reached ("Searched 4000 files,
+  then stopped at the limit; the rest was not searched." / "N files were longer
+  than 64 KB and read in part."). A whole read says nothing.
+- A captured message opens with the provider, chat title, role and date above
+  the text, plus "Open original" at the real URL.
+- The note preview lists what links here, what it links to, which `[[…]]` links
+  resolve to nothing (with an explicit refresh), and which notes mention the
+  note's name without linking to it. Mentions are a quoted-name search minus the
+  notes that already link, so a relation is counted once.
+- Shared wording in `src/shared/lib/vaultSearch.ts` so the palette's titles,
+  details and limit lines are testable without a browser.
+
+**Fixed**
+
+- Rotating the pairing token no longer changes the capture identity, so unsent
+  captures in the browser are not deleted by a security action. A refused
+  pairing holds the queue with a readable remedy instead of clearing it.
+- A damaged or unwritable capture identity no longer turns `/health` into a 500:
+  the port answers 200 with `capture_target: null` and `capture_problem`, replay
+  answers 503, and 409 is reserved for a genuinely different vault.
+- `api.pairToken` is a live getter, not a snapshot.
+- A long conversation's three kept message hits are now its best three; the cap
+  used to be applied during the directory walk, before ranking.
+- A `limit` that arrived as `NaN` no longer removes the result cap (a broken
+  value falls back to 30, a fraction is cut, a value below one is one).
+- The links panel no longer scans in a browser preview that has no vault behind
+  it, where an "unresolved" count would describe a folder nobody read.
+- The palette's highlight no longer survives a close (found by the reopen test).
+- `CONTEXT.md` previously said "four message hits per conversation"; the code
+  caps at three. Corrected here, along with the search details above.
+
+**Verification at `d5e17ac`:** `npx tsc --noEmit` 0; `npx vitest run` 157 files
+passed + 2 skipped, **1,103 passed** + 2 skipped; `npm run build` 0 (offline
+renderer preview 565,411 bytes). The push run `39212012706` is green on linux
+and windows. The pull-request run `39212019137` is red only in the linux native
+"Smoke" step, which also flaked on `64f9c46` and `e70b752` while the same
+commits' push runs passed it; its log could not be downloaded here, so the cause
+is not claimed. No signed-in engine turn, installer run or Electron click-through
+was performed here.
 
 ## Retained clean-build PDF fix
 
