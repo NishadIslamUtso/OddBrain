@@ -4,11 +4,13 @@ import { Brain, Database, FolderOpen, MessageSquare, Shapes, Sun } from 'lucide-
  * The app's own sections, at the top of the sidebar.
  *
  * Every entry is a screen that exists — a nav that looks complete and is
- * not is worse than a short one that is. Code lives inside Projects (its
- * working folder is the project's); see the note below the items.
+ * not is worse than a short one that is. The standalone Code screen is
+ * retired: its board lives inside Projects (its working folder is the
+ * project's). A saved `code` screen resolves to Projects via
+ * state/viewRoute.ts, so old links land where the board went.
  */
 
-export type View = 'chat' | 'artifacts' | 'today' | 'projects' | 'vault' | 'brain' | 'code'
+export type View = 'chat' | 'artifacts' | 'today' | 'projects' | 'vault' | 'brain'
 
 export const NAV_ITEMS: Array<{ id: View; label: string; Icon: typeof MessageSquare }> = [
   { id: 'chat', label: 'Chat', Icon: MessageSquare },
@@ -20,9 +22,9 @@ export const NAV_ITEMS: Array<{ id: View; label: string; Icon: typeof MessageSqu
 ]
 
 /**
- * Code is deliberately NOT in this nav: it is not a place you wander into,
- * it is a project's working folder — so it opens from the project itself
- * (its Code button), or from the menu's View > Code when no project fits.
+ * Code is deliberately NOT in this nav and no longer a screen at all:
+ * its session board, folder and linked-file controls are per-project
+ * surfaces now (components/ProjectSessions.tsx inside ProjectsView).
  * A nav that lists every feature stops being a map of the work.
  */
 
