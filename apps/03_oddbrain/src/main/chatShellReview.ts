@@ -20,7 +20,7 @@ export function createChatShellReview(adapter?: VerifiedShellAdapter, now = Date
       if (!request || typeof request.command !== 'string' || !request.command.trim() || request.command.length > 32_000 || request.command.includes('\0') || typeof request.cwd !== 'string' || !request.cwd || request.cwd.length > 4096 || /[\x00-\x1f]/.test(request.cwd)) throw Error('Invalid command or working folder.')
       for (const [key, ticket] of tickets) if (ticket.expiresAt <= now()) tickets.delete(key)
       if (tickets.size >= 20) throw Error('Too many unreviewed shell requests.')
-      const exact = { command: request.command, cwd: request.cwd }, inspected = await adapter.inspect(exact)
+      const exact = { command: request.command, cwd: request.cwd, ...(request.source ? { source: structuredClone(request.source) } : {}) }, inspected = await adapter.inspect(exact)
       if (!inspected.supported || !inspected.authorityFingerprint) throw Error(inspected.explanation || 'Shell execution is unsupported or unauthorized.')
       if (tickets.size >= 20) throw Error('Too many unreviewed shell requests.')
       const token = randomUUID(), expiresAt = now() + 120_000

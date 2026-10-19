@@ -1,3 +1,4 @@
+import SavedCommands from './SavedCommands'
 import { useEffect, useRef, useState } from 'react'
 import { bridge } from '../platform/bridge'
 import ShellReview from '../components/ShellReview'
@@ -16,6 +17,7 @@ export default function CommandPanel({ close }: { close(): void }) {
     <header><h2>Command runner</h2><button type="button" className="ob-small-button" autoFocus onClick={close}>Close command runner</button></header>
     <p className="ob-control-scope">No AI decides whether a command may run. Closing this panel does not stop an already approved command. Closing its app window requests a stop. Command and output records are private app data, outside vault backups.</p>
     <ShellReview port={bridge.commands} onResult={() => void load()} />
+    <SavedCommands onResult={() => void load()} />
     <details className="ob-native-controls"><summary>Saved command runs</summary><button type="button" onClick={() => void load()}>Refresh command history</button><p>Twenty records per page. Interrupted runs are never restarted automatically.</p>
       {records.map(record => <details key={record.id}><summary>{record.state} · {record.request.command.slice(0, 100)}</summary><p>{record.at} · {record.request.cwd}</p><pre>{record.request.command}</pre><p>{record.note}</p><button type="button" onClick={() => void inspect(record.id)}>Inspect recorded output</button></details>)}
       {next && <button type="button" onClick={() => void load(next)}>Load older command runs</button>}

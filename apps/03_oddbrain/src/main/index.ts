@@ -353,6 +353,10 @@ function registerBridges(): void {
     if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
     return sender.id
   }
+  handle('commands:saved', (_event, before?: string) => commandRunner.saved(before))
+  handle('commands:save', (_event, input: { name: string; command: string; cwd: string }) => commandRunner.save(input))
+  handle('commands:archive-saved', (_event, id: string, archived: boolean) => commandRunner.archiveSaved(id, archived))
+  handle('commands:preview-saved', (event, id: string) => commandRunner.previewSaved(track(event.sender), id))
   handle('commands:context', () => commandRunner.context())
   handle('commands:preview', (event, request: ShellRequest) => commandRunner.preview(track(event.sender), request))
   handle('commands:decide', (event, token: string, decision: 'allow' | 'deny') => commandRunner.decide(track(event.sender), token, decision))

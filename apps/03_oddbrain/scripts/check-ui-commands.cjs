@@ -21,7 +21,11 @@ const BASE = process.env.ODDBRAIN_UI_URL || 'http://127.0.0.1:5174/', QA = proce
   report.checks.push('Browser preview refuses OS execution; opening/closing the runner never replaces or sends the chat draft')
   await page.evaluate(async () => {
    const url = performance.getEntriesByType('resource').map(e => e.name).find(url => url.includes('/src/platform/bridge.ts'))
-   const { bridge } = await import(url); window.commandFixture = { previews: [], decisions: [], stops: 0 }
+   const { bridge } = await import(url); window.commandFixture = { previews: [], decisions: [], stops: 0, savedPreviews: 0 }; const saved = []
+   bridge.commands.saved = async () => ({ items: structuredClone(saved), next: '', notice: '' })
+   bridge.commands.save = async value => { const item = { ...value, id: 'saved-fixture', platform: 'linux', at: new Date().toISOString(), archived: false, digest: 'a'.repeat(64) }; saved.push(item); return item }
+   bridge.commands.archiveSaved = async (id, archived) => { saved.find(item => item.id === id).archived = archived }
+   bridge.commands.previewSaved = async id => { commandFixture.savedPreviews++; const item = saved.find(item => item.id === id); return { command: item.command, cwd: item.cwd, source: { id, name: item.name, digest: item.digest }, token: 'fixture-saved-ticket', expiresAt: Date.now() + 120000, explanation: 'Saved command fixture; no native execution' } }
    bridge.commands.context = async () => ({ cwd: '/fixture/selected folder', allowed: true, explanation: 'Fixture authorization; no real command transport', activeId: null })
    bridge.commands.preview = async request => { commandFixture.previews.push(request); return { ...request, token: 'fixture-ticket', expiresAt: Date.now() + 120000, explanation: 'Fixture review; OS execution is not being tested here', execution: { program: '/fixture/sh', arguments: ['-c', request.command], script: request.command, environmentKeys: ['PATH'] } } }
    bridge.commands.decide = async (token, decision) => { commandFixture.decisions.push({ token, decision }); if (decision === 'deny') return { denied: true }; return new Promise(resolve => { window.finishCommandFixture = resolve }) }
@@ -50,6 +54,23 @@ const BASE = process.env.ODDBRAIN_UI_URL || 'http://127.0.0.1:5174/', QA = proce
   assert.equal(await page.evaluate(() => commandFixture.decisions.filter(d => d.decision === 'allow').length), 1)
   assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2))
   await page.screenshot({ path: path.join(QA, 'command-review-fixture.png'), animations: 'disabled' })
+  await panel.getByText('Save this command for later', { exact: true }).click()
+  await panel.getByRole('textbox', { name: 'Saved command name', exact: true }).fill('Reusable fixture')
+  await panel.getByRole('button', { name: 'Save new command', exact: true }).click()
+  await panel.getByText('Saved commands', { exact: true }).click()
+  await panel.getByText('Reusable fixture', { exact: true }).click()
+  await panel.getByRole('button', { name: 'Review this saved command', exact: true }).click()
+  assert.equal(await page.evaluate(() => commandFixture.savedPreviews), 0)
+  await panel.getByRole('button', { name: 'Prepare command review', exact: true }).last().click()
+  assert.equal(await page.evaluate(() => commandFixture.savedPreviews), 1)
+  assert.equal(await page.evaluate(() => commandFixture.decisions.length), 2)
+  await panel.getByRole('button', { name: 'Deny execution', exact: true }).click()
+  await panel.getByRole('button', { name: 'Archive saved command', exact: true }).click()
+  await panel.getByText('Reusable fixture · archived', { exact: true }).waitFor()
+  await panel.getByRole('button', { name: 'Restore saved command', exact: true }).click()
+  await panel.getByText('Reusable fixture', { exact: true }).waitFor()
+  assert.equal(await page.evaluate(() => commandFixture.decisions.filter(d => d.decision === 'allow').length), 1)
+  report.checks.push('Saving, selecting, archiving and restoring a reusable command never execute it; each use still requires a fresh explicit review')
   await panel.getByRole('button', { name: 'Close command runner', exact: true }).click()
   assert.equal(await draft.inputValue(), 'Preserve this chat draft')
   report.checks.push('Exact script renders as text; no dispatch before Allow; deny, busy protection, stop request and incomplete outcome work through the UI')

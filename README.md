@@ -112,6 +112,8 @@ This is **app-owned OS execution**, not a native engine tool or an AI verdict. C
 
 Records retain the original request, raw stdout/stderr bytes, exit status, stop/error notices and output hashes in private app storage. A stop is requested after five minutes or 2 MB of combined output. Incomplete records/exports are labelled; interrupted work never restarts automatically. Stop requests do not prove escaped/background descendants exited. Exit zero does not by itself prove the requested task succeeded. Records are outside vault backups; raw downloads are available from the runner/history. Browser previews cannot execute commands.
 
+The runner also has a **Saved commands** library. Saving creates a new retained definition, not a permanent approval. Stored commands keep their original working folder and OS, can be archived/restored without deleting their text, and require a fresh review on every use. Changed or archived definitions invalidate pending approvals. Run records retain the inspected definition’s identity and digest. This is a reusable-command foundation, not yet a multi-step or scheduled workflow system.
+
 ## Browser companion
 
 1. Run the desktop app and select a vault. Open **Settings → AI & connections → Connectors**.

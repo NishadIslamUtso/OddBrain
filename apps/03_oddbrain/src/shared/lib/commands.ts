@@ -1,4 +1,6 @@
-export type ShellRequest = { command: string; cwd: string }
+export type CommandSource = { id: string; name: string; digest: string }
+export type SavedCommand = { id: string; name: string; command: string; cwd: string; platform: string; at: string; archived: boolean; digest: string }
+export type ShellRequest = { command: string; cwd: string; source?: CommandSource }
 export type ShellExecution = { program: string; arguments: string[]; script: string; environmentKeys: string[] }
 export type ShellReviewTicket = ShellRequest & { token: string; expiresAt: number; explanation: string; execution?: ShellExecution }
 export type ShellResult = { exitCode: number | null; stdout: string; stderr: string; interrupted: boolean; outputComplete: boolean; runId?: string; note?: string }
@@ -9,6 +11,10 @@ export type CommandRecord = {
   outputComplete: boolean; note: string
 }
 export type CommandBridge = {
+  saved(before?: string): Promise<{ items: SavedCommand[]; next: string; notice: string }>
+  save(input: { name: string; command: string; cwd: string }): Promise<SavedCommand>
+  archiveSaved(id: string, archived: boolean): Promise<void>
+  previewSaved(id: string): Promise<ShellReviewTicket>
   context(): Promise<{ cwd: string; allowed: boolean; explanation: string; activeId: string | null }>
   preview(request: ShellRequest): Promise<ShellReviewTicket>
   decide(token: string, decision: 'allow' | 'deny'): Promise<{ denied: true } | ShellResult>

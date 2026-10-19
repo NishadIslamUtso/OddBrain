@@ -15,7 +15,7 @@ const button = (text: string) => [...host.querySelectorAll('button')].find(butto
 const input = async (text: string) => { await act(() => { const area = host.querySelector('textarea')!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, text); area.dispatchEvent(new Event('input', { bubbles: true })) }) }
 const click = async (text: string) => { await act(async () => button(text).click()) }
 function port(): CommandBridge {
-  return { context: vi.fn(async () => ({ cwd: '/selected', allowed: true, explanation: 'Fixture permission granted', activeId: null })),
+  return { saved: vi.fn(), save: vi.fn(), archiveSaved: vi.fn(), previewSaved: vi.fn(), context: vi.fn(async () => ({ cwd: '/selected', allowed: true, explanation: 'Fixture permission granted', activeId: null })),
     preview: vi.fn(async request => ({ ...request, token: 'reviewed', expiresAt: Date.now() + 120000, explanation: 'Outside native engine sandbox' })),
     decide: vi.fn(async () => ({ exitCode: 7, stdout: 'real output', stderr: 'failure', interrupted: false, outputComplete: true, runId: 'run' })),
     cancel: vi.fn(async () => ({ requested: true, answer: 'Stop requested, not proof of termination' })), history: vi.fn(async () => ({ records: [], next: '', notice: '' })), read: vi.fn(), output: vi.fn() }
@@ -51,4 +51,14 @@ test('permission refusal keeps preview unavailable without inventing an executio
   await mount(api); await input('not allowed')
   expect(button('Prepare command review').disabled).toBe(true); expect(host.textContent).toContain('Command access is off')
   expect(api.preview).not.toHaveBeenCalled(); expect(api.decide).not.toHaveBeenCalled()
+})
+
+test('saving a named command never invokes preview or execution', async () => {
+  const api = port(); api.save = vi.fn(async value => ({ ...value, id: 'saved', platform: 'linux', archived: false, at: new Date().toISOString(), digest: 'a'.repeat(64) }))
+  await mount(api); await input('echo saved')
+  await act(() => { const name = host.querySelectorAll('input')[1]; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, 'Reusable'); name.dispatchEvent(new Event('input', { bubbles: true })) })
+  await click('Save new command')
+  expect(api.save).toHaveBeenCalledWith({ name: 'Reusable', command: 'echo saved', cwd: '/selected' })
+  expect(api.preview).not.toHaveBeenCalled(); expect(api.decide).not.toHaveBeenCalled()
+  expect(host.textContent).toContain('Nothing ran and no approval was saved')
 })

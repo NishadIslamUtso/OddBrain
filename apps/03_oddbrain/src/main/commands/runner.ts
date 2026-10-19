@@ -1,3 +1,4 @@
+import { createCommandLibrary } from './library'
 import { spawn, execFile, type ChildProcess } from 'node:child_process'
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, realpathSync, statSync, writeSync } from 'node:fs'
 import { join, resolve, isAbsolute } from 'node:path'
@@ -39,6 +40,12 @@ export function createCommandRunner(options: {
 }) {
   const limit = options.maxBytes ?? 2_000_000, deadline = options.deadlineMs ?? 300_000
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 2_000_000 || !Number.isSafeInteger(deadline) || deadline < 1 || deadline > 300_000) throw Error('Invalid command resource limits.')
+  const library = createCommandLibrary(join(options.root, 'saved-commands'))
+  const checkSource = (request: ShellRequest) => {
+    if (!request.source) return
+    const saved = library.read(request.source.id)
+    if (saved.archived || saved.platform !== process.platform || saved.digest !== request.source.digest || saved.name !== request.source.name || saved.command !== request.command || saved.cwd !== request.cwd) throw Error('Saved command was archived, changed or belongs to another OS. Review the current command explicitly; nothing was run.')
+  }
   const reviews = new Map<number, ReturnType<typeof createChatShellReview>>()
   let active: { owner: number; controller: AbortController; id: string | null } | null = null
   const directory = (id: string) => { if (!ID.test(id)) throw Error('Invalid command record ID.'); const dir = join(options.root, id); noLinkedPath(dir); return dir }
@@ -47,11 +54,13 @@ export function createCommandRunner(options: {
     const bytes = configBytes(file(id)); if (!bytes) throw Error('Command record is missing.')
     const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as CommandRecord
     if (value?.id !== id || !['starting', 'running', 'finished', 'interrupted'].includes(value.state) || typeof value.request?.command !== 'string' || typeof value.request?.cwd !== 'string' || typeof value.note !== 'string' || typeof value.at !== 'string' || typeof value.outputComplete !== 'boolean' || !Number.isSafeInteger(value.stdoutBytes) || !Number.isSafeInteger(value.stderrBytes) || value.stdoutBytes < 0 || value.stderrBytes < 0 || value.stdoutBytes + value.stderrBytes > limit || !(value.exitCode === null || Number.isSafeInteger(value.exitCode))) throw Error('Command record is damaged. Original files were not changed.')
+    if (value.request.source && (typeof value.request.source.id !== 'string' || !ID.test(value.request.source.id) || typeof value.request.source.name !== 'string' || !/^[a-f0-9]{64}$/.test(value.request.source.digest))) throw Error('Saved command provenance is invalid. Original retained.')
     if (value.outputComplete && (value.state !== 'finished' || value.exitCode === null || !/^[a-f0-9]{64}$/.test(value.stdoutHash || '') || !/^[a-f0-9]{64}$/.test(value.stderrHash || ''))) throw Error('Command completion metadata is incomplete. Originals were retained.')
     return value
   }
   const observed = (record: CommandRecord) => active?.id !== record.id && ['starting', 'running'].includes(record.state) ? { ...record, state: 'interrupted' as const, outputComplete: false, note: 'No final result is recorded and this app has no active handle for this run. It may have been interrupted before or during execution; escaped descendants may have continued. Nothing was automatically retried.' } : record
   const inspect = (request: ShellRequest) => {
+    checkSource(request)
     const scope = options.scope()
     if (!scope.allowed || active) throw Error(active ? 'Another app command is preparing or running.' : scope.explanation)
     if (!isAbsolute(request.cwd) || resolve(request.cwd) !== resolve(scope.cwd)) throw Error('Use the app’s selected working folder. Mentioning another path does not authorize it.')
@@ -87,7 +96,7 @@ export function createCommandRunner(options: {
       try {
         persist() // No process before a durable, inspectable work order exists.
         out = openSync(stdoutFile, 'wx', 0o600); err = openSync(stderrFile, 'wx', 0o600)
-        controller.signal.throwIfAborted(); lease.recheck()
+        controller.signal.throwIfAborted(); lease.recheck(); checkSource(request)
         const result = await new Promise<ShellResult>(resolveResult => {
           let child: ChildProcess | undefined, ended = false, stopNote = '', saveFault = '', closed = false
           const buffers = { stdout: [] as Buffer[], stderr: [] as Buffer[] }
@@ -166,7 +175,17 @@ export function createCommandRunner(options: {
   return {
     running: () => active !== null,
     context() { const scope = options.scope(); return { cwd: scope.cwd, allowed: scope.allowed && !active, explanation: active ? 'An app command is preparing or running.' : scope.explanation || COMMAND_DISCLOSURE, activeId: active?.id || null } },
-    preview: (owner: number, request: ShellRequest) => service(owner).preview(request),
+    // Ordinary IPC cannot forge saved-command provenance.
+    preview: (owner: number, request: ShellRequest) => service(owner).preview({ command: request?.command, cwd: request?.cwd }),
+    saved: (before?: string) => library.list(before),
+    save(input: { name: string; command: string; cwd: string }) {
+      const scope = options.scope()
+      if (typeof input?.cwd !== 'string' || !isAbsolute(input.cwd) || resolve(input.cwd) !== resolve(scope.cwd)) throw Error('Save commands for the selected working folder, not an unapproved path.')
+      commandSpec(input.command); noLinkedPath(input.cwd); if (!statSync(input.cwd).isDirectory()) throw Error('Choose a working directory.')
+      return library.save({ name: input.name, command: input.command, cwd: scope.cwd, platform: process.platform })
+    },
+    archiveSaved: (id: string, archived: boolean) => library.archive(id, archived),
+    previewSaved(owner: number, id: string) { const saved = library.read(id); return service(owner).preview({ command: saved.command, cwd: saved.cwd, source: { id: saved.id, name: saved.name, digest: saved.digest } }) },
     decide: (owner: number, token: string, decision: 'allow' | 'deny') => service(owner).decide(token, decision),
     cancel(owner?: number) { const requested = !!active && (owner === undefined || active.owner === owner); if (requested) active!.controller.abort(); return { requested, answer: requested ? 'Stop requested. Wait for the process result; escaped/background descendants are not certified stopped.' : owner === undefined ? 'No app command is active.' : 'No command owned by this window is active.' } },
     forget(owner: number) { reviews.get(owner)?.revoke(); reviews.delete(owner); if (active?.owner === owner) active.controller.abort() },
