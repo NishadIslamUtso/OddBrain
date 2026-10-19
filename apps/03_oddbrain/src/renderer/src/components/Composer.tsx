@@ -1,3 +1,4 @@
+import { AGY_APPROVAL_CHOICES, AGY_APPROVAL_NOTE } from '@shared/lib/engineApproval'
 import ReasoningEffort from './ReasoningEffort'
 import { useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, ChevronDown, CookingPot, Cpu, FolderOpen, Layers, ListOrdered, Map, MoreHorizontal, Mic, MicOff, Paperclip, Play, ScrollText, Square, Swords, X } from 'lucide-react'
@@ -472,7 +473,7 @@ function EngineChip({ open, onToggle }: { open: boolean; onToggle: () => void })
           <div className="mt-1 border-t border-line px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted">
             Before it acts
           </div>
-          {modes.map(mode => (
+          {(engine.settings.id === 'agy' ? AGY_APPROVAL_CHOICES : modes).map(mode => (
             <button
               key={mode.id}
               type="button"
@@ -489,7 +490,7 @@ function EngineChip({ open, onToggle }: { open: boolean; onToggle: () => void })
           ))}
           <ReasoningEffort />
           <p className="px-2.5 pb-1.5 pt-1.5 text-[10.5px] leading-relaxed text-muted">
-            These are the engine's own modes. The app adds no rules of its own.
+            {engine.settings.id === 'agy' ? AGY_APPROVAL_NOTE : 'These are the engine’s own modes. The app adds no rules of its own.'}
           </p>
         </div>
       ) : null}
@@ -580,7 +581,7 @@ function ModelChip({ open, onToggle }: { open: boolean; onToggle: () => void }) 
               >
                 <span className="min-w-0 flex-1 truncate">{entry.displayName || entry.name}</span>
                 {entry.cloud ? (
-                  <span className="shrink-0 rounded-md border border-line px-1.5 text-[10px] text-muted">{entry.provider === 'native' ? 'CLI login' : entry.provider === 'anthropic' ? 'Anthropic API' : 'cloud'}</span>
+                  <span className="shrink-0 rounded-md border border-line px-1.5 text-[10px] text-muted">{entry.provider === 'native' ? (engine.settings.id === 'agy' ? 'agy' : 'CLI login') : entry.provider === 'anthropic' ? 'Anthropic API' : 'cloud'}</span>
                 ) : typeof entry.sizeGB === 'number' ? (
                   <span className="shrink-0 text-[10.5px] text-muted">{entry.sizeGB.toFixed(1)} GB</span>
                 ) : null}

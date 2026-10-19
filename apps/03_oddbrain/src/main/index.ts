@@ -1546,7 +1546,7 @@ function registerBridges(): void {
     // from the owner's door; agy answers only to Google. Never a pickable lie.
     if (settings.engine.id !== 'claude-code') {
       const known = await detectEngine(settings.engine.id as EngineId)
-      const answer = await agyModelSource(known.found).models()
+      const answer = await agyModelSource(known.found, () => capabilityInspector.inspect(track(event.sender), { ...settings.engine }, settings.engine.workspace || vaultRoot())).models()
       return answer
     }
     return discoverClaudeModels({
@@ -1619,7 +1619,7 @@ function registerBridges(): void {
   })
 
   handle('engine:model', (_event, model: string, provider?: string, expectedEngine?: string): { ok: boolean; answer: string } => {
-    if ((expectedEngine && expectedEngine !== settings.engine.id) || (provider && settings.engine.id !== 'claude-code')) return { ok: false, answer: 'The engine changed. Choose a model from the current engine’s list.' }
+    if ((expectedEngine && expectedEngine !== settings.engine.id) || (provider === 'anthropic' && settings.engine.id !== 'claude-code')) return { ok: false, answer: 'The engine changed. Choose a model from the current engine’s list.' }
     const typed = typeof model === 'string' ? model.trim() : ''
     if (typed && !isValidModelName(typed)) {
       return { ok: false, answer: 'Model names use letters, digits, dots, colons, @, / and dashes only; nothing was changed.' }

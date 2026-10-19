@@ -67,11 +67,13 @@ The **shared skill collection** and **shared MCP configuration** still deploy to
 
 ### Models and reasoning controls
 
-The model picker distinguishes **CLI login**, **Anthropic API** and Ollama routes. Native Claude choices come from the installed CLI, not a bundled model list; listing a model does not prove your account can use it. Manual model entry in engine settings also has a source selector.
+The model picker distinguishes **CLI login**, **Anthropic API** and Ollama routes. Native Claude and agy choices come from their installed CLIs, not a bundled model list; listing a model does not prove your account can use it. Manual model entry in engine settings also has a source selector.
 
-- **Composer → engine menu → Reasoning effort** offers only the selected native Claude model’s reported levels. Changes apply to the next message. **Engine default** keeps the CLI’s own setting; it does not mean reasoning is off.
+- **Composer → engine menu → Reasoning effort** offers only runtime-confirmed levels for the selected native model. Changes apply to the next message. **Engine default** keeps the CLI’s own setting; it does not mean reasoning is off.
 - **Composer → More chat tools → Show thinking** only shows or hides thinking supplied by the engine. It never changes effort, sends another request or creates an explanation.
-- agy model/effort discovery and non-native-provider effort compatibility remain unverified in this adapter. They keep the engine default instead of borrowing another model’s levels. Old saved **Extended** settings migrate to **Engine default**, not an assumed High setting.
+- agy uses a version-gated, read-only native model report. Its effort adapter is conditional: without recognized native metadata, only **Engine default** is offered. No raw native effort capture or signed-in agy acceptance has been established here. Non-native-provider effort remains unverified too; another model’s levels are never borrowed. Old saved **Extended** settings migrate to **Engine default**, not assumed High.
+- agy streams replies and tool activity, preserves partial failures, and avoids adding cumulative session usage repeatedly. Resumed usage is omitted when this turn cannot be separated; prices are not invented.
+- agy’s current connection is **text-only, without interactive approval cards**. Its **Native rules / Plan / Allow edits / Allow tools** controls use native policies. Saved rules can already allow actions; **Allow tools** explicitly skips tool permission prompts, not artifact review. Pictures are refused before sending, with no engine substitution.
 
 ## Browser companion
 

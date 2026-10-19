@@ -1,3 +1,4 @@
+import { inspectAgyCapabilities } from './agyDiscovery'
 import { spawn } from 'node:child_process'
 import { StringDecoder } from 'node:string_decoder'
 import { homedir } from 'node:os'
@@ -106,9 +107,9 @@ export function inspectClaudeCapabilities(settings: EngineSettings, options: {
   })
 }
 
-/** Explicitly limited until agy's native report schema is verified. No test prompt fallback. */
+/** Engine-specific native metadata only. No test-prompt fallback. */
 export async function inspectEngineCapabilities(settings: EngineSettings, cwd?: string): Promise<EngineCapabilityReport> {
-  if (settings.id === 'agy') return unverifiedCapabilities(settings, 'agy’s per-model effort report is not integrated yet. Engine default preserves agy’s own selection; OddBrain does not guess its levels.')
+  if (settings.id === 'agy') return inspectAgyCapabilities(settings, { cwd })
   return inspectClaudeCapabilities(settings, { cwd })
 }
 
@@ -118,26 +119,25 @@ export async function checkEffortSelection(settings: EngineSettings, thinking: s
 ): Promise<{ ok: boolean; answer: string }> {
   if (expectedTarget !== effortTarget(settings) || !THINKING_MODES.includes(thinking as ThinkingMode)) return { ok: false, answer: 'The model or effort choice changed. Reopen Reasoning effort and try again.' }
   if (thinking !== 'default') {
-    const report = await inspect(settings)
+    const report = await inspect(settings.id === 'agy' ? { ...settings, thinking: thinking as ThinkingMode, effortTarget: expectedTarget } : settings)
     if (report.effort.target !== expectedTarget || report.effort.status !== 'reported' || !report.effort.levels.includes(thinking as Exclude<ThinkingMode, 'default'>)) return { ok: false, answer: 'This effort level was not reported for this model and provider. Nothing was changed.' }
   }
   return { ok: true, answer: thinking === 'default' ? 'The next message uses the engine’s own effort setting.' : 'Reasoning effort requested for the next message. The current response is unchanged.' }
 }
 
 /** One inspection per window, shared by model/effort readers; no persistent account cache. */
-export function createCapabilityInspector(run = inspectClaudeCapabilities) {
+export function createCapabilityInspector(run = inspectClaudeCapabilities, runAgy = inspectAgyCapabilities) {
   const jobs = new Map<number, { key: string; controller: AbortController; promise: Promise<EngineCapabilityReport> }>()
   const cancel = (owner: number): void => { jobs.get(owner)?.controller.abort(); jobs.delete(owner) }
   return {
     inspect(owner: number, settings: EngineSettings, cwd: string): Promise<EngineCapabilityReport> {
-      if (settings.id !== 'claude-code') { cancel(owner); return inspectEngineCapabilities(settings) }
-      const command = resolveEngineCommand('claude-code'), key = JSON.stringify([effortTarget(settings), command, cwd])
+      const command = resolveEngineCommand(settings.id), key = JSON.stringify([effortTarget(settings), settings.thinking, command, cwd])
       const existing = jobs.get(owner)
       if (existing?.key === key) return existing.promise
       cancel(owner)
       const controller = new AbortController()
       const job = { key, controller, promise: Promise.resolve(null as unknown as EngineCapabilityReport) }
-      job.promise = run(settings, { command, cwd, signal: controller.signal })
+      job.promise = (settings.id === 'agy' ? runAgy : run)(settings, { command, cwd, signal: controller.signal })
         .catch(() => unverifiedCapabilities(settings, 'Model inspection could not finish. Refresh to try again.'))
         .finally(() => { if (jobs.get(owner) === job) jobs.delete(owner) })
       jobs.set(owner, job)

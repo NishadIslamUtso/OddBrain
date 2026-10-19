@@ -1,3 +1,4 @@
+import { AGY_APPROVAL_CHOICES, AGY_APPROVAL_NOTE } from '@shared/lib/engineApproval'
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, FolderOpen, RefreshCw, Trash2, Cpu, Cloud } from 'lucide-react'
 import { useEngine, type EngineModels } from '@/state/engine'
@@ -27,8 +28,7 @@ const ENGINES: Array<{ id: EngineId; label: string; hint: string }> = [
 /** The honest fine print, per engine, shown where the engine is chosen. */
 const ENGINE_NOTES: Partial<Record<EngineId, string>> = {
   agy:
-    'agy is experimental here. Model and effort discovery, pictures and approval cards are not integrated yet. ' +
-    'agy handles its own permissions; this screen cannot approve its actions.',
+    'This agy connection is experimental. It uses native models, streamed replies and permission rules. Its current stream input is text-only. ' + AGY_APPROVAL_NOTE,
 }
 
 /** The last part of a path, whichever slash the platform uses. */
@@ -190,7 +190,7 @@ export default function EngineBay() {
                   <button type="button" role="menuitemradio" aria-checked={entry.name === engine.settings.model && (entry.provider || '') === engine.settings.cloudProvider}
                     onClick={() => { void engine.setModel(entry.name, entry.provider); setMenuOpen(false) }}>
                     <span>{entry.displayName || entry.name}</span>
-                    {entry.cloud ? <small><Cloud size={10} /> {entry.provider === 'native' ? 'CLI login' : entry.provider === 'anthropic' ? 'Anthropic API' : 'Cloud'}</small> : entry.sizeGB !== null ? <small>{entry.sizeGB.toFixed(1)} GB</small> : null}
+                    {entry.cloud ? <small><Cloud size={10} /> {entry.provider === 'native' ? (engine.settings.id === 'agy' ? 'agy' : 'CLI login') : entry.provider === 'anthropic' ? 'Anthropic API' : 'Cloud'}</small> : entry.sizeGB !== null ? <small>{entry.sizeGB.toFixed(1)} GB</small> : null}
                   </button>
                   {!entry.cloud && !entry.provider ? <button type="button" role="menuitem" title={`Remove ${entry.name}`} aria-label={`Remove ${entry.name}`} onClick={() => void engine.removeModel(entry.name)}><Trash2 size={12} /></button> : null}
                 </div>
@@ -268,10 +268,10 @@ export default function EngineBay() {
       {/* The throttle: the engine's own settings, from ask-me to full speed. */}
       <div
         role="radiogroup"
-        aria-label="How much the engine may do before asking"
+        aria-label={engine.settings.id === 'agy' ? 'agy native permission mode' : 'How much the engine may do before asking'}
         className="mt-1 grid grid-cols-4 gap-1 rounded-lg border border-line p-1"
       >
-        {THROTTLE.map((step) => {
+        {(engine.settings.id === 'agy' ? AGY_APPROVAL_CHOICES : THROTTLE).map((step) => {
           const active = (engine.settings.approval ?? 'ask') === step.id
           return (
             <button

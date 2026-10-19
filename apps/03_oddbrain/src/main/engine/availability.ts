@@ -118,23 +118,13 @@ export type ModelSource = {
   models(): Promise<{ ok: boolean; models: Array<{ name: string; cloud: boolean; sizeGB: number | null }>; error?: string }>
 }
 
-export function agyModelSource(installed: boolean): ModelSource {
+export function agyModelSource(installed: boolean, inspect?: () => Promise<import('../../shared/lib/engineCapabilities').EngineCapabilityReport>): ModelSource {
   return {
     async models() {
-      if (!installed) {
-        return {
-          ok: false,
-          models: [],
-          error:
-            'agy is not on this machine. Install and sign in to use its own default model. This app has no verified agy model-list adapter; there is no custom door for Ollama models.',
-        }
-      }
-      return {
-        ok: false,
-        models: [],
-        error:
-          'agy is installed, but this app has no verified agy model-list adapter. Sign in with agy in your terminal and use the engine’s own default model. Refreshing here will not discover a catalog; Ollama models cannot be used through agy.',
-      }
+      if (!installed) return { ok: false, models: [], error: 'agy is not on this machine. Install it and sign in first; there is no custom door for Ollama models.' }
+      if (!inspect) return { ok: false, models: [], error: 'agy model inspection is unavailable in this window. Refresh from the desktop app.' }
+      const report = await inspect()
+      return { ok: report.ok, models: report.models, ...(!report.ok ? { error: report.effort.note } : {}) }
     },
   }
 }

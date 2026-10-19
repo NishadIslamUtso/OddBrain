@@ -18,7 +18,7 @@ export function effortTarget(settings: EngineSettings): string {
   return JSON.stringify([settings.id, settings.cloudProvider, settings.model, settings.baseUrl, settings.workspace])
 }
 export function selectedEffort(settings: EngineSettings): ThinkingMode {
-  return settings.id === 'claude-code' && settings.cloudProvider === 'native' && settings.model && THINKING_MODES.includes(settings.thinking) && settings.effortTarget === effortTarget(settings) ? settings.thinking : 'default'
+  return (settings.id === 'agy' || settings.cloudProvider === 'native') && settings.model && THINKING_MODES.includes(settings.thinking) && settings.effortTarget === effortTarget(settings) ? settings.thinking : 'default'
 }
 export function unverifiedCapabilities(settings: EngineSettings, note: string): EngineCapabilityReport {
   return { ok: false, models: [], effort: { target: effortTarget(settings), status: 'unverified', levels: [], note } }

@@ -37,5 +37,31 @@ await p.keyboard.press('Escape');const checksBefore=await p.evaluate(()=>window.
 await p.getByRole('button',{name:'More chat tools',exact:true}).click();await p.getByRole('button',{name:/Show thinking/}).click();
 assert.equal(await p.evaluate(()=>window.__calls.effort.length),1);assert.equal(await p.evaluate(()=>window.__calls.sent.length),1);assert.equal(await p.evaluate(()=>window.__calls.capabilities),checksBefore);
 r.checks.push('Reasoning effort shows only reported levels and sets a scoped request; Show thinking sends no message, effort change or metadata request');
+// agy stays a separate native route. These are explicit UI fixtures, not a live account.
+await p.keyboard.press('Escape');
+await p.evaluate(async()=>{
+ window.engineApi.pick=async()=>({ok:true,answer:'selected'});
+ window.engineApi.models=async()=>({ok:true,models:[{name:'agy-fixture',displayName:'Native agy choice',provider:'native',cloud:true,sizeGB:null}]});
+ await window.__engine.pick('agy');await window.__engine.setModel('agy-fixture','native');
+});
+await p.locator('button[title="Which engine works here, and how much it may do before asking"]').click();
+await menu.getByRole('menuitemradio',{name:'Native rules',exact:true}).waitFor();
+assert.equal(await menu.getByRole('menuitemradio',{name:'Ask me',exact:true}).count(),0);
+assert((await menu.innerText()).includes('No approval cards on this connection'));
+await effort.locator('option[value="high"]').waitFor({state:'attached'});
+assert.deepEqual(await effort.locator('option').evaluateAll(es=>es.map(e=>e.value)),['default','low','high']);
+await p.screenshot({path:path.join(QA,'agy-native-controls.png')});
+const agyBounds=await menu.boundingBox();assert(agyBounds&&agyBounds.y>=0&&agyBounds.x>=0);
+await p.keyboard.press('Escape');
+await p.evaluate(async()=>{
+ await window.__engine.send('Synthetic agy stream');
+ window.__emit({kind:'delta',text:'Streamed final answer.'});
+ window.__emit({kind:'status',text:'Native tool finished.'});
+ window.__emit({kind:'done',text:'Streamed final answer.',alreadyDisplayed:true});
+});
+await p.locator('.ob-engine-work li').filter({hasText:'Streamed final answer.'}).waitFor();
+assert.equal(await p.locator('.ob-engine-work li').filter({hasText:'Streamed final answer.'}).count(),1);
+assert.equal(await p.evaluate(()=>window.__engine.turn.permissions.length),0);
+r.checks.push('agy has native permission wording, separately scoped effort and no invented approval cards; streamed final text is not duplicated after tool notices');
 assert.equal(r.errors.length,0);
 }catch(e){r.failure=e.stack;console.error(e.stack);process.exitCode=1}finally{fs.writeFileSync(path.join(QA,'turn-wiring-results.json'),JSON.stringify(r,null,2));console.log(JSON.stringify(r,null,2));await b.close()}})();
