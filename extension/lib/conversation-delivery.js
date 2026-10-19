@@ -8,21 +8,23 @@ function interruptConversations() {
   conversationEpoch++;
   conversationAbort?.abort();
 }
-async function conversationIdentity() {
-  return OddConversations.sha(
-    (await localApiBase()) + "\n" + (await getPairToken()),
-  );
+/* The vault's own identity, not the pairing token and not the port. A rotated
+ * token or a restarted app must not orphan bytes already in the outbox. */
+const PAIRING_HOLD =
+  "The pairing was refused or removed. Enter the current token from OddBrain; this capture was kept and nothing was sent anywhere else.";
+async function queuedDestination() {
+  const stored = await chrome.storage.local.get("conversationDestination");
+  const value = stored.conversationDestination;
+  return value && /^[a-f0-9]{64}$/.test(value.target || "") ? value : null;
 }
-async function rememberConversationDestination(health, identity) {
-  if (identity !== (await conversationIdentity())) return;
-  if (/^[a-f0-9]{64}$/.test(health.capture_target || ""))
-    await chrome.storage.local.set({
-      conversationDestination: {
-        identity,
-        target: health.capture_target,
-        captures: health.captures !== false,
-      },
-    });
+async function rememberConversationDestination(health) {
+  if (!/^[a-f0-9]{64}$/.test(health.capture_target || "")) return;
+  await chrome.storage.local.set({
+    conversationDestination: {
+      target: health.capture_target,
+      captures: health.captures !== false,
+    },
+  });
 }
 async function conversationExcluded(url) {
   const pending = await chrome.storage.local.get("blacklistPending");
@@ -62,7 +64,7 @@ async function conversationQueueSummary() {
   const rows = await conversationOutbox.list(),
     grouped = new Map();
   for (const row of rows) {
-    const key = row.identity + ":" + row.target + ":" + row.conversation;
+    const key = row.target + ":" + row.conversation;
     if (!grouped.has(key))
       grouped.set(key, {
         id: row.id,
@@ -134,7 +136,6 @@ async function clearConversations(id) {
         rows
           .filter(
             (row) =>
-              row.identity === selected.identity &&
               row.target === selected.target &&
               row.conversation === selected.conversation,
           )
@@ -145,11 +146,8 @@ async function clearConversations(id) {
 }
 async function queueConversation(payload) {
   const epoch = conversationEpoch;
-  let { conversationDestination: destination } = await chrome.storage.local.get(
-    "conversationDestination",
-  );
-  const identity = await conversationIdentity();
-  if (!destination || destination.identity !== identity) {
+  let destination = await queuedDestination();
+  if (!destination) {
     const status = await connection();
     if (!status.ok)
       throw Error(
@@ -161,16 +159,12 @@ async function queueConversation(payload) {
       );
     if (status.durableCapture === false)
       throw Error(
-        "Update the OddBrain desktop app to use recoverable conversation saving. Nothing new was queued.",
+        status.captureProblem ||
+          "Update the OddBrain desktop app to use recoverable conversation saving. Nothing new was queued.",
       );
-    destination = (await chrome.storage.local.get("conversationDestination"))
-      .conversationDestination;
+    destination = await queuedDestination();
   }
-  if (
-    !destination ||
-    destination.identity !== identity ||
-    !destination.captures
-  )
+  if (!destination || !destination.captures)
     throw Error(
       "Enable browser capture in OddBrain and verify the connection before saving.",
     );
@@ -195,14 +189,24 @@ async function drainConversations() {
   const status = await connection();
   if (!status.ok) {
     if (status.unpaired) {
-      await clearConversations();
-      await recordActivity({
-        type: "conversation",
-        success: false,
-        reason:
-          "Pairing was refused. Waiting conversation data was removed from this browser.",
-        captured_at: new Date().toISOString(),
-      });
+      /* A refused token is not a reason to destroy bytes this browser already
+       * holds. Rotating the pairing token is a security action the app offers;
+       * the queue is addressed to the vault, not to the token, so it can finish
+       * once the person pastes the current token. Explicit "forget pairing" and
+       * "clear outbox" still remove it. */
+      const hold = PAIRING_HOLD;
+      const rows = await conversationOutbox.list();
+      const changed = rows.some((row) => row.problem !== hold);
+      for (const row of rows)
+        if (row.problem !== hold) await conversationOutbox.mark(row.id, hold);
+      if (changed)
+        await recordActivity({
+          type: "conversation",
+          success: false,
+          reason:
+            "Pairing was refused. Waiting captures were kept in this browser; re-pair to finish saving. Nothing was sent anywhere else.",
+          captured_at: new Date().toISOString(),
+        });
     }
     return;
   }
@@ -218,28 +222,31 @@ async function drainConversations() {
     return;
   }
   if (status.available === false || epoch !== conversationEpoch) return;
+  // A hold written while the token was refused is not a reason to keep blocking
+  // once the app answers again; the token was the whole problem.
+  for (const row of await conversationOutbox.list())
+    if (row.problem === PAIRING_HOLD && epoch === conversationEpoch)
+      await conversationOutbox.mark(row.id, "");
   if (!status.durableCapture) {
+    const message =
+      status.captureProblem ||
+      "Update OddBrain to finish saving these protected captures.";
     for (const row of await conversationOutbox.list())
-      await conversationOutbox.mark(
-        row.id,
-        "Update OddBrain to finish saving these protected captures.",
-      );
+      await conversationOutbox.mark(row.id, message);
     return;
   }
   await currentPatterns(); // Refresh app exclusions before replay, including offline edits.
   await pruneConversations();
-  const identity = await conversationIdentity(),
-    destination = (await chrome.storage.local.get("conversationDestination"))
-      .conversationDestination;
+  const destination = await queuedDestination();
   const deadline = Date.now() + 4500,
     blocked = new Set();
   const rows = await conversationOutbox.list();
   let attempted = 0;
   for (const row of rows) {
     if (Date.now() > deadline || epoch !== conversationEpoch) break;
-    const group = row.identity + row.target + row.conversation;
+    const group = row.target + row.conversation;
     if (blocked.has(group)) continue;
-    if (row.identity !== identity || row.target !== destination?.target) {
+    if (!destination || row.target !== destination.target) {
       await conversationOutbox.mark(
         row.id,
         "Different vault. Reopen the original vault or discard this waiting capture.",
@@ -314,7 +321,6 @@ async function drainConversations() {
           rows
             .filter(
               (other) =>
-                other.identity === row.identity &&
                 other.target === row.target &&
                 (result.reason !== "blacklist" ||
                   other.conversation === row.conversation),
@@ -351,12 +357,9 @@ async function drainConversations() {
   await conversationQueueSummary();
 }
 async function conversationMediaState(payload) {
-  const identity = await conversationIdentity(),
-    destination = (await chrome.storage.local.get("conversationDestination"))
-      .conversationDestination;
+  const destination = await queuedDestination();
   const rows = (await conversationOutbox.list()).filter(
     (row) =>
-      row.identity === identity &&
       row.target === destination?.target &&
       row.conversation === payload.conversation.key &&
       row.attachment === payload.attachment_id,

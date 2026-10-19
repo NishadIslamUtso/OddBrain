@@ -734,15 +734,49 @@ it("pause retains bytes, exclusion removes them, and a page cannot inspect or di
     await h.dispose();
   }
 });
-it("pairing refusal discards private waiting bytes instead of redirecting them to another app", async () => {
+it("a refused pairing holds the bytes and sends them nowhere, and re-pairing finishes the save", async () => {
   const h = await harness();
   try {
     await offlineQueue(h);
     h.local.pairToken = "revoked";
     h.setOffline(false);
     await h.drain();
-    expect(await h.queued()).toHaveLength(0);
+    const held = await h.queued();
+    expect(held).toHaveLength(1);
+    expect(held[0].problem).toContain("Enter the current token");
+    expect(
+      h.vault.files().walkFiles("02 Sources/Conversations/Browser", ".json")
+        .files,
+    ).toHaveLength(0);
     expect(JSON.stringify(h.local.activity)).not.toContain(queuedMessage.text);
+    // Pasting the current token is all it takes; the queued bytes were never
+    // addressed to the old token.
+    h.local.pairToken = h.app.pairToken;
+    await h.drain();
+    expect(await h.queued()).toHaveLength(0);
+    expect(
+      h.vault.files().walkFiles("02 Sources/Conversations/Browser", ".json")
+        .files.length,
+    ).toBeGreaterThan(0);
+  } finally {
+    await h.dispose();
+  }
+});
+it("rotating the pairing token does not orphan captures already waiting in the browser", async () => {
+  const h = await harness();
+  try {
+    await offlineQueue(h);
+    // The app's own Rotate action: a new token, the same vault.
+    const rotated = "r".repeat(48);
+    h.app.setPairToken(rotated);
+    h.local.pairToken = rotated;
+    h.setOffline(false);
+    await h.drain();
+    expect(await h.queued()).toHaveLength(0);
+    expect(
+      h.vault.files().walkFiles("02 Sources/Conversations/Browser", ".json")
+        .files.length,
+    ).toBeGreaterThan(0);
   } finally {
     await h.dispose();
   }

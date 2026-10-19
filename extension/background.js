@@ -93,7 +93,6 @@ async function connection() {
       error: "Pair with the desktop app to save to your vault.",
     };
   try {
-    const identity = await conversationIdentity();
     const health = await api("/health");
     if (health.status === 401)
       return {
@@ -107,12 +106,14 @@ async function connection() {
         ok: false,
         error: health.error || "This port did not answer as OddBrain.",
       };
-    await rememberConversationDestination(health, identity);
+    await rememberConversationDestination(health);
     return {
       ok: true,
       captures: health.captures,
       available: health.available,
       durableCapture: /^[a-f0-9]{64}$/.test(health.capture_target || ""),
+      // Why recoverable capture is off, when the app can say.
+      captureProblem: String(health.capture_problem || ""),
     };
   } catch {
     return {

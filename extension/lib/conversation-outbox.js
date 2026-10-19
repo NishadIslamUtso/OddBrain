@@ -80,10 +80,11 @@
       }
     }
     async function enqueue(payload, destination) {
+      // The target is the vault's identity. A pairing token may rotate and the
+      // app's port may change; neither is what this queue is addressed to.
       if (
         !["messages", "media-part", "media-finish"].includes(payload?.op) ||
-        !/^[a-f0-9]{64}$/.test(destination?.target || "") ||
-        !/^[a-f0-9]{64}$/.test(destination?.identity || "")
+        !/^[a-f0-9]{64}$/.test(destination?.target || "")
       )
         throw Error("A verified vault and a supported capture are required.");
       const body = JSON.stringify({
@@ -115,7 +116,7 @@
             );
           const row = {
             id,
-            identity: destination.identity,
+            identity: destination.identity || destination.target,
             target: destination.target,
             conversation: payload.conversation.key,
             title: String(payload.conversation.title || "").slice(0, 500),
