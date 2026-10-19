@@ -14,7 +14,7 @@ const ENGINES = [
 type AuthView = { checking: boolean; ok: boolean; loggedIn: boolean; answer: string }
 const EMPTY_AUTH: AuthView = { checking: false, ok: false, loggedIn: false, answer: '' }
 
-export default function ConnectorsSection(): React.JSX.Element {
+export default function ConnectorsSection({ onOpenSection }: { onOpenSection?: (section: 'skills' | 'extensions' | 'models') => void } = {}): React.JSX.Element {
   const engine = useEngine()
   const [overrides, setOverrides] = useState({ 'claude-code': '', agy: '' })
   const [runtime, setRuntime] = useState({ checking: false, running: false, answer: '' })
@@ -77,6 +77,7 @@ export default function ConnectorsSection(): React.JSX.Element {
   const address = (engine.settings.baseUrl || 'http://localhost:11434').replace(/^https?:\/\//, '').replace(/\/+$/, '')
   return <div className="ob-connectors">
     <div className="ob-section-actions"><p className="ob-control-scope">Install engines separately, then connect them here.</p><button type="button" className="ob-small-button" onClick={checkAll} disabled={(isDemo && !sampleEnabled()) || busy || runtime.checking || engine.detection.loading}><RefreshCw size={13} />{runtime.checking || engine.detection.loading ? 'Checking…' : 'Check all'}</button></div>
+    {onOpenSection && <div className="ob-inline-actions"><button type="button" onClick={() => onOpenSection('skills')}>Browse skills</button><button type="button" onClick={() => onOpenSection('extensions')}>Engine plugin store</button><button type="button" onClick={() => onOpenSection('models')}>API providers</button></div>}
     {ENGINES.map(({ id, label, url, command }) => {
       const found = engine.detection.engines.find(entry => entry.id === id)
       const signIn = auth[id]

@@ -1,3 +1,4 @@
+import ExtensionInstall from './ExtensionInstall'
 import { SETTINGS_AREAS, areaForSection } from '../state/settingsNavigation'
 import SampleWorkspaceControls from '../ui/SampleWorkspaceControls'
 import { captureSamplePage, sampleEnabled } from '@shared/lib/sampleWorkspace'
@@ -567,37 +568,13 @@ export default function SettingsView({
       {
         label: 'Installed engines',
         terms: 'claude-code agy ollama engine connector connect install login sign in winget local cli brains',
-        body: <ConnectorsSection />,
+        body: <ConnectorsSection onOpenSection={setSection} />,
       },
       {
         label: 'Browser extension',
         terms: 'browser extension chrome capture connector port 8765',
-        body: (
-          <div className="flex items-start gap-2">
-            <span
-              className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                isDemo ? 'bg-muted' : extension.listening ? 'bg-ok' : 'bg-warn'
-              }`}
-            />
-            <div className="min-w-0">
-              {sampleEnabled() && <button type="button" className="ob-small-button" onClick={() => { try { captureSamplePage(); setHelpNote('Sample page captured. Open Vault → Capture sources to inspect it.'); onChanged() } catch { setHelpNote('Sample capture could not be saved to browser storage.') } }}>Capture sample page</button>}
-              <div className="text-[12.5px]">
-                {sampleEnabled() ? 'Sample extension · not connected to a browser' : isDemo
-                  ? 'Not in this window'
-                  : extension.listening
-                    ? `Connected - listening at ${extension.url.replace(/^https?:\/\//, '')}`
-                    : 'Not connected'}
-              </div>
-              <div className="mt-0.5 break-all text-[11.5px] text-muted">
-                {sampleEnabled() ? 'Try a simulated capture, then open Vault or Capture sources. No page is downloaded.' : isDemo
-                  ? 'The extension connects to this app over the local loopback port.'
-                  : extension.listening
-                    ? 'Pages and conversations the extension captures arrive here. One-time setup: chrome://extensions → Developer mode → Load unpacked → choose the extension folder that ships with this app.'
-                    : extension.error || 'The extension cannot reach this app at the moment.'}
-              </div>
-            </div>
-          </div>
-        ),
+        body: <><ExtensionInstall onPermissions={() => setSection('agents')} />{sampleEnabled() && <button type="button" className="ob-small-button mt-3" onClick={() => { try { captureSamplePage(); setHelpNote('Sample page captured. Open Vault → Capture sources to inspect it.'); onChanged() } catch { setHelpNote('Sample capture could not be saved to browser storage.') } }}>Capture sample page</button>}
+          <p className="ob-control-scope mt-3">{isDemo ? 'Preview only: no browser is paired here.' : extension.listening ? `Capture service ready at ${extension.url}. Pair the extension to connect it.` : extension.error || 'Capture service is not listening. Restart the desktop app and check the configured port.'}</p></>,
       },
       {
         label: 'Agent access',
@@ -1191,12 +1168,15 @@ export default function SettingsView({
           {!needle ? SETTINGS_AREAS.map(item => {
             const current = item.id === area.id
             const entry = item.sections[0]
-            return <button key={item.id} type="button" className={`ob-settings-area mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-[12.5px] ${current ? 'bg-accent/15 text-ink' : 'text-muted hover:bg-white/[0.06] hover:text-ink'}`}
+            return <div key={item.id} className="ob-settings-area-group"><button type="button" className={`ob-settings-area mb-0.5 flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-[12.5px] ${current ? 'bg-accent/15 text-ink' : 'text-muted hover:bg-white/[0.06] hover:text-ink'}`}
               aria-label={item.sections.length === 1 ? `Section: ${SECTIONS.find(s => s.id === entry)!.title}` : `Settings area: ${item.title}`}
-              aria-current={current ? 'page' : undefined}
+              aria-current={current ? 'page' : undefined} aria-expanded={item.sections.length > 1 ? current : undefined}
               onClick={() => setSection(lastInArea.current[item.id] || entry)}>
-              <SectionIcon id={entry} />{item.title}
+              <SectionIcon id={entry} /><span><span className="ob-settings-area-title">{item.title}</span><small className="ob-settings-area-description">{item.description}</small></span>
             </button>
+            {current && item.sections.length > 1 && <nav className="ob-settings-subsections" aria-label={item.title}>
+              {item.sections.map(id => { const meta = SECTIONS.find(s => s.id === id)!; return <button key={id} type="button" className="ob-text-button" aria-label={`Section: ${meta.title}`} aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}>{meta.title}</button> })}
+            </nav>}</div>
           }) : SETTINGS_AREAS.map(item => {
             const results = visible.filter(meta => item.sections.includes(meta.id))
             if (!results.length) return null
@@ -1220,9 +1200,6 @@ export default function SettingsView({
           {active.resettable && section !== 'appearance' ? <button type="button" className="ob-text-button ml-auto" aria-label="Reset section" onClick={resetSection}>Reset</button> : null}
         </header>
 
-        {!needle && area.sections.length > 1 && <nav className="ob-settings-subsections" aria-label={area.title}>
-          {area.sections.map(id => { const meta = SECTIONS.find(s => s.id === id)!; return <button key={id} type="button" className="ob-text-button" aria-label={`Section: ${meta.title}`} aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}>{meta.title}</button> })}
-        </nav>}
         <div className={`ob-settings-body mx-auto w-full ${section === 'appearance' ? '' : 'max-w-[860px]'} px-5 py-5`}>
           {rows.length === 0 ? (
             <p className="text-[12.5px] text-muted">Nothing here matches “{query.trim()}”.</p>

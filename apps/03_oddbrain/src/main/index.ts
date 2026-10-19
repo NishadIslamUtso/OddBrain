@@ -1,3 +1,4 @@
+import { exportExtension } from './extension/export'
 import { discoverClaudeModels } from './engine/modelDiscovery'
 import { selectEngine } from '../shared/lib/engine'
 import { configBytes } from './engine/configTransaction'
@@ -435,6 +436,20 @@ function registerBridges(): void {
     if (!clean) return { ok: false }
     extensionAppearance = clean
     return { ok: true }
+  })
+  handle('extension:export', async (_event, destination: unknown) => {
+    if (destination !== 'downloads' && destination !== 'choose') return { ok: false, answer: 'Choose Downloads or a folder.' }
+    let parent = app.getPath('downloads')
+    if (destination === 'choose') {
+      const chosen = await dialog.showOpenDialog({ title: 'Where should the extension folder go?', properties: ['openDirectory', 'createDirectory'] })
+      if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, answer: 'Cancelled. No extension folder was created.' }
+      parent = chosen.filePaths[0]
+    }
+    const source = app.isPackaged ? join(process.resourcesPath, 'extension') : resolve(app.getAppPath(), '../../extension')
+    const target = join(parent, `OddBrain-extension-${Date.now()}-${randomUUID().slice(0,8)}`)
+    const result = exportExtension(source, target)
+    if (result.ok && result.path) shell.showItemInFolder(join(result.path, 'manifest.json'))
+    return result
   })
   handle('extension:status', () => ({
     ok: true,

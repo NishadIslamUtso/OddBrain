@@ -20,14 +20,14 @@ test('old native reading/theme values keep their meanings, not the HTML state me
   const old = { theme: 'light', accent: 'rose', font: 'anthropic-serif', width: 'wide', textSize: 'large', motion: 'calm', mascotWords: true, rowExplanations: true }
   assert.deepEqual(normalizeAppearance(old), { ...old, startupAnimation: true, packCss: '', designSystem: '' })
   assert.equal(normalizeAppearance({ motion: 'reduced' }).motion, 'still')
-  assert.equal(DEFAULT_LOOK.interfaceFont, 'system'); assert.equal(DEFAULT_LOOK.chatFollowsInterface, false)
+  assert.equal(DEFAULT_LOOK.interfaceFont, 'serif'); assert.equal(DEFAULT_LOOK.chatFollowsInterface, true)
 })
 test('missing/corrupt additional fields fall back individually and safely', () => {
   assert.deepEqual(normalizeLook(null), DEFAULT_LOOK)
   assert.deepEqual(normalizeLook([]), DEFAULT_LOOK)
   const value = normalizeLook({ palette: 'sage', paused: 'false', layout: 'evil', speed: Infinity, roles: { thinking: 'compute', working: '<script>' }, command: 'rm -rf', permissions: { cloud: true } })
-  assert.equal(value.palette, 'sage'); assert.equal(value.paused, false); assert.equal(value.layout, 'classic'); assert.equal(value.speed, 1)
-  assert.equal(value.roles.thinking, 'compute'); assert.equal(value.roles.working, 'auto')
+  assert.equal(value.palette, 'sage'); assert.equal(value.paused, false); assert.equal(value.layout, DEFAULT_LOOK.layout); assert.equal(value.speed, 1)
+  assert.equal(value.roles.thinking, 'compute'); assert.equal(value.roles.working, DEFAULT_LOOK.roles.working)
   assert(!('command' in value)); assert(!('permissions' in value))
 })
 test('numeric fields are bounded without changing the interface scale', () => {
@@ -83,7 +83,7 @@ test('all 320 layout/palette/style states resolve without overriding font, size 
   let count = 0
   const a = normalizeAppearance({ width: 'wide', textSize: 'large', font: 'anthropic-serif' })
   for (const layout of LAYOUTS) for (const palette of PALETTES) for (const style of INTERFACE_STYLES) {
-    const look = normalizeLook({ layout: layout.id, palette: palette.id, style: style.id, interfaceFont: 'humanist' })
+    const look = normalizeLook({ layout: layout.id, palette: palette.id, style: style.id, interfaceFont: 'humanist', chatFollowsInterface: false })
     const vars = lookTokens(a, look)
     assert(vars['--font-sans'].includes('Trebuchet')); assert(!('--transcript-size' in vars)); assert(!('--chat-width' in vars))
     assert(!('--transcript-font' in vars)); count++
@@ -122,4 +122,15 @@ test('all native provider-key controls stay byte-for-byte intact across the sett
   assert.match(current, /Windows & shortcuts/); assert.match(current, /About & help/)
   assert.match(current, /Open Capture sources in Vault/)
   assert.match(readFileSync(resolve('src/renderer/src/components/VaultView.tsx'), 'utf8'), /<MemoryMap open[\s\S]*?\bembedded\s*\/>/)
+})
+
+test('fresh defaults and reset match Ink & Sketchbook including the eight behaviour roles; saved choices survive', () => {
+  const ink = LOOK_PRESETS.find(p => p.id === 'ink-sketchbook')!
+  assert.deepEqual(DEFAULT_LOOK.roles, ink.roles)
+  assert.equal(DEFAULT_LOOK.palette, ink.palette); assert.equal(DEFAULT_LOOK.style, ink.style)
+  assert.equal(DEFAULT_LOOK.layout, ink.layout); assert.equal(DEFAULT_APPEARANCE.motion, ink.motion)
+  const saved = normalizeLook({ ...DEFAULT_LOOK, palette: 'sage', layout: 'classic', roles: Object.fromEntries(ROLES.map(r => [r, 'auto'])) })
+  assert.equal(saved.palette, 'sage'); assert.equal(saved.layout, 'classic')
+  assert(ROLES.every(r => saved.roles[r] === 'auto'))
+  assert.deepEqual(normalizeLook({}), DEFAULT_LOOK)
 })

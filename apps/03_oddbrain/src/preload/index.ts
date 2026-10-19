@@ -375,6 +375,7 @@ const api = {
       ipcRenderer.invoke('vault:capture-chat', { title, markdown }),
   },
   extension: {
+    export: (destination: 'downloads' | 'choose'): Promise<{ ok: boolean; answer: string; path?: string }> => ipcRenderer.invoke('extension:export', destination),
     publishAppearance: (value: import('../shared/lib/extensionAppearance').ExtensionAppearance): Promise<{ ok: boolean }> => ipcRenderer.invoke('extension:appearance', value),
     /**
      * Whether the browser extension can reach this app, and at what address. A

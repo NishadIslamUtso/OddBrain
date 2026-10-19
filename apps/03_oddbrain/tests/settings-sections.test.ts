@@ -41,13 +41,13 @@ const click = async (button: HTMLButtonElement): Promise<void> => { await act(as
 const open = async (title: string): Promise<void> => {
   const section = SECTIONS.find(s => s.title === title)!
   const area = areaForSection(section.id)
-  await click(destinations().find(node => node.textContent?.trim() === area.title)!)
+  await click(destinations().find(node => node.querySelector('.ob-settings-area-title')?.textContent === area.title)!)
   if (area.sections.length > 1) await click(host.querySelector(`.ob-settings-subsections [aria-label="Section: ${title}"]`) as HTMLButtonElement)
 }
 
 test('eight task groups expose all seventeen retained pages without nested buttons', async () => {
   expect(destinations()).toHaveLength(8)
-  expect(destinations().map(button => button.textContent?.trim())).toEqual(SETTINGS_AREAS.map(area => area.title))
+  expect(destinations().map(button => button.querySelector('.ob-settings-area-title')?.textContent)).toEqual(SETTINGS_AREAS.map(area => area.title))
   const ids = SETTINGS_AREAS.flatMap(area => area.sections)
   expect(new Set(ids).size).toBe(17)
   expect([...ids].sort()).toEqual(SECTIONS.filter(s => s.id !== 'maps').map(s => s.id).sort())
@@ -63,7 +63,7 @@ test('eight task groups expose all seventeen retained pages without nested butto
 test('returning to a group remembers its last page instead of restarting setup', async () => {
   await open('Performance')
   await open('Appearance')
-  await click(destinations().find(node => node.textContent === 'AI & connections')!)
+  await click(destinations().find(node => node.querySelector('.ob-settings-area-title')?.textContent === 'AI & connections')!)
   expect(host.querySelector('h1')?.textContent).toBe('Performance')
 })
 
@@ -74,7 +74,7 @@ test('legacy capture-settings links go directly to Vault, not another settings p
   try {
     await render('maps'); expect(opened).toBe(1); expect(host.querySelector('.ob-settings-view')).toBeNull()
     await render('engine'); await render()
-    await click(destinations().find(node => node.textContent === 'Appearance')!)
+    await click(destinations().find(node => node.querySelector('.ob-settings-area-title')?.textContent === 'Appearance')!)
     expect(host.querySelector('h1')?.textContent).toBe('Appearance')
     expect(opened).toBe(1)
   }
@@ -83,7 +83,7 @@ test('legacy capture-settings links go directly to Vault, not another settings p
 
 test('direct links open the correct group and extra AI review is kept with advanced tools', async () => {
   await render('hooks')
-  expect(host.querySelector('.ob-settings-area[aria-current="page"]')?.textContent).toBe('Advanced tools')
+  expect(host.querySelector('.ob-settings-area[aria-current="page"] .ob-settings-area-title')?.textContent).toBe('Advanced tools')
   expect(host.querySelector('h1')?.textContent).toBe('Hooks')
   await render() // return to an uncontrolled test instance
   await open('Engine')
@@ -122,4 +122,20 @@ test('Plugins offers the two catalogs that actually resolve, and one click fills
     await act(async () => { button.click(); await Promise.resolve() })
     expect(input.value).toBe(catalog.repo)
   }
+})
+
+ test('group descriptions, inline pages, store shortcuts and companion instructions stay discoverable', async () => {
+  expect(host.querySelectorAll('.ob-settings-area-description')).toHaveLength(8)
+  await open('Connectors')
+  expect(host.querySelector('.ob-settings-navigation .ob-settings-subsections [aria-label="Section: Models & API keys"]')).not.toBeNull()
+  expect(host.querySelector('.ob-settings-content .ob-settings-subsections')).toBeNull()
+  const buttons = () => [...host.querySelectorAll('button')]
+  await click(buttons().find(b => b.textContent === 'Engine plugin store')!)
+  expect(host.querySelector('h1')?.textContent).toBe('Plugins')
+  await open('Connectors'); await click(buttons().find(b => b.textContent === 'Browse skills')!)
+  expect(host.querySelector('h1')?.textContent).toBe('Skills')
+  await open('Connectors')
+  expect(host.querySelector('[aria-label="Install browser companion"]')?.textContent).toContain('Load unpacked')
+  await click(buttons().find(b => b.textContent === 'Save extension to Downloads')!)
+  expect(host.textContent).toContain('No files were created.')
 })

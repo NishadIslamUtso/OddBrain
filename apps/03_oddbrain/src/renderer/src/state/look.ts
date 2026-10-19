@@ -39,11 +39,12 @@ export type LookPreferences = {
   mischief: 'quiet' | 'witty' | 'extra'
   roles: Record<MotionRole, string>
 }
+const DEFAULT_PRESET = LOOK_PRESETS.find(p => p.id === 'ink-sketchbook')!
 export const DEFAULT_LOOK: LookPreferences = Object.freeze({
-  version: 2, palette: 'app', paletteTheme: false, paletteAccent: false,
-  style: 'editorial', layout: 'classic', interfaceFont: 'system', chatFollowsInterface: false,
+  version: 2, palette: DEFAULT_PRESET.palette, paletteTheme: true, paletteAccent: true,
+  style: DEFAULT_PRESET.style, layout: DEFAULT_PRESET.layout, interfaceFont: DEFAULT_PRESET.interfaceFont, chatFollowsInterface: true,
   density: 'comfortable', speed: 1, paused: false, interactions: true,
-  captions: true, showThinking: false, streamReplies: true, mischief: 'witty', roles: Object.fromEntries(ROLES.map(r => [r, 'auto'])) as Record<MotionRole, string>,
+  captions: true, showThinking: false, streamReplies: true, mischief: 'witty', roles: Object.freeze({ ...DEFAULT_PRESET.roles }),
 })
 const object = (v: unknown): Record<string, unknown> => v && typeof v === 'object' && !Array.isArray(v) ? v as Record<string, unknown> : {}
 const choose = <T extends string>(v: unknown, list: readonly T[], fallback: T): T => list.includes(v as T) ? v as T : fallback
@@ -52,17 +53,17 @@ export function normalizeLook(value: unknown): LookPreferences {
   const flag = (k: keyof LookPreferences): boolean => typeof v[k] === 'boolean' ? v[k] as boolean : DEFAULT_LOOK[k] as boolean
   return {
     version: 2,
-    palette: choose(v.palette, PALETTES.map(p => p.id), 'app'),
+    palette: choose(v.palette, PALETTES.map(p => p.id), DEFAULT_LOOK.palette),
     paletteTheme: flag('paletteTheme'), paletteAccent: flag('paletteAccent'),
-    style: choose(v.style, INTERFACE_STYLES.map(s => s.id), 'editorial'),
-    layout: choose(v.layout, LAYOUTS.map(l => l.id), 'classic'),
-    interfaceFont: choose(v.interfaceFont, UI_FONTS.map(f => f.id), 'system'),
+    style: choose(v.style, INTERFACE_STYLES.map(s => s.id), DEFAULT_LOOK.style),
+    layout: choose(v.layout, LAYOUTS.map(l => l.id), DEFAULT_LOOK.layout),
+    interfaceFont: choose(v.interfaceFont, UI_FONTS.map(f => f.id), DEFAULT_LOOK.interfaceFont),
     chatFollowsInterface: flag('chatFollowsInterface'),
     density: choose(v.density, ['comfortable', 'compact'], 'comfortable'),
     speed: typeof v.speed === 'number' && Number.isFinite(v.speed) ? Math.round(Math.max(.5, Math.min(1.5, v.speed)) * 20) / 20 : 1,
     paused: flag('paused'), interactions: flag('interactions'), captions: flag('captions'), showThinking: flag('showThinking'), streamReplies: flag('streamReplies'),
     mischief: choose(v.mischief, ['quiet', 'witty', 'extra'], 'witty'),
-    roles: Object.fromEntries(ROLES.map(r => [r, MOTIONS.some(m => m.id === roles[r]) ? roles[r] : 'auto'])) as Record<MotionRole, string>,
+    roles: Object.fromEntries(ROLES.map(r => [r, roles[r] === 'auto' || MOTIONS.some(m => m.id === roles[r]) ? roles[r] : DEFAULT_LOOK.roles[r]])) as Record<MotionRole, string>,
   }
 }
 export type SidebarPreferences = { collapsed: boolean; width: number }

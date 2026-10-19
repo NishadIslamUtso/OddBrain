@@ -55,12 +55,21 @@ In **Vault → Backup & restore**, choose **Back up full vault**. This includes 
 
 **Restore into a new folder** checks file hashes and never replaces the active vault. After checking the restored copy, choose it under **Settings → Memory & files → Vault**. The current limit is 50,000 files / 2 GiB; larger or linked vaults need a filesystem backup. Installed models, app credentials and unsent browser queues are outside this backup. It is a manual snapshot, not a scheduled backup service.
 
+## Appearance and AI sources
+
+Fresh profiles and **Reset appearance** use **Ink & Sketchbook**, including its eight brain-behaviour roles. Existing saved choices are preserved. Settings groups now describe their contents and expand their pages in the sidebar.
+
+**AI & connections → Connectors** has shortcuts to Skills, the engine plugin catalogs and API providers. **Models & API keys** supports Anthropic, OpenAI, Gemini, OpenRouter, Groq, DeepSeek, xAI and custom OpenAI-compatible endpoints; Ollama is optional. Available engines/models still depend on the configured adapter. Skills and Plugins also remain under **Advanced tools**. Claude catalogs are available; agy's store adapter is not implemented. MCP configuration is not a universal connector marketplace.
+
 ## Browser companion
 
-1. Run the desktop app and select a vault.
-2. Load `extension/` unpacked from Chrome or Edge's extension manager.
-3. Copy the app's pairing token into the extension's connected-app settings, test the connection and permit browser capture.
-4. Grant access to any desired people/Classroom sites, then open the conversation itself.
+1. Run the desktop app and select a vault. Open **Settings → AI & connections → Connectors**.
+2. Choose **Save extension to Downloads**, or **Choose extension folder…**. The app exports its bundled files into a new folder with `INSTALL.txt`; no download or account is required.
+3. In `chrome://extensions` or `edge://extensions`, turn on **Developer mode**, choose **Load unpacked**, and select that folder. Keep it in place.
+4. Use **Browser capture permissions** to permit capture, then return to Connectors and copy the pairing token from **Agent access**. Paste it into the extension's **Settings → Connected app**, and **Save & test connection**.
+5. Grant access to any desired people/Classroom sites, then open the conversation itself.
+
+Browser approval is still manual; exporting files does not install, pair or grant permissions. Browser-only previews cannot export. Finish queued captures before removing/replacing an older extension. Native folder dialogs and loading this export on the target laptop still need acceptance.
 
 The companion captures accessible content in supported open conversations, not an entire account archive. It does not collect browser history. Fully queued data can retry after a normal browser restart; incomplete attachment downloads still need the source. See [capture coverage and limits](CONTEXT.md#install-and-collection-coverage) before relying on it.
 
