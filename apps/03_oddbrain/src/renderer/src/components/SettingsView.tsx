@@ -1127,7 +1127,7 @@ export default function SettingsView({
     ],
   }
 
-  const sectionAliases: Partial<Record<SectionId, string>> = { models: 'get api keys provider credentials encryption', connectors: 'install apps extensions connection runtime', extensions: 'plugins community packs marketplace', windows: 'smaller quick window shortcut startup warm runtime', performance: 'model stays loaded keep alive resource memory', maps: 'browsing maps sources reading history timeline', about: 'learn more help about repository', appearance: 'display name profile account looks layouts styles palettes fonts motion typography density mixes' }
+  const sectionAliases: Partial<Record<SectionId, string>> = { models: 'get api keys provider credentials encryption', connectors: 'install apps extensions connection runtime', extensions: 'plugins community packs marketplace', windows: 'smaller quick window shortcut startup warm runtime', performance: 'model stays loaded keep alive resource memory', maps: 'browsing maps sources reading history timeline', about: 'learn more help about repository', appearance: 'startup animation opening splash display name profile account looks layouts styles palettes fonts motion typography density mixes' }
   rowsById.agents = [{ label: 'Cloud inference', terms: 'allow cloud external inference local transport remote model', body: <AutomationControls scope="access" /> }, ...rowsById.agents]
   const needle = query.trim().toLowerCase()
   const rowText = (row: Row): string => `${row.label} ${row.terms || ''}`.toLowerCase()

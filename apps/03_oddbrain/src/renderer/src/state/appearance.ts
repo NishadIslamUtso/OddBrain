@@ -37,6 +37,8 @@ export type Appearance = {
   motion: MotionName
   /** The little mood word under the mascot on the home screen. */
   mascotWords: boolean
+  /** Show the opening animation on normal launches. */
+  startupAnimation: boolean
   /** The quiet explanation line under a settings row. Off, the rows are terse. */
   rowExplanations: boolean
   /**
@@ -115,6 +117,7 @@ export const DEFAULT_APPEARANCE: Appearance = Object.freeze({
   font: 'sans',
   motion: 'system',
   mascotWords: false,
+  startupAnimation: true,
   rowExplanations: false,
   packCss: '',
   designSystem: '',
@@ -162,6 +165,7 @@ export function normalizeAppearance(value: unknown): Appearance {
       : (input as { motion?: unknown }).motion === 'reduced'
         ? 'still'
         : DEFAULT_APPEARANCE.motion,
+    startupAnimation: typeof input.startupAnimation === 'boolean' ? input.startupAnimation : DEFAULT_APPEARANCE.startupAnimation,
     mascotWords: typeof input.mascotWords === 'boolean' ? input.mascotWords : DEFAULT_APPEARANCE.mascotWords,
     rowExplanations:
       typeof input.rowExplanations === 'boolean' ? input.rowExplanations : DEFAULT_APPEARANCE.rowExplanations,

@@ -15,7 +15,6 @@ A local-first Windows desktop assistant with chat, projects, artifacts, a Markdo
 | `vault/Brain/` | Starter vault, templates and engine rulebooks. |
 | `apps/03_oddbrain/store/packs/` | Installable skills and prompts. |
 | `.github/workflows/` | Linux/Windows checks and Windows installer build. |
-| `apps/01_claude-exact-pixel-clone/`, `apps/02_electron-claude-clone-v6/` | Historical prototypes, not the shipped application. |
 | `CONTEXT.md` | The single maintained project-context document. |
 
 Runtime Markdown, skill files and legal notices remain in their required locations; they are not additional project handovers.
@@ -37,6 +36,8 @@ npm run dev:web -- --host 0.0.0.0
 ```
 
 A browser preview is not a substitute for the native Electron app or its IPC/engine integrations.
+
+Startup animation: **Settings → Appearance → Brain & motion → Startup animation → On / Off**.
 
 ## Browser companion
 
@@ -66,4 +67,4 @@ Current source baseline, historical test results, independently verified faults 
 
 ## License
 
-[Apache-2.0](LICENSE). Preserve the bundled third-party notices and licenses.
+[Apache-2.0](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES) and bundled pack licenses.

@@ -2,7 +2,7 @@
 
 ## Design system tokens — from open-design
 
-The 16 design systems bundled in `src/design-systems/` are derived from the
+The 16 design systems bundled in `apps/03_oddbrain/src/shared/lib/design-systems/` are derived from the
 `design-systems/` directory of **open-design** by nexu-io.
 
 - Source: <https://github.com/nexu-io/open-design>

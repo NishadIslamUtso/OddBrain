@@ -25,10 +25,13 @@ export function launchSvg(raw: string, uid: string, width: number, height: numbe
   })
   return prepareMotionSvg(flight, uid, .55)
 }
-export default function LaunchOverlay() {
+export default function LaunchOverlay({ enabled = true }: { enabled?: boolean }) {
+  // Changing this preference affects future launches, not the current session.
+  // Explicit Replay remains available even when automatic startup is off.
+  const enabledOnMount = useRef(enabled).current
   const look = useLook(), env = useSyncExternalStore(subscribeMotionMode, getMotionMode)
   const frozen = look.paused || env.osReduced || env.mode === 'still'
-  const [phase, setPhase] = useState<'checking' | 'playing' | 'fading' | 'idle'>(shownHere ? 'idle' : 'checking')
+  const [phase, setPhase] = useState<'checking' | 'playing' | 'fading' | 'idle'>(shownHere || !enabledOnMount ? 'idle' : 'checking')
   const startedAt = useRef(0)
   const [painted, setPainted] = useState(false), [settled, setSettled] = useState(false), [iteration, setIteration] = useState(0)
   const [viewport, setViewport] = useState({ width: window.innerWidth, height: window.innerHeight })
@@ -36,9 +39,9 @@ export default function LaunchOverlay() {
   const svg = useMemo(() => launchSvg(motionAsset('assemble') || '', `launch-${id}-${iteration}`, viewport.width, viewport.height), [id, iteration, viewport])
   useEffect(() => {
     let active = true
-    void claim().then(allowed => { if (!active) return; if (allowed && !shownHere) { shownHere = true; setPhase('playing') } else setPhase('idle') })
+    void claim().then(allowed => { if (!active) return; if (allowed && !shownHere) { shownHere = true; if (enabledOnMount) setPhase('playing') } else setPhase('idle') })
     return () => { active = false }
-  }, [])
+  }, [enabledOnMount])
   useEffect(() => {
     const replay = (): void => { setSettled(false); setIteration(n => n + 1); setPhase('playing') }
     window.addEventListener('oddbrain:replay-opening', replay)

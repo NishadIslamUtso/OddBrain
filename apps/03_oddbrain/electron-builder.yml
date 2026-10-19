@@ -41,6 +41,8 @@ files:
 # `resources/extension` so "Load unpacked" at chrome://extensions has a folder to
 # point at. It is not packed into the asar — Chrome needs real files on disk.
 extraResources:
+  - from: ../../THIRD_PARTY_NOTICES
+    to: THIRD_PARTY_NOTICES
   - from: resources/oddbrain-preview.html
     to: oddbrain-preview.html
   - from: ../../extension

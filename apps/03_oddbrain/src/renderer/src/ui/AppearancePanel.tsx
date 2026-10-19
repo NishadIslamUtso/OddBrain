@@ -87,6 +87,7 @@ export default function AppearancePanel({ appearance: a, onAppearanceChange: set
         <Row title="Row explanations"><Toggle label="Row explanations" value={a.rowExplanations} onChange={rowExplanations => setA({ ...a, rowExplanations })} /></Row>
       </> : null}
       {tab === 'brain' ? <><h2>Motion</h2>
+        <Row title="Startup animation"><Toggle label="Startup animation" value={a.startupAnimation} onChange={startupAnimation => setA({ ...a, startupAnimation })} /></Row>
         <Row title="Motion"><Choices label="Motion" value={a.motion} options={MODES.map(m => ({ value: m.name, label: m.label }))} onChange={motion => setA({ ...a, motion })} /></Row>
         <Row title="Animation speed"><div className="ob-range"><input type="range" aria-label="Animation speed" min="0.5" max="1.5" step="0.05" value={l.speed} onChange={e => change({ speed: Number(e.target.value) })} /><output>{l.speed.toFixed(2)}×</output></div></Row>
         <Row title="Pause mascots"><Toggle label="Pause mascots" value={l.paused} onChange={paused => change({ paused })} /></Row>

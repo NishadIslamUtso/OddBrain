@@ -8,7 +8,7 @@
  * without any extra sync step.
  *
  * Matching is deliberately identical to the server's excluded() in
- * apps/01_claude-exact-pixel-clone/server/vault-api.cjs. A substring shortcut
+ * apps/03_oddbrain/src/main/vault/blacklist.ts. A substring shortcut
  * here previously matched "bank.com.evil.org" against the pattern "bank.com/*",
  * which is exactly the spoof the host-aware rules below exist to stop.
  * tests/blacklist.test.js asserts both implementations agree.

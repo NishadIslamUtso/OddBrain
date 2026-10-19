@@ -538,7 +538,7 @@ export default function App() {
   const items: ShellItem[] = view === 'projects' ? projects.map(p => ({ id: p.id, title: p.name, detail: p.folder, open: () => { setProjectFocus(p.id); setView('projects') } })) : view === 'artifacts' ? library.items.map(item => ({ id: item.id, title: item.title, detail: item.type.toUpperCase(), open: () => { setArtifactFocus(item.id); setView('artifacts') } })) : chats.chats.map(c => ({ id: c.id, title: c.title, detail: c.date, open: () => openChat(c.id) }))
   const commands: CommandItem[] = [{ id: 'memory-inbox', title: 'Memory inbox', detail: 'Review interpretations, people and your life story', run: () => window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' })) }, ...screenCommands(setView), ...chats.chats.slice(0, 6).map(c => ({ id: 'chat-' + c.id, title: c.title, detail: 'Conversation', run: () => openChat(c.id) })), { id: 'screen-code', title: 'Code', detail: 'All project folders', run: () => { setCodeFocus(''); setView('code') } }, ...SECTIONS.map(section => ({ id: 'settings-' + section.id, title: section.id === 'models' ? 'Models & API keys' : section.id === 'connectors' ? 'Apps & extensions' : section.title, detail: 'Settings', run: () => openSettings(section.id) }))]
   const searchCommands = (query: string): CommandItem[] => searchChats(chats.chats, query).map(result => ({ id: 'chat-' + result.chat.id, title: result.chat.title, detail: result.matches[0]?.snippet || 'Conversation', run: () => openChat(result.chat.id) }))
-  if (!welcomed) return <LookContext value={look}><LookActions value={updateLook}><div className="ob-app-root"><FirstRunView onFinish={() => setWelcomed(true)} onName={name => setProfile({ ...profile, name })} /></div><LaunchOverlay /></LookActions></LookContext>
+  if (!welcomed) return <LookContext value={look}><LookActions value={updateLook}><div className="ob-app-root"><FirstRunView onFinish={() => setWelcomed(true)} onName={name => setProfile({ ...profile, name })} /></div><LaunchOverlay enabled={appearance.startupAnimation} /></LookActions></LookContext>
 
   return <LookContext value={look}><LookActions value={updateLook}>
     <div className="ob-app-root flex h-full flex-col bg-bg text-ink">
@@ -724,6 +724,6 @@ export default function App() {
       </div></div> : null}
       <TurnJournal />
     </div>
-    <LaunchOverlay />
+    <LaunchOverlay enabled={appearance.startupAnimation} />
   </LookActions></LookContext>
 }

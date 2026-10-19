@@ -18,7 +18,7 @@ test('complete owner inventory: every look, structure, palette, style and scene'
 })
 test('old native reading/theme values keep their meanings, not the HTML state meanings', () => {
   const old = { theme: 'light', accent: 'rose', font: 'anthropic-serif', width: 'wide', textSize: 'large', motion: 'calm', mascotWords: true, rowExplanations: true }
-  assert.deepEqual(normalizeAppearance(old), { ...old, packCss: '', designSystem: '' })
+  assert.deepEqual(normalizeAppearance(old), { ...old, startupAnimation: true, packCss: '', designSystem: '' })
   assert.equal(normalizeAppearance({ motion: 'reduced' }).motion, 'still')
   assert.equal(DEFAULT_LOOK.interfaceFont, 'system'); assert.equal(DEFAULT_LOOK.chatFollowsInterface, false)
 })
