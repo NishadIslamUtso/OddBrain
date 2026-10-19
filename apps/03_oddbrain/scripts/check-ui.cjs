@@ -27,7 +27,7 @@ await p.setViewportSize({width:940,height:620});await p.getByRole('button',{name
 for(let i=0;i<8;i++){
  await p.locator('.ob-layout-choice').nth(i).click();await p.getByRole('button',{name:'Try in workspace',exact:true}).click();
  for(const view of ['Chat','Artifacts','Today','Projects','Vault','Brain','Code']){
-  await p.keyboard.press('Control+k');await p.getByRole('textbox',{name:'Search everything',exact:true}).fill(view);await p.locator('.ob-command-results>button').filter({hasText:new RegExp('^'+view)}).first().click();await p.waitForTimeout(35);
+  await p.keyboard.press('Control+k');await p.getByRole('combobox',{name:'Search everything',exact:true}).fill(view);await p.locator('.ob-command-results>button').filter({hasText:new RegExp('^'+view)}).first().click();await p.waitForTimeout(35);
   const g=await p.evaluate(()=>{const m=document.querySelector('.ob-shell-content');return {layout:document.documentElement.dataset.obLayout,root:document.documentElement.scrollWidth,main:m.clientWidth,scroll:m.scrollWidth,viewport:innerWidth,view:JSON.parse(localStorage.getItem('ai-assistant.view'))};});r.geometry.push(g);assert(g.root<=942&&g.scroll<=g.main+2,JSON.stringify(g));
   if(view==='Chat'){const send=p.getByRole('button',{name:'Send',exact:true});const bb=await send.boundingBox();assert(bb&&bb.x+bb.width<=942&&bb.y+bb.height<=622);}
  }

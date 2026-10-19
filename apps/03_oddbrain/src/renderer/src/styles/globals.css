@@ -197,3 +197,5 @@ body {
 .ob-extension-install details { margin-top: 12px; }
 .ob-extension-steps { list-style: decimal; padding-left: 20px; font-size: 12.5px; line-height: 1.7; }
 .ob-extension-steps li { margin: 6px 0; }
+
+.ob-command-results > [aria-selected="true"] { background: var(--color-card); outline: 1px solid var(--color-line); outline-offset: -1px; }

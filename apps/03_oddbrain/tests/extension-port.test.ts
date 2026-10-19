@@ -356,6 +356,59 @@ test('a vault that is not there is reported, not created — and the port says s
   assert.equal(existsSync(missing), false, 'no empty vault may be manufactured to satisfy a request')
 })
 
+test('a damaged capture identity is reported, not thrown — and replay is refused with the reason', async t => {
+  const { call, root } = await withPort(t)
+  mkdirSync(join(root, '.oddbrain'), { recursive: true })
+  writeFileSync(join(root, '.oddbrain/capture-destination'), 'truncated')
+  const health = await call('GET', '/health', { origin: EXT })
+  assert.equal(health.status, 200, 'a damaged identity must not take the whole port down')
+  assert.equal(health.body.capture_target, null)
+  assert.match(String(health.body.capture_problem), /damaged/)
+  assert.match(String(health.body.capture_problem), /capture-destination/)
+  // Read-only features keep working, which is the point of not throwing here.
+  assert.equal((await call('GET', '/appearance', { origin: EXT })).status, 200)
+  const replay = await call('POST', '/conversation-sync', {
+    origin: EXT,
+    body: { ...conversation(), op: 'messages', messages: [], order: [], capture_target: 'a'.repeat(64) },
+  })
+  assert.equal(replay.status, 503)
+  assert.equal(replay.body.code, 'capture-unavailable')
+  assert.match(String(replay.body.error), /damaged/)
+})
+
+test('an unwritable vault folder is reported, not thrown', async t => {
+  const denied = Object.assign(new Error('denied'), { code: 'EACCES' })
+  const service = {
+    root: '/unwritable-vault',
+    available: () => true,
+    files: () => ({
+      writeOnce: () => { throw denied },
+      readHead: () => '',
+    }),
+  }
+  const api = await startExtensionApi({ port: 0, vault: service as never })
+  t.after(() => api.close())
+  const health = await (
+    await fetch(`${api.url}/health`, { headers: { origin: EXT, 'x-oddbrain-pair': api.pairToken } })
+  ).json()
+  assert.equal(health.capture_target, null)
+  assert.match(String(health.capture_problem), /EACCES/)
+})
+
+test('the capture identity belongs to the vault, not the pairing token', async t => {
+  const { api, call } = await withPort(t)
+  const before = (await call('GET', '/health', { origin: EXT })).body.capture_target
+  assert.match(String(before), /^[a-f0-9]{64}$/)
+  api.setPairToken('n'.repeat(48))
+  const after = (await call('GET', '/health', { origin: EXT })).body.capture_target
+  assert.equal(after, before, 'rotating the token must not orphan bytes already in a browser')
+  const replay = await call('POST', '/conversation-sync', {
+    origin: EXT,
+    body: { ...conversation(), op: 'messages', messages: [], order: [], capture_target: before },
+  })
+  assert.notEqual(replay.status, 409, 'the same vault accepted the same target after rotation')
+})
+
 test('a busy port is reported, never fatal', async t => {
   const first = await withPort(t)
   const second = await startExtensionApi({ port: first.api.port, vault: createVaultService({ vaultPath: first.root }) })
@@ -363,4 +416,29 @@ test('a busy port is reported, never fatal', async t => {
   assert.equal(second.port, first.api.port)
   assert.match(second.error, /already in use/)
   await second.close()
+})
+
+test('legacy upgrade proof survives desktop restart and rotation, but never moves to another vault', async t => {
+  const {api,call,root}=await withPort(t)
+  const before=(await call('GET','/health',{origin:EXT})).body
+  assert.equal(before.capture_legacy_targets.length,1)
+  await api.close()
+  const restarted=await startExtensionApi({port:0,pairToken:'n'.repeat(48),vault:createVaultService({vaultPath:root})})
+  t.after(()=>restarted.close())
+  const health=await (await fetch(restarted.url+'/health',{headers:{origin:EXT,'x-oddbrain-pair':restarted.pairToken}})).json()
+  assert.equal(health.capture_target,before.capture_target)
+  assert.deepEqual(health.capture_legacy_targets,before.capture_legacy_targets)
+  const post=async(target:string,token=restarted.pairToken)=>fetch(restarted.url+'/conversation-sync',{method:'POST',headers:{origin:EXT,'x-oddbrain-pair':token,'content-type':'application/json'},body:JSON.stringify({...conversation(),op:'messages',messages:[],order:[],capture_target:target})})
+  assert.notEqual((await post(before.capture_legacy_targets[0])).status,409)
+  assert.equal((await post('a'.repeat(64))).status,409)
+  assert.equal((await post(before.capture_legacy_targets[0],'wrong')).status,401)
+  const other=await withPort(t)
+  assert.equal((await other.call('POST','/conversation-sync',{origin:EXT,body:{...conversation(),op:'messages',messages:[],order:[],capture_target:before.capture_legacy_targets[0]}})).status,409)
+})
+test('damaged upgrade metadata holds captures instead of accepting an unproven legacy address', async t => {
+  const {api,call,root}=await withPort(t), before=(await call('GET','/health',{origin:EXT})).body
+  writeFileSync(join(root,`.oddbrain/capture-legacy-${before.capture_target}`),'broken')
+  const health=(await call('GET','/health',{origin:EXT})).body
+  assert.equal(health.capture_target,null); assert.match(health.capture_problem,/upgrade/)
+  assert.equal((await call('POST','/conversation-sync',{origin:EXT,body:{...conversation(),op:'messages',messages:[],order:[],capture_target:before.capture_target}})).status,503)
 })

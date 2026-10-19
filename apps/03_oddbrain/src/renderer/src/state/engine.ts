@@ -321,6 +321,12 @@ const ingest = (event: EngineEvent): void => {
     const last = turn.items.at(-1)
     const alreadySaid = event.text && last?.kind === 'text' && last.text === event.text
     if (event.text && !alreadySaid) turn.items.push({ kind: 'text', text: event.text })
+    // Small or broken models sometimes end a turn with no words at all. A
+    // silent blank reply would look like the app froze; one muted line says
+    // what actually happened and what to do next.
+    if (!event.text?.trim() && !turn.items.some((item) => (item.kind === 'text' && item.text.trim()) || (item.kind === 'status' && item.text.startsWith('This turn ended with no words')))) {
+      turn.items.push({ kind: 'status', text: 'This turn ended with no words from the model. Ask again, or try another model.' })
+    }
     if (event.usage) {
       turn.usage = event.usage
       state.totals = {

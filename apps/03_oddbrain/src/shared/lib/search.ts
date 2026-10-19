@@ -9,6 +9,7 @@
  * is the right trade for a local app holding a few hundred chats — no index to
  * keep in sync, and no way for the index to disagree with what is on screen.
  */
+import { recallTerms, recallMatches } from './recall'
 import type { Chat, Message, Role } from '../types'
 
 const MAX_SNIPPET = 140
@@ -21,11 +22,7 @@ export type HighlightPart = string | { mark: string }
 
 /** Split a query into terms on whitespace; all terms must match (AND). */
 function terms(query: string): string[] {
-  return String(query || '')
-    .toLowerCase()
-    .split(/\s+/)
-    .filter(term => term.length > 0)
-    .slice(0, 8)
+  return recallTerms(String(query || '')).slice(0, 8)
 }
 
 /** A short window of text around the first hit, so the result is recognisable. */
@@ -58,13 +55,13 @@ export function searchChats(chats: Chat[] | unknown, query: string): SearchResul
   const results: SearchResult[] = []
   for (const chat of Array.isArray(chats) ? (chats as Chat[]) : []) {
     const title = String(chat?.title || '')
-    const titleHit = list.every(term => title.toLowerCase().includes(term))
+    const titleHit = recallMatches(title, list)
     const matches: SearchMatch[] = []
     for (const message of Array.isArray(chat?.messages) ? chat.messages : []) {
       const text = messageText(message)
       if (!text) continue
       const haystack = text.toLowerCase()
-      if (!list.every(term => haystack.includes(term))) continue
+      if (!recallMatches(haystack, list)) continue
       matches.push({
         messageId: message.id,
         role: message.role,

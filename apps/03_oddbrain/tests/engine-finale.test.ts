@@ -258,3 +258,16 @@ test('a finished turn is journaled once, with the engine\u2019s own words and us
 })
 
 // ---------- wiring ----------
+
+test('empty or whitespace-only completion says what happened once; streamed answers are untouched', async () => {
+  for (const spoken of [false, true]) {
+    const fake = withCoreFake(); fake.busyHold = true; resetEngineForTests()
+    await engineStore().send('try this')
+    if (spoken) fake.listener?.({ kind: 'delta', text: 'A real answer' } as EngineEvent)
+    fake.listener?.({ kind: 'done', text: '   ' } as EngineEvent)
+    fake.listener?.({ kind: 'done', text: '' } as EngineEvent)
+    await settleStore()
+    const messages = engineStore().turn!.items.filter(i => i.kind === 'status' && i.text.includes('no words from the model'))
+    assert.equal(messages.length, spoken ? 0 : 1)
+  }
+})

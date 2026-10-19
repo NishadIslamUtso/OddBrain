@@ -1,4 +1,4 @@
-import { sourceReading } from '@shared/lib/recall'
+import { sourceReading, type RecallHit } from '@shared/lib/recall'
 import MemoryMap from './MemoryMap'
 import { sampleEnabled } from '@shared/lib/sampleWorkspace'
 import { Mascot } from '../motion/Mascot'
@@ -33,7 +33,8 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading')
   const [selected, setSelected] = useState<{ path: string; content: string; truncated: boolean; title?: string } | null>(null)
   const [query, setQuery] = useState('')
-  const [hits, setHits] = useState<Array<{ path: string; line: number; text: string }> | null>(null)
+  const [hits, setHits] = useState<RecallHit[] | null>(null)
+  const [searching, setSearching] = useState(false), [searchNote, setSearchNote] = useState('')
   const [problem, setProblem] = useState('')
 
   const loadTree = (): void => {
@@ -83,21 +84,24 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
   const searchContents = (): void => {
     const ticket = ++searchTicket.current
     const needle = query.trim()
+    setHits(null); setSearchNote(''); setProblem(''); setSearching(Boolean(needle))
     if (!needle) {
       setHits(null)
       return
     }
-    vaultGet(`/grep?q=${encodeURIComponent(needle)}`)
+    vaultGet(`/recall?q=${encodeURIComponent(needle)}`)
       .then((reply) => {
         if (!mounted.current || ticket !== searchTicket.current) return
+        setSearching(false)
         if (reply?.ok !== true) {
-          setProblem(String(reply?.error || 'The search failed.'))
+          setProblem(String(reply?.notices?.join(' ') || reply?.error || 'The search failed.'))
           return
         }
         setHits(Array.isArray(reply.hits) ? reply.hits : [])
+        setSearchNote((reply.notices || []).join(' '))
         setProblem('')
       })
-      .catch(() => { if (mounted.current && ticket === searchTicket.current) setProblem('The search failed.') })
+      .catch(() => { if (mounted.current && ticket === searchTicket.current) { setSearching(false); setProblem('The search failed.') } })
   }
 
   const nameMatches = query.trim()
@@ -154,11 +158,11 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
             <Search size={13} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
             <input
               value={query}
-              onChange={(event) => { searchTicket.current++; setHits(null); setQuery(event.target.value) }}
+              onChange={(event) => { searchTicket.current++; setHits(null); setSearching(false); setSearchNote(''); setQuery(event.target.value) }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') searchContents()
               }}
-              placeholder="Filter names, or press Enter to search contents"
+              placeholder="Filter names; Enter searches content. Quote an exact phrase."
               aria-label="Search the vault"
               className="h-9 w-full rounded-lg border border-line bg-card pl-8 pr-3 text-[12.5px] text-ink outline-none placeholder:text-muted focus:border-accent/60"
             />
@@ -172,6 +176,8 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
         {state === 'ready' && files.length === 0 ? (
           <div className="ob-screen-empty"><Mascot motion="read" size={88} static /><h2>No notes yet</h2><p>Notes and browser captures in this folder will appear here.</p></div>
         ) : null}
+        {searching && <p role="status" className="ob-memory-caption">Searching saved conversations, confirmed memory and files…</p>}
+        {searchNote && <p role="status" className="ob-memory-caption">{searchNote}</p>}
         {problem ? <p className="mt-2 text-[12px] text-warn">{problem}</p> : null}
 
         <div className="mt-3 flex min-h-0 flex-1 gap-4">
@@ -182,7 +188,7 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
               <div>
                 <div className="flex items-center gap-2">
                   <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted">
-                    {hits.length ? `${hits.length} ${hits.length === 1 ? 'file mentions it' : 'files mention it'}` : 'Nothing mentions it'}
+                    {hits.length ? `${hits.length} ranked ${hits.length === 1 ? 'match' : 'matches'}` : 'No matches in the searched records'}
                   </h2>
                   <button type="button" onClick={() => setHits(null)} className="text-[11px] text-muted hover:text-ink">
                     clear
@@ -190,13 +196,13 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
                 </div>
                 <ul className="mt-1.5 flex flex-col gap-1">
                   {hits.map((hit) => (
-                    <li key={`${hit.path}:${hit.line}`}>
+                    <li key={hit.id}>
                       <button
                         type="button"
-                        onClick={() => openFile(hit.path)}
+                        onClick={() => openFile(hit.path, hit.title)}
                         className="w-full rounded-lg px-2 py-1.5 text-left hover:bg-white/[0.04]"
                       >
-                        <span className="block truncate text-[12px] text-ink">{leaf(hit.path)}</span>
+                        <span className="block truncate text-[12px] text-ink">{hit.title}</span><span className="block text-[11px] text-muted">{hit.kind === 'confirmed' ? 'Confirmed memory' : hit.kind === 'conversation' ? 'Original conversation' : 'Saved file'} · {hit.speaker}</span>
                         <span className="block truncate font-mono text-[11px] text-muted">{hit.text}</span>
                       </button>
                     </li>

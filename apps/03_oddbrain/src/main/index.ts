@@ -1,3 +1,4 @@
+import { createVaultFiles } from './vault/files'
 import { exportExtension } from './extension/export'
 import { discoverClaudeModels } from './engine/modelDiscovery'
 import { selectEngine } from '../shared/lib/engine'
@@ -21,7 +22,7 @@ import { createLaunchGate } from './uiLaunch'
 import { app, BrowserWindow, dialog, Menu, safeStorage, shell, globalShortcut, screen, session } from 'electron'
 import { randomBytes, randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
-import { loadAppFlags, saveAppFlags } from './appFlags'
+import { loadAppFlags, readAppFlagsStrict, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
 import { registerStagingRoot, setBinaryOverride, binaryOverride } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
@@ -30,6 +31,7 @@ import { existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync,
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
 import { createVaultService, resolveVaultRoot } from './vault/service'
+import { canonicalStructureRoot, conflictWasSettled, normalizeSettledConflicts, settleStructureConflict, validStructureRelative, type SettledStructureConflict } from './vault/settled'
 import { createKeyStore, type KeyStore } from './cloud/keys'
 import { createCloudClient, type CloudClient } from './cloud/client'
 import { providerById } from '../shared/lib/providers'
@@ -194,20 +196,21 @@ function pushEngineEvent(event: EngineEvent): void {
   // The plan is made here, from the real folder, never from the renderer's
   // word; an existing file is never rewritten.
   const settledFile = (): string => join(app.getPath('userData'), 'structure-settled.json')
-  const readSettled = (): string[] => {
+  const readSettled = (): SettledStructureConflict[] => {
     try {
       const parsed: unknown = JSON.parse(readFileSync(settledFile(), 'utf8'))
-      return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : []
+      const normalized = normalizeSettledConflicts(parsed, canonicalStructureRoot(vaultRoot()))
+      if (Array.isArray(parsed) && parsed.some(entry => typeof entry === 'string')) {
+        try { writeFileSync(settledFile(), JSON.stringify(normalized, null, 2), 'utf8') } catch { return normalizeSettledConflicts(parsed.filter(entry => typeof entry !== 'string'), canonicalStructureRoot(vaultRoot())) } // Never silently scope the same legacy entries to another vault on a failed migration.
+      }
+      return normalized
     } catch {
       return []
     }
   }
-  const rememberSettled = (relative: string): void => {
-    const list = readSettled()
-    if (!list.includes(relative)) {
-      list.push(relative)
-      writeFileSync(settledFile(), JSON.stringify(list, null, 2), 'utf8')
-    }
+  const rememberSettled = (root: string, relative: string): void => {
+    const before = readSettled(), after = settleStructureConflict(before, root, relative)
+    if (after !== before) writeFileSync(settledFile(), JSON.stringify(after, null, 2), 'utf8')
   }
 
   const structurePlan = (root: string) => {
@@ -230,7 +233,7 @@ function pushEngineEvent(event: EngineEvent): void {
       }
     }
     const settled = readSettled()
-    const plan = planBrainApply(kind, relative => existsSync(join(root, relative)), readExisting, relative => settled.includes(relative))
+    const plan = planBrainApply(kind, relative => existsSync(join(root, relative)), readExisting, relative => conflictWasSettled(settled, root, relative))
     const differing = planBrainRefresh(kind, readExisting)
     return { kind: plan.kind, present: plan.present, missing: plan.missing, differing, conflicts: plan.conflicts, writes: plan.writes }
   }
@@ -527,20 +530,16 @@ function registerBridges(): void {
     (_event, root: string, original: string, added: string, action: 'mine' | 'new' | 'both' | 'combine') => {
       try {
         if (typeof root !== 'string' || !root.trim()) return { ok: false, error: 'Give a real folder path.' }
+        if (canonicalStructureRoot(root) !== canonicalStructureRoot(vaultRoot())) return { ok: false, error: 'Only the selected vault can settle a structure conflict.' }
         if (action !== 'mine' && action !== 'new' && action !== 'both' && action !== 'combine') {
           return { ok: false, error: 'Unknown choice.' }
         }
-        const clean = (relative: string): string => {
-          if (typeof relative !== 'string' || /['\n\r]/.test(relative) || relative.includes('..')) {
-            throw new Error('Not a vault-relative path.')
-          }
-          return relative
-        }
-        const mine = clean(original)
-        const theirs = clean(added)
-        if (!theirs.includes(' (new)')) return { ok: false, error: 'That beside-copy was not added by the structure.' }
-        const mineFull = join(root, mine)
-        const theirsFull = join(root, theirs)
+        if (!validStructureRelative(original) || !validStructureRelative(added)) throw new Error('Not a vault-relative path.')
+        const mine = original, theirs = added
+        const scoped = createVaultFiles(root, () => new Date())
+        const mineFull = scoped.filePath(mine), theirsFull = scoped.filePath(theirs)
+        const plan = structurePlan(root)
+        if ('error' in plan || !plan.conflicts.some(conflict => conflict.original === mine && conflict.added === theirs)) return { ok: false, error: 'That pair is not a current structure conflict.' }
         if (!existsSync(mineFull) || !existsSync(theirsFull)) return { ok: false, error: 'One of the two files is gone.' }
         // The never-check list is functional, not prose: the default seed must
         // never overwrite the patterns the owner actually keeps.
@@ -548,10 +547,10 @@ function registerBridges(): void {
           return { ok: false, error: 'The privacy list is never replaced by the default seed. Keep yours, or combine.' }
         }
         const verdict = applyConflictAction(action, readFileSync(mineFull, 'utf8'), readFileSync(theirsFull, 'utf8'))
-        if (verdict.original !== null) writeFileSync(mineFull, verdict.original, { encoding: 'utf8' })
+        if (verdict.original !== null) scoped.writeAtomic(mine, verdict.original)
         if (verdict.deleteAdded) rmSync(theirsFull)
         // Settled is settled: the plan stops offering this file.
-        rememberSettled(mine)
+        rememberSettled(root, mine)
         if (resolve(root) === resolve(vaultRoot())) {
           try {
             const service = createVaultService({ vaultPath: vaultRoot() })
@@ -716,7 +715,8 @@ function registerBridges(): void {
   const appFlagsFile = (): string => join(app.getPath('userData'), 'app-flags.json')
   handle('app:preview-html', () => readUiPreview(app.getAppPath(), process.resourcesPath, app.isPackaged))
   handle('app:claim-launch', () => claimUiLaunch())
-  handle('app:flags:get', () => loadAppFlags(appFlagsFile()))
+  const confirmedFlags = () => ({ ...readAppFlagsStrict(appFlagsFile()), ...(['win32', 'darwin'].includes(process.platform) ? { loginItem: app.getLoginItemSettings().openAtLogin } : {}) })
+  handle('app:flags:get', confirmedFlags)
   // The machine's own name for this person, offered as a suggestion on first
   // run. The real machine lesson: the app asked for a name and detected
   // nothing, so the owner typed empty quotes and moved on. Spaces in the
@@ -784,7 +784,7 @@ function registerBridges(): void {
     // staged copy must exist. (The always-loaded env applies when the runtime
     // next starts; a running one is never restarted under the person's feet.)
     if (clean.warmRuntime === true || clean.keepLoadedAlways === true) void warmStartRuntime()
-    return next
+    return confirmedFlags()
   })
 
   // The battle tally: a PRIVATE local ledger of what won for this person.

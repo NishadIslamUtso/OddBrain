@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
+import { useId, useEffect, useMemo, useRef, useState, type ReactNode } from 'react'
 import { ArrowRight, ChevronDown, Plus, Search, X } from 'lucide-react'
 import AppNav, { type View, NAV_ITEMS } from '../components/AppNav'
 import TitleBar from '../components/TitleBar'
@@ -31,10 +31,16 @@ export default function DesktopShell({ layout, navigation, sidebar, items = [], 
     return () => { clearTimeout(timer); controller.abort() }
   }, [open, query, searchSaved, preview])
   const savedItems = saved.query === query && saved.owner === searchSaved ? saved.items : []
+  const [activeId, setActiveId] = useState<string | null>(null)
+  const listId = useId(), results = useRef<HTMLDivElement | null>(null)
   const input = useRef<HTMLInputElement | null>(null), returnFocus = useRef<HTMLElement | null>(null)
   const list = useMemo(() => { const found = commands.filter(c => `${c.title} ${c.detail || ''}`.toLowerCase().includes(query.trim().toLowerCase())); const all = query.trim() && extraSearch ? [...found, ...extraSearch(query)] : found; return [...new Map(all.map(c => [c.id, c])).values()] }, [commands, query, extraSearch])
-  const search = (): void => { if (preview) return; returnFocus.current = document.activeElement as HTMLElement; setQuery(''); setOpen(true) }
-  const close = (): void => { setOpen(false); returnFocus.current?.focus() }
+  const shown = [...list.slice(0, 30), ...savedItems]
+  const activeIndex = shown.findIndex(item => item.id === activeId)
+  const chosen = shown.length ? Math.max(0, activeIndex) : -1
+  useEffect(() => { if (open) results.current?.querySelector<HTMLElement>('[aria-selected="true"]')?.scrollIntoView?.({ block: 'nearest' }) }, [open, chosen, shown.length])
+  const search = (): void => { if (preview) return; returnFocus.current = document.activeElement as HTMLElement; setQuery(''); setActiveId(null); setOpen(true) }
+  const close = (): void => { setOpen(false); setActiveId(null); returnFocus.current?.focus() }
   useEffect(() => {
     if (preview || suspended) return
     const key = (e: KeyboardEvent): void => {
@@ -65,9 +71,18 @@ export default function DesktopShell({ layout, navigation, sidebar, items = [], 
       layout === 'console' ? <div className="ob-console-body">{main}<form className="ob-console-prompt" onSubmit={e => { e.preventDefault(); const match = commands.find(c => c.title.toLowerCase().includes(query.trim().toLowerCase())); if (query.trim() && match) { match.run(); setQuery('') } else search() }}><span aria-hidden="true">&gt;</span><input aria-label="Go to a chat or screen" placeholder="Go to…" value={query} onChange={e => setQuery(e.target.value)} /><button type="button" onClick={search}><ChevronDown size={14} />Browse</button><button type="submit" aria-label="Open matching screen"><ArrowRight size={14} /></button></form></div> :
       <div className="ob-shell-body">{main}</div>}
     {open ? <div className="ob-command-backdrop" onPointerDown={e => { if (e.target === e.currentTarget) close() }}><section className="ob-command-dialog" role="dialog" aria-modal="true" aria-label="Search OddBrain" onKeyDown={e => {
-      if (e.key === 'Tab') { const nodes = [...e.currentTarget.querySelectorAll<HTMLElement>('input,button')]; const first = nodes[0], last = nodes.at(-1); if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus() } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() } }
-      if (e.key === 'Enter' && e.target === input.current && (list[0] || savedItems[0])) { e.preventDefault(); close(); (list[0] || savedItems[0]).run() }
-    }}><div className="ob-command-input"><Search size={16} /><input ref={input} aria-label="Search everything" placeholder="Search conversations, memory, files or screens" maxLength={500} value={query} onChange={e => setQuery(e.target.value)} /><button className="ob-icon-button" type="button" onClick={close} aria-label="Close search"><X size={16} /></button></div><div className="ob-command-results">{list.slice(0, 30).map(c => <button type="button" key={c.id} onClick={() => { close(); c.run() }}><span>{c.title}{c.detail ? <small>{c.detail}</small> : null}</span><ArrowRight size={14} /></button>)}{savedItems.map(c => <button className="ob-recall-result" type="button" key={c.id} onClick={() => { close(); c.run() }}><span>{c.title}<small>{c.detail}</small></span><ArrowRight size={14} /></button>)}{saved.query === query && saved.notice && <p className="ob-empty-line" role="status">{saved.notice}</p>}{!list.length && !savedItems.length && !saved.notice ? <p className="ob-empty-line">No matches.</p> : null}</div></section></div> : null}
+      if (e.key === 'Tab') { const nodes = [...e.currentTarget.querySelectorAll<HTMLElement>('input,button:not([tabindex="-1"])')]; const first = nodes[0], last = nodes.at(-1); if (e.shiftKey && e.target === first) { e.preventDefault(); last?.focus() } else if (!e.shiftKey && e.target === last) { e.preventDefault(); first?.focus() } }
+      // Enter on Close must close, not accidentally execute the selected result.
+      if (e.target !== input.current || e.nativeEvent.isComposing) return
+      let next = chosen
+      if (e.key === 'ArrowDown') next = Math.min(chosen + 1, shown.length - 1)
+      else if (e.key === 'ArrowUp') next = Math.max(chosen - 1, 0)
+      else if (e.key === 'Home') next = 0
+      else if (e.key === 'End') next = shown.length - 1
+      else if (e.key === 'Enter') { e.preventDefault(); const command = shown[chosen]; if (command) { close(); command.run() } return }
+      else return
+      e.preventDefault(); setActiveId(shown[next]?.id || null)
+    }}><div className="ob-command-input"><Search size={16} /><input ref={input} role="combobox" aria-label="Search everything" aria-expanded="true" aria-controls={listId} aria-autocomplete="list" aria-activedescendant={chosen >= 0 ? `${listId}-${chosen}` : undefined} placeholder='Search conversations, memory, files or screens; quote a phrase' maxLength={500} value={query} onChange={e => { setActiveId(null); setQuery(e.target.value) }} /><button className="ob-icon-button" type="button" onClick={close} aria-label="Close search"><X size={16} /></button></div><div ref={results} id={listId} role="listbox" aria-label="Search results" className="ob-command-results">{shown.map((c, index) => <button className={savedItems.includes(c) ? 'ob-recall-result' : undefined} type="button" key={c.id} id={`${listId}-${index}`} role="option" aria-selected={index === chosen} tabIndex={-1} onMouseEnter={() => setActiveId(c.id)} onClick={() => { close(); c.run() }}><span>{c.title}{c.detail ? <small>{c.detail}</small> : null}</span><ArrowRight size={14} /></button>)}{saved.query === query && saved.notice && <p className="ob-empty-line" role="status">{saved.notice}</p>}{!list.length && !savedItems.length && !saved.notice ? <p className="ob-empty-line">No matches.</p> : null}</div></section></div> : null}
   </div>
 }
 export function screenCommands(onView: (view: View) => void): CommandItem[] { return NAV_ITEMS.map(item => ({ id: 'screen-' + item.id, title: item.label, detail: 'Screen', run: () => onView(item.id) })) }

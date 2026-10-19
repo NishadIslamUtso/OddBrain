@@ -1,5 +1,5 @@
 import { IDBFactory } from "fake-indexeddb";
-import { webcrypto } from "node:crypto";
+import { createHash, webcrypto } from "node:crypto";
 import { describe, it, expect } from "vitest";
 import { readFileSync, mkdtempSync, rmSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -18,6 +18,7 @@ async function harness() {
     version: 1,
     tokens: { "--color-bg": "#fafafa", "--color-ink": "#222222" },
   });
+  let rotateOnPost = false
   let captures = true,
     offline = false,
     loseAcknowledgement = false,
@@ -80,6 +81,7 @@ async function harness() {
       fetch: async (url: string, options: any) => {
         calls.push(url);
         if (offline) throw Error("offline");
+        if (rotateOnPost && url.endsWith('/conversation-sync')) { rotateOnPost = false; app.setPairToken('r'.repeat(48)) }
         const response = await fetch(url, {
           ...options,
           headers: { ...options?.headers, origin: "chrome-extension://test" },
@@ -153,6 +155,29 @@ async function harness() {
   boot();
   return {
     local,
+    rotateOnPost: () => { rotateOnPost = true },
+    // Seed the exact previous IndexedDB v1 row/body schema, including its old
+    // credential-bound ID, without calling the new enqueue implementation.
+    seedLegacy: async (payload: any, override?: string) => {
+      await vm.runInContext("conversationOutbox.list()", context)
+      const sha = (v: string) => createHash('sha256').update(v).digest('hex')
+      const target = override || sha(app.pairToken + '\n' + vault.root + '\n' + vault.files().read('.oddbrain/capture-destination').trim())
+      const identity = sha(app.url + '\n' + app.pairToken), body = JSON.stringify({...payload,capture_target:target}), id = sha(identity + '\n' + body)
+      await new Promise<void>((yes,no) => {
+        const open = indexedDB.open('oddbrain-conversation-outbox',1)
+        open.onerror = () => no(open.error)
+        open.onsuccess = () => {
+          const db=open.result,tx=db.transaction(['rows','bodies','meta'],'readwrite'), meta=tx.objectStore('meta'), tally=meta.get('tally')
+          tally.onsuccess=()=>{
+            const old=tally.result || {bytes:0,count:0,sequence:0},bytes=Buffer.byteLength(body)
+            tx.objectStore('rows').add({id,identity,target,conversation:payload.conversation.key,title:payload.conversation.title,url:payload.url,op:payload.op,attachment:payload.attachment_id||'',hash:payload.hash||'',bytes,sequence:old.sequence+1,at:Date.now(),problem:''})
+            tx.objectStore('bodies').add({id,body}); meta.put({bytes:old.bytes+bytes,count:old.count+1,sequence:old.sequence+1},'tally')
+          }
+          tx.oncomplete=()=>{db.close();yes()};tx.onabort=()=>{db.close();no(tx.error)}
+        }
+      })
+      return {id,target}
+    },
     restart: async () => {
       await context.flushConversations();
       await vm.runInContext("conversationOutbox.close()", context);
@@ -734,15 +759,49 @@ it("pause retains bytes, exclusion removes them, and a page cannot inspect or di
     await h.dispose();
   }
 });
-it("pairing refusal discards private waiting bytes instead of redirecting them to another app", async () => {
+it("a refused pairing holds the bytes and sends them nowhere, and re-pairing finishes the save", async () => {
   const h = await harness();
   try {
     await offlineQueue(h);
     h.local.pairToken = "revoked";
     h.setOffline(false);
     await h.drain();
-    expect(await h.queued()).toHaveLength(0);
+    const held = await h.queued();
+    expect(held).toHaveLength(1);
+    expect(held[0].problem).toContain("Enter the current token");
+    expect(
+      h.vault.files().walkFiles("02 Sources/Conversations/Browser", ".json")
+        .files,
+    ).toHaveLength(0);
     expect(JSON.stringify(h.local.activity)).not.toContain(queuedMessage.text);
+    // Pasting the current token is all it takes; the queued bytes were never
+    // addressed to the old token.
+    h.local.pairToken = h.app.pairToken;
+    await h.drain();
+    expect(await h.queued()).toHaveLength(0);
+    expect(
+      h.vault.files().walkFiles("02 Sources/Conversations/Browser", ".json")
+        .files.length,
+    ).toBeGreaterThan(0);
+  } finally {
+    await h.dispose();
+  }
+});
+it("rotating the pairing token does not orphan captures already waiting in the browser", async () => {
+  const h = await harness();
+  try {
+    await offlineQueue(h);
+    // The app's own Rotate action: a new token, the same vault.
+    const rotated = "r".repeat(48);
+    h.app.setPairToken(rotated);
+    h.local.pairToken = rotated;
+    h.setOffline(false);
+    await h.drain();
+    expect(await h.queued()).toHaveLength(0);
+    expect(
+      h.vault.files().walkFiles("02 Sources/Conversations/Browser", ".json")
+        .files.length,
+    ).toBeGreaterThan(0);
   } finally {
     await h.dispose();
   }
@@ -896,3 +955,47 @@ it("an older desktop cannot silently receive queued writes without the destinati
     await h.dispose();
   }
 });
+
+it('the actual pairing action holds the queue, including a token refused during a POST', async () => {
+  const h=await harness()
+  try {
+    await offlineQueue(h); h.setOffline(false); h.rotateOnPost(); await h.drain()
+    expect(await h.queued()).toHaveLength(1); expect((await h.queued())[0].problem).toContain('Enter the current token')
+    const paired=await h.dispatch({type:'ob-pair',token:h.app.pairToken,port:h.app.port,confirmChange:true})
+    expect(paired.ok).toBe(true); expect(await h.queued()).toHaveLength(1)
+    await h.drain(); expect(await h.queued()).toHaveLength(0)
+  } finally {await h.dispose()}
+})
+it('legacy message and attachment rows survive restart and real re-pairing with their old receipts', async () => {
+  const h=await harness()
+  try {
+    h.setOffline(true)
+    const attachment={id:'file',kind:'file',name:'legacy.txt',url:'https://chatgpt.com/file',mime:'text/plain',representation:'original'}
+    const bytes=Buffer.from('LEGACY ATTACHMENT'),hash=createHash('sha256').update(bytes).digest('hex')
+    const common={url:queuedUrl,conversation:queuedConversation,message_id:'msg',attachment_id:'file'}
+    const receipts=[]
+    receipts.push(await h.seedLegacy({...queuedPayload,messages:[{...queuedMessage,attachments:[attachment]}]}))
+    receipts.push(await h.seedLegacy({...common,op:'media-part',index:0,hash,data:bytes.toString('base64')}))
+    receipts.push(await h.seedLegacy({...common,op:'media-finish',mime:'text/plain',size:bytes.length,parts:[hash]}))
+    await h.restart(); expect(await h.queued()).toHaveLength(3)
+    h.app.setPairToken('n'.repeat(48)); await h.dispatch({type:'ob-pair',token:h.app.pairToken,port:h.app.port,confirmChange:true})
+    h.setOffline(false); await h.drain(); expect(await h.queued()).toHaveLength(0)
+    const result=await h.dispatch({type:'ob-conversation-sync',payload:{...common,op:'media-state'}},queuedSender)
+    expect(h.vault.files().read(result.saved.source)).toBe('LEGACY ATTACHMENT')
+    const delivery=await h.dispatch({type:'ob-conversation-sync',payload:{...queuedPayload,op:'delivery',receipts:receipts.map(r=>r.id)}},queuedSender)
+    expect(delivery.saved).toBe(3)
+    expect(h.calls.every(url=>url.startsWith(h.app.url))).toBe(true)
+  } finally {await h.dispose()}
+})
+it('unknown legacy addresses stay held, and returning to the original vault releases only its own queue', async () => {
+  const h=await harness()
+  try {
+    await offlineQueue(h); await h.seedLegacy(queuedPayload,'e'.repeat(64))
+    const original=h.vault.files().read('.oddbrain/capture-destination')
+    h.vault.files().writeAtomic('.oddbrain/capture-destination','f'.repeat(64))
+    h.setOffline(false); await h.drain(); expect(await h.queued()).toHaveLength(2)
+    h.vault.files().writeAtomic('.oddbrain/capture-destination',original)
+    await h.drain(); const held=await h.queued(); expect(held).toHaveLength(1)
+    expect(held[0].target).toBe('e'.repeat(64)); expect(held[0].problem).toContain('Different vault')
+  } finally {await h.dispose()}
+})

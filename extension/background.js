@@ -93,8 +93,10 @@ async function connection() {
       error: "Pair with the desktop app to save to your vault.",
     };
   try {
-    const identity = await conversationIdentity();
+    const identity = await conversationIdentity(), epoch = conversationEpoch;
     const health = await api("/health");
+    if (epoch !== conversationEpoch || identity !== await conversationIdentity())
+      return { ok: false, error: "Pairing changed while checking the app. Check the connection again." };
     if (health.status === 401)
       return {
         ok: false,
@@ -107,12 +109,15 @@ async function connection() {
         ok: false,
         error: health.error || "This port did not answer as OddBrain.",
       };
-    await rememberConversationDestination(health, identity);
+    if (!(await rememberConversationDestination(health, identity)))
+      return { ok: false, error: "Pairing changed while checking the app. Check the connection again." };
     return {
       ok: true,
       captures: health.captures,
       available: health.available,
       durableCapture: /^[a-f0-9]{64}$/.test(health.capture_target || ""),
+      // Why recoverable capture is off, when the app can say.
+      captureProblem: String(health.capture_problem || ""),
     };
   } catch {
     return {
@@ -537,7 +542,7 @@ async function dispatch(msg, sender) {
         ) {
           if (!msg.confirmChange)
             throw Error("Confirm changing the paired app first.");
-          await clearConversations();
+          interruptConversations(); // Changing credentials holds the durable outbox; only Forget discards it.
           await chrome.storage.local.remove("conversationDestination");
           await chrome.storage.local.set({
             queue: [],

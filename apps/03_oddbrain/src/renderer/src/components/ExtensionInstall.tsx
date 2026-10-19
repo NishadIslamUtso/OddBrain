@@ -20,6 +20,6 @@ export default function ExtensionInstall({ onPermissions }: { onPermissions: () 
       <li>Keep OddBrain open with a vault selected. Enable browser capture under <strong>Privacy &amp; access → Agent access</strong> (or use the button above). Then return here and copy the pairing token from <strong>Agent access</strong> below.</li>
       <li>Open the extension → <strong>Settings → Connected app</strong>. Paste the token and choose <strong>Save &amp; test connection</strong>. Match the port shown by the app if you changed it.</li>
       <li>Allow the sites you want and open a conversation. Check progress before closing a page, especially while attachments are still downloading.</li>
-    </ol><p className="ob-control-scope">The browser requires this one-time confirmation. Copying the folder does not grant permissions or capture anything. It saves accessible conversation content, not an entire account or browser history. Finish queued captures before replacing an older extension.</p></details>
+    </ol><p className="ob-control-scope">The browser requires this one-time confirmation. Copying the folder does not grant permissions or capture anything. It saves accessible conversation content, not an entire account or browser history. To update with waiting captures, leave the extension installed: copy the exported files into its existing loaded folder, then click Reload. Do not remove it or rotate pairing before updating.</p></details>
   </section>
 }

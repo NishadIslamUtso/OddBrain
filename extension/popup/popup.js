@@ -885,7 +885,7 @@ bind("pair-save", async () => {
     if (
       !(await confirmAction(
         "Change paired app?",
-        "This clears waiting captures and cached capsules so they cannot cross into a different vault. Site exclusions stay.",
+        "Waiting conversation captures stay bound to their original vault and resume only after it is verified. Other queued page captures and cached capsules are cleared. Site exclusions stay.",
         "Change pairing",
       ))
     )

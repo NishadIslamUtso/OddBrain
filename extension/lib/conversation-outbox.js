@@ -80,10 +80,11 @@
       }
     }
     async function enqueue(payload, destination) {
+      // The target is the vault's identity. A pairing token may rotate and the
+      // app's port may change; neither is what this queue is addressed to.
       if (
         !["messages", "media-part", "media-finish"].includes(payload?.op) ||
-        !/^[a-f0-9]{64}$/.test(destination?.target || "") ||
-        !/^[a-f0-9]{64}$/.test(destination?.identity || "")
+        !/^[a-f0-9]{64}$/.test(destination?.target || "")
       )
         throw Error("A verified vault and a supported capture are required.");
       const body = JSON.stringify({
@@ -95,7 +96,7 @@
         throw Error(
           "This capture exceeds the 18 MB browser queue item limit. Nothing was truncated.",
         );
-      const id = await digest(destination.identity + "\n" + body);
+      const id = await digest(destination.target + "\n" + body);
       return transaction(
         ["rows", "bodies", "meta", "receipts"],
         "readwrite",
@@ -115,7 +116,7 @@
             );
           const row = {
             id,
-            identity: destination.identity,
+            identity: destination.target,
             target: destination.target,
             conversation: payload.conversation.key,
             title: String(payload.conversation.title || "").slice(0, 500),

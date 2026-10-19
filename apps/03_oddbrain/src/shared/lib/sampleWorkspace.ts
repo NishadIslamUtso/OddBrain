@@ -1,4 +1,4 @@
-import { recallTerms, recallMatches, recallSnippet } from './recall'
+import { recallScore, recallTerms, recallMatches, recallSnippet } from './recall'
 import type { Chat } from '../types'
 import type { Project } from './projects'
 
@@ -103,7 +103,7 @@ export function sampleVaultReply(path: string): Record<string, unknown> {
     case '/status': return { ok: true, available: true, vault: SAMPLE_ROOT, counts: { files: Object.keys(files).length } }
     case '/files': return { ok: true, available: true, root: SAMPLE_ROOT, files: Object.keys(files), capped: false }
     case '/file': { const name = url.searchParams.get('path') || ''; return Object.hasOwn(files, name) ? { ok: true, content: files[name], truncated: false } : { ok: false, error: 'This sample note does not exist.' } }
-    case '/recall': { const terms = recallTerms(url.searchParams.get('q') || ''); return { ok: true, incomplete: false, notices: ['Sample files only; no real account or model is connected.'], hits: Object.entries(files).filter(([path, text]) => recallMatches(path + ' ' + text, terms)).map(([path, text]) => ({ id: path, kind: 'file', path, title: path.split('/').at(-1), text: recallSnippet(text, terms), date: '', speaker: 'Sample file' })) } }
+    case '/recall': { const terms = recallTerms(url.searchParams.get('q') || ''); return { ok: true, incomplete: false, notices: ['Sample files only; no real account or model is connected.'], hits: Object.entries(files).filter(([path, text]) => recallMatches(path + ' ' + text, terms)).sort((a,b) => recallScore(b[0], b[1], terms) - recallScore(a[0], a[1], terms)).map(([path, text]) => ({ id: path, kind: 'file', path, title: path.split('/').at(-1), text: recallSnippet(text, terms), date: '', speaker: 'Sample file' })) } }
     case '/grep': { const q = (url.searchParams.get('q') || '').toLowerCase(); return { ok: true, hits: Object.entries(files).flatMap(([path, text]) => text.split('\n').flatMap((text, line) => text.toLowerCase().includes(q) ? [{ path, line: line + 1, text }] : [])).slice(0, 100) } }
     case '/today': return { available: true, snapshot: '# Sample day\n\nWorkshop plan drafted. Event page ready for review. Garden notes linked.\n\nNext: review the checklist, compare the artifact versions, and try a sample capture in Connectors.' }
     case '/sources': {

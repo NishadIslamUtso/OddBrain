@@ -1,3 +1,4 @@
+import MachineFlagRow from './MachineFlagRow'
 import ExtensionInstall from './ExtensionInstall'
 import { SETTINGS_AREAS, areaForSection } from '../state/settingsNavigation'
 import SampleWorkspaceControls from '../ui/SampleWorkspaceControls'
@@ -122,7 +123,7 @@ function AgentAccessCard({ isDemo }: { isDemo: boolean }): ReactNode {
           type="button"
           aria-label="Rotate the pairing token"
           onClick={() => {
-            if (!window.confirm('Rotate the pairing token? Already-paired extensions will lose access, and their waiting conversation captures will be discarded when the old token is refused. Let them finish saving first. Saved vault files are unchanged.')) return
+            if (!window.confirm('Rotate the pairing token? Already-paired extensions will lose access until you enter the new token. Updated extensions keep waiting captures for their original vault. Update older extensions and let them finish saving first. Saved vault files are unchanged.')) return
             void bridge.extensionPair.rotate().then(view => {
               if (view.ok) {
                 setToken(view.token)
@@ -1234,93 +1235,10 @@ export default function SettingsView({
  * keeps the same answer for the road it still drives.
  */
 function KeepLoadedRow(): React.JSX.Element {
-  const [state, setState] = useState<{ on: boolean; loaded: boolean }>({ on: false, loaded: false })
-  useEffect(() => {
-    if (isDemo) return
-    void bridge.app?.flags
-      ?.get()
-      .then(flags => setState({ on: flags.keepLoadedAlways === true, loaded: true }))
-      .catch(() => setState({ on: false, loaded: true }))
-  }, [])
-  const flip = (): void => {
-    const next = !state.on
-    setState({ on: next, loaded: true })
-    if (!isDemo) void bridge.app?.flags?.set({ keepLoadedAlways: next }).catch(() => undefined)
-  }
-  if (isDemo) {
-    return <span className="text-[11.5px] text-muted">A desktop-app switch — this window is the interface only.</span>
-  }
-  return (
-    <div className="flex gap-1.5 sm:justify-end">
-      {[
-        { label: 'Off', value: false },
-        { label: 'Always', value: true },
-      ].map(option => (
-        <button
-          key={option.label}
-          type="button"
-          className={`rounded-full border px-3 py-1 text-[12px] ${
-            state.on === option.value ? 'border-accent bg-accent/15 text-ink' : 'border-line text-muted hover:bg-white/[0.06]'
-          }`}
-          onClick={() => { if (option.value !== state.on) flip() }}
-          aria-pressed={state.on === option.value}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  )
+  return <MachineFlagRow flag="keepLoadedAlways" onLabel="Always" offLabel="Off" />
 }
-
-/**
- * The machine-level keep-it-running switches (login item, warm runtime).
- * Read from the app's own flags file through the guarded door; the desktop
- * app is the only machine they exist on, so the browser preview says so.
- */
-function StartupRow({
-  flag,
-  onLabel,
-  offLabel,
-}: {
-  flag: 'loginItem' | 'warmRuntime'
-  onLabel: string
-  offLabel: string
-}): React.JSX.Element {
-  const [state, setState] = useState<{ on: boolean; loaded: boolean }>({ on: false, loaded: false })
-  useEffect(() => {
-    if (isDemo) return
-    void bridge.app?.flags
-      ?.get()
-      .then(flags => setState({ on: flags[flag] === true, loaded: true }))
-      .catch(() => setState({ on: false, loaded: true }))
-  }, [flag])
-  const flip = (): void => {
-    const next = !state.on
-    setState({ on: next, loaded: true })
-    if (!isDemo) void bridge.app?.flags?.set({ [flag]: next }).catch(() => undefined)
-  }
-  if (isDemo) {
-    return <span className="text-[11.5px] text-muted">A desktop-app switch — this window is the interface only.</span>
-  }
-  return (
-    <div className="flex items-center gap-3 sm:justify-end">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={state.on}
-        aria-label={flag === 'loginItem' ? 'Run at startup' : 'Warm runtime'}
-        onClick={flip}
-        className={`relative h-[22px] w-[40px] shrink-0 rounded-full border transition-colors ${
-          state.on ? 'border-accent bg-accent/30' : 'border-line bg-card'
-        } ${state.loaded ? '' : 'opacity-50'}`}
-      >
-        <span
-          className={`absolute top-[2px] h-[16px] w-[16px] rounded-full transition-all ${state.on ? 'left-[20px] bg-accent' : 'left-[2px] bg-muted'}`}
-        />
-      </button>
-      <span className="text-[11.5px] text-muted">{state.on ? onLabel : offLabel}</span>
-    </div>
-  )
+function StartupRow(props: { flag: 'loginItem' | 'warmRuntime'; onLabel: string; offLabel: string }): React.JSX.Element {
+  return <MachineFlagRow {...props} />
 }
 
 /** The quick window's global hotkey (Ctrl+Shift+O). One toggle; the main

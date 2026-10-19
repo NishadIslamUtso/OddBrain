@@ -11,7 +11,7 @@ A local-first Windows desktop assistant with chat, projects, artifacts, a Markdo
 | Path | Purpose |
 |---|---|
 | `apps/03_oddbrain/` | Shipped application: Electron, React and TypeScript. |
-| `extension/` | Chromium Manifest V3 companion, version 0.5.0. |
+| `extension/` | Chromium Manifest V3 companion, version 0.5.1. |
 | `vault/Brain/` | Starter vault, templates and engine rulebooks. |
 | `apps/03_oddbrain/store/packs/` | Installable skills and prompts. |
 | `.github/workflows/` | Linux/Windows checks and Windows installer build. |
@@ -45,9 +45,9 @@ Settings has eight groups, with search across every setting. Appearance experime
 
 **Vault → Capture sources** is the single home for source details. In **People**, content comes first; account linking, merging and history are behind **Manage person**.
 
-Use the search button or **Ctrl K** to find app chats, captured conversation text, confirmed memory and saved Markdown files. Results open their sources; this is word search, not an AI-generated answer. Searching does not upload your records or need a running model.
+Use the search button or **Ctrl K** to find app chats, captured conversation text, confirmed memory and saved Markdown files. Put an exact phrase in quotes. Saved results are ranked, with the best three matching messages per conversation; limits are reported. The palette supports arrows, Home/End and Enter. **Vault** uses the same guarded search when you press Enter. Results open their sources; this is word search, not an AI-generated answer. Searching does not upload your records or need a running model.
 
-In **Memory inbox**, select related suggestions, inspect their wording and quotations, then confirm the group. Nothing is preselected. **People**, **Journal** and **Life Story** offer readable timelines and in-view search; unknown event dates stay unknown.
+In **Memory inbox**, select related suggestions, inspect their wording and quotations, then confirm the group. Nothing is preselected. **People**, **Journal** and **Life Story** offer readable timelines and in-view search; unknown event dates stay unknown. Open **Evidence and revisions → Copy with sources** to copy a record with its quotation, qualification and review status. This does not approve it or send it to a model.
 
 ### Backup and recovery
 
@@ -69,7 +69,7 @@ Fresh profiles and **Reset appearance** use **Ink & Sketchbook**, including its 
 4. Use **Browser capture permissions** to permit capture, then return to Connectors and copy the pairing token from **Agent access**. Paste it into the extension's **Settings → Connected app**, and **Save & test connection**.
 5. Grant access to any desired people/Classroom sites, then open the conversation itself.
 
-Browser approval is still manual; exporting files does not install, pair or grant permissions. Browser-only previews cannot export. Finish queued captures before removing/replacing an older extension. Native folder dialogs and loading this export on the target laptop still need acceptance.
+Browser approval is still manual; exporting files does not install, pair or grant permissions. Browser-only previews cannot export. To update with waiting captures, leave the extension installed: copy the exported files into its existing loaded folder and click **Reload** in the browser extension manager. Update before rotating pairing. The updated companion holds conversation captures through token changes and resumes only for their verified original vault; **Forget pairing**, explicit discard and privacy revocation still delete waiting data. Loading a new folder can create a different extension and leave the old queue behind. Native folder dialogs and loading this export on the target laptop still need acceptance.
 
 The companion captures accessible content in supported open conversations, not an entire account archive. It does not collect browser history. Fully queued data can retry after a normal browser restart; incomplete attachment downloads still need the source. See [capture coverage and limits](CONTEXT.md#install-and-collection-coverage) before relying on it.
 

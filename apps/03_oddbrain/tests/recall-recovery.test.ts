@@ -139,3 +139,38 @@ it('does not ignore excess query words silently', () => {
   const h = setup()
   expect(searchVault(h.vault.files(), Array(17).fill('toolbox').join(' ')).ok).toBe(false)
 })
+
+describe('ranked phrase recall keeps privacy and original-source guarantees', () => {
+  it('quotes mean a contiguous phrase, even across whitespace, in both search surfaces', () => {
+    const h=setup(), f=h.vault.files()
+    f.writeAtomic('Notes/phrase.md','A tin\n roof protects the tools')
+    f.writeAtomic('Notes/scattered.md','The tin was beside the roof')
+    expect(searchVault(f,'"tin roof"').hits.map(x=>x.path)).toEqual(['Notes/phrase.md'])
+    expect(searchVault(f,'tin roof').hits).toHaveLength(2)
+    const response=handleVaultRequest(h.vault,{route:'/recall',method:'GET',query:new URLSearchParams({q:'"tin roof"'}),body:{},headers:new Headers()} as never)
+    expect(response.status).toBe(200)
+  })
+  it('ranks a later strong title above the first 60 weak hits, reporting the result limit', () => {
+    const h=setup(), f=h.vault.files()
+    for(let i=0;i<65;i++) f.writeAtomic(`Notes/a${i}.md`,'tin roof')
+    f.writeAtomic('Notes/z/tin roof.md','tin roof tin roof')
+    const reply=searchVault(f,'tin roof')
+    expect(reply.hits).toHaveLength(60); expect(reply.hits[0].path).toBe('Notes/z/tin roof.md'); expect(reply.incomplete).toBe(true)
+  })
+  it('has no stale same-size cache, and rechecks privacy and generated-record exclusion every time', () => {
+    const h=setup(), f=h.vault.files()
+    f.writeAtomic('Notes/cache.md','one-sentinel'); expect(searchVault(f,'one-sentinel').hits).toHaveLength(1)
+    f.writeAtomic('Notes/cache.md','two-sentinel'); expect(searchVault(f,'one-sentinel').hits).toEqual([])
+    f.writeAtomic('Notes/private.md','---\nurl: https://private.example/chat\n---\nsecret-sentinel')
+    expect(searchVault(f,'secret-sentinel').hits).toHaveLength(1)
+    f.writeAtomic('00 System/Privacy & Access.md','---\nexcluded_patterns: ["private.example/*"]\n---\n')
+    f.writeAtomic('03 Memory/Life Story/Chapters/withdrawn.md','---\nstatus: withdrawn\n---\nsecret-sentinel')
+    expect(searchVault(f,'secret-sentinel').hits).toEqual([])
+  })
+  it('keeps a long conversation’s best three matches, not its first three', () => {
+    const h=setup(), messages=Array.from({length:8},(_,i)=>({...h.message,id:'rank'+i,text:i===7?'roof '.repeat(5):'roof'}))
+    h.vault.conversationSync({op:'messages',url:h.conversation.url,conversation:h.conversation,messages,order:messages.map(m=>m.id)})
+    const reply=searchVault(h.vault.files(),'roof')
+    expect(reply.hits).toHaveLength(3); expect(reply.hits[0].text).toBe('roof roof roof roof roof'); expect(reply.incomplete).toBe(true)
+  })
+})

@@ -103,3 +103,9 @@ test("a browser storage write failure aborts the entire enqueue without reportin
   expect(await queue.receipts([row.id])).toMatchObject({ queued: 1, saved: 0 });
   await queue.close();
 });
+test('queue deduplication follows the vault across a credential change',async()=>{
+ const queue=create({indexedDB:new IDBFactory(),digest})
+ const first=await queue.enqueue(payload(),destination)
+ const second=await queue.enqueue(payload(),{...destination,identity:'c'.repeat(64)})
+ expect(second.id).toBe(first.id);expect(await queue.list()).toHaveLength(1);await queue.close()
+})
