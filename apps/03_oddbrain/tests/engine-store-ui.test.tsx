@@ -8,7 +8,7 @@ import SkillsCatalogSection from '../src/renderer/src/components/SkillsCatalogSe
 import McpServersSection from '../src/renderer/src/components/McpServersSection'
 import ExtensionsSection from '../src/renderer/src/components/ExtensionsSection'
 import { AGY_MARKETPLACE as source, type StoreEngine } from '../src/shared/lib/marketplace'
-const f = vi.hoisted(() => ({ demo: false, market: { sources: vi.fn(), browse: vi.fn(), probe: vi.fn(), installed: vi.fn(), plan: vi.fn(), confirm: vi.fn(), cancel: vi.fn() }, skills: { installCatalog: vi.fn() }, mcp: { read: vi.fn(), write: vi.fn() } }))
+const f = vi.hoisted(() => ({ demo: false, market: { inspect: vi.fn(), sources: vi.fn(), browse: vi.fn(), probe: vi.fn(), installed: vi.fn(), plan: vi.fn(), confirm: vi.fn(), cancel: vi.fn() }, skills: { installCatalog: vi.fn() }, mcp: { read: vi.fn(), write: vi.fn() } }))
 vi.mock('../src/renderer/src/platform/bridge', () => ({ get isDemo() { return f.demo }, bridge: { marketplace: f.market, skills: f.skills, mcp: f.mcp } }))
 vi.mock('../src/renderer/src/components/ModsSection', () => ({ default: () => createElement('p', null, 'Existing OddBrain packs') }))
 let root: Root, host: HTMLDivElement
@@ -108,4 +108,21 @@ test('a failed installed-list refresh removes old status rather than presenting 
   expect(host.querySelector('[aria-label="Installed packages"]')).not.toBeNull()
   await click('Read installed plugins')
   expect(host.querySelector('[aria-label="Installed packages"]')).toBeNull(); expect(host.textContent).toContain('Cannot read agy')
+})
+
+test('package inspection is read-only, engine-scoped, and renders publisher text without executing it', async () => {
+  f.market.inspect.mockResolvedValue({ ok: true, value: { source: { repo: 'owner/package', path: '', ref: 'HEAD' }, revision: 'a'.repeat(40), files: ['skills/notes/SKILL.md'], skills: ['skills/notes/SKILL.md'], connectors: [], agents: [], hooks: [], commands: [], requirements: ['Node 24'], readme: '<script>window.pwned=true</script>', notices: ['No scripts were run.'] } })
+  await mount(createElement(EngineMarketplace, { engine: 'agy' })); await click('Browse / refresh'); await click('Inspect package')
+  expect(f.market.inspect).toHaveBeenCalledWith(source, 'notes', 'agy')
+  expect(host.textContent).toContain('skills/notes/SKILL.md'); expect(host.textContent).toContain('No scripts were run')
+  expect(host.querySelector('script')).toBeNull(); expect(f.market.plan).not.toHaveBeenCalled(); expect(f.market.confirm).not.toHaveBeenCalled()
+})
+test('a canceled package inspection cannot install or show a late report', async () => {
+  let finish!: (value: unknown) => void
+  f.market.inspect.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  await mount(createElement(EngineMarketplace, { engine: 'agy' })); await click('Browse / refresh')
+  await act(() => [...host.querySelectorAll('button')].find(b => b.textContent === 'Inspect package')!.click())
+  await click('Cancel operation')
+  await act(async () => finish({ ok: true, value: { files: [] } }))
+  expect(host.querySelector('[aria-label="Package contents"]')).toBeNull(); expect(f.market.confirm).not.toHaveBeenCalled()
 })

@@ -1,3 +1,5 @@
+import type { PackageInspection } from '@shared/lib/packageInspection'
+import PackageDetails from './PackageDetails'
 import { useEffect, useRef, useState } from 'react'
 import {
   AGY_MARKETPLACE,
@@ -27,8 +29,22 @@ export default function EngineMarketplace({
   const [note, setNote] = useState(''),
     [installed, setInstalled] = useState(''),
     [busy, setBusy] = useState(false)
+  const [inspection, setInspection] = useState<{ name: string; report: PackageInspection } | null>(null)
+  const inspectionGeneration = useRef(0)
+  const inspect = async (name: string) => {
+    if (!catalog) return
+    const own = ++inspectionGeneration.current; setBusy(true); setInspection(null); setNote('')
+    try {
+      const result = await bridge.marketplace.inspect(catalog.repo, name, engine)
+      if (!mounted.current || own !== inspectionGeneration.current) return
+      if (!result.ok) throw Error(result.error)
+      setInspection({ name, report: result.value })
+    } catch (e) { if (mounted.current && own === inspectionGeneration.current) setNote((e as Error).message) }
+    finally { if (mounted.current) setBusy(false) }
+  }
   const mounted = useRef(true)
   const cancel = () => {
+    inspectionGeneration.current++
     void bridge.marketplace.cancel(engine).catch(() => {
       if (mounted.current) setNote('Cancellation could not be confirmed. Read installed plugins before retrying.')
     })
@@ -48,6 +64,7 @@ export default function EngineMarketplace({
     setBusy(true)
     setPlan(null)
     setCatalog(null)
+    setInspection(null)
     setNote('')
     try {
       const result = await bridge.marketplace.browse(repo.trim(), engine)
@@ -268,12 +285,14 @@ export default function EngineMarketplace({
                     Author: {p.author} · Source: {catalog.repo}
                   </p>
                   <div className="ob-inline-actions">
+                    <button type="button" disabled={busy || isDemo} onClick={() => void inspect(p.name)}>Inspect package</button>
                     {actions.map((action) => (
                       <button type="button" key={action} disabled={busy} onClick={() => void prepare(action, p.name)}>
                         Review {action}
                       </button>
                     ))}
                   </div>
+                  {inspection?.name === p.name ? <PackageDetails report={inspection.report} /> : null}
                 </li>
               ))}
           </ul>

@@ -1,3 +1,7 @@
+import { AGY_PICTURES_ANSWER } from './engine/agy'
+import { restartIdleConnection } from './engine/restart'
+import { createTurnArchive } from './turnArchive'
+import { dispatchRecordedTurn } from './recordedDispatch'
 import { effortTarget, selectedEffort, type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
 import { checkEffortSelection, createCapabilityInspector } from './engine/nativeCapabilities'
 import type { ThinkingMode } from '../shared/lib/engine'
@@ -278,6 +282,10 @@ let mediaService: ReturnType<typeof createMediaService> | undefined
 let marketplaceService: ReturnType<typeof createMarketplaceService> | undefined
 let agyMarketplaceService: ReturnType<typeof createAgyMarketplaceService> | undefined
 function registerBridges(): void {
+  const turnArchive = createTurnArchive(join(app.getPath('userData'), 'turn-transcripts'))
+  const transcriptAnswer = <T,>(read: () => T) => { try { return { ok: true as const, value: read() } } catch { return { ok: false as const, error: 'The transcript could not be read. Its original file has not been changed.' } } }
+  handle('transcripts:list', (_event, before: string = '') => transcriptAnswer(() => turnArchive.list(before)))
+  handle('transcripts:read', (_event, id: string) => transcriptAnswer(() => turnArchive.read(id)))
   mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
   marketplaceService = createMarketplaceService({ file: join(app.getPath('userData'), 'marketplaces.json') })
   agyMarketplaceService = createAgyMarketplaceService({ cacheFile: join(app.getPath('home'), '.gemini', 'antigravity', 'cache', 'marketplaces', 'antigravity-plugins-official', 'marketplace.json') })
@@ -305,6 +313,7 @@ function registerBridges(): void {
   handle('media:cancel', event => { mediaService!.cancel(event.sender.id) })
   handle('market:sources', (_event, engine?: unknown) => market(engine).sources())
   handle('market:browse', (event, repo: string, engine?: unknown) => marketAnswer(() => market(engine).browse(repo, track(event.sender))))
+  handle('market:inspect', (event, repo: string, plugin: string, engine?: unknown) => marketAnswer(() => market(engine).inspect(track(event.sender), repo, plugin)))
   handle('market:probe', (event, engine?: unknown) => marketAnswer(() => market(engine).probe(track(event.sender))))
   handle('market:installed', (event, engine?: unknown) => marketAnswer(() => market(engine).installed(track(event.sender))))
   handle('market:plan', (event, repo: string, action: MarketplaceAction, plugin?: string, engine?: unknown) => marketAnswer(() => market(engine).plan(track(event.sender), repo, action, plugin)))
@@ -636,13 +645,15 @@ function registerBridges(): void {
   handle(
     'engine:send',
     async (event, prompt: string, cwd: string, pictures: unknown = []): Promise<{ ok: boolean; answer: string }> => {
-      const text = typeof prompt === 'string' ? prompt.trim().slice(0, 20000) : ''
+      const text = typeof prompt === 'string' ? prompt.trim() : ''
+      if (text.length > 20000) return { ok: false, answer: 'The prompt exceeds 20,000 characters. Nothing was sent or shortened.' }
       if (!text) return { ok: false, answer: 'Write what the engine should do first.' }
       // Pictures: only what the wire can carry, only a few, only small. A bad
       // list is refused with the reason, never silently dropped.
       const checkedImages = engineImages(pictures ?? [])
       if (!checkedImages.ok) return checkedImages
       const images = checkedImages.images
+      if (settings.engine.id === 'agy' && images.length) return { ok: false, answer: AGY_PICTURES_ANSWER }
       if (!engine) return { ok: false, answer: 'The engine is still waking up, try again in a moment.' }
       // The working folder is the app's decision, never the window's: the
       // folder the owner picked in the engine bay, or the vault when none.
@@ -684,19 +695,19 @@ function registerBridges(): void {
         }
         auth = { provider: 'anthropic', apiKey: key }
       }
-      const sent = engine.send(text, {
+      const sent = dispatchRecordedTurn(turnArchive, { prompt: text, engine: usedEngine.id, model: usedEngine.model, workspace: usedEngine.workspace || vaultRoot(), pictures: images.length }, receive => engine!.send(text, {
         cwd: usedEngine.workspace || vaultRoot(),
         settings: usedEngine,
         auth, images,
         checkpointDir: join(app.getPath('userData'), 'checkpoints'),
         shouldCheckpoint: () => automation?.preferences().autoKeep !== false,
-        onEvent: (event: EngineEvent) => {
-          automation?.ingest(event)
-          pushEngineEvent(event)
-          if (event.kind === 'done') void hookRunner.run('turn-done').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
-          if (event.kind === 'error') void hookRunner.run('turn-error').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
-          if (event.kind === 'permission') void hookRunner.run('permission').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
-        },
+        onEvent: receive,
+      }), () => engine?.stop(), (event: EngineEvent) => {
+        automation?.ingest(event)
+        pushEngineEvent(event)
+        if (event.kind === 'done') void hookRunner.run('turn-done').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
+        if (event.kind === 'error') void hookRunner.run('turn-error').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
+        if (event.kind === 'permission') void hookRunner.run('permission').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
       })
       if (!sent.ok) automation?.rejectWork()
       return sent
@@ -1015,6 +1026,8 @@ function registerBridges(): void {
     }
   })
 
+  handle('engine:restart', () => restartIdleConnection(engine, dispatchingWork))
+
   handle('engine:stop', () => {
     workDispatchGeneration++
     automation?.stopWork()
@@ -1098,14 +1111,14 @@ function registerBridges(): void {
   handle('vault:capture-chat', (_event, payload: { title: string; markdown: string }): { ok: boolean; answer: string } => {
     const title = typeof payload?.title === 'string' ? payload.title.trim().slice(0, 80) : ''
     const markdown = typeof payload?.markdown === 'string' ? payload.markdown : ''
-    if (!title || !markdown || markdown.length > 100_000) {
-      return { ok: false, answer: 'That is not a conversation this app will capture.' }
+    if (!title || !markdown || Buffer.byteLength(markdown, 'utf8') > 8_000_000) {
+      return { ok: false, answer: 'The capture is empty or exceeds 8 MB. Export the full chat as Markdown instead; nothing was shortened.' }
     }
     const service = createVaultService({ vaultPath: vaultRoot() })
     if (!service.available()) return { ok: false, answer: 'No vault to capture into.' }
     try {
       const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-      const name = `${stampFor(new Date())}${slug ? `-${slug}` : ''}.md`
+      const name = `${stampFor(new Date())}-${randomUUID()}${slug ? `-${slug}` : ''}.md`
       service.files().write(`Captures/${name}`, markdown)
       return { ok: true, answer: `Captures/${name}` }
     } catch (error) {

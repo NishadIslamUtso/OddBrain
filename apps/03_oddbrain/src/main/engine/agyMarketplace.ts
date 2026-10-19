@@ -1,3 +1,5 @@
+import { packageSource } from '../../shared/lib/packageInspection'
+import { inspectPackage } from './packageInspection'
 import { randomUUID } from 'node:crypto'
 import { lstatSync, readFileSync } from 'node:fs'
 import { AGY_MARKETPLACE, AGY_MARKETPLACE_URL, type Marketplace, type MarketplaceAction, type MarketplacePlan } from '../../shared/lib/marketplace'
@@ -20,7 +22,7 @@ export function readAgyMarketplace(raw: string): Marketplace {
   const plugins = value.plugins.map((p: any) => {
     if (!p || typeof p.name !== 'string' || !SLUG.test(p.name) || names.has(p.name.toLowerCase())) throw Error('The agy catalog has an invalid or duplicate plugin name.')
     names.add(p.name.toLowerCase())
-    return { name: p.name, description: typeof p.description === 'string' ? p.description.slice(0, 800) : '', author: typeof p.author === 'string' ? p.author.slice(0, 100) : typeof p.author?.name === 'string' ? p.author.name.slice(0, 100) : 'Not supplied' }
+    return { name: p.name, description: typeof p.description === 'string' ? p.description.slice(0, 800) : '', ...(packageSource('', p.source) ? { inspectSource: packageSource('', p.source) } : {}), author: typeof p.author === 'string' ? p.author.slice(0, 100) : typeof p.author?.name === 'string' ? p.author.name.slice(0, 100) : 'Not supplied' }
   })
   return { repo: AGY_MARKETPLACE, name: AGY_MARKETPLACE, plugins, notice: `Source: ${AGY_MARKETPLACE_URL}. The engine resolves the package at install time; browsing does not pin its version.` }
 }
@@ -69,6 +71,11 @@ export function createAgyMarketplaceService(options: { cacheFile?: string; fetch
   return {
     sources: (): string[] => [AGY_MARKETPLACE], cancel,
     cancelAll: (): void => { for (const owner of new Set([...jobs.keys(), ...[...plans.values()].map(p => p.owner)])) cancel(owner) },
+    inspect: (owner: number, repo: string, plugin: string) => operation(owner, signal => {
+      const source = repo === AGY_MARKETPLACE ? catalog?.plugins.find(p => p.name === plugin)?.inspectSource : undefined
+      if (!source) throw Error('This agy listing does not expose a supported public GitHub package source. Review the package in agy; no source was guessed.')
+      return inspectPackage(source, signal, options.fetchImpl || fetch)
+    }),
     probe: (owner: number): Promise<string> => operation(owner, async signal => {
       const binary = command(); await checkHelp(binary, 'install', signal); await checkHelp(binary, 'list', signal)
       return 'Installed agy exposes plugin install and list --json. Each change still needs your review. Authentication and required plugin settings remain with agy.'

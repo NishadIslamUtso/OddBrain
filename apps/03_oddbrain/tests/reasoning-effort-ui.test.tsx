@@ -8,9 +8,9 @@ import ReasoningEffort from '../src/renderer/src/components/ReasoningEffort'
 import Composer from '../src/renderer/src/components/Composer'
 import { LookActions, LookContext } from '../src/renderer/src/ui/LookContext'
 import { DEFAULT_LOOK } from '../src/renderer/src/state/look'
-const fixture = vi.hoisted(() => ({ engine: { settings: {} as typeof DEFAULT_ENGINE, models: { entries: [], loading: false }, detection: { engines: [] }, setThinking: vi.fn() }, capabilities: vi.fn(), send: vi.fn() }))
+const fixture = vi.hoisted(() => ({ engine: { settings: {} as typeof DEFAULT_ENGINE, models: { entries: [], loading: false }, detection: { engines: [] }, setThinking: vi.fn() }, capabilities: vi.fn(), send: vi.fn(), pickFiles: vi.fn() }))
 vi.mock('../src/renderer/src/state/engine', async importOriginal => ({ ...await importOriginal<object>(), useEngine: () => fixture.engine }))
-vi.mock('../src/renderer/src/platform/bridge', async importOriginal => ({ ...await importOriginal<object>(), getEngineApi: () => ({ capabilities: fixture.capabilities, setThinking: fixture.engine.setThinking, send: fixture.send }) }))
+vi.mock('../src/renderer/src/platform/bridge', async importOriginal => { const actual = await importOriginal<any>(); return { ...actual, isDemo: false, bridge: { ...actual.bridge, engine: { ...actual.bridge.engine, pickFiles: fixture.pickFiles } }, getEngineApi: () => ({ capabilities: fixture.capabilities, setThinking: fixture.engine.setThinking, send: fixture.send }) } })
 vi.mock('../src/renderer/src/hooks/useDictation', () => ({ default: () => ({ active: false, toggle: vi.fn(), cancel: vi.fn() }) }))
 let host: HTMLDivElement, root: Root
 const report = (status: 'reported' | 'unverified' = 'reported'): EngineCapabilityReport => ({ ok: status === 'reported', models: [], effort: { target: effortTarget(fixture.engine.settings), status, levels: status === 'reported' ? ['low', 'high'] : [], note: status === 'reported' ? 'Applies to your next message.' : 'Not verified for this provider.' } })
@@ -65,4 +65,25 @@ test('Show thinking changes only display preferences, never effort, inference, o
   await act(async () => toggle.click())
   expect(change).toHaveBeenCalledWith({ showThinking: true })
   expect(fixture.engine.setThinking).not.toHaveBeenCalled(); expect(fixture.send).not.toHaveBeenCalled(); expect(fixture.capabilities).not.toHaveBeenCalled()
+})
+
+test('file picker inserts into the latest draft rather than replacing text typed while it was open', async () => {
+  let finish!: (paths: string[]) => void
+  fixture.pickFiles.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const change = vi.fn(), send = vi.fn()
+  const renderComposer = (value: string) => act(async () => root.render(<Composer value={value} onChange={change} onSend={send} onStop={() => {}} busy={false} notice="" />))
+  await renderComposer('Original @')
+  await act(() => [...host.querySelectorAll('button')].find(b => b.textContent === 'Choose files to mention')!.click())
+  await renderComposer('My newer draft')
+  await act(async () => finish(['/work/file.txt']))
+  expect(change).toHaveBeenCalledWith(expect.stringMatching(/^My newer draft/)); expect(change.mock.calls[0][0]).toContain('/work/file.txt'); expect(send).not.toHaveBeenCalled()
+})
+test('closing the composer during a file picker cannot write into a later screen', async () => {
+  let finish!: (paths: string[]) => void
+  fixture.pickFiles.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+  const change = vi.fn()
+  await act(() => root.render(<Composer value="@" onChange={change} onSend={() => {}} onStop={() => {}} busy={false} notice="" />))
+  await act(() => [...host.querySelectorAll('button')].find(b => b.textContent === 'Choose files to mention')!.click())
+  await act(() => root.render(<p>Different screen</p>)); await act(async () => finish(['/work/old-file.txt']))
+  expect(change).not.toHaveBeenCalled()
 })

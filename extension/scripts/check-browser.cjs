@@ -27,7 +27,7 @@ fs.mkdirSync(dir, { recursive: true });
       viewport: { width: 1440, height: 1000 },
     });
     const page = await context.newPage();
-    page.on("pageerror", (e) => errors.push(e.message));
+    page.on("pageerror", (e) => errors.push(e.stack || e.message));
     await page.goto(target);
     const ui = () => page.frameLocator("#extension"),
       inner = () => page.frames().find((f) => f.url().includes("/popup/"));
@@ -325,7 +325,7 @@ fs.mkdirSync(dir, { recursive: true });
     );
     // Content script insertion, explicit prompt cooking, and extraction in an actual DOM.
     const content = await context.newPage();
-    content.on("pageerror", (e) => errors.push(e.message));
+    content.on("pageerror", (e) => errors.push(e.stack || e.message));
     await content.goto(target + "/preview/index.html");
     await content.setContent(
       '<main><h1>Public page</h1><p>Useful public text.</p><form>PRIVATE_FORM<textarea id="first">First draft</textarea><textarea id="second">Second draft</textarea></form><div contenteditable="true" id="editable">PRIVATE_EDITOR</div><p style="display:none">PRIVATE_HIDDEN</p></main>',

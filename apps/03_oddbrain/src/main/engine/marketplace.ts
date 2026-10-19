@@ -1,3 +1,5 @@
+import { packageSource } from '../../shared/lib/packageInspection'
+import { inspectPackage } from './packageInspection'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs'
@@ -19,7 +21,7 @@ export function readMarketplace(repo: string, raw: string): Marketplace {
   const plugins = value.plugins.map((p: any) => {
     if (!p || typeof p.name !== 'string' || !SLUG.test(p.name) || names.has(p.name)) throw Error('Marketplace has an invalid or duplicate plugin name.')
     names.add(p.name)
-    return { name: p.name, description: typeof p.description === 'string' ? p.description.slice(0, 800) : '', author: typeof p.author === 'string' ? p.author.slice(0, 100) : typeof p.author?.name === 'string' ? p.author.name.slice(0, 100) : 'Not supplied' }
+    return { name: p.name, description: typeof p.description === 'string' ? p.description.slice(0, 800) : '', ...(packageSource(repo, p.source) ? { inspectSource: packageSource(repo, p.source) } : {}), author: typeof p.author === 'string' ? p.author.slice(0, 100) : typeof p.author?.name === 'string' ? p.author.name.slice(0, 100) : 'Not supplied' }
   })
   return { repo: repository(repo), name: value.name, plugins }
 }
@@ -89,6 +91,11 @@ export function createMarketplaceService(options: { file: string; fetchImpl?: ty
   return {
     sources, cancel,
     cancelAll: (): void => { for (const owner of new Set([...jobs.keys(), ...[...plans.values()].map(plan => plan.owner)])) cancel(owner) },
+    inspect: (owner: number, repo: string, plugin: string) => operation(owner, signal => {
+      const source = catalogs.get(repository(repo))?.plugins.find(p => p.name === plugin)?.inspectSource
+      if (!source) throw Error('Browse first and choose a package with a supported public GitHub source. No package code was run.')
+      return inspectPackage(source, signal, options.fetchImpl || fetch)
+    }),
     probe: (owner: number): Promise<string> => operation(owner, async signal => {
       const help = await execute(['plugin', 'install', '--help'], command(), signal)
       if (!help.includes('--json') || !help.includes('--scope')) throw Error('This installed CLI lacks the verified marketplace install flags. Update Claude Code or use its own terminal; nothing was installed.')

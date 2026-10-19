@@ -11,8 +11,10 @@ import EngineBay from '../src/renderer/src/components/EngineBay'
  */
 
 const fixture = vi.hoisted(() => ({
+  restart: vi.fn(),
   engine: {
     settings: { id: 'claude-code', model: '', baseUrl: '', workspace: '', approval: 'ask' },
+    alive: false, ambient: { busy: false, note: '', updatedAt: null },
     detection: { loading: false, engines: [
       { id: 'claude-code', found: true, version: '2.1.302', path: '/usr/local/bin/claude' },
       { id: 'agy', found: true, version: '1.0.0', path: '/usr/local/bin/agy' },
@@ -25,6 +27,7 @@ const fixture = vi.hoisted(() => ({
   },
 }))
 vi.mock('../src/renderer/src/state/engine', () => ({ useEngine: () => fixture.engine }))
+vi.mock('../src/renderer/src/platform/bridge', async original => { const actual = await original<any>(); return { ...actual, getEngineApi: () => ({ ...actual.getEngineApi(), restart: fixture.restart }) } })
 
 let host: HTMLDivElement, root: Root
 beforeEach(() => {
@@ -69,4 +72,12 @@ test('picking an engine that is not installed says a turn will refuse', async ()
   await act(async () => { radio('agy').click(); await Promise.resolve() })
   expect(status()).toContain('Stop the active task')
   expect(status()).not.toContain('the next one uses')
+})
+
+test('restart is disabled during work and only requests an app-owned restart when idle', async () => {
+ fixture.engine.turn={state:'running'};await mount()
+ const button=()=>[...host.querySelectorAll('button')].find(b=>b.textContent==='Restart connection')!
+ expect(button().disabled).toBe(true);await act(()=>button().click());expect(fixture.restart).not.toHaveBeenCalled()
+ fixture.engine.turn=null;fixture.restart.mockResolvedValue({ok:true,answer:'Connection stopped; next send reconnects.'});await mount()
+ await act(async()=>button().click());expect(fixture.restart).toHaveBeenCalledOnce();expect(host.textContent).toContain('next send reconnects');expect(fixture.engine.pick).not.toHaveBeenCalled()
 })

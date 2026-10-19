@@ -1,3 +1,5 @@
+import { insertFileMentions } from '@shared/lib/fileMentions'
+import SavedDrafts from '../ui/SavedDrafts'
 import { AGY_APPROVAL_CHOICES, AGY_APPROVAL_NOTE } from '@shared/lib/engineApproval'
 import ReasoningEffort from './ReasoningEffort'
 import { useContext, useEffect, useRef, useState, type ReactNode } from 'react'
@@ -11,7 +13,7 @@ import type { Recipe } from '@shared/lib/recipes'
 import { renderRecipe } from '@shared/lib/recipes'
 import { loadRecipes, runRecipe, useRecipes } from '@/state/recipes'
 import { mapContextBlock } from '@shared/lib/repoMap'
-import { getEngineApi } from '@/platform/bridge'
+import { getEngineApi, bridge, isDemo } from '@/platform/bridge'
 import { vaultGet, type VaultReply } from '@shared/lib/vault'
 import { useEngine, type EngineTurn } from '@/state/engine'
 import useDismiss from '@/hooks/useDismiss'
@@ -71,6 +73,19 @@ export default function Composer({
   const box = useRef<HTMLTextAreaElement | null>(null)
   const [boxOpen, setBoxOpen] = useState<'engine' | 'models' | null>(null)
   const [cook, setCook] = useState(false)
+  const [savedDrafts, setSavedDrafts] = useState(false)
+  const [fileNote, setFileNote] = useState(''), [pickingFiles, setPickingFiles] = useState(false)
+  const liveDraft = useRef(value); liveDraft.current = value
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false } }, [])
+  const mentionFiles = async () => {
+    if (isDemo) { setFileNote('File references require the desktop picker. No paths or files were sent.'); return }
+    if (pickingFiles) return
+    setPickingFiles(true)
+    try { const paths = await bridge.engine.pickFiles(); if (mounted.current && paths.length) { onChange(insertFileMentions(liveDraft.current, paths)); setFileNote('Paths inserted, not file contents. The engine uses its own tools and permissions when you send.') } }
+    catch (e) { if (mounted.current) setFileNote((e as Error).message || 'Files could not be selected.') }
+    finally { if (mounted.current) setPickingFiles(false) }
+  }
   const [tools, setTools] = useState(false)
   const toolsRef = useRef<HTMLDivElement | null>(null)
   const look = useLook(), changeLook = useContext(LookActions)
@@ -130,6 +145,7 @@ export default function Composer({
     <div className="ob-composer-host shrink-0 px-6 pb-4">
       <BriefContext />
       <ComposerSurface>
+        {/(?:^|\s)@$/.test(value) && !listening ? <div className="px-4 py-2 text-[12px]"><button type="button" className="ob-text-button" disabled={pickingFiles} onClick={() => void mentionFiles()}>Choose files to mention</button><span className="text-muted"> · Paths only, not an upload</span></div> : null}
         {slashOpen ? <ul id="composer-prompts" role="listbox" aria-label="Prompt templates" className="max-h-[160px] overflow-y-auto border-b border-line p-2">{promptChoices.map((prompt, index) => <li key={prompt.id} id={`composer-prompt-${index}`} role="option" aria-selected={index === slashIndex}><button type="button" className="w-full px-2 py-1 text-left text-[12px] hover:bg-panel" onClick={() => pickPrompt(index)}><strong>/{prompt.name}</strong> · {prompt.hint}</button></li>)}</ul> : null}
         <textarea
           ref={box}
@@ -203,6 +219,8 @@ export default function Composer({
             {tools ? <div className="ob-tools-popup" role="dialog" aria-label="Chat tools">
               <ProjectDropdown projects={projects} project={project} onProject={onProject} />
               <RecipeButton />
+              <button type="button" disabled={listening || pickingFiles} onClick={() => { void mentionFiles(); setTools(false) }}><Paperclip size={14} />Mention files</button>
+              <button type="button" disabled={listening} onClick={() => { setSavedDrafts(true); setTools(false) }}><ScrollText size={14} />Saved drafts</button>
               <MapButton onInsert={map => onChange(value.trim() ? `${value.trimEnd()}\n\n${map}\n` : `${map}\n`)} />
               <button type="button" disabled={!value.trim() || busy} onClick={() => { setCook(true); setTools(false) }}><CookingPot size={14} />Cook context</button>
               <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:battle', { detail: value })); setTools(false) }}><Swords size={14} />Brain battle</button>
@@ -239,8 +257,10 @@ export default function Composer({
           </span>
         </div>
       </ComposerSurface>
+      {savedDrafts ? <SavedDrafts draft={value} insert={text => onChange(value ? `${value}\n\n${text}` : text)} close={() => setSavedDrafts(false)} /> : null}
       {cook ? <CookDialog draft={value} onDone={next => { if (next !== null) onChange(next); setCook(false) }} /> : null}
       {preview ? <p className="px-1 pt-2 text-[12px] text-muted">{preview}</p> : null}
+      {fileNote ? <p role="status" className="px-1 pt-2 text-[12px] text-muted">{fileNote}</p> : null}
       {notice ? <p className="px-1 pt-2 text-[12px] text-warn">{notice}</p> : null}
     </div>
   )

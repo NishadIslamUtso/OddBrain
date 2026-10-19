@@ -193,6 +193,8 @@ export default function App() {
   // cleared on success. The engine reads them itself, whatever engine it is.
   const [attachments, setAttachments] = useState<Attachment[]>([])
   const media = useMediaAttachments(attachments, setAttachments, setNotice)
+  const liveComposer = useRef({ attachments, mediaBusy: media.busy })
+  liveComposer.current = { attachments, mediaBusy: media.busy }
   // Set for a moment when the rail jumps to an artifact, so a click on something
   // already on screen still shows that it did something.
   const [highlight, setHighlight] = useState('')
@@ -484,6 +486,11 @@ export default function App() {
   const send = async (): Promise<void> => {
     if (media.busy) { setNotice('Wait for file processing or cancel it before sending.'); return }
     const text = draft
+    const clearSentComposer = () => {
+      setDraft(current => current === text ? '' : current)
+      if (liveComposer.current.attachments === attachments && !liveComposer.current.mediaBusy) { setAttachments([]); media.clear(); return '' }
+      return 'Attachments changed while sending. They were kept; remove any you already sent.'
+    }
     if (!text.trim() && attachments.length === 0) return
     // The only path: the engine. The text is a work order. The same
     // keep-the-draft-on-refusal rule applies, so nothing is ever typed twice.
@@ -500,22 +507,18 @@ export default function App() {
     )
     if (answer.ok) {
       consumeSeed(pendingBrief)
-      setDraft('')
-      setAttachments([])
-      media.clear()
-      setNotice('')
+      setNotice(clearSentComposer())
       if (pendingProject) {
         setPendingProject(null)
       }
     } else if (answer.answer.startsWith('The engine is already working')) {
+      if (attachments.some(entry => entry.kind === 'image')) { setNotice('Images cannot be parked in the text-only queue. Your draft and attachments are unchanged; send them after this task finishes.'); return }
       // Busy is not a refusal here: the owner typed a work order, so it
       // waits in the line and runs the moment the engine is free.
       engineStore().enqueue(order)
       consumeSeed(pendingBrief)
-      setDraft('')
-      setAttachments([])
-      media.clear()
-      setNotice('Added to the line. It runs when the current work finishes; the card shows the queue.')
+      const retained = clearSentComposer()
+      setNotice(retained || 'Added to the line. It runs when the current work finishes; the card shows the queue.')
     } else {
       setNotice(answer.answer)
     }

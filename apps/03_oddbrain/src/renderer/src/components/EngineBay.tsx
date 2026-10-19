@@ -1,3 +1,6 @@
+import { getEngineApi, bridge } from '@/platform/bridge'
+import { setupSummary } from '@shared/lib/setupSummary'
+import CopyText from '../ui/CopyText'
 import { AGY_APPROVAL_CHOICES, AGY_APPROVAL_NOTE } from '@shared/lib/engineApproval'
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, FolderOpen, RefreshCw, Trash2, Cpu, Cloud } from 'lucide-react'
@@ -114,6 +117,7 @@ export default function EngineBay() {
         >
           {engine.detection.loading ? 'scanning…' : 'Re-scan'}
         </button>
+        <button type="button" className="ob-text-button" disabled={engine.turn?.state === 'running' || engine.ambient.busy} title="Stop the idle connection; reopen with current settings on your next message. Keeps native resume memory." onClick={() => { void getEngineApi().restart().then(r => setSwapNote(r.answer)).catch(() => setSwapNote('Restart could not be confirmed.')) }}>Restart connection</button>
       </header>
 
       {/* The engine selection system. An engine that is not on this machine
@@ -254,6 +258,7 @@ export default function EngineBay() {
         </div>
       ) : null}
 
+      <details className="mt-2 text-[12px] text-muted"><summary className="cursor-pointer">Setup summary (redacted)</summary><p className="ob-control-scope">Review before sharing. No sign-in or connection check is run.</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words">{setupSummary({ appVersion: bridge.app.version, platform: bridge.app.platform, settings: engine.settings, engines: engine.detection.engines, running: engine.alive })}</pre><CopyText label="Copy redacted setup summary" text={setupSummary({ appVersion: bridge.app.version, platform: bridge.app.platform, settings: engine.settings, engines: engine.detection.engines, running: engine.alive })} /></details>
       {/* Where the engine works. */}
       <button
         type="button"

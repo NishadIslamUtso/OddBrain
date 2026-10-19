@@ -66,7 +66,7 @@ export function installSampleBridge(bridge: DesktopBridge, engine: EngineBridge)
   })
   replace(engine, {
     authStatus: async id => id === 'agy'
-      ? { ok: true, loggedIn: false, method: '', provider: '', answer: 'agy does not report a sign-in state. This sample runs no CLI, so there is nothing to ask.' }
+      ? { ok: true, loggedIn: false, method: '', provider: '', answer: 'This connection has no verified agy sign-in check. This sample runs no CLI, so there is nothing to ask.' }
       : { ok: true, loggedIn: true, method: 'sample', provider: 'sample', answer: 'Sample answer: signed in with sample (sample). No CLI was run and no credential was read.' },
     ollamaVersion: async () => ({ ok: true, version: '0.15.2', compatible: true, answer: 'Sample answer: Ollama 0.15.2 is new enough for Claude Code\u2019s local door. Nothing was contacted.' }),
     openLogin: async () => ({ ok: false, answer: 'This sample has no terminal to open. The installed app opens Claude Code\u2019s own sign-in there.' }),

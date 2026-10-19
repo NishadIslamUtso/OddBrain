@@ -125,7 +125,7 @@ export function readAuthStatus(
       loggedIn: false,
       method: '',
       provider: '',
-      answer: 'agy does not report a sign-in state to other programs. Run `agy` once in a terminal; its credentials stay with it.',
+      answer: 'This connection has no verified agy sign-in check. Run `agy` once in a terminal; its credentials stay with it.',
     })
   }
   const platform = options.platform ?? process.platform

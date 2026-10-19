@@ -41,7 +41,7 @@ test('the sample answers the sign-in question for both engines, and says it is a
   const agy = await world.bridge.engine.authStatus('agy')
   expect(agy.ok).toBe(true)
   expect(agy.loggedIn).toBe(false)
-  expect(agy.answer).toContain('does not report a sign-in state')
+  expect(agy.answer).toContain('no verified agy sign-in check')
   const login = await world.bridge.engine.openLogin()
   expect(login.ok).toBe(false)
   expect(login.answer).toContain('no terminal')

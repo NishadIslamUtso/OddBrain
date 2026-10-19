@@ -137,7 +137,7 @@ test('dispatch rechecks persisted effort before sending and guards a changed exe
   const main = readFileSync(new URL('../src/main/index.ts', import.meta.url), 'utf8')
   const send = main.slice(main.indexOf("'engine:send'"), main.indexOf('// Bringing a brain home'))
   expect(send.indexOf('await checkEffortSelection(usedEngine')).toBeGreaterThan(0)
-  expect(send.indexOf('await checkEffortSelection(usedEngine')).toBeLessThan(send.indexOf('engine.send(text'))
+  expect(send.indexOf('await checkEffortSelection(usedEngine')).toBeLessThan(send.indexOf('dispatchRecordedTurn(turnArchive'))
   expect(send).toContain('usedCommand !== resolveEngineCommand(usedEngine.id)')
   expect(send).toContain('No message was sent.')
 })

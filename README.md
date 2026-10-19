@@ -75,6 +75,17 @@ The model picker distinguishes **CLI login**, **Anthropic API** and Ollama route
 - agy streams replies and tool activity, preserves partial failures, and avoids adding cumulative session usage repeatedly. Resumed usage is omitted when this turn cannot be separated; prices are not invented.
 - agy’s current connection is **text-only, without interactive approval cards**. Its **Native rules / Plan / Allow edits / Allow tools** controls use native policies. Saved rules can already allow actions; **Allow tools** explicitly skips tool permission prompts, not artifact review. Pictures are refused before sending, with no engine substitution.
 
+## Drafts, records and package inspection
+
+- **More chat tools → Saved drafts** stores text copies on this device. Insert appends to the current draft; it never sends or replaces it. Attachments stay separate. Limits are explicit refusals, not automatic eviction.
+- **More chat tools → Mention files**, or a standalone **@**, opens the desktop file picker. It inserts quoted paths, not file contents or shell commands. Native tools still enforce their own permissions. Browser previews cannot use this picker.
+- **More chat tools → Turn journal → Full transcripts** shows new per-turn text received from the native engine, with copy and Markdown download. Records include the dispatched prompt and emitted text/thinking/tool summaries, not image bytes or raw native tool traces. Older summaries cannot be expanded. Interrupted or damaged records are not labelled successful. Recording failures refuse dispatch or request engine stop rather than silently dropping text.
+- Under saved chat messages, **Save or copy this chat** exports all stored messages, attachment text, citations and artifact revisions. There is no old 30-message/2,000-character clipping. Attachment binaries are not embedded. Capsule capture refuses above 8 MB; Markdown download remains available.
+- **Skills / Plugins / Connectors → engine catalog → Inspect package** reads a commit-pinned public GitHub inventory, README and supported dependency declarations. It never installs or executes package code. Unsupported sources, incomplete trees and linked packages are refused. This is not a security audit, authentication check or native compatibility proof; native installation may resolve another revision.
+- **Settings → AI & connections → Engine** has **Restart connection** for idle processes and a reviewable **Setup summary (redacted)**. Restart keeps the native resume ID and reconnects on the next send; it is not a native plugin-reload guarantee. The setup summary omits paths, addresses, account details, model names and task text. It does not certify sign-in or connector health.
+
+Native text records live in private app storage, **outside vault backups**. Export important records separately. The limit is 32 MB per turn with no automatic deletion of older records. These are app-owned per-turn records, not grouped native-session history, archive import, or recovery of text that was previously clipped. The broader authorized backlog remains in progress; account/archive import remains on hold.
+
 ## Browser companion
 
 1. Run the desktop app and select a vault. Open **Settings → AI & connections → Connectors**.

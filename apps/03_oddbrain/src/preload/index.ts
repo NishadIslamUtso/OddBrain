@@ -55,6 +55,7 @@ const engineApi = {
   authStatus: (id?: 'claude-code' | 'agy'): Promise<{ ok: boolean; loggedIn: boolean; method: string; provider: string; answer: string }> =>
     ipcRenderer.invoke('engine:auth-status', id),
   /** Open the engine's own login in a terminal; nothing is read back. */
+  restart: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:restart'),
   openLogin: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:open-login'),
   /** The Ollama answering on the door, plus whether Claude Code can use it. */
   ollamaVersion: (): Promise<{ ok: boolean; version: string; compatible: boolean; answer: string }> =>
@@ -202,12 +203,14 @@ const mediaApi: MediaBridge = {
   dictate: () => ipcRenderer.invoke('media:dictate'), cancel: () => ipcRenderer.invoke('media:cancel'),
 }
 const marketplaceApi: MarketplaceBridge = {
+  inspect: (repo, plugin, engine) => ipcRenderer.invoke('market:inspect', repo, plugin, engine),
   sources: engine => ipcRenderer.invoke('market:sources', engine), browse: (repo, engine) => ipcRenderer.invoke('market:browse', repo, engine),
   probe: engine => ipcRenderer.invoke('market:probe', engine), installed: engine => ipcRenderer.invoke('market:installed', engine),
   plan: (repo, action, plugin, engine) => ipcRenderer.invoke('market:plan', repo, action, plugin, engine),
   confirm: (token, engine) => ipcRenderer.invoke('market:confirm', token, engine), cancel: engine => ipcRenderer.invoke('market:cancel', engine),
 }
 const api = {
+  transcripts: { list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
   media: mediaApi, marketplace: marketplaceApi,
   automation: automationApi,
   memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,

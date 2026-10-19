@@ -1,3 +1,4 @@
+import type { TranscriptBridge } from '@shared/lib/transcripts'
 import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
 import type { ThinkingMode } from '@shared/lib/engine'
 import type { MemoryBridge } from '@shared/lib/memoryWorkspace'
@@ -50,6 +51,7 @@ import type {
 
 /** What the preload script exposes today. It grows as the main process does. */
 export type DesktopBridge = {
+  transcripts: TranscriptBridge
   media: MediaBridge
   marketplace: MarketplaceBridge
   memoryWorkspace: MemoryBridge
@@ -281,7 +283,8 @@ const demoBridge: DesktopBridge = {
     decode: async input => ({ ok: false, name: input.name, error: 'Native decoding and provider uploads require the desktop app. No file was sent.' }),
     dictate: async () => ({ ok: false, name: 'Dictation', error: 'Offline Windows dictation requires the desktop app.' }), cancel: async () => {},
   },
-  marketplace: { sources: async () => [], browse: unavailableMarket, probe: unavailableMarket, installed: unavailableMarket, plan: unavailableMarket, confirm: unavailableMarket, cancel: async () => {} },
+  transcripts: { list: async () => ({ ok: false, error: 'Native transcripts require the desktop app. Sample chats remain separate.' }), read: async () => ({ ok: false, error: 'Native transcripts require the desktop app.' }) },
+  marketplace: { inspect: unavailableMarket, sources: async () => [], browse: unavailableMarket, probe: unavailableMarket, installed: unavailableMarket, plan: unavailableMarket, confirm: unavailableMarket, cancel: async () => {} },
   automation: demoAutomation,
   memoryWorkspace: demoMemoryWorkspace,
   extensionPair: {
@@ -457,6 +460,7 @@ export type EngineBridge = {
   authStatus: (id?: 'claude-code' | 'agy') => Promise<{ ok: boolean; loggedIn: boolean; method: string; provider: string; answer: string }>
   /** Open the engine's own login in a terminal; nothing is read back. */
   openLogin: () => Promise<{ ok: boolean; answer: string }>
+  restart: () => Promise<{ ok: boolean; answer: string }>
   /** The Ollama answering on the door, and whether it can serve Claude Code. */
   ollamaVersion: () => Promise<{ ok: boolean; version: string; compatible: boolean; answer: string }>
   pull: (name: string) => Promise<{ ok: boolean; answer: string }>
@@ -545,6 +549,7 @@ const demoEngineBridge: EngineBridge = {
   clearBinary: async () => ({ ok: false, answer: 'The desktop app manages the binary override.' }),
   binaryOverride: async () => ({ path: '' }),
   authStatus: async () => ({ ok: false, loggedIn: false, method: '', provider: '', answer: 'Sign-in is checked by the installed app.' }),
+  restart: async () => ({ ok: false, answer: 'Connection restart requires the desktop app. No process was restarted.' }),
   openLogin: async () => ({ ok: false, answer: 'Signing in needs the installed app.' }),
   ollamaVersion: async () => ({ ok: false, version: '', compatible: false, answer: 'The installed app checks the local runtime.' }),
   pull: async () => ({ ok: false, answer: 'Pulling brains needs the desktop app.' }),
