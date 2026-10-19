@@ -162,3 +162,32 @@ test('a note about a search that stopped short appears only once something was t
   expect(container.querySelector('.ob-command-note')?.textContent).toBe(note)
   expect(container.querySelector('.ob-command-note')?.getAttribute('role')).toBe('status')
 })
+
+test('an empty list says "Searching the vault…" while the answer is still coming', async () => {
+  await open()
+  await act(() => root.render(
+    <DesktopShell
+      layout="topbar"
+      navigation={{ view: 'chat', onView: () => {}, onNew: () => {}, onSettings: () => {}, name: 'Test' }}
+      sidebar={<div />}
+      commands={commands}
+      searching
+    >
+      <div>Main</div>
+    </DesktopShell>
+  ))
+  await type('nothing matches this')
+  expect(container.querySelector('.ob-empty-line')?.textContent).toBe('Searching the vault…')
+  await act(() => root.render(
+    <DesktopShell
+      layout="topbar"
+      navigation={{ view: 'chat', onView: () => {}, onNew: () => {}, onSettings: () => {}, name: 'Test' }}
+      sidebar={<div />}
+      commands={commands}
+      searching={false}
+    >
+      <div>Main</div>
+    </DesktopShell>
+  ))
+  expect(container.querySelector('.ob-empty-line')?.textContent).toBe('No matches.')
+})

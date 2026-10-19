@@ -548,12 +548,15 @@ export default function App() {
   const [vaultQuery, setVaultQuery] = useState('')
   const [vaultHits, setVaultHits] = useState<CommandItem[]>([])
   const [vaultNote, setVaultNote] = useState('')
+  /** True from the keystroke until the vault answers, so an empty list is not called "no matches" too early. */
+  const [vaultSearching, setVaultSearching] = useState(false)
   const [vaultFocus, setVaultFocus] = useState<{ path: string; at: number } | null>(null)
   const vaultTicket = useRef(0)
   useEffect(() => {
     const query = vaultQuery.trim()
-    if (!query || sampleEnabled()) { setVaultHits([]); setVaultNote(''); return }
+    if (!query || sampleEnabled()) { setVaultHits([]); setVaultNote(''); setVaultSearching(false); return }
     const ticket = ++vaultTicket.current
+    setVaultSearching(true)
     const timer = window.setTimeout(() => {
       vaultGet(`/search?q=${encodeURIComponent(query)}&limit=6`)
         .then(reply => {
@@ -567,8 +570,9 @@ export default function App() {
           })))
           // Only speaks when the walk stopped short. A whole read is not news.
           setVaultNote(vaultScanNote(reply?.scanned as VaultScan | undefined))
+          setVaultSearching(false)
         })
-        .catch(() => { if (ticket === vaultTicket.current) { setVaultHits([]); setVaultNote('') } })
+        .catch(() => { if (ticket === vaultTicket.current) { setVaultHits([]); setVaultNote(''); setVaultSearching(false) } })
     }, 220)
     return () => window.clearTimeout(timer)
   }, [vaultQuery])
@@ -583,7 +587,7 @@ export default function App() {
   return <LookContext value={look}><LookActions value={updateLook}>
     <div className="ob-app-root flex h-full flex-col bg-bg text-ink">
       <div className="ob-shell-host" hidden={settingsOpen} inert={settingsOpen}>
-        <DesktopShell layout={look.layout} navigation={{ view, onView: setView, onNew: newChat, onBack: navigation.back, canBack: navigation.canBack, onSettings: () => openSettings('appearance'), name: profile.name }} items={items} commands={paletteCommands} extraSearch={searchCommands} onSearchQuery={setVaultQuery} searchNote={vaultNote} suspended={settingsOpen} sidebar={
+        <DesktopShell layout={look.layout} navigation={{ view, onView: setView, onNew: newChat, onBack: navigation.back, canBack: navigation.canBack, onSettings: () => openSettings('appearance'), name: profile.name }} items={items} commands={paletteCommands} extraSearch={searchCommands} onSearchQuery={setVaultQuery} searchNote={vaultNote} searching={vaultSearching} suspended={settingsOpen} sidebar={
         <Sidebar
           view={view}
           onView={setView}
