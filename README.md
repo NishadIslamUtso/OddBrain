@@ -97,7 +97,7 @@ Current source baseline, historical test results, independently verified faults 
 - **Chat history import — ChatGPT and Claude.** The Vault screen gains "Import chat export": pick `conversations.json` from either app's data export and each conversation lands in `02 Sources/Imports/` as one markdown document the app can already search — the current branch of the conversation, in order, roles spelled out, non-text attachments named but never invented, re-imports updating instead of duplicating, per-conversation failures reported instead of fatal. Pure-local: one file read, no network, no model calls. Regression-tested (`tests/chatgpt-import.test.ts`).
 - **No silent blank replies.** When a model ends a turn without words, the chat says so in one muted line instead of showing a blank card.
 - **`engine:model-delete` refuses redirects**, matching `engine:pull` and model discovery on the same brain door.
-- The Vault view states the import's result in words — counts the app can prove from what it wrote.
+- The import works two ways: the button, or drag `conversations.json` straight onto the Vault screen. Files that start with an invisible byte-order mark (some Windows exports) import fine. The Vault view states the result in words — counts the app can prove from what it wrote.
 
 ## License
 

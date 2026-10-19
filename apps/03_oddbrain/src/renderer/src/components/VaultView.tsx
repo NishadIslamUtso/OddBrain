@@ -38,6 +38,31 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
   const [hits, setHits] = useState<RecallHit[] | null>(null)
   const [searching, setSearching] = useState(false), [searchNote, setSearchNote] = useState('')
   const [problem, setProblem] = useState('')
+  const [dropping, setDropping] = useState(false)
+
+  // A dropped conversations.json is the same import, minus the file picker.
+  // One file at a time; anything unresolvable is said out loud, not ignored.
+  const runDropImport = (files: FileList | null): void => {
+    const file = files?.[0]
+    if (!file) return
+    setImporting(true)
+    setImported('')
+    void bridge.vault
+      .pathForFile(file)
+      .then((path) => {
+        if (!path) {
+          if (mounted.current) setImported('That dropped file could not be located on disk. Use the import button instead.')
+          return null
+        }
+        return bridge.vault.importChatsFromPath(path).then((answer) => {
+          if (!mounted.current) return
+          setImported(answer.answer)
+          if (answer.ok) loadTree()
+        })
+      })
+      .catch(() => { if (mounted.current) setImported('The import could not run.') })
+      .finally(() => { if (mounted.current) setImporting(false) })
+  }
 
   const loadTree = (): void => {
     setState('loading')
@@ -118,7 +143,28 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
   }
 
   return (
-    <div className="ob-workspace-page ob-vault-view flex-1 overflow-hidden" aria-label="Vault">
+    <div
+      className="ob-workspace-page ob-vault-view flex-1 overflow-hidden"
+      aria-label="Vault"
+      onDragOver={(event) => {
+        if (![...event.dataTransfer.types].includes('Files')) return
+        event.preventDefault()
+        setDropping(true)
+      }}
+      onDragLeave={(event) => {
+        if (event.currentTarget === event.target) setDropping(false)
+      }}
+      onDrop={(event) => {
+        event.preventDefault()
+        setDropping(false)
+        runDropImport(event.dataTransfer.files)
+      }}
+    >
+      {dropping ? (
+        <div className="pointer-events-none absolute inset-0 z-20 flex items-center justify-center bg-[var(--color-bg)]/80" aria-hidden>
+          <p className="rounded-xl border border-line px-4 py-3 text-[13px] text-ink">Drop conversations.json to import it</p>
+        </div>
+      ) : null}
       <div className="mx-auto flex h-full w-full max-w-[var(--chat-width)] flex-col px-4 py-6">
         <header className="ob-screen-header flex items-center gap-2.5">
           <Mascot motion="read" size={32} static />

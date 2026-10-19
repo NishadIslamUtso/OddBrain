@@ -208,6 +208,16 @@ describe("ChatGPT export import", () => {
       rmSync(root, { recursive: true, force: true });
     }
   });
+  it("accepts a file that starts with a byte-order mark, like some Windows exports do", () => {
+    const { store, root } = storeOf();
+    try {
+      const answer = importChatExport(store, "﻿" + JSON.stringify([conversation()]), "2026-10-19T00:00:00.000Z");
+      expect(answer.imported).toBe(1);
+      expect(answer.messages).toBe(2);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
   it("unrecognized conversations fail politely instead of guessing", () => {
     const { store, root } = storeOf();
     try {

@@ -2,7 +2,7 @@ import type { MemoryBridge } from '../shared/lib/memoryWorkspace'
 import type { MediaBridge } from '../shared/lib/mediaBridge'
 import type { MarketplaceBridge } from '../shared/lib/marketplace'
 import type { AutomationBridge, AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   CloudModelsAnswer,
   CloudTestAnswer,
@@ -370,9 +370,20 @@ const api = {
     /** A timestamped portable copy of the vault, written to the exports folder. */
     backup: (operation: 'create' | 'restore'): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('vault:backup', operation),
     exportCopy: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('vault:export-copy'),
-    /** A ChatGPT data export (conversations.json), imported into the vault as searchable markdown. */
+    /** A ChatGPT or Claude data export (conversations.json), imported into the vault as searchable markdown. */
     importChats: (): Promise<{ ok: boolean; answer: string; imported?: number; messages?: number }> =>
       ipcRenderer.invoke('vault:import-chats'),
+    /** The same import for a file dropped onto the window; webUtils resolves the dropped File to a path. */
+    importChatsFromPath: (filePath: string): Promise<{ ok: boolean; answer: string; imported?: number; messages?: number }> =>
+      ipcRenderer.invoke('vault:import-chats-from-path', filePath),
+    /** The on-disk path of a dropped file, or null when it cannot be resolved. */
+    pathForFile: async (file: File): Promise<string | null> => {
+      try {
+        return webUtils.getPathForFile(file) || null
+      } catch {
+        return null
+      }
+    },
     /** The open conversation, captured into the vault as a capsule. */
     captureChat: (title: string, markdown: string): Promise<{ ok: boolean; answer: string }> =>
       ipcRenderer.invoke('vault:capture-chat', { title, markdown }),

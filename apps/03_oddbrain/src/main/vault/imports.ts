@@ -151,7 +151,10 @@ export function importChatExport(store: VaultFiles, raw: string, now: string): {
 } {
   let parsed: unknown;
   try {
-    parsed = JSON.parse(raw);
+    // Windows "Export data" archives sometimes hand over a file that starts
+    // with an invisible byte-order mark; JSON.parse refuses it. Strip it —
+    // the person chose the right file and should not learn about encodings.
+    parsed = JSON.parse(raw.replace(/^\uFEFF/, ""));
   } catch {
     throw new InputError("That file is not valid JSON. ChatGPT and Claude exports ship a conversations.json — choose that file.");
   }

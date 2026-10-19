@@ -1073,27 +1073,35 @@ function registerBridges(): void {
     }
   })
 
-  // A ChatGPT data export, brought home: conversations.json becomes one
+  // A chat data export, brought home: conversations.json becomes one
   // searchable markdown file per conversation in the vault. The person picks
-  // the file; the app reads it once, locally, and reports what happened.
-  handle('vault:import-chats', async (): Promise<{ ok: boolean; answer: string; imported?: number; messages?: number }> => {
+  // the file — or drags it onto the Vault screen — the app reads it once,
+  // locally, and reports what happened.
+  const runChatsImport = (filePath: string): { ok: boolean; answer: string; imported?: number; messages?: number } => {
+    const service = createVaultService({ vaultPath: vaultRoot() })
+    if (!service.available()) return { ok: false, answer: 'Choose a vault folder first; an import needs somewhere to land.' }
+    try {
+      const stat = statSync(filePath)
+      if (stat.size > 512 * 1024 * 1024) return { ok: false, answer: 'That file is over 512 MB, larger than this app reads in one go. Nothing was written.' }
+      const raw = readFileSync(filePath, 'utf8')
+      return importChatExport(service.files(), raw, new Date().toISOString())
+    } catch (error) {
+      return { ok: false, answer: error instanceof Error ? error.message : 'The import could not be read.' }
+    }
+  }
+  handle('vault:import-chats', async () => {
     const picked = await dialog.showOpenDialog({
       title: 'Choose conversations.json from your ChatGPT or Claude data export',
       properties: ['openFile'],
       filters: [{ name: 'JSON', extensions: ['json'] }],
     })
     if (picked.canceled || !picked.filePaths[0]) return { ok: false, answer: 'No file was chosen.' }
-    const service = createVaultService({ vaultPath: vaultRoot() })
-    if (!service.available()) return { ok: false, answer: 'Choose a vault folder first; an import needs somewhere to land.' }
-    try {
-      const stat = statSync(picked.filePaths[0])
-      if (stat.size > 512 * 1024 * 1024) return { ok: false, answer: 'That file is over 512 MB, larger than this app reads in one go. Nothing was written.' }
-      const raw = readFileSync(picked.filePaths[0], 'utf8')
-      const answer = importChatExport(service.files(), raw, new Date().toISOString())
-      return answer
-    } catch (error) {
-      return { ok: false, answer: error instanceof Error ? error.message : 'The import could not be read.' }
-    }
+    return runChatsImport(picked.filePaths[0])
+  })
+  // The same import, reached by dropping the file onto the Vault screen.
+  handle('vault:import-chats-from-path', (_event, filePath: unknown) => {
+    if (typeof filePath !== 'string' || !filePath) return { ok: false, answer: 'That dropped file could not be located on disk.' }
+    return runChatsImport(filePath)
   })
 
   // Capture the current conversation as a capsule: the digest lands in the

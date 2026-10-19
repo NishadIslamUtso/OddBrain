@@ -264,7 +264,6 @@ Validation for this cleanup/switch: 1,071 tests across 155 files passed with rea
 - Hooks, watches, skills, plugins and House rules are under Advanced tools. Second-pass AI review moved from Engine to House rules. Automatic/external review were already off by default and remain so; saved choices are not reset. Code was already outside primary navigation, under Projects/menu; no new removal is claimed.
 - Validation: **1,074 tests across 155 files, zero skips**, including both required real-browser suites; strict JUnit gate passed. TypeScript and Electron/web builds passed. All nine UI suites passed in one final serial run after rebuilding the offline renderer and updating moved-control selectors. Checks cover all 17 pages, search/Back/draft retention, all eight layouts at minimum size, appearance inventory, identity preview/cancel/confirm/undo and Capture sources shortcuts. Cache receipts: `.cache/intuitive/{full.xml,tests.log,build.log,web.log,ui.log}`. Generated receipts are not committed. Native target-machine use, live provider/model quality and CI for this change are not claimed by these local results.
 
-<<<<<<< HEAD
 ## Recall, review, reading and recovery (2026-10-19)
 
 The owner authorized all five follow-up priorities while AFK. Implemented the software work without adding main screens or changing capture/model permissions. Live signed-in account access and the owner's laptop are not available in this environment; do not call those tested.
@@ -319,7 +318,7 @@ Validation: **1,157 tests / 166 files / zero skips**, both required real-Chromiu
 Native login-item behavior, packaged dialogs/extension updating on the target laptop, signed-in account capture and cross-platform CI for this new commit are not established by these local tests. Those acceptance checks remain. No new installer or signed release is claimed.
 
 Workspace continuity: this turn restored current files but Git metadata at old `a6c7807`. Fetched the published own-branch `fa2ad39`, independently SHA-1 compared every tracked blob with the working tree (zero differences), then used a mixed reset on the same session branch to align only HEAD/index with that published state. No working files were reset, no other branch was checked out, and no user changes were discarded. Dependencies/browser were restored in ignored storage; the first browser launch lacked bundled Linux libraries, then the corrected launch succeeded before the complete no-skip run.
-=======
+
 ## clean-build's own delta (2026-10-19, branch `clean-build`)
 
 This branch is the owner branch's tree plus a small, recorded delta. The judge verdict on `80c6689` found no real defect: gate reproduced locally (1,071 tests / 155 files / zero skips, tsc 0, builds, smoke, extension harness PASS), and the owner's five new laws are already honored by the branch itself (plain replies, model-agnostic capture/search/permissions, no unnecessary files, engine setup honesty, startup-animation switch).
@@ -331,4 +330,23 @@ What `clean-build` adds on top, all regression-tested:
 - **`engine:model-delete` refuses redirects**, matching `engine:pull` and model discovery on the same brain door: a redirect would send a model request somewhere the settings never named.
 
 Validation on `clean-build`'s tip, sandbox: 1,073 tests across 155 files, zero skips; TypeScript, Electron and web builds passed; smoke clean. CI runs on both operating systems and the installer artifact are recorded in the README. Nothing merges anywhere without the owner's say-so.
->>>>>>> be9cae1 (clean-build on 80c6689: chat import now understands Claude too, and blank replies speak up.)
+
+## clean-build third pass (2026-10-19, on `60a198e`)
+
+Judge of `60a198e` (settings grouped into eight areas): no defect found; gate reproduced locally before rebasing (1,075-class suite, zero skips, builds, smoke). The rebase carried this branch's delta onto it; the CONTEXT conflict was resolved by keeping both records.
+
+New on `clean-build` this pass — better ways, same guarantees:
+
+- **Drag-and-drop import.** A `conversations.json` dropped anywhere on the Vault screen imports exactly like the button does (one file at a time, the drop overlay names what to drop, an unresolvable drop is said out loud rather than ignored). Implemented with the Electron file-path bridge; the web preview answers honestly that importing needs the desktop app.
+- **Byte-order-mark tolerance.** ChatGPT/Claude exports written by some Windows tools start with an invisible BOM that strict JSON parsing refuses; the import strips it, because the person chose the right file and should not learn about encodings. Test included.
+- The suite on this tip: **1,084 tests across 156 files, zero skips**, plus the usual typecheck, builds and native smoke — run in the sandbox before pushing.
+
+**What comparable apps can still do that this one cannot** (2026-10-19 survey of Cherry Studio, Msty, Chatbox, LM Studio, Jan, Open WebUI; kept here so the gap stays visible and deliberate):
+
+- Branch a conversation from any past message and keep both continuations (Cherry Studio, Msty). OddBrain's sessions are linear by design; battles and splits already cover "same prompt, several models".
+- Embedded-vector knowledge stacks with per-chunk citations (Msty Knowledge Stacks, Cherry knowledge bases). OddBrain's recall is keyword search over plain markdown until Stage 2 lands — deliberately model-independent, at the cost of smarter ranking.
+- Model Context Protocol tool servers (Cherry, Msty, Chatbox). Tool use belongs to the engines here; the app does not run its own tool runtime.
+- Live web search inside answers (Msty's paid tier, Cherry extensions). Against the no-cloud-services law; the browser companion is the honest way to bring web text in.
+- Phone and web companions (Chatbox). Desktop-only by owner decision.
+
+Nothing here merges anywhere without the owner's say-so; the gap list is a map, not a promise.
