@@ -28,6 +28,8 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
   const [files, setFiles] = useState<string[]>([])
   const [exported, setExported] = useState('')
   const [backupBusy, setBackupBusy] = useState(false)
+  const [imported, setImported] = useState('')
+  const [importing, setImporting] = useState(false)
   const [root, setRoot] = useState('')
   const [capped, setCapped] = useState(false)
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading')
@@ -146,12 +148,32 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
               >
                 Export copy
               </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setImporting(true)
+                  void bridge.vault
+                    .importChatGPT()
+                    .then((answer) => {
+                      if (!mounted.current) return
+                      setImported(answer.answer)
+                      if (answer.ok) loadTree()
+                    })
+                    .catch(() => { if (mounted.current) setImported('The import could not run.') })
+                    .finally(() => { if (mounted.current) setImporting(false) })
+                }}
+                title="Bring a ChatGPT data export (conversations.json) into the vault as searchable markdown"
+                className="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-[11.5px] text-muted hover:text-ink"
+              >
+                {importing ? 'Importing…' : 'Import ChatGPT export'}
+              </button>
             </>
           ) : null}
         </header>
         {sources ? <div className="min-h-0 flex-1 overflow-auto"><MemoryMap open onClose={() => setSources(false)} embedded /></div> : <>
         <details className="ob-vault-backup"><summary>Backup &amp; restore</summary><p className="ob-memory-caption">Full vault copies include conversations, attachments, confirmed memory and review history. Markdown export does not. Backups contain sensitive information; choose a private location, preferably on another drive. Models, app credentials and unsent browser queues are not included.</p><div className="ob-memory-actions">{(['create', 'restore'] as const).map(operation => <button type="button" key={operation} className="ob-small-button" disabled={backupBusy} onClick={() => { setBackupBusy(true); setExported(''); void bridge.vault.backup(operation).then(reply => setExported(reply.answer)).catch(() => setExported('The backup operation failed. No complete copy is reported.')).finally(() => setBackupBusy(false)) }}>{operation === 'create' ? 'Back up full vault' : 'Restore into a new folder'}</button>)}</div>{backupBusy && <p role="status">Choose the folders in the desktop dialog. Keep the app open until verification finishes.</p>}</details>
         {exported ? <p className="mt-1 text-[11px] text-muted">{exported}</p> : null}
+        {imported ? <p className="mt-1 text-[11px] text-muted">{imported}</p> : null}
 
         <div className="mt-4 flex items-center gap-2">
           <div className="relative min-w-0 flex-1">

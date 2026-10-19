@@ -27,7 +27,8 @@ import { userInfo } from 'node:os'
 import { registerStagingRoot, setBinaryOverride, binaryOverride } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
 import { basename, dirname, join, resolve } from 'node:path'
-import { existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { importChatGPTExport } from './vault/imports'
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
 import { createVaultService, resolveVaultRoot } from './vault/service'
@@ -1069,6 +1070,29 @@ function registerBridges(): void {
       return { ok: true, answer: `${name} is gone from this machine` }
     } catch {
       return { ok: false, answer: 'the brain door (Ollama) is not answering, start it, then try again' }
+    }
+  })
+
+  // A ChatGPT data export, brought home: conversations.json becomes one
+  // searchable markdown file per conversation in the vault. The person picks
+  // the file; the app reads it once, locally, and reports what happened.
+  handle('vault:import-chatgpt', async (): Promise<{ ok: boolean; answer: string; imported?: number; messages?: number }> => {
+    const picked = await dialog.showOpenDialog({
+      title: 'Choose conversations.json from your ChatGPT data export',
+      properties: ['openFile'],
+      filters: [{ name: 'JSON', extensions: ['json'] }],
+    })
+    if (picked.canceled || !picked.filePaths[0]) return { ok: false, answer: 'No file was chosen.' }
+    const service = createVaultService({ vaultPath: vaultRoot() })
+    if (!service.available()) return { ok: false, answer: 'Choose a vault folder first; an import needs somewhere to land.' }
+    try {
+      const stat = statSync(picked.filePaths[0])
+      if (stat.size > 512 * 1024 * 1024) return { ok: false, answer: 'That file is over 512 MB, larger than this app reads in one go. Nothing was written.' }
+      const raw = readFileSync(picked.filePaths[0], 'utf8')
+      const answer = importChatGPTExport(service.files(), raw, new Date().toISOString())
+      return answer
+    } catch (error) {
+      return { ok: false, answer: error instanceof Error ? error.message : 'The import could not be read.' }
     }
   })
 

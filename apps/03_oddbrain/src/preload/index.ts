@@ -370,6 +370,9 @@ const api = {
     /** A timestamped portable copy of the vault, written to the exports folder. */
     backup: (operation: 'create' | 'restore'): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('vault:backup', operation),
     exportCopy: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('vault:export-copy'),
+    /** A ChatGPT data export (conversations.json), imported into the vault as searchable markdown. */
+    importChatGPT: (): Promise<{ ok: boolean; answer: string; imported?: number; messages?: number }> =>
+      ipcRenderer.invoke('vault:import-chatgpt'),
     /** The open conversation, captured into the vault as a capsule. */
     captureChat: (title: string, markdown: string): Promise<{ ok: boolean; answer: string }> =>
       ipcRenderer.invoke('vault:capture-chat', { title, markdown }),

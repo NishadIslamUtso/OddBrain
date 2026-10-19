@@ -90,6 +90,14 @@ Browser tests need an installed Chromium and `ODDBRAIN_BROWSER_OPTIONS` pointing
 
 Current source baseline, historical test results, independently verified faults and other-branch audit evidence are recorded in [CONTEXT.md](CONTEXT.md#independent-audit-of-other-agents-claims). Passing automated checks does not establish real-account or target-laptop acceptance.
 
+## What clean-build carries
+
+`clean-build` is this branch's tree plus a small, honest delta, kept and proven on that branch:
+
+- **ChatGPT history import.** The Vault screen gains "Import ChatGPT export": pick `conversations.json` from ChatGPT's own data export and each conversation lands in `02 Sources/Imports/ChatGPT/` as one markdown document the app can already search — the current branch of the conversation, in order, roles spelled out, non-text attachments named but never invented, re-imports updating instead of duplicating. Pure-local: one file read, no network, no model calls. Regression-tested (`tests/chatgpt-import.test.ts`).
+- **`engine:model-delete` refuses redirects**, matching `engine:pull` and model discovery on the same brain door.
+- The Vault view states the import's result in words — counts the app can prove from what it wrote.
+
 ## License
 
 [Apache-2.0](LICENSE). See [third-party notices](THIRD_PARTY_NOTICES) and bundled pack licenses.
