@@ -235,3 +235,25 @@ test('search reaches the interface through the real boundary and refuses an empt
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('the three messages kept from a long conversation are its best three, not its first three', () => {
+  const messages = Array.from({ length: 8 }, (_, index) => ({
+    id: String(index + 1).padStart(64, '0'),
+    role: 'user',
+    // One message has the words together; the rest have them far apart, so the
+    // phrase and proximity bonuses only apply to the last one in the walk.
+    text: index === 7 ? 'the night jasmine and the tin roof, together' : `tin ${'padding '.repeat(80)} roof item ${index + 1}`,
+  }))
+  const { root, service } = vaultWith(conversationFiles({ id: '9'.repeat(64), title: 'Roof diary', messages }))
+  try {
+    const answer = service.search({ query: 'night jasmine' })
+    assert.equal(answer.hits.length, 1, 'only one message contains both words')
+    assert.match(answer.hits[0].path, /messages\/0000000000000000000000000000000000000000000000000000000000000008\.md$/)
+    const roof = service.search({ query: 'tin roof' })
+    assert.equal(roof.hits.length, 3)
+    assert.match(roof.hits[0].path, /\/messages\/0{63}8\.md$/, 'the phrase message ranks first even though it is last in the walk')
+    assert.ok(roof.hits.slice(1).every(hit => !hit.path.endsWith('8.md')), 'the other two are different messages')
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})

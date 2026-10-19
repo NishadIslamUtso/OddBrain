@@ -334,22 +334,29 @@ export function createVaultSearch(files: VaultFiles, now: () => number = Date.no
         ...(conversation ? { conversation } : {}),
         ...(file.partial ? { partial: true } : {}),
       }
-      // One long conversation may fill the answer; it should not fill all of it.
-      if (conversation) {
-        const key = path.split('/messages/')[0].replace(/\/conversation\.md$/, '')
-        const used = perConversation.get(key) || 0
-        if (used >= PER_CONVERSATION) continue
-        perConversation.set(key, used + 1)
-      }
       hits.push(hit)
     }
 
     hits.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path))
+    // One long conversation may fill the answer; it should not fill all of it.
+    // Applied after ranking, so the three kept are its best three, not the first
+    // three the alphabet happened to reach.
+    const kept: SearchHit[] = []
+    for (const hit of hits) {
+      if (hit.kind !== 'note') {
+        const key = hit.path.split('/messages/')[0].replace(/\/conversation\.md$/, '')
+        const used = perConversation.get(key) || 0
+        if (used >= PER_CONVERSATION) continue
+        perConversation.set(key, used + 1)
+      }
+      kept.push(hit)
+      if (kept.length >= limit) break
+    }
     return {
       ok: true,
       query,
       terms,
-      hits: hits.slice(0, limit),
+      hits: kept,
       scanned: { files: scanned, bytes, capped, partial },
     }
   }
