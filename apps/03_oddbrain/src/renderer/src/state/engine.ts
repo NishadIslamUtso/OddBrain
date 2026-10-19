@@ -1,3 +1,5 @@
+import { effortTarget } from '@shared/lib/engineCapabilities'
+import type { ThinkingMode } from '@shared/lib/engine'
 import { selectEngine } from '@shared/lib/engine'
 /**
  * The engine, as the interface sees it.
@@ -129,11 +131,11 @@ type EngineStore = EngineState & {
   /** Ask the brain door what the engine can use. */
   loadModels(): Promise<void>
   /** Pick the engine's brain; persists. */
-  setModel(name: string, provider?: 'anthropic'): Promise<void>
+  setModel(name: string, provider?: 'anthropic' | 'native'): Promise<void>
   /** Set the throttle: how much the engine may do before asking; persists. */
   setApproval(mode: ApprovalMode): Promise<void>
-  /** The engine's own thinking budget; persists. */
-  setThinking(mode: 'default' | 'extended'): Promise<void>
+  /** Requested reasoning effort, bound to the inspected route; persists. */
+  setThinking(mode: ThinkingMode, target: string): Promise<{ ok: boolean; answer: string }>
   /** Park a work order for when the current turn closes. */
   enqueue(prompt: string): LineItem
   removeFromLine(id: number): void
@@ -535,9 +537,10 @@ const store: EngineStore = {
     }
   },
 
-  async setModel(name: string, provider?: 'anthropic'): Promise<void> {
-    const answer = await getEngineApi().setModel(name, provider)
-    if (answer.ok) setState({ settings: { ...state.settings, model: name, cloudProvider: provider === 'anthropic' ? 'anthropic' : '' } })
+  async setModel(name: string, provider?: 'anthropic' | 'native'): Promise<void> {
+    const expectedEngine = state.settings.id
+    const answer = await getEngineApi().setModel(name, provider, expectedEngine)
+    if (answer.ok && state.settings.id === expectedEngine) setState({ settings: { ...state.settings, model: name, cloudProvider: provider === 'anthropic' || provider === 'native' ? provider : '', thinking: 'default', effortTarget: undefined } })
   },
 
   async setApproval(mode: ApprovalMode): Promise<void> {
@@ -545,9 +548,10 @@ const store: EngineStore = {
     if (answer.ok) setState({ settings: { ...state.settings, approval: mode } })
   },
 
-  async setThinking(mode: 'default' | 'extended'): Promise<void> {
-    const answer = await getEngineApi().setThinking(mode)
-    if (answer.ok) setState({ settings: { ...state.settings, thinking: mode } })
+  async setThinking(mode: ThinkingMode, target: string): Promise<{ ok: boolean; answer: string }> {
+    const answer = await getEngineApi().setThinking(mode, target)
+    if (answer.ok && target === effortTarget(state.settings)) setState({ settings: { ...state.settings, thinking: mode, effortTarget: target } })
+    return answer
   },
 
   enqueue(prompt: string): LineItem {

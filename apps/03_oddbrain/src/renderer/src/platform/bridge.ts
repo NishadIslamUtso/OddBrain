@@ -1,3 +1,5 @@
+import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
+import type { ThinkingMode } from '@shared/lib/engine'
 import type { MemoryBridge } from '@shared/lib/memoryWorkspace'
 import { demoMemoryWorkspace } from './sampleMemory'
 import { DEFAULT_MEDIA, type MediaBridge } from '@shared/lib/mediaBridge'
@@ -463,9 +465,10 @@ export type EngineBridge = {
   onPullEvent: (listener: (tick: unknown) => void) => () => void
   readHouseRules: () => Promise<{ rules: HouseRules; defaults: HouseRules }>
   writeHouseRules: (rules: HouseRules) => Promise<{ ok: boolean; written: string[] }>
-  setModel: (model: string, provider?: 'anthropic') => Promise<{ ok: boolean; answer: string }>
+  setModel: (model: string, provider?: 'anthropic' | 'native', expectedEngine?: EngineId) => Promise<{ ok: boolean; answer: string }>
   setApproval: (mode: ApprovalMode) => Promise<{ ok: boolean; answer: string }>
-  setThinking: (mode: 'default' | 'extended') => Promise<{ ok: boolean; answer: string }>
+  capabilities: () => Promise<EngineCapabilityReport>
+  setThinking: (mode: ThinkingMode, target: string) => Promise<{ ok: boolean; answer: string }>
   memory: {
     chooseFolder?: () => Promise<{ ok: boolean; answer: string; folder?: string; canceled?: boolean }>
     defaultFolder?: () => Promise<{ ok: boolean; answer: string }>
@@ -563,6 +566,7 @@ const demoEngineBridge: EngineBridge = {
     answer: 'The engine works in the desktop app: this window is the interface only.',
   }),
   answer: async () => ({ ok: false }),
+  capabilities: async () => unverifiedCapabilities(DEFAULT_ENGINE, 'Model capabilities need the desktop app. No engine is connected in this preview.'),
   setThinking: async () => ({ ok: false, answer: 'Thinking lives in the desktop app.' }),
   memory: {
     chooseFolder: async () => ({ ok: false, answer: 'Choosing a memory folder uses the installed app.' }),

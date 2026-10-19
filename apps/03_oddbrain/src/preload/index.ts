@@ -1,3 +1,5 @@
+import { type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
+import type { ThinkingMode } from '../shared/lib/engine'
 import type { MemoryBridge } from '../shared/lib/memoryWorkspace'
 import type { MediaBridge } from '../shared/lib/mediaBridge'
 import type { MarketplaceBridge } from '../shared/lib/marketplace'
@@ -76,13 +78,14 @@ const engineApi = {
     return () => ipcRenderer.removeListener(channel, wrapped)
   },
   /** Pick which brain the engine thinks with (provider brains say which door). */
-  setModel: (model: string, provider?: 'anthropic'): Promise<{ ok: boolean; answer: string }> =>
-    ipcRenderer.invoke('engine:model', model, provider),
+  setModel: (model: string, provider?: 'anthropic' | 'native', expectedEngine?: EngineId): Promise<{ ok: boolean; answer: string }> =>
+    ipcRenderer.invoke('engine:model', model, provider, expectedEngine),
   /** Set the throttle: how much the engine may do before asking. */
   setApproval: (mode: ApprovalMode): Promise<{ ok: boolean; answer: string }> =>
     ipcRenderer.invoke('engine:approval', mode),
-  setThinking: (mode: 'default' | 'extended'): Promise<{ ok: boolean; answer: string }> =>
-    ipcRenderer.invoke('engine:thinking', mode),
+  capabilities: (): Promise<EngineCapabilityReport> => ipcRenderer.invoke('engine:capabilities'),
+  setThinking: (mode: ThinkingMode, target: string): Promise<{ ok: boolean; answer: string }> =>
+    ipcRenderer.invoke('engine:thinking', mode, target),
   memory: {
     chooseFolder: (): Promise<{ ok: boolean; answer: string; folder?: string; canceled?: boolean }> => ipcRenderer.invoke('memory:choose-folder'),
     defaultFolder: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:default-folder'),

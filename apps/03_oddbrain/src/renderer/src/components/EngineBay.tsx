@@ -27,10 +27,8 @@ const ENGINES: Array<{ id: EngineId; label: string; hint: string }> = [
 /** The honest fine print, per engine, shown where the engine is chosen. */
 const ENGINE_NOTES: Partial<Record<EngineId, string>> = {
   agy:
-    'agy answers and chats, but raises no permission cards here — its CLI has no stdio ' +
-    'prompt door, so anything beyond Ask is throttled by agy itself, not approved by you. ' +
-    'Its brain list appears when Google ships one to the CLI; until a signed-in Windows ' +
-    'turn is proven, treat this door as experimental.',
+    'agy is experimental here. Model and effort discovery, pictures and approval cards are not integrated yet. ' +
+    'agy handles its own permissions; this screen cannot approve its actions.',
 }
 
 /** The last part of a path, whichever slash the platform uses. */
@@ -68,6 +66,7 @@ export default function EngineBay() {
   // is what runs. This field exists for the person who knows a name its CLI
   // accepts; empty still means "engine default". Nothing is invented here.
   const [typedModel, setTypedModel] = useState('')
+  const [typedProvider, setTypedProvider] = useState<'native' | ''>('native')
   const [modelNote, setModelNote] = useState('')
   // What a swap actually did. Choosing an engine is a saved decision, not a
   // promise that a running turn changes hands — it cannot, and says so.
@@ -190,10 +189,10 @@ export default function EngineBay() {
                 <div key={`${entry.provider || "ollama"}:${entry.name}`} className="ob-engine-model-row" role="none">
                   <button type="button" role="menuitemradio" aria-checked={entry.name === engine.settings.model && (entry.provider || '') === engine.settings.cloudProvider}
                     onClick={() => { void engine.setModel(entry.name, entry.provider); setMenuOpen(false) }}>
-                    <span>{entry.name}</span>
-                    {entry.cloud ? <small><Cloud size={10} /> {entry.provider === 'anthropic' ? 'Anthropic' : 'Cloud'}</small> : entry.sizeGB !== null ? <small>{entry.sizeGB.toFixed(1)} GB</small> : null}
+                    <span>{entry.displayName || entry.name}</span>
+                    {entry.cloud ? <small><Cloud size={10} /> {entry.provider === 'native' ? 'CLI login' : entry.provider === 'anthropic' ? 'Anthropic API' : 'Cloud'}</small> : entry.sizeGB !== null ? <small>{entry.sizeGB.toFixed(1)} GB</small> : null}
                   </button>
-                  {!entry.cloud ? <button type="button" role="menuitem" title={`Remove ${entry.name}`} aria-label={`Remove ${entry.name}`} onClick={() => void engine.removeModel(entry.name)}><Trash2 size={12} /></button> : null}
+                  {!entry.cloud && !entry.provider ? <button type="button" role="menuitem" title={`Remove ${entry.name}`} aria-label={`Remove ${entry.name}`} onClick={() => void engine.removeModel(entry.name)}><Trash2 size={12} /></button> : null}
                 </div>
               ))
             )}
@@ -214,10 +213,16 @@ export default function EngineBay() {
           no list. Validated before it can reach the launch line. */}
       {engine.settings.id === 'claude-code' ? (
         <div className="mt-1.5">
+          <label className="mb-1 flex items-center gap-2 text-[11px] text-muted">
+            Model source
+            <select aria-label="Typed model source" value={typedProvider} onChange={event => setTypedProvider(event.target.value === 'native' ? 'native' : '')}>
+              <option value="native">CLI login</option><option value="">Ollama endpoint</option>
+            </select>
+          </label>
           <div className="ob-form-line">
             <input
               aria-label="Type a model name"
-              placeholder="or type a model your CLI knows"
+              placeholder="or type a model identifier"
               value={typedModel}
               onChange={(event) => { setTypedModel(event.target.value); setModelNote('') }}
               onKeyDown={(event) => {
@@ -225,7 +230,7 @@ export default function EngineBay() {
                 event.preventDefault()
                 const value = typedModel.trim()
                 if (!isValidModelName(value)) { setModelNote('Letters, digits, dots, colons, @, / and dashes only.'); return }
-                void engine.setModel(value).then(() => setTypedModel(''))
+                void engine.setModel(value, typedProvider || undefined).then(() => setTypedModel(''))
               }}
             />
             <button
@@ -234,7 +239,7 @@ export default function EngineBay() {
               onClick={() => {
                 const value = typedModel.trim()
                 if (!isValidModelName(value)) { setModelNote('Letters, digits, dots, colons, @, / and dashes only.'); return }
-                void engine.setModel(value).then(() => setTypedModel(''))
+                void engine.setModel(value, typedProvider || undefined).then(() => setTypedModel(''))
               }}
             >
               Use this name

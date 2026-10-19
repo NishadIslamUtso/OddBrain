@@ -84,11 +84,11 @@ describe('agy: engine #2 on its own verified wire', () => {
     expect(agyModeArguments('edits')).toEqual(['--mode', 'accept-edits'])
     expect(agyModeArguments('plan')).toEqual(['--mode', 'plan'])
     expect(agyModeArguments('full')).toEqual(['--dangerously-skip-permissions'])
-    // the Thinking chip maps to its own effort knob; default sets nothing
-    expect(agyArguments(settings({ thinking: 'extended' }))).toContain('--effort')
-    expect(agyArguments(settings({ approval: 'full', thinking: 'extended' }))).toEqual([
+    // Legacy Extended must not silently become high effort. The default model omits --model.
+    expect(agyArguments(settings({ thinking: 'extended' as never }))).not.toContain('--effort')
+    expect(agyArguments(settings({ approval: 'full', thinking: 'extended' as never }))).toEqual([
       '--input-format', 'stream-json', '--output-format', 'stream-json', '--model', 'gemini-3-pro',
-      '--dangerously-skip-permissions', '--effort', 'high',
+      '--dangerously-skip-permissions',
     ])
   })
 

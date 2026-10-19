@@ -62,12 +62,9 @@ export function agyArguments(settings: EngineSettings, resumeId?: string): strin
   return [
     '--input-format', 'stream-json',
     '--output-format', 'stream-json',
-    '--model', settings.model,
+    ...(settings.model ? ['--model', settings.model] : []),
     ...agyModeArguments(settings.approval),
-    // The engine's own reasoning-effort knob for the Thinking chip. Its help
-    // documents low|medium|high|xhigh|max; extended maps to `high`, default
-    // sets nothing — the same shape as Claude Code's thinking switch.
-    ...(settings.thinking === 'extended' ? ['--effort', 'high'] : []),
+    // No guessed effort mapping: agy's capability report is not integrated yet.
     ...(resumeId ? ['--conversation', resumeId] : []),
   ]
 }

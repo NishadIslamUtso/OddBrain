@@ -65,6 +65,14 @@ Fresh profiles and **Reset appearance** use **Ink & Sketchbook**, including its 
 
 The **shared skill collection** and **shared MCP configuration** still deploy to both engines; engine-marketplace actions affect only the chosen engine. Packs, API providers and Ollama remain separate. Installed/enabled does not mean a connector is authenticated or working. Interactive plugin settings and sign-in remain in the engine. The agy adapter has regression and fixture-process coverage; live Google-catalog access, real agy installs and target-laptop acceptance are still pending.
 
+### Models and reasoning controls
+
+The model picker distinguishes **CLI login**, **Anthropic API** and Ollama routes. Native Claude choices come from the installed CLI, not a bundled model list; listing a model does not prove your account can use it. Manual model entry in engine settings also has a source selector.
+
+- **Composer → engine menu → Reasoning effort** offers only the selected native Claude model’s reported levels. Changes apply to the next message. **Engine default** keeps the CLI’s own setting; it does not mean reasoning is off.
+- **Composer → More chat tools → Show thinking** only shows or hides thinking supplied by the engine. It never changes effort, sends another request or creates an explanation.
+- agy model/effort discovery and non-native-provider effort compatibility remain unverified in this adapter. They keep the engine default instead of borrowing another model’s levels. Old saved **Extended** settings migrate to **Engine default**, not an assumed High setting.
+
 ## Browser companion
 
 1. Run the desktop app and select a vault. Open **Settings → AI & connections → Connectors**.

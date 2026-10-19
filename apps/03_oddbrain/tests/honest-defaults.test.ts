@@ -30,7 +30,7 @@ test('an empty model never becomes a --model flag', () => {
 
 test('launch points claude-code at a brain door ONLY when a brain was actually picked', () => {
   const source = readFileSync(new URL('../src/main/engine/claudeCode.ts', import.meta.url), 'utf8')
-  assert.match(source, /input\.settings\.model\s*\n\s*\? brainEnvironment\(input\.settings\.baseUrl\)/)
+  assert.match(source, /input\.settings\.model && input\.settings\.cloudProvider !== 'native'\s*\n\s*\? brainEnvironment\(input\.settings\.baseUrl\)/)
   assert.doesNotMatch(source, /: brainEnvironment\(input\.settings\.baseUrl\)\),\s*\n\s*\.\.\.\(enginePathSync/)
 })
 

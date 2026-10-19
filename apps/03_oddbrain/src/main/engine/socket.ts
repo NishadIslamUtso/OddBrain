@@ -1,3 +1,5 @@
+import { resolveEngineCommand } from './enginePath'
+import { selectedEffort } from '../../shared/lib/engineCapabilities'
 /**
  * The socket: the one plug between the app and whatever engine is chosen.
  *
@@ -66,6 +68,8 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
   // must mean a relaunch — reusing the process would silently run under the
   // OLD gear while the UI shows the new one.
   let sessionModel: string | null = null
+  let sessionProvider: string | null = null
+  let sessionCommand: string | null = null
   let sessionApproval: string | null = null
   // What the living process was LAUNCHED with: a flag or a base URL that
   // changed under it would only apply on the next start, silently.
@@ -129,10 +133,13 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       // for: same folder, same model, same approval gear. Anything else gets
       // an honest relaunch (the conversation itself survives via the resume
       // id where the engine supports one).
+      const command = resolveEngineCommand(input.settings.id)
       const gearChanged =
+        sessionCommand !== command ||
         sessionModel !== input.settings.model ||
+        sessionProvider !== input.settings.cloudProvider ||
         sessionApproval !== input.settings.approval ||
-        sessionThinking !== input.settings.thinking ||
+        sessionThinking !== selectedEffort(input.settings) ||
         sessionBaseUrl !== input.settings.baseUrl ||
         sessionKeyFingerprint !== (input.auth?.apiKey ?? null) ||
         currentCwd !== input.cwd
@@ -160,8 +167,10 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       session = start({ ...input, resumeId: memory.load(sessionKey(input.settings.id, input.cwd)) })
       currentCwd = input.cwd
       sessionModel = input.settings.model
+      sessionProvider = input.settings.cloudProvider
+      sessionCommand = command
       sessionApproval = input.settings.approval
-      sessionThinking = input.settings.thinking
+      sessionThinking = selectedEffort(input.settings)
       sessionBaseUrl = input.settings.baseUrl
       sessionKeyFingerprint = input.auth?.apiKey ?? null
       sessionAuthProvider = input.auth?.provider ?? null
@@ -192,6 +201,8 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       if (sessionEngine && currentCwd) memory.save(sessionKey(sessionEngine, currentCwd), '')
       sessionEngine = null
       sessionModel = null
+      sessionProvider = null
+      sessionCommand = null
       sessionApproval = null
       sessionThinking = null
       sessionBaseUrl = null

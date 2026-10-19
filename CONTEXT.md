@@ -23,9 +23,10 @@ Runtime Markdown is intentionally preserved: `vault/Brain/` holds actual vault c
 | Stage 3: comfortable daily use | Grouped Settings, optional Looks lab, People management disclosure, readable timelines, in-view search and full-vault backup/restore implemented. Unified setup and real-machine acceptance remain pending. |
 | Verified reliability repairs | Integrated after the audit: vault preview guard, chapter-cycle handling, damaged memory-state handling, organizer lifecycle, artifact/checkpoint/key persistence edge cases and test timeout forwarding. Regression cases now run on this branch; see the integration record below. |
 | Engine stores + Node 24 | Engine-specific catalog adapters available from Skills, Plugins and Connectors; agy mutations/read-back guarded. Node 24 development/types/CI migration complete. Live agy catalog/install and target-machine acceptance remain pending; see the latest section. |
+| Model / effort foundation | Native Claude initialization discovery and route-aware effort controls implemented; Show thinking remains display-only. agy model/effort discovery and non-native effort parity remain pending. See latest section. |
 | Documentation | README + this context file; stale `.ai` handovers retired. No runtime Markdown or feature removed. |
 
-Targeted reliability integration is complete; Stage 1’s queue is unchanged. Next product work remains Stages 2/3 and real-machine acceptance. No blanket merge is justified by a higher test count.
+Targeted reliability integration is complete; Stage 1’s queue is unchanged. The owner subsequently authorized the broader engine/extension/conversation/composer/automation backlog. Work is proceeding in tested batches, beginning with engine foundations; the latest section distinguishes this batch from the remaining work. No blanket merge is justified by a higher test count.
 
 ## The laws
 
@@ -344,3 +345,48 @@ Authoritative CLI feature evidence: [official agy changelog](https://github.com/
 Sandbox setup lives only in ignored `.cache/stores/`, `.cache/node24/` and `.cache/browser/`. The shell's default Node may remain 22; validation explicitly prepended `.cache/node24/node_modules/node/bin` to PATH. Restore Node 24 before rerunning if caches are missing. Chromium 153 required bundled AL2023 libraries and fonts. An initial UI run failed when Sparticuz's default `--single-process` closed the browser between contexts. Removing that flag (and its web-security/isolation bypass flags) fixed the harness; the entire final build/test/UI/extension sequence then passed unchanged. Logs: `.cache/stores/{build,web,tests,ui,extension}.log`, report `final.xml`, screenshots `ui/`. Existing CSS-optimizer/chunk warnings are non-failing.
 
 **Still unverified:** Google's live feed and a real agy install/read-back in this environment. Its outbound allowlist excludes Google hosts; the official GitHub release download redirected to a blocked release-assets host, so no agy binary was installed here. The native CLI capability checks will refuse unsupported versions rather than borrow another engine's flags. Signed-in/configured MCP operation, packaged Windows acceptance and new cross-platform CI are not established by local tests. Do not describe this as a completed live agy acceptance pass. The Antigravity IDE's separate MCP-store UI is not mirrored, and this is not a universal MCP registry. Non-native Claude models still depend on provider protocol/tool support; this work adds no blanket compatibility claim or terminal-TUI emulation.
+
+
+## Native model / effort foundation (2026-10-19)
+
+**Authorization:** the owner explicitly approved the consolidated backlog, then reiterated correctness and intuitive controls. Do not ask for the same scope approval again. **Show thinking must never increase effort.** Safe full ChatGPT/Claude archive import remains on hold; the other agent’s clipping importer was not taken.
+
+This first foundation batch builds on `1a458d2`, not the entire backlog. Existing appearance/navigation/controls remain; no new screen or runtime dependency was added.
+
+### Implemented
+
+- Renamed the existing display-only control **Show thinking**, explaining that it only displays engine-supplied output. Tests exercise the real button: no inference, effort change or metadata query. Hidden thinking does not disable reasoning; unavailable thinking is never reconstructed.
+- Replaced model-unaware Default/Extended with **Reasoning effort** in the existing composer engine menu. Only exact runtime-reported native Claude levels are selectable, plus **Engine default**. Missing metadata, unfamiliar levels, another provider, an unknown model or an unspecified CLI model stay explicitly unverified. `supportsEffort: false` is distinguished from missing evidence. Default means native configuration, not “off.”
+- `nativeCapabilities.ts` uses the official Claude SDK initialization protocol against the user-installed native executable: only an `initialize` frame, no user prompt, slash command or test inference. Tools/MCP/startup hooks are disabled for inspection; workspace/user settings are read for provider context. Bounded 1 MB output / 20 seconds, no shell, UTF-8 framing, matched request IDs, process-tree cleanup, cancellation and redacted failures. One inspection per window is coalesced; changed routes/executables and destroyed windows cancel it. No persistent account/catalog cache. Shell shims are refused for inspection with guidance to choose the native executable.
+- Native catalog rows are separate from independent Ollama and authorized Anthropic API lists. Model identifiers are validated, including rejection of leading option dashes. Picker labels and manual-entry source selection distinguish routes. Native models use the CLI login, not Ollama. The inference gate treats native login models as external; the tool-free reviewer refuses an implicit same-name local substitute.
+- Effort requests are scoped to engine/provider/model/endpoint/workspace. Main rechecks supported levels when saving **and before sending any message with non-default effort**. Stale settings/binary changes refuse the operation. Session reuse compares provider and executable as well as model/effective effort/approval/endpoint/credentials. Native launches use real `--effort <level>`, not the old app-imposed `MAX_THINKING_TOKENS=31999`. Old Extended migrates to Default, never guessed High.
+- agy no longer gets empty `--model` or the guessed Extended→High mapping. Its native default is preserved. The UI now accurately says model/effort discovery, pictures and approval cards are not integrated; it no longer claims Google has not shipped model discovery.
+
+### Compatibility and acceptance
+
+| Route | Model discovery | Effort | Evidence |
+|---|---|---|---|
+| Native Claude CLI login | Initialization metadata and display names | Exact reported levels for an explicitly selected model | Real Linux Claude Code 2.1.303 metadata probe; subprocess/renderer tests. No signed-in inference or Windows acceptance claim. |
+| Claude → Anthropic API key | Existing authorized API discovery | Unverified here; engine default only | Provider routing/regressions. Native-login metadata is not borrowed. |
+| Claude → Ollama/custom endpoint | Existing independent endpoint discovery | Unverified here; engine default only | Endpoint tests and route/same-name isolation. No blanket model compatibility claim. |
+| agy | Native model-list adapter still pending | Native default; report adapter pending | Adapter regressions only; no real agy binary or signed-in acceptance here. |
+| Browser / sample workspace | Explicit preview/sample data | No invented native capabilities | Browser UI + mocked bridge, not native execution. |
+
+Sources: [official Claude SDK changelog](https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/CHANGELOG.md), [Python SDK initialization](https://github.com/anthropics/claude-agent-sdk-python/blob/main/src/claude_agent_sdk/_internal/query.py), and published `@anthropic-ai/claude-agent-sdk` 0.3.303 types. For research only, its official Linux executable was obtained from npm and returned a real initialization response containing `models`, `resolvedModel`, `supportsEffort`, `supportedEffortLevels`, `account.apiProvider` and `claude_code_version`. The production parser was exercised against that binary, with no user prompt. This is advertised capability metadata, not proof of account entitlement or applied inference. The SDK/executable are **not app dependencies or bundled files**; temporary package changes were reverted and a clean `npm ci` rerun. Probe files stay in ignored `.cache/effort-review/`.
+
+The [official agy changelog](https://github.com/google-antigravity/antigravity-cli/blob/main/CHANGELOG.md) documents read-only print `/model` and `/effort` since **1.1.11**, without agent turns/quota/conversations. That proves the feature exists, not the exact JSON envelope. The screenshot proves Gemini 3.8 Flash’s Low/Medium/High only. Secondary captured summaries corroborate differences but do not establish the raw schema. No invented permissive parser, model-name inference, effort clamping or invalid-model test prompt was adopted. Obtain real native reports next; do not mistake this integration gap for agy lacking the feature.
+
+### Validation
+
+**Final Node 24.22.0 validation: 1,204 tests / 171 files / zero skips.** Both required Chromium suites and strict JUnit gate passed. Typecheck, Electron/web/offline builds, all ten serial app UI suites and the extension browser harness passed. New coverage includes 14 capability/probe/guard tests, five effort UI tests, same-name provider/session isolation, and updated migration/launch tests. The actual browser control offers only reported levels, saves a scoped request, fits its menu, and toggles Show thinking without another message/effort/metadata call. Screenshot inspected. Existing non-failing CSS/chunk warnings remain.
+
+Receipts: ignored `.cache/effort-review/{build,web,tests,ui,extension}.log`, `final.xml`, `native-proof.json`, `ui/native-effort-controls.png`. Browser setup reuses `.cache/stores/browser-options.json` and AL2023 libraries. Native dialogs, signed-in inference, Windows packaging/target-laptop use and cross-platform CI for this new commit remain separate acceptance work. Real Claude metadata initialization is not a claim of live agy or universal provider compatibility.
+
+### Remaining authorized backlog
+
+- Finish core agy discovery/effort, streaming/tool events, verified attachments and enforceable approvals; verify resume/cancel/reload/recovery and live extension install/auth/tool use per engine/provider.
+- Extensions: package contents/requirements inspection, guided configuration/auth, complete installed skills, reviewed GitHub installs, create-skill wizard, portable versus engine-specific packages, native MCP-store investigation and safe reload.
+- Conversations/composer: honest context estimates, accessible branching/side questions, native-session import/resume, recap/pins/full Markdown and clipboard export, per-chat workspaces/additional folders/goals/styles, file mentions, approval-gated shell/output, external editor, stash and shortcuts.
+- Changes/permissions/diagnostics: unified diffs/open/restore, explicit rules and reviewed suggestions without automatic permission expansion, project-rule previews, version/sign-in/endpoint/connector health, qualified usage/cost, redacted diagnostics and agy artifacts/history.
+- Agents/automation: agent library, parallel subtasks, schedules/inbox with app-open/background limits, workflow/run browsing, worktree batches, cited tool-backed research, reviewed/verified project runners, and reusable review/security/simplify/verify with actual checks.
+- **Still held:** full archive import preserving originals/revisions, before drag/drop and header tolerance. No unsafe branch intake is authorized by this batch.

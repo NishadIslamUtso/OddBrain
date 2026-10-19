@@ -13,9 +13,29 @@ await p.evaluate(async()=>{
 await p.getByText('qwen2.5-coder:3b',{exact:true}).waitFor();
 await p.getByRole('textbox',{name:'Message',exact:true}).fill('Update welcome.html after checking it.');await p.getByRole('button',{name:'Send',exact:true}).click();assert.equal(await p.evaluate(()=>window.__calls.sent.length),1);assert.equal(await p.locator('.ob-brain-toy:visible').count(),0);assert(await p.locator('.ob-engine-activity').isVisible());
 await p.evaluate(()=>window.__emit({kind:'tool',name:'Grep',summary:'Find the welcome heading'}));await p.waitForTimeout(80);assert((await p.locator('.ob-engine-activity').innerText()).includes('searching'));r.checks.push('The real composer calls the existing engine send path once; actual tool events drive the strip');
-await p.evaluate(()=>window.__emit({kind:'thinking',text:'Checking the relevant file before editing.'}));await p.getByRole('button',{name:'More chat tools',exact:true}).click();await p.getByRole('button',{name:/Thinking details/}).click();await p.getByRole('button',{name:'More chat tools',exact:true}).click();assert.equal(await p.locator('.ob-engine-work .ob-thinking-block').getAttribute('open'),'');
+await p.evaluate(()=>window.__emit({kind:'thinking',text:'Checking the relevant file before editing.'}));await p.getByRole('button',{name:'More chat tools',exact:true}).click();await p.getByRole('button',{name:/Show thinking/}).click();await p.getByRole('button',{name:'More chat tools',exact:true}).click();assert.equal(await p.locator('.ob-engine-work .ob-thinking-block').getAttribute('open'),'');
 await p.evaluate(()=>{window.__emit({kind:'permission',requestId:'permission-1',tool:'Write',summary:'C:\\Projects\\OddBrain\\welcome.html',detail:'- Old heading\n+ New heading'});window.__emit({kind:'permission',requestId:'permission-2',tool:'Bash',summary:'Run the project tests'});});await p.waitForTimeout(100);assert((await p.locator('.ob-engine-activity').innerText()).includes('waiting for you'));assert(await p.getByText('+1 more waiting',{exact:true}).count());await p.screenshot({path:path.join(QA,'real-app-permission.png')});
 await p.getByRole('button',{name:'Allow',exact:true}).click();await p.getByRole('button',{name:'Deny',exact:true}).click();assert.deepEqual(await p.evaluate(()=>window.__calls.answered),[{requestId:'permission-1',allow:true},{requestId:'permission-2',allow:false}]);r.checks.push('Existing permission queue, native request IDs, Allow/Deny callbacks and reasoning disclosure remain intact');
 await p.evaluate(()=>window.__emit({kind:'done',text:'The sample turn finished.'}));await p.waitForTimeout(1900);assert.equal(await p.locator('.ob-engine-activity').count(),0);assert.equal(await p.evaluate(()=>window.__engine.turn.state),'done');assert.equal(await p.getByRole('button',{name:'Hand off',exact:true}).count(),1);assert.equal(await p.getByRole('button',{name:'Compact',exact:true}).count(),1);r.checks.push('Completion reaction ends; existing handoff, compact, journal/review actions remain in the real panel');
+// The real effort control uses only runtime metadata. This remains a UI fixture,
+// separate from the native Claude initialize probe recorded in CONTEXT.md.
+await p.evaluate(async()=>{
+ window.__calls.effort=[];window.__calls.capabilities=0;
+ window.engineApi.setModel=async()=>({ok:true,answer:'selected'});
+ window.engineApi.capabilities=async()=>{window.__calls.capabilities++;const s=window.__engine.settings;return {ok:true,models:[],effort:{target:JSON.stringify([s.id,s.cloudProvider,s.model,s.baseUrl,s.workspace]),status:'reported',levels:['low','high'],note:'CLI-reported options. Applies to your next message.'}}};
+ window.engineApi.setThinking=async(mode,target)=>{window.__calls.effort.push({mode,target});return {ok:true,answer:'Requested for your next message.'}};
+ await window.__engine.setModel('metadata-fixture','native');
+});
+await p.locator('button[title="Which engine works here, and how much it may do before asking"]').click();
+const effort=p.getByRole('combobox',{name:'Reasoning effort',exact:true});await effort.locator('option[value="high"]').waitFor({state:'attached'});
+assert.deepEqual(await effort.locator('option').evaluateAll(es=>es.map(e=>e.value)),['default','low','high']);
+await effort.selectOption('high');await p.getByRole('status').filter({hasText:'Requested for your next message.'}).waitFor();
+assert.equal(await p.evaluate(()=>window.__calls.sent.length),1);assert.equal(await p.evaluate(()=>window.__calls.effort[0].mode),'high');
+await p.screenshot({path:path.join(QA,'native-effort-controls.png')});
+const menu=p.getByRole('menu',{name:'Engines and how much they may do'});const bounds=await menu.boundingBox();assert(bounds&&bounds.y>=0&&bounds.x>=0&&bounds.x+bounds.width<=1280);
+await p.keyboard.press('Escape');const checksBefore=await p.evaluate(()=>window.__calls.capabilities);
+await p.getByRole('button',{name:'More chat tools',exact:true}).click();await p.getByRole('button',{name:/Show thinking/}).click();
+assert.equal(await p.evaluate(()=>window.__calls.effort.length),1);assert.equal(await p.evaluate(()=>window.__calls.sent.length),1);assert.equal(await p.evaluate(()=>window.__calls.capabilities),checksBefore);
+r.checks.push('Reasoning effort shows only reported levels and sets a scoped request; Show thinking sends no message, effort change or metadata request');
 assert.equal(r.errors.length,0);
 }catch(e){r.failure=e.stack;console.error(e.stack);process.exitCode=1}finally{fs.writeFileSync(path.join(QA,'turn-wiring-results.json'),JSON.stringify(r,null,2));console.log(JSON.stringify(r,null,2));await b.close()}})();

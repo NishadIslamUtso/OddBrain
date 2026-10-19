@@ -1,3 +1,6 @@
+import { effortTarget, selectedEffort, type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
+import { checkEffortSelection, createCapabilityInspector } from './engine/nativeCapabilities'
+import type { ThinkingMode } from '../shared/lib/engine'
 import { createVaultFiles } from './vault/files'
 import { exportExtension } from './extension/export'
 import { discoverClaudeModels } from './engine/modelDiscovery'
@@ -25,7 +28,7 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { loadAppFlags, readAppFlagsStrict, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
-import { registerStagingRoot, setBinaryOverride, binaryOverride } from './engine/enginePath'
+import { registerStagingRoot, setBinaryOverride, binaryOverride, resolveEngineCommand } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
 import { basename, dirname, join, resolve } from 'node:path'
 import { existsSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -270,6 +273,7 @@ function inferencePermissions() {
   return { ...settings.permissions, cloud: Object.fromEntries(CLOUD_PROVIDERS.map(p => [p.id, false])) }
 }
 
+const capabilityInspector = createCapabilityInspector()
 let mediaService: ReturnType<typeof createMediaService> | undefined
 let marketplaceService: ReturnType<typeof createMarketplaceService> | undefined
 let agyMarketplaceService: ReturnType<typeof createAgyMarketplaceService> | undefined
@@ -284,7 +288,7 @@ function registerBridges(): void {
   }
   const owners = new Set<number>()
   const track = (sender: Electron.WebContents): number => {
-    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
+    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
     return sender.id
   }
   const marketAnswer = async <T,>(run: () => Promise<T>) => { try { return { ok: true as const, value: await run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
@@ -631,7 +635,7 @@ function registerBridges(): void {
 
   handle(
     'engine:send',
-    async (_event, prompt: string, cwd: string, pictures: unknown = []): Promise<{ ok: boolean; answer: string }> => {
+    async (event, prompt: string, cwd: string, pictures: unknown = []): Promise<{ ok: boolean; answer: string }> => {
       const text = typeof prompt === 'string' ? prompt.trim().slice(0, 20000) : ''
       if (!text) return { ok: false, answer: 'Write what the engine should do first.' }
       // Pictures: only what the wire can carry, only a few, only small. A bad
@@ -652,8 +656,16 @@ function registerBridges(): void {
       await automation?.beginWork(text, settings.engine)
       if (ownDispatch !== workDispatchGeneration) { automation?.rejectWork(); return { ok: false, answer: 'The task was canceled before it started.' } }
       const usedEngine = { ...settings.engine }
+      const usedCommand = resolveEngineCommand(usedEngine.id)
+      // Saved effort is a request, not permanent proof about a changing CLI/account.
+      // Recheck before any task text is handed to the engine; no agent turn is used.
+      const effort = selectedEffort(usedEngine)
+      if (effort !== 'default') {
+        const checked = await checkEffortSelection(usedEngine, effort, effortTarget(usedEngine), current => capabilityInspector.inspect(track(event.sender), current, current.workspace || vaultRoot()))
+        if (!checked.ok) { automation?.rejectWork(); return { ok: false, answer: 'The requested effort could not be verified for this model. Refresh Reasoning effort or choose Engine default. No message was sent.' } }
+      }
       const access = await inferenceAllowed(usedEngine, settings.permissions.local, automation?.preferences().allowCloudInference !== false)
-      if (!access.ok || ownDispatch !== workDispatchGeneration || JSON.stringify(usedEngine) !== JSON.stringify(settings.engine)) {
+      if (!access.ok || usedCommand !== resolveEngineCommand(usedEngine.id) || ownDispatch !== workDispatchGeneration || JSON.stringify(usedEngine) !== JSON.stringify(settings.engine)) {
         automation?.rejectWork(); return { ok: false, answer: access.answer || 'The task was canceled or its model changed before dispatch. Send again when ready.' }
       }
       automation?.retargetWork(usedEngine)
@@ -1528,7 +1540,8 @@ function registerBridges(): void {
   // the same list Claude Code itself would choose from. Real data only: what
   // Ollama reports, with cloud brains flagged because their work leaves the
   // machine and the label must say so.
-  handle('engine:models', async (): Promise<{ ok: boolean; models: EngineModelEntry[]; error?: string }> => {
+  handle('engine:capabilities', async (event): Promise<EngineCapabilityReport> => capabilityInspector.inspect(track(event.sender), { ...settings.engine }, settings.engine.workspace || vaultRoot()))
+  handle('engine:models', async (event): Promise<{ ok: boolean; models: EngineModelEntry[]; error?: string }> => {
     // Each engine is served by its OWN source: Claude Code reads its brains
     // from the owner's door; agy answers only to Google. Never a pickable lie.
     if (settings.engine.id !== 'claude-code') {
@@ -1538,6 +1551,11 @@ function registerBridges(): void {
     }
     return discoverClaudeModels({
       baseUrl: settings.engine.baseUrl || 'http://localhost:11434',
+      nativeModels: async () => {
+        const report = await capabilityInspector.inspect(track(event.sender), { ...settings.engine }, settings.engine.workspace || vaultRoot())
+        if (!report.ok) throw Error('Native model inspection unavailable.')
+        return report.models
+      },
       providerModels: cloud && keyStore?.has('anthropic') && cloudEnabled(inferencePermissions(), 'anthropic', true)
         ? () => cloud!.listModels('anthropic') : undefined,
     })
@@ -1588,18 +1606,25 @@ function registerBridges(): void {
   })
 
 
-  handle('engine:thinking', (_event, thinking: string): { ok: boolean; answer: string } => {
-    const mode = thinking === 'extended' ? 'extended' : 'default'
-    settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, thinking: mode } })
-    return { ok: true, answer: mode === 'extended' ? 'Extended thinking: the engine gets its own big budget.' : 'Default thinking.' }
+  handle('engine:thinking', async (event, thinking: string, expectedTarget: string): Promise<{ ok: boolean; answer: string }> => {
+    const original = settings.engine
+    const snapshot = { ...original }
+    const target = effortTarget(snapshot)
+    const command = resolveEngineCommand(snapshot.id)
+    const checked = await checkEffortSelection(snapshot, thinking, expectedTarget, current => capabilityInspector.inspect(track(event.sender), current, current.workspace || vaultRoot()))
+    if (!checked.ok) return checked
+    if (command !== resolveEngineCommand(snapshot.id) || original !== settings.engine || target !== effortTarget(settings.engine)) return { ok: false, answer: 'Engine settings changed during the check. Nothing was changed.' }
+    settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, thinking: thinking as ThinkingMode, effortTarget: target } })
+    return checked
   })
 
-  handle('engine:model', (_event, model: string, provider?: string): { ok: boolean; answer: string } => {
+  handle('engine:model', (_event, model: string, provider?: string, expectedEngine?: string): { ok: boolean; answer: string } => {
+    if ((expectedEngine && expectedEngine !== settings.engine.id) || (provider && settings.engine.id !== 'claude-code')) return { ok: false, answer: 'The engine changed. Choose a model from the current engine’s list.' }
     const typed = typeof model === 'string' ? model.trim() : ''
     if (typed && !isValidModelName(typed)) {
       return { ok: false, answer: 'Model names use letters, digits, dots, colons, @, / and dashes only; nothing was changed.' }
     }
-    const clean = normalizeEngine({ ...settings.engine, model: typed, cloudProvider: provider === 'anthropic' ? 'anthropic' : '' })
+    const clean = normalizeEngine({ ...settings.engine, model: typed, cloudProvider: provider === 'anthropic' || provider === 'native' ? provider : '', thinking: 'default', effortTarget: undefined })
     settings = writeSettings(settingsFile, { ...settings, engine: clean })
     return { ok: true, answer: clean.cloudProvider ? `brain set to ${clean.model} via ${clean.cloudProvider}` : `brain set to ${clean.model}` }
   })
@@ -2203,6 +2228,7 @@ app.whenReady().then(async () => {
   })
 
   app.on('before-quit', () => {
+    capabilityInspector.cancelAll()
     mediaService?.cancelAll()
     marketplaceService?.cancelAll()
     agyMarketplaceService?.cancelAll()

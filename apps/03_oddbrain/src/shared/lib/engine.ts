@@ -19,8 +19,8 @@ export type EngineId = 'claude-code' | 'agy'
  */
 /** How much the engine may do before it asks. The app imposes no more. */
 export type ApprovalMode = 'ask' | 'plan' | 'edits' | 'full'
-/** How much room the engine's own thinking gets: its flag, our switch. */
-export const THINKING_MODES = ['default', 'extended'] as const
+/** Requested native effort. Display-only thinking visibility lives elsewhere. */
+export const THINKING_MODES = ['default', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 export type ThinkingMode = (typeof THINKING_MODES)[number]
 
 export const APPROVAL_MODES: ApprovalMode[] = ['ask', 'plan', 'edits', 'full']
@@ -51,8 +51,9 @@ export type EngineSettings = {
   workspace: string
   /** The throttle: how much the engine may do before asking. */
   approval: ApprovalMode
-  /** The engine's own thinking budget, as its environment variable. */
+  /** Requested effort, applied only to the route that was checked. */
   thinking: ThinkingMode
+  effortTarget?: string
   /**
    * The door the brain lives behind. Empty means "whatever this machine
    * already has", which lets an Anthropic key work later without app changes.
@@ -61,9 +62,10 @@ export type EngineSettings = {
   /**
    * When the chosen brain comes from a provider (a key saved in Models),
    * the engine is launched pointed there WITH that key — riding the engine,
-   * never around it. Empty means the engine's own local door.
+   * never around it. 'native' keeps the CLI login. Empty uses the local
+   * endpoint for a named model, or the CLI login for an empty model.
    */
-  cloudProvider: '' | 'anthropic'
+  cloudProvider: '' | 'anthropic' | 'native'
 }
 
 export const DEFAULT_ENGINE: EngineSettings = {
@@ -101,9 +103,11 @@ export type EngineModelEntry = {
    * Which provider door this brain was read from. Empty = the engine's own
    * local door. 'anthropic' = read from the Anthropic API with a key from
    * Models; sending routes the ENGINE there with that key — the app itself
-   * never calls the provider.
+   * never calls the provider. 'native' is the CLI-reported catalog, sent
+   * through its own login instead of the configured Ollama endpoint.
    */
-  provider?: 'anthropic'
+  provider?: 'anthropic' | 'native'
+  displayName?: string
 }
 
 /** What a whole engine looks like from the machine it runs on. */
@@ -133,7 +137,7 @@ const ENGINES: readonly EngineId[] = ['claude-code', 'agy']
  * rule is a pattern, not a comment: letters, digits, dots, colons, and a few
  * separator characters — nothing that a shell could interpret.
  */
-const MODEL_PATTERN = /^[\w.:@/-]+$/
+const MODEL_PATTERN = /^(?!-)[\w.:@/-]+$/
 
 /** True for a model name the launch line can carry without a shell seeing it. */
 export function isValidModelName(value: unknown): value is string {
@@ -164,8 +168,10 @@ export function normalizeEngine(raw: unknown): EngineSettings {
     approval: APPROVAL_MODES.includes(value.approval as ApprovalMode)
       ? (value.approval as ApprovalMode)
       : 'ask',
-    thinking: value.thinking === 'extended' ? 'extended' : 'default',
-    cloudProvider: value.cloudProvider === 'anthropic' ? 'anthropic' : '',
+    // Old Extended was a fixed budget, not model effort. Never silently convert it.
+    thinking: THINKING_MODES.includes(value.thinking as ThinkingMode) ? value.thinking as ThinkingMode : 'default',
+    ...(typeof value.effortTarget === 'string' && value.effortTarget.length < 8192 ? { effortTarget: value.effortTarget } : {}),
+    cloudProvider: value.cloudProvider === 'anthropic' || value.cloudProvider === 'native' ? value.cloudProvider : '',
   }
 }
 
@@ -228,5 +234,5 @@ export function toolSummary(name: string, input: unknown): string {
 
 /** Engine-specific model/provider choices never leak into another adapter. */
 export function selectEngine(current: EngineSettings, id: EngineId): EngineSettings {
-  return current.id === id ? current : { ...current, id, model: '', cloudProvider: '' }
+  return current.id === id ? current : { ...current, id, model: '', cloudProvider: '', thinking: 'default', effortTarget: undefined }
 }

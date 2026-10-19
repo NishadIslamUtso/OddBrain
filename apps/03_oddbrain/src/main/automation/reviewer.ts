@@ -32,6 +32,7 @@ export function createTextReviewer(options: {
   function chosen(task: ReviewTask, prefs: AutomationPreferences): string {
     if (prefs.reviewModel) return prefs.reviewModel
     if (task.engine.cloudProvider === 'anthropic') return task.engine.model.startsWith('anthropic/') ? task.engine.model : 'anthropic/' + task.engine.model
+    if (task.engine.cloudProvider === 'native' || !task.engine.model) throw Error('Choose an installed local or saved-key reviewer. The native engine login has no verified tool-free review channel.')
     if (task.engine.id !== 'claude-code') throw Error('Choose an installed local or saved-key reviewer. agy has no verified tool-free review channel; its agent is never used as a report-only reviewer.')
     return task.engine.model
   }

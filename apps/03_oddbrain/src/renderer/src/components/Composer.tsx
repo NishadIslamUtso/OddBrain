@@ -1,3 +1,4 @@
+import ReasoningEffort from './ReasoningEffort'
 import { useContext, useEffect, useRef, useState, type ReactNode } from 'react'
 import { ArrowUp, ChevronDown, CookingPot, Cpu, FolderOpen, Layers, ListOrdered, Map, MoreHorizontal, Mic, MicOff, Paperclip, Play, ScrollText, Square, Swords, X } from 'lucide-react'
 import { filterPrompts, loadPrompts } from '@shared/lib/prompts'
@@ -205,7 +206,7 @@ export default function Composer({
               <button type="button" disabled={!value.trim() || busy} onClick={() => { setCook(true); setTools(false) }}><CookingPot size={14} />Cook context</button>
               <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:battle', { detail: value })); setTools(false) }}><Swords size={14} />Brain battle</button>
               <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:split', { detail: value })); setTools(false) }}><ListOrdered size={14} />Split a task</button>
-              <button type="button" aria-pressed={look.showThinking} onClick={() => changeLook({ showThinking: !look.showThinking })}><ScrollText size={14} />Thinking details<span>{look.showThinking ? 'On' : 'Off'}</span></button>
+              <button type="button" aria-pressed={look.showThinking} title="Only shows thinking supplied by the engine. This does not change reasoning effort or request an explanation." onClick={() => changeLook({ showThinking: !look.showThinking })}><ScrollText size={14} />Show thinking<span>{look.showThinking ? 'On' : 'Off'}</span></button>
               <button type="button" onClick={() => { window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' })); setTools(false) }}><ListOrdered size={14} />Memory inbox</button>
               <button type="button" onClick={() => { window.dispatchEvent(new Event('app:show-journal')); setTools(false) }}><ListOrdered size={14} />Turn journal</button>
             </div> : null}
@@ -486,24 +487,7 @@ function EngineChip({ open, onToggle }: { open: boolean; onToggle: () => void })
               {mode.label}
             </button>
           ))}
-          <div className="mt-1 flex items-center justify-between gap-1.5 border-t border-line px-2.5 pb-1 pt-2" role="group" aria-label="The engine's own thinking budget">
-            <span className="text-[10.5px] uppercase tracking-wide text-muted">Thinking</span>
-            <div className="flex items-center gap-1">
-              {([['default', 'Default'], ['extended', 'Extended']] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={(engine.settings.thinking ?? 'default') === value}
-                  title={value === 'extended' ? 'The engine gets its own big thinking budget (its MAX_THINKING_TOKENS, set at launch).' : 'The engine decides how much to think.'}
-                  onClick={() => void engine.setThinking(value)}
-                  className={`rounded-lg px-2 py-1 text-[11px] ${ (engine.settings.thinking ?? 'default') === value ? 'bg-white/[0.06] text-ink' : 'text-muted hover:text-ink' }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <ReasoningEffort />
           <p className="px-2.5 pb-1.5 pt-1.5 text-[10.5px] leading-relaxed text-muted">
             These are the engine's own modes. The app adds no rules of its own.
           </p>
@@ -594,9 +578,9 @@ function ModelChip({ open, onToggle }: { open: boolean; onToggle: () => void }) 
                   entry.name === engine.settings.model && (entry.provider || '') === engine.settings.cloudProvider ? 'bg-white/[0.06] text-ink' : 'text-muted hover:text-ink'
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                <span className="min-w-0 flex-1 truncate">{entry.displayName || entry.name}</span>
                 {entry.cloud ? (
-                  <span className="shrink-0 rounded-md border border-line px-1.5 text-[10px] text-muted">{entry.provider === 'anthropic' ? 'Anthropic' : 'cloud'}</span>
+                  <span className="shrink-0 rounded-md border border-line px-1.5 text-[10px] text-muted">{entry.provider === 'native' ? 'CLI login' : entry.provider === 'anthropic' ? 'Anthropic API' : 'cloud'}</span>
                 ) : typeof entry.sizeGB === 'number' ? (
                   <span className="shrink-0 text-[10.5px] text-muted">{entry.sizeGB.toFixed(1)} GB</span>
                 ) : null}
