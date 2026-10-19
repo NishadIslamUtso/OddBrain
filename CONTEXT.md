@@ -264,6 +264,7 @@ Validation for this cleanup/switch: 1,071 tests across 155 files passed with rea
 - Hooks, watches, skills, plugins and House rules are under Advanced tools. Second-pass AI review moved from Engine to House rules. Automatic/external review were already off by default and remain so; saved choices are not reset. Code was already outside primary navigation, under Projects/menu; no new removal is claimed.
 - Validation: **1,074 tests across 155 files, zero skips**, including both required real-browser suites; strict JUnit gate passed. TypeScript and Electron/web builds passed. All nine UI suites passed in one final serial run after rebuilding the offline renderer and updating moved-control selectors. Checks cover all 17 pages, search/Back/draft retention, all eight layouts at minimum size, appearance inventory, identity preview/cancel/confirm/undo and Capture sources shortcuts. Cache receipts: `.cache/intuitive/{full.xml,tests.log,build.log,web.log,ui.log}`. Generated receipts are not committed. Native target-machine use, live provider/model quality and CI for this change are not claimed by these local results.
 
+<<<<<<< HEAD
 ## Recall, review, reading and recovery (2026-10-19)
 
 The owner authorized all five follow-up priorities while AFK. Implemented the software work without adding main screens or changing capture/model permissions. Live signed-in account access and the owner's laptop are not available in this environment; do not call those tested.
@@ -318,3 +319,16 @@ Validation: **1,157 tests / 166 files / zero skips**, both required real-Chromiu
 Native login-item behavior, packaged dialogs/extension updating on the target laptop, signed-in account capture and cross-platform CI for this new commit are not established by these local tests. Those acceptance checks remain. No new installer or signed release is claimed.
 
 Workspace continuity: this turn restored current files but Git metadata at old `a6c7807`. Fetched the published own-branch `fa2ad39`, independently SHA-1 compared every tracked blob with the working tree (zero differences), then used a mixed reset on the same session branch to align only HEAD/index with that published state. No working files were reset, no other branch was checked out, and no user changes were discarded. Dependencies/browser were restored in ignored storage; the first browser launch lacked bundled Linux libraries, then the corrected launch succeeded before the complete no-skip run.
+=======
+## clean-build's own delta (2026-10-19, branch `clean-build`)
+
+This branch is the owner branch's tree plus a small, recorded delta. The judge verdict on `80c6689` found no real defect: gate reproduced locally (1,071 tests / 155 files / zero skips, tsc 0, builds, smoke, extension harness PASS), and the owner's five new laws are already honored by the branch itself (plain replies, model-agnostic capture/search/permissions, no unnecessary files, engine setup honesty, startup-animation switch).
+
+What `clean-build` adds on top, all regression-tested:
+
+- **Chat history import (ChatGPT and Claude).** The Vault screen's "Import chat export" accepts `conversations.json` from either app's data export, detecting the shape automatically — ChatGPT's `mapping` tree (document follows the branch ChatGPT itself shows) or Claude's flat `chat_messages`. Each conversation becomes one searchable markdown document under `02 Sources/Imports/ChatGPT/` or `02 Sources/Imports/Claude/`: roles spelled out, dates preserved, non-text attachments named but never invented, re-imports updating instead of duplicating (documents keyed by a hash of the conversation id), and per-conversation breakage reported instead of fatal. Pure-local: one picked file, one read, no network, no model calls — and it does not depend on model quality at all. Tests: `tests/chatgpt-import.test.ts` (8).
+- **No silent blank replies.** A weak or failing model can end a turn with no words. The chat now says one muted line ("This turn ended with no words from the model. Ask again, or try another model.") instead of showing an unexplained blank card. A turn that did speak is never decorated with the line. Test: `tests/engine-finale.test.ts`.
+- **`engine:model-delete` refuses redirects**, matching `engine:pull` and model discovery on the same brain door: a redirect would send a model request somewhere the settings never named.
+
+Validation on `clean-build`'s tip, sandbox: 1,073 tests across 155 files, zero skips; TypeScript, Electron and web builds passed; smoke clean. CI runs on both operating systems and the installer artifact are recorded in the README. Nothing merges anywhere without the owner's say-so.
+>>>>>>> be9cae1 (clean-build on 80c6689: chat import now understands Claude too, and blank replies speak up.)

@@ -176,6 +176,32 @@ test('the totals accumulate across turns, honestly scoped to the window', async 
   assert.ok(store.totals.costUsd > 0.003)
 })
 
+test('a model that says nothing still gets an honest word: no silent blank replies', async () => {
+  const fake = withCoreFake()
+  resetEngineForTests()
+  const store = engineStore()
+  await store.send('say something')
+  fake.listener?.({ kind: 'done', text: '', usage: { inTokens: 3, outTokens: 0, durationMs: 5, costUsd: 0 } } as EngineEvent)
+  await settleStore()
+  const turn = engineStore().turn
+  assert.ok(turn)
+  assert.equal(turn.state, 'done')
+  assert.ok(
+    turn.items.some((item) => item.kind === 'status' && /no words from the model/.test(item.text)),
+    'the blank turn says what happened instead of showing nothing',
+  )
+  // A turn that DID speak must not be decorated with the no-words line.
+  withCoreFake()
+  resetEngineForTests()
+  const second = engineStore()
+  await second.send('say it again')
+  fake.listener?.({ kind: 'done', text: 'here are words', usage: { inTokens: 3, outTokens: 2, durationMs: 5, costUsd: 0 } } as EngineEvent)
+  await settleStore()
+  const spoken = engineStore().turn
+  assert.ok(spoken)
+  assert.ok(!spoken.items.some((item) => item.kind === 'status' && /no words from the model/.test(item.text)))
+})
+
 // ---------- the line ----------
 
 test('the line: busy sends park, drain in order when the engine frees, holds stop the drain', async () => {

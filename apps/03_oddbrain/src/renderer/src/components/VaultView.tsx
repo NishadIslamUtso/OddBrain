@@ -153,7 +153,7 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
                 onClick={() => {
                   setImporting(true)
                   void bridge.vault
-                    .importChatGPT()
+                    .importChats()
                     .then((answer) => {
                       if (!mounted.current) return
                       setImported(answer.answer)
@@ -162,10 +162,10 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
                     .catch(() => { if (mounted.current) setImported('The import could not run.') })
                     .finally(() => { if (mounted.current) setImporting(false) })
                 }}
-                title="Bring a ChatGPT data export (conversations.json) into the vault as searchable markdown"
+                title="Bring a ChatGPT or Claude data export (conversations.json) into the vault as searchable markdown"
                 className="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-[11.5px] text-muted hover:text-ink"
               >
-                {importing ? 'Importing…' : 'Import ChatGPT export'}
+                {importing ? 'Importing…' : 'Import chat export'}
               </button>
             </>
           ) : null}
