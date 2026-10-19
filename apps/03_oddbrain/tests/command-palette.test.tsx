@@ -142,3 +142,23 @@ test('a row still runs on a click', async () => {
   expect(ran).toEqual(['kitchen'])
   expect(dialog()).toBeNull()
 })
+
+test('a note about a search that stopped short appears only once something was typed', async () => {
+  const note = 'Searched 4000 files, then stopped at the limit; the rest was not searched.'
+  await act(() => root.render(
+    <DesktopShell
+      layout="topbar"
+      navigation={{ view: 'chat', onView: () => {}, onNew: () => {}, onSettings: () => {}, name: 'Test' }}
+      sidebar={<div />}
+      commands={commands}
+      searchNote={note}
+    >
+      <div>Main</div>
+    </DesktopShell>
+  ))
+  await open()
+  expect(container.querySelector('.ob-command-note')).toBeNull()
+  await type('mint')
+  expect(container.querySelector('.ob-command-note')?.textContent).toBe(note)
+  expect(container.querySelector('.ob-command-note')?.getAttribute('role')).toBe('status')
+})

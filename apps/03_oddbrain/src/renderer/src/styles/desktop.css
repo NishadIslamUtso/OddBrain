@@ -63,6 +63,7 @@ button[role=switch]{border-radius:999px}
 .ob-command-results>button[aria-selected="true"]{background:var(--color-panel);box-shadow:inset 2px 0 var(--color-accent,var(--color-ink))}
 .ob-command-results>button>span{flex:1;min-width:0}
 .ob-command-results small{display:block;font-size:11px;color:var(--color-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.ob-command-note{margin:0;padding:6px 12px 8px;font-size:11px;line-height:1.4;color:var(--color-muted)}
 /* Same compact home, transcript and composer used by the live app and preview. */
 .ob-chat-view{display:flex;flex-direction:column;flex:1;min-width:0;min-height:0;height:100%}
 .ob-chat-scroller{display:flex;flex-direction:column;flex:1;min-height:0;overflow-y:auto;overflow-x:hidden}

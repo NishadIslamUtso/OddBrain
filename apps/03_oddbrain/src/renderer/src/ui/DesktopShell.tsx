@@ -12,7 +12,7 @@ export type ShellNavigation = { view: View; onView: (view: View) => void; onNew:
 /** Exactly the same structural host in the app and the scaled Appearance
  * preview. The caller supplies real content and real callbacks in the app,
  * small read-only sample components in the preview. */
-export default function DesktopShell({ layout, navigation, sidebar, items = [], commands = [], children, preview = false, suspended = false, extraSearch, onSearchQuery }: {
+export default function DesktopShell({ layout, navigation, sidebar, items = [], commands = [], children, preview = false, suspended = false, extraSearch, onSearchQuery, searchNote = '' }: {
   layout: LayoutId; navigation: ShellNavigation; sidebar: ReactNode
   items?: ShellItem[]; commands?: CommandItem[]; children: ReactNode; preview?: boolean; suspended?: boolean; extraSearch?: (query: string) => CommandItem[]
   /**
@@ -21,6 +21,8 @@ export default function DesktopShell({ layout, navigation, sidebar, items = [], 
    * unaware of what that search costs; results arrive as ordinary commands.
    */
   onSearchQuery?: (query: string) => void
+  /** A line under the results when the search could not see everything, e.g. a bound was reached. */
+  searchNote?: string
 }) {
   const pending = usePermissionsWaiting()
   const { view, onView, onNew, onBack, canBack, onSettings, name } = navigation
@@ -73,7 +75,7 @@ export default function DesktopShell({ layout, navigation, sidebar, items = [], 
       else if (e.key === 'Home') { e.preventDefault(); setActive(0) }
       else if (e.key === 'End') { e.preventDefault(); setActive(shown.length - 1) }
       else if (e.key === 'Enter') { const command = shown[chosen]; if (command) { e.preventDefault(); close(); command.run() } }
-    }}><div className="ob-command-input"><Search size={16} /><input ref={input} aria-label="Search chats, screens and the vault" placeholder="Search chats, screens and the vault" role="combobox" aria-expanded="true" aria-controls="ob-command-list" aria-activedescendant={chosen >= 0 ? `ob-command-option-${chosen}` : undefined} value={query} onChange={e => { setQuery(e.target.value); onSearchQuery?.(e.target.value) }} /><button className="ob-icon-button" type="button" onClick={close} aria-label="Close search"><X size={16} /></button></div><div ref={results} className="ob-command-results" id="ob-command-list" role="listbox" aria-label="Results">{shown.map((c, index) => <button type="button" key={c.id} id={`ob-command-option-${index}`} role="option" aria-selected={index === chosen} onMouseEnter={() => setActive(index)} onClick={() => { close(); c.run() }}><span>{c.title}{c.detail ? <small>{c.detail}</small> : null}</span><ArrowRight size={14} /></button>)}{!shown.length ? <p className="ob-empty-line">No matches.</p> : null}</div></section></div> : null}
+    }}><div className="ob-command-input"><Search size={16} /><input ref={input} aria-label="Search chats, screens and the vault" placeholder="Search chats, screens and the vault" role="combobox" aria-expanded="true" aria-controls="ob-command-list" aria-activedescendant={chosen >= 0 ? `ob-command-option-${chosen}` : undefined} value={query} onChange={e => { setQuery(e.target.value); onSearchQuery?.(e.target.value) }} /><button className="ob-icon-button" type="button" onClick={close} aria-label="Close search"><X size={16} /></button></div><div ref={results} className="ob-command-results" id="ob-command-list" role="listbox" aria-label="Results">{shown.map((c, index) => <button type="button" key={c.id} id={`ob-command-option-${index}`} role="option" aria-selected={index === chosen} onMouseEnter={() => setActive(index)} onClick={() => { close(); c.run() }}><span>{c.title}{c.detail ? <small>{c.detail}</small> : null}</span><ArrowRight size={14} /></button>)}{!shown.length ? <p className="ob-empty-line">No matches.</p> : null}</div>{query.trim() && searchNote ? <p className="ob-command-note" role="status">{searchNote}</p> : null}</section></div> : null}
   </div>
 }
 export function screenCommands(onView: (view: View) => void): CommandItem[] { return NAV_ITEMS.map(item => ({ id: 'screen-' + item.id, title: item.label, detail: 'Screen', run: () => onView(item.id) })) }

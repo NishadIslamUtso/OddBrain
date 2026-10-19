@@ -47,7 +47,7 @@ import { useChats } from './state/useChats'
 import { bridge, isDemo } from './platform/bridge'
 import { DEFAULT_PERMISSIONS, normalizePermissions, type Permissions } from '@shared/lib/permissions'
 import { vaultGet, vaultPost } from '@shared/lib/vault'
-import { vaultHitDetail, vaultHitTitle, type VaultSearchHit } from '@shared/lib/vaultSearch'
+import { vaultHitDetail, vaultHitTitle, vaultScanNote, type VaultScan, type VaultSearchHit } from '@shared/lib/vaultSearch'
 import { setMotionMode, setMascotPause } from './motion/motionMode'
 import { setOsReducedMotion } from './motion/motionMode'
 import { conversationCapture } from '@shared/lib/capture'
@@ -547,11 +547,12 @@ export default function App() {
    */
   const [vaultQuery, setVaultQuery] = useState('')
   const [vaultHits, setVaultHits] = useState<CommandItem[]>([])
+  const [vaultNote, setVaultNote] = useState('')
   const [vaultFocus, setVaultFocus] = useState<{ path: string; at: number } | null>(null)
   const vaultTicket = useRef(0)
   useEffect(() => {
     const query = vaultQuery.trim()
-    if (!query || sampleEnabled()) { setVaultHits([]); return }
+    if (!query || sampleEnabled()) { setVaultHits([]); setVaultNote(''); return }
     const ticket = ++vaultTicket.current
     const timer = window.setTimeout(() => {
       vaultGet(`/search?q=${encodeURIComponent(query)}&limit=6`)
@@ -564,8 +565,10 @@ export default function App() {
             detail: vaultHitDetail(hit),
             run: () => { setVaultFocus({ path: hit.path, at: Date.now() }); setView('vault') },
           })))
+          // Only speaks when the walk stopped short. A whole read is not news.
+          setVaultNote(vaultScanNote(reply?.scanned as VaultScan | undefined))
         })
-        .catch(() => { if (ticket === vaultTicket.current) setVaultHits([]) })
+        .catch(() => { if (ticket === vaultTicket.current) { setVaultHits([]); setVaultNote('') } })
     }, 220)
     return () => window.clearTimeout(timer)
   }, [vaultQuery])
@@ -580,7 +583,7 @@ export default function App() {
   return <LookContext value={look}><LookActions value={updateLook}>
     <div className="ob-app-root flex h-full flex-col bg-bg text-ink">
       <div className="ob-shell-host" hidden={settingsOpen} inert={settingsOpen}>
-        <DesktopShell layout={look.layout} navigation={{ view, onView: setView, onNew: newChat, onBack: navigation.back, canBack: navigation.canBack, onSettings: () => openSettings('appearance'), name: profile.name }} items={items} commands={paletteCommands} extraSearch={searchCommands} onSearchQuery={setVaultQuery} suspended={settingsOpen} sidebar={
+        <DesktopShell layout={look.layout} navigation={{ view, onView: setView, onNew: newChat, onBack: navigation.back, canBack: navigation.canBack, onSettings: () => openSettings('appearance'), name: profile.name }} items={items} commands={paletteCommands} extraSearch={searchCommands} onSearchQuery={setVaultQuery} searchNote={vaultNote} suspended={settingsOpen} sidebar={
         <Sidebar
           view={view}
           onView={setView}
