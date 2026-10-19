@@ -93,7 +93,9 @@ test('every place that shells out an engine command quotes it first', () => {
   const agy = readFileSync(new URL('../src/main/engine/agy.ts', import.meta.url), 'utf8')
   const detect = readFileSync(new URL('../src/main/engine/availability.ts', import.meta.url), 'utf8')
   assert.match(claude, /start\(shellSafeCommand\(resolveEngineCommand\('claude-code'\)\)/)
-  assert.match(agy, /start\(shellSafeCommand\(resolveEngineCommand\('agy'\)\)/)
+  // Native agy now bypasses the shell entirely; quoting would become part of the filename.
+  assert.ok(agy.includes('child = start(command, args, {'))
+  assert.ok(agy.includes('shell: false'))
   assert.ok(detect.includes('run(shellSafeCommand(command)'))
   assert.ok(detect.includes('run(shellSafeCommand(candidates[index])'))
 })

@@ -1,3 +1,4 @@
+import { effortTarget } from '../src/shared/lib/engineCapabilities'
 import { EventEmitter } from 'node:events'
 import { sep as pathSep } from 'node:path'
 import test from 'node:test'
@@ -473,19 +474,19 @@ test('the socket: a changed launch flag relaunches the engine with the new flags
   // Same engine, same model, only the THINKING budget changed: the running
   // process was launched without the new flag — a silent gear mismatch — so
   // the honest move is a relaunch, not reuse.
-  const first = socket.send('a', { ...base, settings: { ...DEFAULT_ENGINE, thinking: 'default' } })
+  const first = socket.send('a', { ...base, settings: { ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native', thinking: 'default' } })
   assert.equal(first.ok, true)
   const line = JSON.stringify({ type: 'result', subtype: 'success', result: 'done' }) + '\n'
   children[0].stdout.emit('data', Buffer.from(line, 'utf8'))
 
-  const second = socket.send('b', { ...base, settings: { ...DEFAULT_ENGINE, thinking: 'extended' } })
+  const second = socket.send('b', { ...base, settings: { ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native', thinking: 'high', effortTarget: effortTarget({ ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native' }) } })
   assert.equal(second.ok, true, second.answer)
   assert.equal(children[0].killed, true, 'the process launched with the old thinking flag is set aside')
   assert.equal(spawnCount, 2, 'a fresh start carries the new launch flag')
   children[1].stdout.emit('data', Buffer.from(line, 'utf8'))
 
   // And an UNCHANGED gear still reuses: the fix must not turn every send into a relaunch.
-  const third = socket.send('c', { ...base, settings: { ...DEFAULT_ENGINE, thinking: 'extended' } })
+  const third = socket.send('c', { ...base, settings: { ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native', thinking: 'high', effortTarget: effortTarget({ ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native' }) } })
 
   assert.equal(third.ok, true)
   assert.equal(spawnCount, 2, 'same launch flags, same process')
@@ -695,4 +696,18 @@ test('tool summaries speak about the thing, not the JSON', () => {
   assert.equal(toolSummary('Bash', { command: 'npm test', timeout: 3000 }), 'npm test')
   assert.equal(toolSummary('Read', { file_path: '/vault/today.md', limit: 10 }), '/vault/today.md')
   assert.equal(toolSummary('Whatever', { a: 1 }).length <= 160, true)
+})
+
+test('the socket: a same-named native model never reuses an Ollama session', () => {
+  const children: ReturnType<typeof fakeEngine>['child'][] = []
+  const start = (() => { const fake = fakeEngine(); children.push(fake.child); return fake.child }) as unknown as typeof import('node:child_process').spawn
+  const socket = createEngineSocket(), rec = recorder()
+  const settings = { ...DEFAULT_ENGINE, model: 'same-name' }
+  const base = { cwd: '.', platform: 'linux', spawnProcess: start, onEvent: rec.on }
+  assert.equal(socket.send('first', { ...base, settings }).ok, true)
+  children[0].stdout.emit('data', Buffer.from(JSON.stringify({ type: 'result', subtype: 'success', result: 'done' }) + '\n'))
+  assert.equal(socket.send('second', { ...base, settings: { ...settings, cloudProvider: 'native' } }).ok, true)
+  assert.equal(children.length, 2)
+  assert.equal(children[0].killed, true)
+  socket.stop()
 })

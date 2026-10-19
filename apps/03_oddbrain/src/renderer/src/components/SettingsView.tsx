@@ -1057,7 +1057,7 @@ export default function SettingsView({
     engine: [
       {
         label: 'Engine & workspace',
-        terms: 'engine agent claude-code agy model selection approval workspace folder',
+        terms: 'engine agent claude-code agy model selection approval workspace folder restart connection redacted setup summary diagnostics',
         body: <EngineBay />,
       },
     ],

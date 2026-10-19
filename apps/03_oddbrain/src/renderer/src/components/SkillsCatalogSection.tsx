@@ -1,3 +1,4 @@
+import EngineStoreSource from './EngineStoreSource'
 import { useState } from 'react'
 import { Check, Download } from 'lucide-react'
 import { SKILL_CATALOG } from '@shared/lib/skillCatalog'
@@ -11,7 +12,7 @@ import { bridge, isDemo } from '@/platform/bridge'
  * and licenses. Existing engine skills are not replaced. No account, no key, no
  * middleman — a raw file from a public repo.
  */
-export default function SkillsCatalogSection() {
+function SharedSkillsCatalogSection() {
   const [installed, setInstalled] = useState<Record<string, { ok: boolean; answer: string }>>({})
   const [busy, setBusy] = useState('')
 
@@ -66,4 +67,8 @@ export default function SkillsCatalogSection() {
       </ul>
     </div>
   )
+}
+
+export default function SkillsCatalogSection() {
+  return <EngineStoreSource kind="skills"><SharedSkillsCatalogSection /></EngineStoreSource>
 }

@@ -1,3 +1,5 @@
+import { type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
+import type { ThinkingMode } from '../shared/lib/engine'
 import type { MemoryBridge } from '../shared/lib/memoryWorkspace'
 import type { MediaBridge } from '../shared/lib/mediaBridge'
 import type { MarketplaceBridge } from '../shared/lib/marketplace'
@@ -53,6 +55,7 @@ const engineApi = {
   authStatus: (id?: 'claude-code' | 'agy'): Promise<{ ok: boolean; loggedIn: boolean; method: string; provider: string; answer: string }> =>
     ipcRenderer.invoke('engine:auth-status', id),
   /** Open the engine's own login in a terminal; nothing is read back. */
+  restart: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:restart'),
   openLogin: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:open-login'),
   /** The Ollama answering on the door, plus whether Claude Code can use it. */
   ollamaVersion: (): Promise<{ ok: boolean; version: string; compatible: boolean; answer: string }> =>
@@ -76,13 +79,14 @@ const engineApi = {
     return () => ipcRenderer.removeListener(channel, wrapped)
   },
   /** Pick which brain the engine thinks with (provider brains say which door). */
-  setModel: (model: string, provider?: 'anthropic'): Promise<{ ok: boolean; answer: string }> =>
-    ipcRenderer.invoke('engine:model', model, provider),
+  setModel: (model: string, provider?: 'anthropic' | 'native', expectedEngine?: EngineId): Promise<{ ok: boolean; answer: string }> =>
+    ipcRenderer.invoke('engine:model', model, provider, expectedEngine),
   /** Set the throttle: how much the engine may do before asking. */
   setApproval: (mode: ApprovalMode): Promise<{ ok: boolean; answer: string }> =>
     ipcRenderer.invoke('engine:approval', mode),
-  setThinking: (mode: 'default' | 'extended'): Promise<{ ok: boolean; answer: string }> =>
-    ipcRenderer.invoke('engine:thinking', mode),
+  capabilities: (): Promise<EngineCapabilityReport> => ipcRenderer.invoke('engine:capabilities'),
+  setThinking: (mode: ThinkingMode, target: string): Promise<{ ok: boolean; answer: string }> =>
+    ipcRenderer.invoke('engine:thinking', mode, target),
   memory: {
     chooseFolder: (): Promise<{ ok: boolean; answer: string; folder?: string; canceled?: boolean }> => ipcRenderer.invoke('memory:choose-folder'),
     defaultFolder: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:default-folder'),
@@ -199,12 +203,14 @@ const mediaApi: MediaBridge = {
   dictate: () => ipcRenderer.invoke('media:dictate'), cancel: () => ipcRenderer.invoke('media:cancel'),
 }
 const marketplaceApi: MarketplaceBridge = {
-  sources: () => ipcRenderer.invoke('market:sources'), browse: repo => ipcRenderer.invoke('market:browse', repo),
-  probe: () => ipcRenderer.invoke('market:probe'), installed: () => ipcRenderer.invoke('market:installed'),
-  plan: (repo, action, plugin) => ipcRenderer.invoke('market:plan', repo, action, plugin),
-  confirm: token => ipcRenderer.invoke('market:confirm', token), cancel: () => ipcRenderer.invoke('market:cancel'),
+  inspect: (repo, plugin, engine) => ipcRenderer.invoke('market:inspect', repo, plugin, engine),
+  sources: engine => ipcRenderer.invoke('market:sources', engine), browse: (repo, engine) => ipcRenderer.invoke('market:browse', repo, engine),
+  probe: engine => ipcRenderer.invoke('market:probe', engine), installed: engine => ipcRenderer.invoke('market:installed', engine),
+  plan: (repo, action, plugin, engine) => ipcRenderer.invoke('market:plan', repo, action, plugin, engine),
+  confirm: (token, engine) => ipcRenderer.invoke('market:confirm', token, engine), cancel: engine => ipcRenderer.invoke('market:cancel', engine),
 }
 const api = {
+  transcripts: { list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
   media: mediaApi, marketplace: marketplaceApi,
   automation: automationApi,
   memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,

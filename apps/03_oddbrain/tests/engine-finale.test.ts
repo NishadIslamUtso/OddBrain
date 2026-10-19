@@ -1,3 +1,4 @@
+import { effortTarget } from '../src/shared/lib/engineCapabilities'
 // @vitest-environment jsdom
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -18,7 +19,7 @@ import { resetEngineForTests, engineStore, registerLineHold } from '../src/rende
 /**
  * The finale batch, five small honed pieces:
  *  - copy/edit: the turn as text, the order back in the composer
- *  - extended thinking: the engine's own MAX_THINKING_TOKENS, set at launch
+ *  - reasoning effort: native --effort, never a fixed thinking-token budget
  *  - context visibility: the window's honest totals, on the card
  *  - the line: work orders parked while the engine works, run in order
  *  - the journal: finished turns kept as a record a reopened window can read
@@ -44,7 +45,7 @@ test('the turn copies as the order plus the words; totals format honestly', () =
   assert.equal(formatTotals({ turns: 1, inTokens: 12, outTokens: 34, costUsd: 0.0001 }), '1 turn this window · 12 in · 34 out · $0.0001')
 })
 
-// ---------- extended thinking ----------
+// ---------- reasoning effort ----------
 
 function fakeEngineChild() {
   const child = new EventEmitter() as EventEmitter & {
@@ -69,26 +70,31 @@ function fakeEngineChild() {
   return child
 }
 
-test('extended thinking sets the engine\u2019s own env at launch; default sets nothing', () => {
+test('native effort uses its real flag, default adds no budget, legacy Extended migrates safely', () => {
   const seen: Array<Record<string, string | undefined>> = []
+  const args: string[][] = []
+  const native = { ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native' as const }
   const makeSpawn = () =>
     ((_command: string, _args: string[], options?: { env?: Record<string, string> }) => {
       seen.push(options?.env)
+      args.push(_args)
       const child = fakeEngineChild()
       setTimeout(() => child.emit('close', 0), 5)
       return child
     }) as unknown as typeof spawn
   const extended = startClaudeCodeSession({
-    cwd: '.', settings: { ...DEFAULT_ENGINE, thinking: 'extended' }, onEvent: () => undefined, spawnProcess: makeSpawn(),
+    cwd: '.', settings: { ...native, thinking: 'high', effortTarget: effortTarget(native) }, onEvent: () => undefined, spawnProcess: makeSpawn(),
   })
   extended.stop()
-  assert.equal(seen[0]?.MAX_THINKING_TOKENS, '31999')
+  assert.equal(seen[0]?.MAX_THINKING_TOKENS, undefined)
+  assert.deepEqual(args[0].slice(-2), ['--effort', 'high'])
+  assert.equal(seen[0]?.ANTHROPIC_BASE_URL, undefined, 'native models use their CLI login, not Ollama')
   const plain = startClaudeCodeSession({
     cwd: '.', settings: { ...DEFAULT_ENGINE }, onEvent: () => undefined, spawnProcess: makeSpawn(),
   })
   plain.stop()
   assert.equal(seen[1]?.MAX_THINKING_TOKENS, undefined, 'default thinking leaves the engine alone')
-  assert.equal(normalizeEngine({ ...DEFAULT_ENGINE, thinking: 'extended' }).thinking, 'extended')
+  assert.equal(normalizeEngine({ ...DEFAULT_ENGINE, thinking: 'extended' as never }).thinking, 'default')
   assert.equal(normalizeEngine({ ...DEFAULT_ENGINE, thinking: 'wild' as never }).thinking, 'default')
 })
 

@@ -1,3 +1,4 @@
+import EngineStoreSource from './EngineStoreSource'
 import { useEffect, useState } from 'react'
 import { Trash2 } from 'lucide-react'
 import { bridge, isDemo } from '@/platform/bridge'
@@ -19,7 +20,7 @@ import {
  * command: adding a server only writes configuration, and every tool call the
  * engine then makes still goes through its normal permission path.
  */
-export default function McpServersSection(): React.JSX.Element {
+function SharedMcpServersSection(): React.JSX.Element {
   const [servers, setServers] = useState<McpServerEntry[]>([])
   const [loaded, setLoaded] = useState(false)
   const [kind, setKind] = useState<'stdio' | 'http'>('stdio')
@@ -122,4 +123,8 @@ export default function McpServersSection(): React.JSX.Element {
       {note ? <p role="status" className="ob-control-scope">{note}</p> : null}
     </section>
   )
+}
+
+export default function McpServersSection() {
+  return <EngineStoreSource kind="connectors"><SharedMcpServersSection /></EngineStoreSource>
 }

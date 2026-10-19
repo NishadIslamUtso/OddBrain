@@ -1,3 +1,6 @@
+import { chatMarkdown } from '@shared/lib/transcripts'
+import { downloadText } from '../lib/downloadText'
+import CopyText from '../ui/CopyText'
 import { useState, useRef, useEffect, type ReactNode } from 'react'
 import type { Attachment } from '@shared/types'
 import type { Artifact, Chat } from '@shared/types'
@@ -155,28 +158,26 @@ export function greetingFor(name: string, now: Date = new Date()): string {
  */
 function CaptureCapsule({ chat }: { chat: Chat }) {
   const [state, setState] = useState<'idle' | 'busy' | 'done' | 'failed'>('idle')
+  const [notice, setNotice] = useState('')
+  useEffect(() => { setState('idle'); setNotice('') }, [chat.id, chat.messages.length])
   const capture = (): void => {
     setState('busy')
-    const lines = [`# ${chat.title}`, '', `*Captured from a conversation in OddBrain, ${new Date().toLocaleString()}.*`, '']
-    for (const message of chat.messages.slice(-30)) {
-      const who = message.role === 'user' ? 'You' : 'The engine'
-      const text = String(message.content ?? '').slice(0, 2000)
-      lines.push(`## ${who}`, '', text, '')
-    }
+    const markdown = chatMarkdown(chat)
     void bridge.vault
-      .captureChat(chat.title, lines.join('\n'))
-      .then((answer) => setState(answer.ok ? 'done' : 'failed'))
+      .captureChat(chat.title, markdown)
+      .then((answer) => { setState(answer.ok ? 'done' : 'failed'); setNotice(answer.answer) })
       .catch(() => setState('failed'))
   }
   return (
+    <details className="mx-6 mb-3 text-[12px] text-muted"><summary className="cursor-pointer">Save or copy this chat</summary><p>Full stored message text. Binary attachments are not embedded; this is not an account archive.</p><div className="ob-inline-actions"><CopyText text={chatMarkdown(chat)} label="Copy full chat" /><button type="button" onClick={() => downloadText(chatMarkdown(chat), `chat-${chat.id}.md`)}>Export chat Markdown</button>
     <button
       type="button"
       onClick={capture}
       disabled={state === 'busy'}
       title="Capture this conversation into the vault as a capsule"
-      className="fixed bottom-5 right-5 z-20 rounded-full border border-line bg-card px-3.5 py-2 text-[11.5px] text-muted shadow-lg hover:text-ink disabled:opacity-60"
+      className="ob-small-button"
     >
       {state === 'done' ? 'Captured ✓' : state === 'failed' ? 'The vault refused it' : state === 'busy' ? 'Capturing…' : 'Capture as Capsule'}
-    </button>
+    </button></div>{notice ? <p role="status">{notice}</p> : null}</details>
   )
 }

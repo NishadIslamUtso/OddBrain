@@ -5,6 +5,7 @@ import type { EngineModelEntry } from '../../shared/lib/engine'
 /** Independent sources: one unavailable service must not hide another's models. */
 export async function discoverClaudeModels(input: {
   baseUrl: string
+  nativeModels?: () => Promise<EngineModelEntry[]>
   fetchImpl?: typeof fetch
   providerModels?: () => Promise<Array<{ name: string }>>
 }): Promise<{ ok: boolean; models: EngineModelEntry[]; error?: string }> {
@@ -25,14 +26,15 @@ export async function discoverClaudeModels(input: {
     return rows.filter(m => m && typeof m.name === 'string' && m.name.trim()).slice(0, 50)
       .map(m => ({ name: m.name, cloud: true, sizeGB: null, provider: 'anthropic' as const }))
   }
-  const [ollama, anthropic] = await Promise.allSettled([local(), remote()])
+  const [native, ollama, anthropic] = await Promise.allSettled([input.nativeModels?.() ?? Promise.resolve([]), local(), remote()])
   const models: EngineModelEntry[] = []
-  for (const result of [ollama, anthropic]) if (result.status === 'fulfilled') {
+  for (const result of [native, ollama, anthropic]) if (result.status === 'fulfilled') {
     for (const row of result.value) if (!models.some(m => m.name === row.name && m.provider === row.provider)) models.push(row)
   }
   const errors: string[] = []
+  if (native.status === 'rejected') errors.push('Native Claude models unavailable. Check the CLI installation and refresh.')
   if (ollama.status === 'rejected') errors.push('Ollama models unavailable. Start Ollama or check its address.')
   if (anthropic.status === 'rejected') errors.push('Anthropic models unavailable. Check provider access, credentials and connectivity.')
-  const ok = ollama.status === 'fulfilled' || Boolean(input.providerModels && anthropic.status === 'fulfilled')
+  const ok = Boolean(input.nativeModels && native.status === 'fulfilled') || ollama.status === 'fulfilled' || Boolean(input.providerModels && anthropic.status === 'fulfilled')
   return { ok, models, ...(errors.length ? { error: errors.join(' ') } : {}) }
 }

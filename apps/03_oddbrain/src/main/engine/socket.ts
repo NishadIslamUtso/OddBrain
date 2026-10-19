@@ -1,3 +1,5 @@
+import { resolveEngineCommand } from './enginePath'
+import { selectedEffort } from '../../shared/lib/engineCapabilities'
 /**
  * The socket: the one plug between the app and whatever engine is chosen.
  *
@@ -59,6 +61,7 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
   let session: EngineSession | null = null
   let sessionEngine: string | null = null
   let busy = false
+  let activeInput: EngineStartInput | null = null
   let currentCwd = ''
   let generation = 0
   // What the live session was STARTED with. The engine's launch flags fix its
@@ -66,6 +69,8 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
   // must mean a relaunch — reusing the process would silently run under the
   // OLD gear while the UI shows the new one.
   let sessionModel: string | null = null
+  let sessionProvider: string | null = null
+  let sessionCommand: string | null = null
   let sessionApproval: string | null = null
   // What the living process was LAUNCHED with: a flag or a base URL that
   // changed under it would only apply on the next start, silently.
@@ -96,11 +101,11 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
     const ownGeneration = ++generation
     const spawnArgs = {
       ...input,
-      onEvent: (event: EngineEvent) => { if (ownGeneration === generation) onEvent(input, event) },
+      onEvent: (event: EngineEvent) => { if (ownGeneration === generation) onEvent(activeInput || input, event) },
       onClose: (code: number | null) => {
         if (ownGeneration !== generation) return
         busy = false
-        input.onClose?.(code)
+        ;(activeInput || input).onClose?.(code)
       },
     }
     // One plug, two adapters: each engine's own file speaks its own wire and
@@ -129,10 +134,13 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       // for: same folder, same model, same approval gear. Anything else gets
       // an honest relaunch (the conversation itself survives via the resume
       // id where the engine supports one).
+      const command = resolveEngineCommand(input.settings.id)
       const gearChanged =
+        sessionCommand !== command ||
         sessionModel !== input.settings.model ||
+        sessionProvider !== input.settings.cloudProvider ||
         sessionApproval !== input.settings.approval ||
-        sessionThinking !== input.settings.thinking ||
+        sessionThinking !== selectedEffort(input.settings) ||
         sessionBaseUrl !== input.settings.baseUrl ||
         sessionKeyFingerprint !== (input.auth?.apiKey ?? null) ||
         currentCwd !== input.cwd
@@ -141,9 +149,10 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
           return { ok: false, answer: 'An engine is already working. Stop it first, or wait for it to finish.' }
         }
         // Same engine, same gear, new task — no relaunch, no refusal.
-        const sent = session.send(prompt, input.images)
-        if (!sent) return { ok: false, answer: session.refusal?.() ?? 'The engine just closed, try again.' }
+        activeInput = input
         busy = true
+        const sent = session.send(prompt, input.images)
+        if (!sent) { busy = false; return { ok: false, answer: session.refusal?.() ?? 'The engine just closed, try again.' } }
         return { ok: true, answer: 'started' }
       }
       if (session?.isRunning()) {
@@ -157,24 +166,28 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       // Fresh start. If this engine+workspace had a session before the app
       // (or the engine) closed, continue it — the owner's conversation is not
       // lost just because a process ended.
+      activeInput = input
       session = start({ ...input, resumeId: memory.load(sessionKey(input.settings.id, input.cwd)) })
       currentCwd = input.cwd
       sessionModel = input.settings.model
+      sessionProvider = input.settings.cloudProvider
+      sessionCommand = command
       sessionApproval = input.settings.approval
-      sessionThinking = input.settings.thinking
+      sessionThinking = selectedEffort(input.settings)
       sessionBaseUrl = input.settings.baseUrl
       sessionKeyFingerprint = input.auth?.apiKey ?? null
       sessionAuthProvider = input.auth?.provider ?? null
       if (!session.isRunning()) {
         return { ok: false, answer: 'The engine could not be started on this machine.' }
       }
+      busy = true
       const sent = session.send(prompt, input.images)
       if (!sent) {
+        busy = false
         // A refused first line (agy with a picture, say) is a REFUSAL, not a
         // start — saying "starting" here left the turn hanging forever.
         return { ok: false, answer: session.refusal?.() ?? 'The engine could not accept that task.' }
       }
-      busy = true
       return { ok: true, answer: 'started' }
     },
     current: () => session,
@@ -187,11 +200,14 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       session?.stop()
       session = null
       busy = false
+      activeInput = null
       // Forget per engine+workspace: the gear is going away with the process,
       // so a stale id must not survive under a different key shape either.
       if (sessionEngine && currentCwd) memory.save(sessionKey(sessionEngine, currentCwd), '')
       sessionEngine = null
       sessionModel = null
+      sessionProvider = null
+      sessionCommand = null
       sessionApproval = null
       sessionThinking = null
       sessionBaseUrl = null

@@ -21,7 +21,7 @@
     "dist:win:dir": "npm run build && electron-builder --win --dir",
     "dist:linux": "npm run build && electron-builder --linux",
     "build:ui-preview": "node scripts/build-ui-preview.mjs",
-    "test:ui": "node scripts/check-ui.cjs && node scripts/check-ui-turns.cjs && node scripts/check-ui-standalone.cjs && node scripts/check-ui-motion.cjs && node scripts/check-ui-integration.cjs && node scripts/check-ui-media.cjs && node scripts/check-ui-graph.cjs && node scripts/check-ui-samples.cjs && node scripts/check-ui-memory.cjs && node scripts/check-ui-settings.cjs",
+    "test:ui": "node scripts/check-ui.cjs && node scripts/check-ui-turns.cjs && node scripts/check-ui-standalone.cjs && node scripts/check-ui-motion.cjs && node scripts/check-ui-integration.cjs && node scripts/check-ui-media.cjs && node scripts/check-ui-graph.cjs && node scripts/check-ui-samples.cjs && node scripts/check-ui-memory.cjs && node scripts/check-ui-settings.cjs && node scripts/check-ui-productivity.cjs",
     "test:media-runtime": "node scripts/check-media-runtime.cjs"
   },
   "dependencies": {
@@ -40,7 +40,7 @@
     "@electron/fuses": "^1.8.0",
     "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/vite": "^4.0.0",
-    "@types/node": "^22.10.2",
+    "@types/node": "^24.19.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@types/yauzl": "^3.4.0",
@@ -61,6 +61,6 @@
     "@electron/get": "^5.1.0"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": ">=24 <25"
   }
 }

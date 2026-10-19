@@ -8,7 +8,7 @@ export async function inferenceAllowed(engine: EngineSettings, local: boolean, c
   if (!local && !cloud) return { ok: false, answer: 'Local and cloud inference are both off in Agent access. Nothing was sent.' }
   // With no named model, Claude uses its own login, never the Ollama endpoint.
   if (engine.id === 'claude-code' && !engine.model) return cloud ? { ok: true } : { ok: false, answer: 'The engine default uses its own external service. Enable cloud inference, or select a verified local model. Nothing was sent.' }
-  if (engine.id === 'agy' || engine.cloudProvider === 'anthropic') return cloud ? { ok: true } : { ok: false, answer: 'Cloud inference is off in Agent access. This engine/model runs externally; nothing was sent.' }
+  if (engine.id === 'agy' || (engine.cloudProvider === 'anthropic' || engine.cloudProvider === 'native')) return cloud ? { ok: true } : { ok: false, answer: 'Cloud inference is off in Agent access. This engine/model runs externally; nothing was sent.' }
   let remote = isRemoteModel(engine.model)
   try {
     const url = new URL(engine.baseUrl || 'http://localhost:11434')

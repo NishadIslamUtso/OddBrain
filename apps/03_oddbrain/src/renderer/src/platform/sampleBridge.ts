@@ -1,3 +1,4 @@
+import { unverifiedCapabilities } from '@shared/lib/engineCapabilities'
 import type { DesktopBridge, EngineBridge } from './bridge'
 import type { ArtifactSummary, SaveInput } from '../../../main/artifacts/store'
 import { DEFAULT_ENGINE, type EngineEvent, type EngineSettings } from '@shared/lib/engine'
@@ -65,7 +66,7 @@ export function installSampleBridge(bridge: DesktopBridge, engine: EngineBridge)
   })
   replace(engine, {
     authStatus: async id => id === 'agy'
-      ? { ok: true, loggedIn: false, method: '', provider: '', answer: 'agy does not report a sign-in state. This sample runs no CLI, so there is nothing to ask.' }
+      ? { ok: true, loggedIn: false, method: '', provider: '', answer: 'This connection has no verified agy sign-in check. This sample runs no CLI, so there is nothing to ask.' }
       : { ok: true, loggedIn: true, method: 'sample', provider: 'sample', answer: 'Sample answer: signed in with sample (sample). No CLI was run and no credential was read.' },
     ollamaVersion: async () => ({ ok: true, version: '0.15.2', compatible: true, answer: 'Sample answer: Ollama 0.15.2 is new enough for Claude Code\u2019s local door. Nothing was contacted.' }),
     openLogin: async () => ({ ok: false, answer: 'This sample has no terminal to open. The installed app opens Claude Code\u2019s own sign-in there.' }),
@@ -84,8 +85,9 @@ export function installSampleBridge(bridge: DesktopBridge, engine: EngineBridge)
   const finish = (text: string) => { emit({ kind: 'done', text }); active = false; pending = false; emit({ kind: 'closed' }) }
   const cancel = () => { for (const timer of timers) clearTimeout(timer); timers.clear(); pending = false; active = false; emit({ kind: 'closed' }) }
   replace(engine, {
+    capabilities: async () => unverifiedCapabilities(settings, 'This is a sample workspace. Real model and effort options need the desktop app and an installed engine.'),
     read: async () => ({ engine: settings, running: false, history: [] }),
-    pick: async id => change({ id }), setModel: async model => change({ model }), setApproval: async approval => change({ approval }), setThinking: async thinking => change({ thinking }),
+    pick: async id => change({ id }), setModel: async (model, provider) => change({ model, cloudProvider: provider || '', thinking: 'default', effortTarget: undefined }), setApproval: async approval => change({ approval }), setThinking: async (thinking, effortTarget) => change({ thinking, effortTarget }),
     detect: async () => ['claude-code', 'agy'].map(id => ({ id: id as EngineSettings['id'], found: true, version: 'Simulated · not installed', install: '', path: '/Sample workspace/engines/' + id })),
     models: async () => ({ ok: true, models: ['sample-balanced', 'sample-fast', 'sample-reasoning'].map(name => ({ name, cloud: false, sizeGB: null })) }),
     pickWorkspace: async () => change({ workspace: '/Sample workspace/Website' }),

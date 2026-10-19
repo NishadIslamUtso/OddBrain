@@ -6,7 +6,8 @@ import EngineBay from '../src/renderer/src/components/EngineBay'
 const fixture = vi.hoisted(() => ({ engine: {
   settings: { id: 'claude-code', model: '', cloudProvider: '', workspace: '', approval: 'ask' },
   models: { loading: false, error: 'Ollama unavailable.', entries: [{ name: 'provider-fixture', cloud: true, sizeGB: null, provider: 'anthropic' }] },
-  detection: { loading: false, engines: [] }, loadModels: vi.fn(), checkEngines: vi.fn(), setModel: vi.fn(),
+  alive: false, ambient: { busy: false, note: '', updatedAt: null },
+    detection: { loading: false, engines: [] }, loadModels: vi.fn(), checkEngines: vi.fn(), setModel: vi.fn(),
 } }))
 vi.mock('../src/renderer/src/state/engine', () => ({ useEngine: () => fixture.engine }))
 test('a partial discovery failure does not hide usable provider models in the real picker', async () => {

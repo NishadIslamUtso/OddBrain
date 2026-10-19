@@ -25,6 +25,7 @@ import { StringDecoder } from 'node:string_decoder'
 import { join } from 'node:path'
 import { enginePathSync, resolveEngineCommand, shellSafeCommand } from './enginePath'
 import type { ApprovalMode, EngineEvent, EngineSettings } from '../../shared/lib/engine'
+import { selectedEffort } from '../../shared/lib/engineCapabilities'
 import { PERMISSION_MODE } from '../../shared/lib/engine'
 import { createEngineParser } from './stream'
 import { checkpointWorthTaking, takeCheckpoint } from './checkpoints'
@@ -172,6 +173,8 @@ export function brainEnvironment(baseUrl: string, apiKey?: string): Record<strin
 
 export function startClaudeCodeSession(input: StartSessionInput): EngineSession {
   const args = engineArguments(input.settings.model, input.settings.approval, input.resumeId)
+  const effort = selectedEffort(input.settings)
+  if (effort !== 'default') args.push('--effort', effort)
 
   // Permission questions still waiting on a person, with what they would touch.
   const pending = new Map<string, { tool: string; file: string }>()
@@ -191,13 +194,10 @@ export function startClaudeCodeSession(input: StartSessionInput): EngineSession 
             // owner's machine proved the old shape: claude-code forced at a
             // dead localhost door, retrying forever ("the brain is not
             // answering") while the dot lied green.
-            input.settings.model
+            input.settings.model && input.settings.cloudProvider !== 'native'
             ? brainEnvironment(input.settings.baseUrl)
             : {}),
         ...(enginePathSync() !== (process.env['PATH'] ?? '') ? { PATH: enginePathSync() } : {}),
-        // The engine's own extended-thinking knob, its documented variable,
-        // set only when the owner asked for it through the chip.
-        ...(input.settings.thinking === 'extended' ? { MAX_THINKING_TOKENS: '31999' } : {}),
       },
       // On Windows the command lives behind an npm `.cmd` shim, which only
       // runs through the shell. The one argument that is not a fixed flag is

@@ -54,7 +54,7 @@ test('garbage or a missing binary is reported honestly', async () => {
   expect(garbage.answer).toContain('did not answer')
   const agy = await readAuthStatus('agy')
   expect(agy.ok).toBe(false)
-  expect(agy.answer).toContain('does not report a sign-in state')
+  expect(agy.answer).toContain('no verified agy sign-in check')
 })
 
 test('sign-in opens a real terminal with the quoted engine path, and reads nothing back', () => {

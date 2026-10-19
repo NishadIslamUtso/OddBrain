@@ -1,3 +1,7 @@
+import { getEngineApi, bridge } from '@/platform/bridge'
+import { setupSummary } from '@shared/lib/setupSummary'
+import CopyText from '../ui/CopyText'
+import { AGY_APPROVAL_CHOICES, AGY_APPROVAL_NOTE } from '@shared/lib/engineApproval'
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown, FolderOpen, RefreshCw, Trash2, Cpu, Cloud } from 'lucide-react'
 import { useEngine, type EngineModels } from '@/state/engine'
@@ -27,10 +31,7 @@ const ENGINES: Array<{ id: EngineId; label: string; hint: string }> = [
 /** The honest fine print, per engine, shown where the engine is chosen. */
 const ENGINE_NOTES: Partial<Record<EngineId, string>> = {
   agy:
-    'agy answers and chats, but raises no permission cards here — its CLI has no stdio ' +
-    'prompt door, so anything beyond Ask is throttled by agy itself, not approved by you. ' +
-    'Its brain list appears when Google ships one to the CLI; until a signed-in Windows ' +
-    'turn is proven, treat this door as experimental.',
+    'This agy connection is experimental. It uses native models, streamed replies and permission rules. Its current stream input is text-only. ' + AGY_APPROVAL_NOTE,
 }
 
 /** The last part of a path, whichever slash the platform uses. */
@@ -68,6 +69,7 @@ export default function EngineBay() {
   // is what runs. This field exists for the person who knows a name its CLI
   // accepts; empty still means "engine default". Nothing is invented here.
   const [typedModel, setTypedModel] = useState('')
+  const [typedProvider, setTypedProvider] = useState<'native' | ''>('native')
   const [modelNote, setModelNote] = useState('')
   // What a swap actually did. Choosing an engine is a saved decision, not a
   // promise that a running turn changes hands — it cannot, and says so.
@@ -115,6 +117,7 @@ export default function EngineBay() {
         >
           {engine.detection.loading ? 'scanning…' : 'Re-scan'}
         </button>
+        <button type="button" className="ob-text-button" disabled={engine.turn?.state === 'running' || engine.ambient.busy} title="Stop the idle connection; reopen with current settings on your next message. Keeps native resume memory." onClick={() => { void getEngineApi().restart().then(r => setSwapNote(r.answer)).catch(() => setSwapNote('Restart could not be confirmed.')) }}>Restart connection</button>
       </header>
 
       {/* The engine selection system. An engine that is not on this machine
@@ -190,10 +193,10 @@ export default function EngineBay() {
                 <div key={`${entry.provider || "ollama"}:${entry.name}`} className="ob-engine-model-row" role="none">
                   <button type="button" role="menuitemradio" aria-checked={entry.name === engine.settings.model && (entry.provider || '') === engine.settings.cloudProvider}
                     onClick={() => { void engine.setModel(entry.name, entry.provider); setMenuOpen(false) }}>
-                    <span>{entry.name}</span>
-                    {entry.cloud ? <small><Cloud size={10} /> {entry.provider === 'anthropic' ? 'Anthropic' : 'Cloud'}</small> : entry.sizeGB !== null ? <small>{entry.sizeGB.toFixed(1)} GB</small> : null}
+                    <span>{entry.displayName || entry.name}</span>
+                    {entry.cloud ? <small><Cloud size={10} /> {entry.provider === 'native' ? (engine.settings.id === 'agy' ? 'agy' : 'CLI login') : entry.provider === 'anthropic' ? 'Anthropic API' : 'Cloud'}</small> : entry.sizeGB !== null ? <small>{entry.sizeGB.toFixed(1)} GB</small> : null}
                   </button>
-                  {!entry.cloud ? <button type="button" role="menuitem" title={`Remove ${entry.name}`} aria-label={`Remove ${entry.name}`} onClick={() => void engine.removeModel(entry.name)}><Trash2 size={12} /></button> : null}
+                  {!entry.cloud && !entry.provider ? <button type="button" role="menuitem" title={`Remove ${entry.name}`} aria-label={`Remove ${entry.name}`} onClick={() => void engine.removeModel(entry.name)}><Trash2 size={12} /></button> : null}
                 </div>
               ))
             )}
@@ -214,10 +217,16 @@ export default function EngineBay() {
           no list. Validated before it can reach the launch line. */}
       {engine.settings.id === 'claude-code' ? (
         <div className="mt-1.5">
+          <label className="mb-1 flex items-center gap-2 text-[11px] text-muted">
+            Model source
+            <select aria-label="Typed model source" value={typedProvider} onChange={event => setTypedProvider(event.target.value === 'native' ? 'native' : '')}>
+              <option value="native">CLI login</option><option value="">Ollama endpoint</option>
+            </select>
+          </label>
           <div className="ob-form-line">
             <input
               aria-label="Type a model name"
-              placeholder="or type a model your CLI knows"
+              placeholder="or type a model identifier"
               value={typedModel}
               onChange={(event) => { setTypedModel(event.target.value); setModelNote('') }}
               onKeyDown={(event) => {
@@ -225,7 +234,7 @@ export default function EngineBay() {
                 event.preventDefault()
                 const value = typedModel.trim()
                 if (!isValidModelName(value)) { setModelNote('Letters, digits, dots, colons, @, / and dashes only.'); return }
-                void engine.setModel(value).then(() => setTypedModel(''))
+                void engine.setModel(value, typedProvider || undefined).then(() => setTypedModel(''))
               }}
             />
             <button
@@ -234,7 +243,7 @@ export default function EngineBay() {
               onClick={() => {
                 const value = typedModel.trim()
                 if (!isValidModelName(value)) { setModelNote('Letters, digits, dots, colons, @, / and dashes only.'); return }
-                void engine.setModel(value).then(() => setTypedModel(''))
+                void engine.setModel(value, typedProvider || undefined).then(() => setTypedModel(''))
               }}
             >
               Use this name
@@ -249,6 +258,7 @@ export default function EngineBay() {
         </div>
       ) : null}
 
+      <details className="mt-2 text-[12px] text-muted"><summary className="cursor-pointer">Setup summary (redacted)</summary><p className="ob-control-scope">Review before sharing. No sign-in or connection check is run.</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words">{setupSummary({ appVersion: bridge.app.version, platform: bridge.app.platform, settings: engine.settings, engines: engine.detection.engines, running: engine.alive })}</pre><CopyText label="Copy redacted setup summary" text={setupSummary({ appVersion: bridge.app.version, platform: bridge.app.platform, settings: engine.settings, engines: engine.detection.engines, running: engine.alive })} /></details>
       {/* Where the engine works. */}
       <button
         type="button"
@@ -263,10 +273,10 @@ export default function EngineBay() {
       {/* The throttle: the engine's own settings, from ask-me to full speed. */}
       <div
         role="radiogroup"
-        aria-label="How much the engine may do before asking"
+        aria-label={engine.settings.id === 'agy' ? 'agy native permission mode' : 'How much the engine may do before asking'}
         className="mt-1 grid grid-cols-4 gap-1 rounded-lg border border-line p-1"
       >
-        {THROTTLE.map((step) => {
+        {(engine.settings.id === 'agy' ? AGY_APPROVAL_CHOICES : THROTTLE).map((step) => {
           const active = (engine.settings.approval ?? 'ask') === step.id
           return (
             <button

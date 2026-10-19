@@ -4,13 +4,8 @@ import { agyArguments, agyErrorSentence, agyModeArguments, agyUserLine, startAgy
 import { DEFAULT_ENGINE } from '../src/shared/lib/engine'
 import type { EngineEvent } from '../src/shared/lib/engine'
 
-/**
- * agy's wire contract, pinned from the REAL binary (v1.4.0, official
- * installer, run in the build sandbox on 2026-10-17): stream-json in and out,
- * a `result` envelope carrying status/response/error/usage/conversation_id,
- * exit 0 even on error, `--conversation` to resume. The fixtures below are
- * the lines the real binary actually emitted.
- */
+/** Adapter contract tests. The auth error is a historical captured fixture;
+ * other records are synthetic. Native signed-in acceptance is separate. */
 
 const settings = (over: Partial<typeof DEFAULT_ENGINE> = {}): typeof DEFAULT_ENGINE => ({
   ...DEFAULT_ENGINE,
@@ -75,7 +70,7 @@ function drive(lines: string[], stderr = ''): Run {
 
 const wait = (ms = 30): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
 
-describe('agy: engine #2 on its own verified wire', () => {
+describe('agy: documented native event wire', () => {
   test('the launch line is its own documented flags, stream-json both ways', () => {
     const args = agyArguments(settings())
     expect(args).toEqual(['--input-format', 'stream-json', '--output-format', 'stream-json', '--model', 'gemini-3-pro'])
@@ -84,11 +79,11 @@ describe('agy: engine #2 on its own verified wire', () => {
     expect(agyModeArguments('edits')).toEqual(['--mode', 'accept-edits'])
     expect(agyModeArguments('plan')).toEqual(['--mode', 'plan'])
     expect(agyModeArguments('full')).toEqual(['--dangerously-skip-permissions'])
-    // the Thinking chip maps to its own effort knob; default sets nothing
-    expect(agyArguments(settings({ thinking: 'extended' }))).toContain('--effort')
-    expect(agyArguments(settings({ approval: 'full', thinking: 'extended' }))).toEqual([
+    // Legacy Extended must not silently become high effort. The default model omits --model.
+    expect(agyArguments(settings({ thinking: 'extended' as never }))).not.toContain('--effort')
+    expect(agyArguments(settings({ approval: 'full', thinking: 'extended' as never }))).toEqual([
       '--input-format', 'stream-json', '--output-format', 'stream-json', '--model', 'gemini-3-pro',
-      '--dangerously-skip-permissions', '--effort', 'high',
+      '--dangerously-skip-permissions',
     ])
   })
 
@@ -100,7 +95,7 @@ describe('agy: engine #2 on its own verified wire', () => {
   })
 
   test('a turn goes in as one NDJSON user message; pictures are refused honestly', () => {
-    expect(agyUserLine('say done')).toBe(`${JSON.stringify({ type: 'user', message: { role: 'user', content: 'say done' } })}\n`)
+    expect(agyUserLine('say done')).toBe(`${JSON.stringify({ event: 'user', message: { content: 'say done' } })}\n`)
     const run = drive([])
     expect(run.stdin).toHaveLength(1)
     const ok = run.child.stdin.write as unknown as (line: string) => boolean
@@ -133,7 +128,7 @@ describe('agy: engine #2 on its own verified wire', () => {
   })
 
   test('a success result maps to done + usage + a resumable session id', async () => {
-    const line = '{"event":"result","result":{"conversation_id":"c-9","status":"COMPLETED","response":"Done, cleanly.","error":"","duration_seconds":1.2,"num_turns":2,"usage":{"input_tokens":40,"output_tokens":9,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":49}}}'
+    const line = '{"event":"result","result":{"conversation_id":"c-9","status":"SUCCESS","response":"Done, cleanly.","error":"","duration_seconds":1.2,"num_turns":1,"usage":{"input_tokens":40,"output_tokens":9,"thinking_tokens":0,"cache_read_tokens":0,"total_tokens":49}}}'
     const run = drive([line])
     await wait()
     const done = run.events.find(event => event.kind === 'done')

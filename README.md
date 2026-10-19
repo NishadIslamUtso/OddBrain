@@ -21,7 +21,7 @@ Runtime Markdown, skill files and legal notices remain in their required locatio
 
 ## Run from source
 
-Use Node.js 22.13 or newer. Install the desired engine separately and configure its executable in the app. Ollama is a separately installed model server, not a bundled download.
+Use Node.js 24 LTS (`.nvmrc`, package requirements and CI agree). Electron 41 has its own embedded Node 24 runtime; changing the development runtime does not replace external engines. Install the desired engine separately and configure its executable in the app. Ollama is a separately installed model server, not a bundled download.
 
 ```sh
 cd apps/03_oddbrain
@@ -59,7 +59,32 @@ In **Vault → Backup & restore**, choose **Back up full vault**. This includes 
 
 Fresh profiles and **Reset appearance** use **Ink & Sketchbook**, including its eight brain-behaviour roles. Existing saved choices are preserved. Settings groups now describe their contents and expand their pages in the sidebar.
 
-**AI & connections → Connectors** has shortcuts to Skills, the engine plugin catalogs and API providers. **Models & API keys** supports Anthropic, OpenAI, Gemini, OpenRouter, Groq, DeepSeek, xAI and custom OpenAI-compatible endpoints; Ollama is optional. Available engines/models still depend on the configured adapter. Skills and Plugins also remain under **Advanced tools**. Claude catalogs are available; agy's store adapter is not implemented. MCP configuration is not a universal connector marketplace.
+**AI & connections → Connectors** has shortcuts to Skills, the engine plugin catalogs and API providers. **Models & API keys** supports Anthropic, OpenAI, Gemini, OpenRouter, Groq, DeepSeek, xAI and custom OpenAI-compatible endpoints; Ollama is optional. Available engines/models still depend on the configured adapter. Skills and Plugins also remain under **Advanced tools**.
+
+**Skills, Plugins and Connectors** have a source picker for Claude Code or agy. Claude offers Anthropic's official marketplace and saved public GitHub sources; agy reads its official Antigravity catalog, with a labelled engine-cache fallback when offline. Changes require command review, and installed state can be read back from the engine. These catalogs distribute whole plugin packages, which can include skills, connectors, hooks, rules and agents—not independently installable items in every category.
+
+The **shared skill collection** and **shared MCP configuration** still deploy to both engines; engine-marketplace actions affect only the chosen engine. Packs, API providers and Ollama remain separate. Installed/enabled does not mean a connector is authenticated or working. Interactive plugin settings and sign-in remain in the engine. The agy adapter has regression and fixture-process coverage; live Google-catalog access, real agy installs and target-laptop acceptance are still pending.
+
+### Models and reasoning controls
+
+The model picker distinguishes **CLI login**, **Anthropic API** and Ollama routes. Native Claude and agy choices come from their installed CLIs, not a bundled model list; listing a model does not prove your account can use it. Manual model entry in engine settings also has a source selector.
+
+- **Composer → engine menu → Reasoning effort** offers only runtime-confirmed levels for the selected native model. Changes apply to the next message. **Engine default** keeps the CLI’s own setting; it does not mean reasoning is off.
+- **Composer → More chat tools → Show thinking** only shows or hides thinking supplied by the engine. It never changes effort, sends another request or creates an explanation.
+- agy uses a version-gated, read-only native model report. Its effort adapter is conditional: without recognized native metadata, only **Engine default** is offered. No raw native effort capture or signed-in agy acceptance has been established here. Non-native-provider effort remains unverified too; another model’s levels are never borrowed. Old saved **Extended** settings migrate to **Engine default**, not assumed High.
+- agy streams replies and tool activity, preserves partial failures, and avoids adding cumulative session usage repeatedly. Resumed usage is omitted when this turn cannot be separated; prices are not invented.
+- agy’s current connection is **text-only, without interactive approval cards**. Its **Native rules / Plan / Allow edits / Allow tools** controls use native policies. Saved rules can already allow actions; **Allow tools** explicitly skips tool permission prompts, not artifact review. Pictures are refused before sending, with no engine substitution.
+
+## Drafts, records and package inspection
+
+- **More chat tools → Saved drafts** stores text copies on this device. Insert appends to the current draft; it never sends or replaces it. Attachments stay separate. Limits are explicit refusals, not automatic eviction.
+- **More chat tools → Mention files**, or a standalone **@**, opens the desktop file picker. It inserts quoted paths, not file contents or shell commands. Native tools still enforce their own permissions. Browser previews cannot use this picker.
+- **More chat tools → Turn journal → Full transcripts** shows new per-turn text received from the native engine, with copy and Markdown download. Records include the dispatched prompt and emitted text/thinking/tool summaries, not image bytes or raw native tool traces. Older summaries cannot be expanded. Interrupted or damaged records are not labelled successful. Recording failures refuse dispatch or request engine stop rather than silently dropping text.
+- Under saved chat messages, **Save or copy this chat** exports all stored messages, attachment text, citations and artifact revisions. There is no old 30-message/2,000-character clipping. Attachment binaries are not embedded. Capsule capture refuses above 8 MB; Markdown download remains available.
+- **Skills / Plugins / Connectors → engine catalog → Inspect package** reads a commit-pinned public GitHub inventory, README and supported dependency declarations. It never installs or executes package code. Unsupported sources, incomplete trees and linked packages are refused. This is not a security audit, authentication check or native compatibility proof; native installation may resolve another revision.
+- **Settings → AI & connections → Engine** has **Restart connection** for idle processes and a reviewable **Setup summary (redacted)**. Restart keeps the native resume ID and reconnects on the next send; it is not a native plugin-reload guarantee. The setup summary omits paths, addresses, account details, model names and task text. It does not certify sign-in or connector health.
+
+Native text records live in private app storage, **outside vault backups**. Export important records separately. The limit is 32 MB per turn with no automatic deletion of older records. These are app-owned per-turn records, not grouped native-session history, archive import, or recovery of text that was previously clipped. The broader authorized backlog remains in progress; account/archive import remains on hold.
 
 ## Browser companion
 

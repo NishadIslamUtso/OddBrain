@@ -18,10 +18,10 @@ import { normalizeMcpServers, readMcpList } from '../../shared/lib/mcp'
  * re-deploys everywhere; a hand-edit in an engine folder is that engine's
  * private copy until the next deploy.
  *
- * agy's remote-MCP field naming changed when Gemini CLI became agy; local
- * (command) servers are identical everywhere. Remote entries are written
- * with `url` for both, and the exact translation is confirmed at the agy
- * Windows check rather than guessed now.
+ * Remote transport is engine-specific: Claude uses type/http + url; agy
+ * uses serverUrl (Antigravity MCP configuration documentation). Local command
+ * servers share the same format. Configuration is not an authentication or
+ * connection-health check.
  */
 import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
@@ -175,7 +175,7 @@ export function mcpForAgy(servers: McpServer[]): string {
   for (const server of servers.map(safeServer)) {
     if (!server) continue
     out[server.name] = server.url
-      ? { remote: { url: server.url } }
+      ? { serverUrl: server.url }
       : { command: server.command, args: server.args ?? [] }
   }
   return `${JSON.stringify({ mcpServers: out }, null, 2)}\n`

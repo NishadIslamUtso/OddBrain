@@ -102,7 +102,7 @@ test('mcp: one list, two native formats, local and remote servers', () => {
 
   const agy = JSON.parse(mcpForAgy(servers)) as Record<string, Record<string, unknown>>
   assert.deepEqual(agy.mcpServers['files'], { command: 'npx', args: ['files-mcp'] })
-  assert.deepEqual(agy.mcpServers['search'], { remote: { url: 'https://mcp.example.com' } })
+  assert.deepEqual(agy.mcpServers['search'], { serverUrl: 'https://mcp.example.com' })
 
   // Nothing usable in, nothing dangerous out.
   assert.deepEqual(JSON.parse(mcpForClaude([{ name: '', command: '' }])), { mcpServers: {} })

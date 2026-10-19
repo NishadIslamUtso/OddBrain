@@ -1,45 +1,16 @@
 /**
- * Engine adapter #2: agy (Google's Antigravity CLI), spawned and driven over
- * its wire — the same EngineEvent stream as Claude Code, so the socket, the
- * cards, the line and every app feature ride it unchanged.
- *
- * Everything below was verified against the REAL agy binary (v1.4.0, the
- * official installer at antigravity.google/cli/install.sh) on 2026-10-17 —
- * the architecture plan's 6.3 gate, finally run:
- *
- *  - `--input-format stream-json --output-format stream-json` is its
- *    non-interactive mode: one NDJSON user message per stdin line, one turn
- *    each; `-p` is implied (passing `-p` alone is a flag error — observed).
- *  - The observed result envelope:
- *      {"event":"result","result":{conversation_id,status,response,error,
- *       duration_seconds,num_turns,usage:{input_tokens,output_tokens,
- *       thinking_tokens,cache_read_tokens,total_tokens}}}
- *    with `status:"ERROR"` carrying the reason in `result.error`, and the
- *    process exiting 0 even then. Unauthenticated runs emit exactly this
- *    shape with "authentication failed or timed out".
- *  - `conversation_id` is the resume key: the flag is `--conversation <id>`
- *    (and `--continue` for the most recent).
- *  - The throttle maps onto its OWN documented knobs: `--mode
- *    accept-edits|plan` and `--dangerously-skip-permissions`. Its help lists
- *    no stdio permission-prompt flag, so in the default Ask gear its print
- *    mode simply runs without tool prompts — honest chat and answers; the
- *    card-per-write guarantee is Claude Code's gear set.
- *  - Models are Google's own plan-gated list (`agy models` — sign-in gated,
- *    observed). No custom endpoint exists: Ollama brains cannot plug in.
- *  - Sign-in is a browser flow (observed OAuth URL); per the owner's rule it
- *    happens in his terminal/browser, never in this app.
- *
- * What is deliberately NOT invented: the mid-turn event vocabulary of an
- * authenticated run (text deltas, tool use). Unknown `{"event":…}` lines are
- * passed by silently — the same rule adapter #1 follows — and the result
- * envelope above carries the turn's outcome regardless. The first signed-in
- * turn on the owner's machine pins the rest, and only then do those events
- * get richer mapping.
+ * agy's native event protocol. Schema evidence: CLI headless documentation and
+ * third-party 1.3.2 catalog/DTO evidence; native signed-in acceptance is separate.
+ * Text-only stdin, incremental agent_response/tool events, cumulative usage.
+ * This transport has no interactive permission-response channel.
  */
 import { spawn, type ChildProcess } from 'node:child_process'
+import { StringDecoder } from 'node:string_decoder'
+import { createAgyParser } from './agyStream'
+import { selectedEffort } from '../../shared/lib/engineCapabilities'
 import type { EngineSettings } from '../../shared/lib/engine'
 import { sanitizeEnvironment, stopArguments, type EngineStartInput } from './claudeCode'
-import { enginePathSync, resolveEngineCommand, shellSafeCommand } from './enginePath'
+import { enginePathSync, resolveEngineCommand } from './enginePath'
 import type { EngineSession } from './claudeCode'
 
 /** The throttle setting → agy's own documented flags (verified in --help). */
@@ -62,24 +33,21 @@ export function agyArguments(settings: EngineSettings, resumeId?: string): strin
   return [
     '--input-format', 'stream-json',
     '--output-format', 'stream-json',
-    '--model', settings.model,
+    ...(settings.model ? ['--model', settings.model] : []),
     ...agyModeArguments(settings.approval),
-    // The engine's own reasoning-effort knob for the Thinking chip. Its help
-    // documents low|medium|high|xhigh|max; extended maps to `high`, default
-    // sets nothing — the same shape as Claude Code's thinking switch.
-    ...(settings.thinking === 'extended' ? ['--effort', 'high'] : []),
+    ...(selectedEffort(settings) !== 'default' ? ['--effort', selectedEffort(settings)] : []),
     ...(resumeId ? ['--conversation', resumeId] : []),
   ]
 }
 
-/** One user turn on the stdin wire, as the binary accepted it in probes. */
+/** One documented agy user event; Claude's `type`/`role` shape is not this protocol. */
 export function agyUserLine(prompt: string): string {
-  return `${JSON.stringify({ type: 'user', message: { role: 'user', content: prompt } })}\n`
+  return `${JSON.stringify({ event: 'user', message: { content: prompt } })}\n`
 }
 
-/** What the app can honestly do with pictures on agy's wire: nothing yet. */
+/** The current documented stream input explicitly permits text blocks only. */
 export const AGY_PICTURES_ANSWER =
-  'agy\u2019s picture shape is not verified yet, so nothing was sent with a picture in it. Send the words alone here, or pick Claude Code for pictures.'
+  'agy’s current stream input accepts text only. Nothing was sent. Send words alone or explicitly choose an engine that supports pictures.'
 
 export function startAgySession(input: EngineStartInput & { spawnProcess?: typeof spawn }): EngineSession {
   const args = agyArguments(input.settings, input.resumeId)
@@ -87,13 +55,16 @@ export function startAgySession(input: EngineStartInput & { spawnProcess?: typeo
   let child: ChildProcess
   const start = input.spawnProcess ?? spawn
   try {
-    child = start(shellSafeCommand(resolveEngineCommand('agy')), args, {
+    const command = resolveEngineCommand('agy')
+    if (/\.(cmd|bat)$/i.test(command)) throw Error('Use the native executable.')
+    child = start(command, args, {
       cwd: input.cwd,
       env: {
         ...sanitizeEnvironment(process.env),
         ...(enginePathSync() !== (process.env['PATH'] ?? '') ? { PATH: enginePathSync() } : {}),
       },
-      shell: process.platform === 'win32',
+      shell: false,
+      detached: process.platform !== 'win32',
     })
   } catch {
     input.onEvent({ kind: 'error', text: 'agy could not be started. Install it from antigravity.google (the CLI, not the IDE), then pick it again.' })
@@ -101,94 +72,65 @@ export function startAgySession(input: EngineStartInput & { spawnProcess?: typeo
     return deadSession()
   }
 
-  child.on('error', () => {
-    input.onEvent({ kind: 'error', text: 'agy is not on this machine yet. Install it from antigravity.google (the CLI, not the IDE), then pick it here.' })
-  })
-  child.stdin?.on?.('error', () => undefined)
-
-  let lineBuf = ''
-  let stderrTail = ''
-  let finished = false
-  let deliberate = false
-  let sawResult = false
-
-  const handleLine = (line: string): void => {
-    const trimmed = line.trim()
-    if (!trimmed) return
-    let parsed: { event?: string; result?: {
-      conversation_id?: string
-      status?: string
-      response?: string
-      error?: string
-      duration_seconds?: number
-      usage?: { input_tokens?: number; output_tokens?: number; total_tokens?: number; thinking_tokens?: number; cache_read_tokens?: number }
-    } }
-    try {
-      parsed = JSON.parse(trimmed)
-    } catch {
-      return // a non-JSON line on this wire is not an app concern
-    }
-    if (parsed.event !== 'result' || !parsed.result) return
-    sawResult = true
-    const { result } = parsed
-    if (result.conversation_id) {
-      input.onEvent({ kind: 'session', id: result.conversation_id })
-    }
-    if (result.status === 'ERROR') {
-      const why = result.error || 'agy reported an error without a reason.'
-      input.onEvent({ kind: 'error', text: agyErrorSentence(why, stderrTail) })
-      return
-    }
-    const usage = result.usage
-    input.onEvent({
-      kind: 'done',
-      text: result.response ?? '',
-      usage: {
-        inTokens: usage?.input_tokens ?? 0,
-        outTokens: usage?.output_tokens ?? 0,
-        durationMs: result.duration_seconds != null ? Math.round(result.duration_seconds * 1000) : null,
-        costUsd: null, // agy's result envelope names no cost
-      },
-    })
+  let lineBuf = '', stderrTail = ''
+  let finished = false, deliberate = false, failed = false
+  const decoder = new StringDecoder('utf8'), stderrDecoder = new StringDecoder('utf8')
+  const parser = createAgyParser(input.resumeId || false)
+  const terminate = (): void => {
+    const platform = input.platform ?? process.platform
+    if (platform === 'win32' && child.pid) {
+      try { const killer = start('taskkill', stopArguments(child.pid), { stdio: 'ignore' }); killer.on?.('error', () => child.kill('SIGKILL')) }
+      catch { child.kill('SIGKILL') }
+    } else if (child.pid) {
+      try { process.kill(-child.pid, 'SIGKILL') } catch { child.kill('SIGKILL') }
+    } else child.kill('SIGKILL')
   }
-
+  const fail = (text: string): void => {
+    if (failed || deliberate) return
+    failed = true
+    input.onEvent({ kind: 'error', text })
+    terminate()
+  }
+  child.on('error', () => fail('agy could not start. Check its executable and installation.'))
+  child.stdin?.on?.('error', () => fail('The agy connection closed while sending. Check any partial activity before retrying.'))
+  const handleLine = (line: string): void => {
+    if (failed || deliberate || !line.trim()) return
+    let value: unknown
+    try { value = JSON.parse(line) } catch { return }
+    try {
+      const events = parser.event(value)
+      if (parser.shouldStop()) { failed = true; terminate() }
+      for (const event of events) input.onEvent(event.kind === 'error' ? { ...event, text: agyErrorSentence(event.text, '') } : event)
+    } catch (error) { fail((error as Error).message) }
+  }
   child.stdout?.on('data', (chunk: Buffer) => {
-    lineBuf += chunk.toString('utf8')
+    if (failed || deliberate || finished) return
+    lineBuf += decoder.write(chunk)
+    if (lineBuf.length > 8_000_000) { fail('agy output exceeded the supported message size. The task was stopped; received text is retained.'); return }
     let index: number
     while ((index = lineBuf.indexOf('\n')) >= 0) {
-      const line = lineBuf.slice(0, index)
-      lineBuf = lineBuf.slice(index + 1)
-      handleLine(line)
+      const line = lineBuf.slice(0, index); lineBuf = lineBuf.slice(index + 1); handleLine(line)
     }
   })
-  child.stderr?.on('data', (chunk: Buffer) => {
-    stderrTail = `${stderrTail}${chunk.toString('utf8')}`.slice(-600)
-  })
+  child.stderr?.on('data', (chunk: Buffer) => { stderrTail = (stderrTail + stderrDecoder.write(chunk)).slice(-1200) })
   child.on('close', (code: number | null) => {
     if (finished) return
-    finished = true
+    lineBuf += decoder.end()
     if (lineBuf.trim()) handleLine(lineBuf)
-    if (!sawResult && !deliberate) {
-      // No result envelope at all: the binary died before answering — say why.
-      const why = stderrTail.trim()
-      input.onEvent({
-        kind: 'error',
-        text: why
-          ? `agy closed without an answer: ${why}`
-          : 'agy closed without an answer. Is it signed in? Run `agy` once in a terminal to sign in, then try again.',
-      })
-    }
+    finished = true
+    if (parser.pending() && !deliberate && !failed) input.onEvent({ kind: 'error', text: agyErrorSentence('agy closed without an answer for the current message. Check its connection and CLI setup before retrying.', stderrTail) })
     input.onClose?.(code)
     input.onEvent({ kind: 'closed' })
   })
 
-  const isRunning = (): boolean => !finished && child.exitCode === null && !child.killed
+  const isRunning = (): boolean => !failed && !deliberate && !finished && child.exitCode === null && !child.killed
   let refusalReason = ''
 
   const writeLine = (line: string): boolean => {
     if (!isRunning()) return false
     try {
-      child.stdin?.write(line)
+      if (!child.stdin) return false
+      child.stdin.write(line)
       return true
     } catch {
       return false
@@ -197,14 +139,16 @@ export function startAgySession(input: EngineStartInput & { spawnProcess?: typeo
 
   return {
     send(prompt: string, images: Array<{ mime: string; data: string }> = []): boolean {
-      // Pictures: agy's image shape is unverified — an honest refusal beats a
-      // silent drop or an invented block. The reason travels with the session
-      // so the socket can show it instead of inventing "starting".
+      // Do not drop images or invent an unsupported wire block.
       if (images.length) {
         refusalReason = AGY_PICTURES_ANSWER
         return false
       }
-      return writeLine(agyUserLine(prompt))
+      if (!isRunning() || parser.pending()) { refusalReason = 'agy is still working or has stopped. Wait for its result, or stop and retry.'; return false }
+      parser.beginTurn()
+      const sent = writeLine(agyUserLine(prompt))
+      if (!sent) { refusalReason = 'The agy connection could not accept the message.'; fail(refusalReason) }
+      return sent
     },
     refusal(): string {
       const reason = refusalReason
@@ -212,22 +156,13 @@ export function startAgySession(input: EngineStartInput & { spawnProcess?: typeo
       return reason
     },
     answer(): void {
-      // agy's print mode surfaces no stdio permission questions (verified in
-      // its --help), so there is nothing to answer — the throttle flags above
-      // are its entire permission story.
+      // The documented stream protocol rejects control_response messages.
+      // Never turn a UI decision into a fake approval or a permission-rule edit.
     },
     stop(): void {
       if (!isRunning()) return
       deliberate = true
-      const platform = input.platform ?? process.platform
-      if (platform === 'win32' && child.pid) {
-        // agy.exe may spawn children the same way claude does: take the tree.
-        // Through the session's own spawner, exactly like claudeCode's stop —
-        // the tree-kill is observable and testable, never a module secret.
-        start('taskkill', stopArguments(child.pid), { stdio: 'ignore' })
-      } else {
-        child.kill('SIGTERM')
-      }
+      terminate()
     },
     isRunning,
   }
@@ -235,8 +170,8 @@ export function startAgySession(input: EngineStartInput & { spawnProcess?: typeo
 
 /** The auth case gets the exact next step; everything else says what came back. */
 export function agyErrorSentence(error: string, stderrTail: string): string {
-  if (/auth/i.test(error)) {
-    return 'agy is not signed in on this machine. Run `agy` once in a terminal and finish the browser sign-in; then send the work again here. Nothing was charged or sent.'
+  if (/authentication|unauthenticated|sign.in|login required|oauth/i.test(error)) {
+    return 'agy is not signed in on this machine. Run `agy` once in a terminal and finish the browser sign-in; then check any partial activity before retrying. No billing conclusion is available here.'
   }
   const tail = stderrTail.trim()
   return tail ? `${error} (agy said: ${tail})` : error

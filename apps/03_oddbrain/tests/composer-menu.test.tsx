@@ -36,5 +36,5 @@ test('attachment picker accepts broad formats and all chat tools remain reachabl
   expect(container.querySelector('input[type="file"]')!.hasAttribute('accept')).toBe(false)
   await act(() => { (container.querySelector('[aria-label="More chat tools"]') as HTMLButtonElement).click() })
   const tools = container.querySelector('[aria-label="Chat tools"]')!
-  for (const label of ['Project', 'Cook context', 'Brain battle', 'Split a task', 'Thinking details', 'Turn journal']) expect(tools.textContent).toContain(label)
+  for (const label of ['Project', 'Cook context', 'Brain battle', 'Split a task', 'Show thinking', 'Turn journal']) expect(tools.textContent).toContain(label)
 })
