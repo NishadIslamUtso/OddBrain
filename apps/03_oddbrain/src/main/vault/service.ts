@@ -21,6 +21,7 @@ import { PRIVACY_FILE, SCOPE_FILE, excluded, readPatterns, replacePatterns } fro
 import { digest, dhakaParts, parseFollowups, safeSegment, section, splitDocument, timestamp, yamlDocument } from './text'
 import { createZip, safeEntryName } from './zip'
 import { syncConversation } from './conversations'
+import { createVaultSearch, type SearchRequest, type VaultSearch } from './search'
 
 export type Payload = Record<string, any>
 
@@ -71,12 +72,19 @@ export function createVaultService({
   // not: the app opens, says what is missing, and picks the vault up the moment
   // it appears without a restart.
   let files: VaultFiles | null = null
+  let indexed: VaultSearch | null = null
   function vault(): VaultFiles {
     if (!files) {
       if (!existsSync(root)) throw new VaultMissingError(noVaultMessage(root))
       files = createVaultFiles(root, clock)
     }
     return files
+  }
+  /** One search over notes and captured messages. Built with the vault, so
+   *  neither exists before the folder does. */
+  function searcher(): VaultSearch {
+    if (!indexed) indexed = createVaultSearch(vault(), () => clock().getTime())
+    return indexed
   }
 
   function status(): VaultStatus {
@@ -820,6 +828,8 @@ export function createVaultService({
     capsules,
     context,
     exportZip,
+    /** Ranked search over notes and captured conversations. */
+    search: (request: SearchRequest) => searcher().search(request),
     /**
      * The store itself, for the map of sources: it walks and reads heads, and it
      * must do both through the same path rules as everything else in this app. A

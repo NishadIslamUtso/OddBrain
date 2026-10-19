@@ -100,6 +100,41 @@ test('a preview cannot be used to read outside the vault or a folder', async () 
   }
 })
 
+test('a captured message opens with the chat it came from, and a note does not', async () => {
+  const base = `02 Sources/Conversations/Browser/${'a'.repeat(64)}`
+  const message = `${'b'.repeat(64)}`
+  const dir = mkdtempSync(join(tmpdir(), 'oddbrain-preview-chat-'))
+  try {
+    mkdirSync(join(dir, base, 'messages'), { recursive: true })
+    writeFileSync(
+      join(dir, `${base}/conversation.json`),
+      JSON.stringify({ provider: 'Claude', key: 'x', title: 'A real chat', url: 'https://claude.ai/chat/abc', updated_at: '2026-10-18T12:00:00Z' })
+    )
+    writeFileSync(
+      join(dir, `${base}/messages/${message}.md`),
+      `---\ntype: conversation_message\nrole: user\n---\n# user\n\nThe marigold needs water.\n`
+    )
+    writeFileSync(join(dir, `${base}/messages/${message}.json`), JSON.stringify({ message: { id: message, role: 'user', text: 'The marigold needs water.' }, hash: 'x' }))
+    writeFileSync(join(dir, 'Note.md'), '# Note\n\nPlain.\n')
+    const service = createVaultService({ vaultPath: dir, clock: () => new Date('2026-10-10T19:00:00Z') })
+    const api = await startLocalApi({ port: 0, ollamaUrl: 'http://127.0.0.1:9', vault: service })
+    try {
+      const captured = await get(api, `/file?path=${encodeURIComponent(`${base}/messages/${message}.md`)}`)
+      assert.equal(captured.status, 200)
+      assert.equal(captured.body.conversation.provider, 'Claude')
+      assert.equal(captured.body.conversation.title, 'A real chat')
+      assert.equal(captured.body.conversation.url, 'https://claude.ai/chat/abc')
+      assert.equal(captured.body.conversation.role, 'user')
+      const note = await get(api, '/file?path=Note.md')
+      assert.equal(note.body.conversation, undefined)
+    } finally {
+      await api.close()
+    }
+  } finally {
+    rmSync(dir, { recursive: true, force: true })
+  }
+})
+
 test('the preview stays same-origin: another page cannot read the vault through it', async () => {
   const { api } = await start()
   try {

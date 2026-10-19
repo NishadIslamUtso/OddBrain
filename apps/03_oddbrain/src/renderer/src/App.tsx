@@ -46,7 +46,8 @@ import { DEFAULT_INFERENCE, INFERENCE_KEY, normalizeInference } from './state/pe
 import { useChats } from './state/useChats'
 import { bridge, isDemo } from './platform/bridge'
 import { DEFAULT_PERMISSIONS, normalizePermissions, type Permissions } from '@shared/lib/permissions'
-import { vaultPost } from '@shared/lib/vault'
+import { vaultGet, vaultPost } from '@shared/lib/vault'
+import { vaultHitDetail, vaultHitTitle, type VaultSearchHit } from '@shared/lib/vaultSearch'
 import { setMotionMode, setMascotPause } from './motion/motionMode'
 import { setOsReducedMotion } from './motion/motionMode'
 import { conversationCapture } from '@shared/lib/capture'
@@ -536,14 +537,50 @@ export default function App() {
   const openChat = (id: string): void => { chats.open(id); setView('chat') }
   const newChat = (): void => { chats.create(); setView('chat'); setSettingsOpen(false); setPendingProject(null); setNotice(''); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label=Message]')?.focus()) }
   const items: ShellItem[] = view === 'projects' ? projects.map(p => ({ id: p.id, title: p.name, detail: p.folder, open: () => { setProjectFocus(p.id); setView('projects') } })) : view === 'artifacts' ? library.items.map(item => ({ id: item.id, title: item.title, detail: item.type.toUpperCase(), open: () => { setArtifactFocus(item.id); setView('artifacts') } })) : chats.chats.map(c => ({ id: c.id, title: c.title, detail: c.date, open: () => openChat(c.id) }))
+  /**
+   * The vault half of Ctrl+K.
+   *
+   * The shell's own search is synchronous and local; this one crosses into the
+   * main process, so it is debounced and every in-flight answer is discarded
+   * the moment a newer query exists. A hit opens the file it names, because a
+   * result that cannot be opened is a dead end.
+   */
+  const [vaultQuery, setVaultQuery] = useState('')
+  const [vaultHits, setVaultHits] = useState<CommandItem[]>([])
+  const [vaultFocus, setVaultFocus] = useState<{ path: string; at: number } | null>(null)
+  const vaultTicket = useRef(0)
+  useEffect(() => {
+    const query = vaultQuery.trim()
+    if (!query || sampleEnabled()) { setVaultHits([]); return }
+    const ticket = ++vaultTicket.current
+    const timer = window.setTimeout(() => {
+      vaultGet(`/search?q=${encodeURIComponent(query)}&limit=6`)
+        .then(reply => {
+          if (ticket !== vaultTicket.current) return
+          const hits = Array.isArray(reply?.hits) ? reply.hits as VaultSearchHit[] : []
+          setVaultHits(hits.filter(hit => typeof hit.path === 'string').map(hit => ({
+            id: 'vault-' + hit.path,
+            title: vaultHitTitle(hit),
+            detail: vaultHitDetail(hit),
+            run: () => { setVaultFocus({ path: hit.path, at: Date.now() }); setView('vault') },
+          })))
+        })
+        .catch(() => { if (ticket === vaultTicket.current) setVaultHits([]) })
+    }, 220)
+    return () => window.clearTimeout(timer)
+  }, [vaultQuery])
+
   const commands: CommandItem[] = [{ id: 'memory-inbox', title: 'Memory inbox', detail: 'Review interpretations, people and your life story', run: () => window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' })) }, ...screenCommands(setView), ...chats.chats.slice(0, 6).map(c => ({ id: 'chat-' + c.id, title: c.title, detail: 'Conversation', run: () => openChat(c.id) })), { id: 'screen-code', title: 'Code', detail: 'All project folders', run: () => { setCodeFocus(''); setView('code') } }, ...SECTIONS.map(section => ({ id: 'settings-' + section.id, title: section.id === 'models' ? 'Models & API keys' : section.id === 'connectors' ? 'Apps & extensions' : section.title, detail: 'Settings', run: () => openSettings(section.id) }))]
   const searchCommands = (query: string): CommandItem[] => searchChats(chats.chats, query).map(result => ({ id: 'chat-' + result.chat.id, title: result.chat.title, detail: result.matches[0]?.snippet || 'Conversation', run: () => openChat(result.chat.id) }))
+  // Vault hits are ordinary commands; dedupe by id keeps a note from appearing
+  // twice when a chat and a note share a title.
+  const paletteCommands: CommandItem[] = [...commands, ...vaultHits]
   if (!welcomed) return <LookContext value={look}><LookActions value={updateLook}><div className="ob-app-root"><FirstRunView onFinish={() => setWelcomed(true)} onName={name => setProfile({ ...profile, name })} /></div><LaunchOverlay /></LookActions></LookContext>
 
   return <LookContext value={look}><LookActions value={updateLook}>
     <div className="ob-app-root flex h-full flex-col bg-bg text-ink">
       <div className="ob-shell-host" hidden={settingsOpen} inert={settingsOpen}>
-        <DesktopShell layout={look.layout} navigation={{ view, onView: setView, onNew: newChat, onBack: navigation.back, canBack: navigation.canBack, onSettings: () => openSettings('appearance'), name: profile.name }} items={items} commands={commands} extraSearch={searchCommands} suspended={settingsOpen} sidebar={
+        <DesktopShell layout={look.layout} navigation={{ view, onView: setView, onNew: newChat, onBack: navigation.back, canBack: navigation.canBack, onSettings: () => openSettings('appearance'), name: profile.name }} items={items} commands={paletteCommands} extraSearch={searchCommands} onSearchQuery={setVaultQuery} suspended={settingsOpen} sidebar={
         <Sidebar
           view={view}
           onView={setView}
@@ -572,6 +609,7 @@ export default function App() {
           <BrainView vault={vault} isDemo={isDemo && !sampleEnabled()} onOpenVault={() => setView('vault')} />
         ) : view === 'vault' ? (
           <VaultView
+            focus={vaultFocus}
             onAddToComposer={(path, content) => {
               // A note becomes context: quoted, capped, and named — never a
               // silent paste of a whole file into the draft.

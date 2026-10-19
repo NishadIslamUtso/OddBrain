@@ -12,17 +12,23 @@ export type ShellNavigation = { view: View; onView: (view: View) => void; onNew:
 /** Exactly the same structural host in the app and the scaled Appearance
  * preview. The caller supplies real content and real callbacks in the app,
  * small read-only sample components in the preview. */
-export default function DesktopShell({ layout, navigation, sidebar, items = [], commands = [], children, preview = false, suspended = false, extraSearch }: {
+export default function DesktopShell({ layout, navigation, sidebar, items = [], commands = [], children, preview = false, suspended = false, extraSearch, onSearchQuery }: {
   layout: LayoutId; navigation: ShellNavigation; sidebar: ReactNode
   items?: ShellItem[]; commands?: CommandItem[]; children: ReactNode; preview?: boolean; suspended?: boolean; extraSearch?: (query: string) => CommandItem[]
+  /**
+   * The palette's own query, so a screen can search something the shell cannot
+   * (the vault lives behind the main process). The shell stays synchronous and
+   * unaware of what that search costs; results arrive as ordinary commands.
+   */
+  onSearchQuery?: (query: string) => void
 }) {
   const pending = usePermissionsWaiting()
   const { view, onView, onNew, onBack, canBack, onSettings, name } = navigation
   const [open, setOpen] = useState(false), [query, setQuery] = useState('')
   const input = useRef<HTMLInputElement | null>(null), returnFocus = useRef<HTMLElement | null>(null)
   const list = useMemo(() => { const found = commands.filter(c => `${c.title} ${c.detail || ''}`.toLowerCase().includes(query.trim().toLowerCase())); const all = query.trim() && extraSearch ? [...found, ...extraSearch(query)] : found; return [...new Map(all.map(c => [c.id, c])).values()] }, [commands, query, extraSearch])
-  const search = (): void => { if (preview) return; returnFocus.current = document.activeElement as HTMLElement; setQuery(''); setOpen(true) }
-  const close = (): void => { setOpen(false); returnFocus.current?.focus() }
+  const search = (): void => { if (preview) return; returnFocus.current = document.activeElement as HTMLElement; setQuery(''); onSearchQuery?.(''); setOpen(true) }
+  const close = (): void => { setOpen(false); onSearchQuery?.(''); returnFocus.current?.focus() }
   useEffect(() => {
     if (preview || suspended) return
     const key = (e: KeyboardEvent): void => {
@@ -54,7 +60,7 @@ export default function DesktopShell({ layout, navigation, sidebar, items = [], 
     {open ? <div className="ob-command-backdrop" onPointerDown={e => { if (e.target === e.currentTarget) close() }}><section className="ob-command-dialog" role="dialog" aria-modal="true" aria-label="Find a chat or screen" onKeyDown={e => {
       if (e.key === 'Tab') { const nodes = [...e.currentTarget.querySelectorAll<HTMLElement>('input,button')]; const first = nodes[0], last = nodes.at(-1); if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last?.focus() } else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first?.focus() } }
       if (e.key === 'Enter' && e.target === input.current && list[0]) { e.preventDefault(); close(); list[0].run() }
-    }}><div className="ob-command-input"><Search size={16} /><input ref={input} aria-label="Search chats and screens" placeholder="Search chats and screens" value={query} onChange={e => setQuery(e.target.value)} /><button className="ob-icon-button" type="button" onClick={close} aria-label="Close search"><X size={16} /></button></div><div className="ob-command-results">{list.slice(0, 30).map(c => <button type="button" key={c.id} onClick={() => { close(); c.run() }}><span>{c.title}{c.detail ? <small>{c.detail}</small> : null}</span><ArrowRight size={14} /></button>)}{!list.length ? <p className="ob-empty-line">No matches.</p> : null}</div></section></div> : null}
+    }}><div className="ob-command-input"><Search size={16} /><input ref={input} aria-label="Search chats and screens" placeholder="Search chats, screens and the vault" value={query} onChange={e => { setQuery(e.target.value); onSearchQuery?.(e.target.value) }} /><button className="ob-icon-button" type="button" onClick={close} aria-label="Close search"><X size={16} /></button></div><div className="ob-command-results">{list.slice(0, 30).map(c => <button type="button" key={c.id} onClick={() => { close(); c.run() }}><span>{c.title}{c.detail ? <small>{c.detail}</small> : null}</span><ArrowRight size={14} /></button>)}{!list.length ? <p className="ob-empty-line">No matches.</p> : null}</div></section></div> : null}
   </div>
 }
 export function screenCommands(onView: (view: View) => void): CommandItem[] { return NAV_ITEMS.map(item => ({ id: 'screen-' + item.id, title: item.label, detail: 'Screen', run: () => onView(item.id) })) }

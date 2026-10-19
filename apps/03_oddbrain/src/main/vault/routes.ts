@@ -15,6 +15,7 @@
  */
 import { InputError, VaultMissingError } from './errors'
 import { createSourceMap } from './sources'
+import { conversationContext } from './search'
 import type { VaultService } from './service'
 
 export type VaultRouteRequest = {
@@ -41,6 +42,7 @@ export const VAULT_ROUTES: Record<string, string[]> = {
   '/files': ['GET'],
   '/file': ['GET'],
   '/grep': ['GET'],
+  '/search': ['GET'],
   '/onui': ['GET'],
   '/links': ['GET'],
   '/capture': ['POST'],
@@ -91,7 +93,29 @@ export function handleVaultRequest(service: VaultService, request: VaultRouteReq
           return { status: 404, body: { ok: false, error: `There is no file at ${relative} in the vault. The preview was not shown.` } }
         }
         const content = service.files().read(relative)
-        return { status: 200, body: { ok: true, path: relative, content: content.slice(0, 200_000), truncated: content.length > 200_000 } }
+        // A captured message opens with the chat it came from, so a search hit
+        // does not become a sentence with no author.
+        const conversation = conversationContext(service.files(), relative)
+        return { status: 200, body: { ok: true, path: relative, content: content.slice(0, 200_000), truncated: content.length > 200_000, ...(conversation ? { conversation } : {}) } }
+      }
+      if (route === '/search') {
+        // Ranked search over notes and captured conversations. `q` is required;
+        // every word narrows the answer, and the reply says how much of the
+        // vault it actually looked at.
+        const text = String(request.query.get('q') || '').trim()
+        if (!text) return { status: 400, body: { ok: false, error: 'A search word is required.' } }
+        const rawLimit = Number(request.query.get('limit') || 30)
+        const days = Number(request.query.get('days') || 0)
+        const kind = String(request.query.get('kind') || 'all')
+        return {
+          status: 200,
+          body: service.search({
+            query: text,
+            limit: Number.isFinite(rawLimit) ? Math.max(1, Math.min(100, Math.trunc(rawLimit))) : 30,
+            days: Number.isFinite(days) && days > 0 ? Math.trunc(days) : 0,
+            kind: kind === 'note' || kind === 'conversation' ? kind : 'all',
+          }),
+        }
       }
       if (route === '/grep') {
         // Content search: which files mention this, with the matching line.

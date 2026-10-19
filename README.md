@@ -2,7 +2,7 @@
 
 A local-first Windows desktop assistant with chat, projects, artifacts, a Markdown vault and a browser companion. It connects to separately installed engines and keeps source conversations distinct from AI interpretations and user-confirmed memory.
 
-**Development status:** recoverable browser capture is implemented. Better recall, grouped review and the next People/Journal/Life Story improvements remain in progress. The independently verified reliability repairs have been integrated with regression coverage. This is not a fully accepted or signed release.
+**Development status:** recoverable browser capture is implemented. Ctrl+K searches notes and captured messages, a captured message opens with the chat it came from, and the note preview reports backlinks and unresolved links. Semantic recall, grouped review and the next People/Journal/Life Story improvements remain in progress. The independently verified reliability repairs have been integrated with regression coverage. This is not a fully accepted or signed release.
 
 [Project context, requirements, known issues and verification →](CONTEXT.md)
 
@@ -37,6 +37,10 @@ npm run dev:web -- --host 0.0.0.0
 ```
 
 A browser preview is not a substitute for the native Electron app or its IPC/engine integrations.
+
+## Recall
+
+`Ctrl+K` searches the vault as well as chats and screens: notes, captured conversations and individual messages, ranked with snippets. Every word narrows the answer, results say whether they are a note or which provider said it, and opening one goes to the exact file. Within the vault, a captured message shows the provider, chat title, role and date above the text, with a link to the original page, and a note lists what links to it, what it links to, and how many of its links point nowhere. Search reads at most 64 KB of each file and says when it stopped (`scanned`, `capped`, `partial`); it is keyword matching, not embeddings, and it does not search the memory review database.
 
 ## Browser companion
 

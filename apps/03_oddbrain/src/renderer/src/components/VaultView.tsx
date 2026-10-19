@@ -20,7 +20,11 @@ import { bridge, isDemo } from '@/platform/bridge'
 const leaf = (path: string): string => path.split('/').filter(Boolean).at(-1) ?? path
 const folderOf = (path: string): string => path.split('/').slice(0, -1).join('/') || '(root)'
 
-export default function VaultView({ onAddToComposer }: { onAddToComposer: (path: string, content: string) => void }) {
+export default function VaultView({ onAddToComposer, focus }: {
+  onAddToComposer: (path: string, content: string) => void
+  /** A file chosen somewhere else — the command palette's search — to open now. */
+  focus?: { path: string; at: number } | null
+}) {
   const [sources, setSources] = useState(false)
   useEffect(() => { const open = () => setSources(true); window.addEventListener('app:vault-sources-select', open); return () => window.removeEventListener('app:vault-sources-select', open) }, [])
   const mounted = useRef(false), fileTicket = useRef(0), searchTicket = useRef(0)
@@ -29,10 +33,24 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
   const [root, setRoot] = useState('')
   const [capped, setCapped] = useState(false)
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading')
-  const [selected, setSelected] = useState<{ path: string; content: string; truncated: boolean } | null>(null)
+  const [selected, setSelected] = useState<{
+    path: string
+    content: string
+    truncated: boolean
+    conversation?: { title: string; provider: string; url: string; at: string; role?: string }
+  } | null>(null)
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<Array<{ path: string; line: number; text: string }> | null>(null)
   const [problem, setProblem] = useState('')
+  /** What the vault's own link graph says, scanned once when this screen opens. */
+  const [linkGraph, setLinkGraph] = useState<{ edges: Array<{ from: string; to: string }>; dead: Array<{ from: string; target: string }> } | null>(null)
+
+  const readLinks = (): void => {
+    if (sampleEnabled()) return
+    bridge.structure.linkCheck()
+      .then((answer) => { if (Array.isArray(answer?.edges)) setLinkGraph({ edges: answer.edges, dead: Array.isArray(answer.dead) ? answer.dead : [] }) })
+      .catch(() => setLinkGraph(null))
+  }
 
   const loadTree = (): void => {
     setState('loading')
@@ -53,6 +71,9 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
       .catch(() => { if (mounted.current) { setState('missing'); setProblem('The vault could not be read.') } })
   }
 
+  // One link scan per visit; the panel can refresh it without leaving the note.
+  useEffect(() => { readLinks() }, [])
+
   // One load when the screen appears.
   useEffect(() => {
     mounted.current = true
@@ -71,10 +92,19 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
           setProblem(String(reply?.error || 'The file could not be read.'))
           return
         }
-        setSelected({ path, content: String(reply.content || ''), truncated: reply.truncated === true })
+        setSelected({
+          path,
+          content: String(reply.content || ''),
+          truncated: reply.truncated === true,
+          ...(reply.conversation && typeof reply.conversation === 'object' ? { conversation: reply.conversation } : {}),
+        })
       })
       .catch((reason) => { if (mounted.current && ticket === fileTicket.current) setProblem(reason instanceof Error && reason.message ? reason.message : 'The file could not be read.') })
   }
+
+  // Ctrl+K can name a file this screen has never listed. Open exactly that file;
+  // the tree stays where it is.
+  useEffect(() => { if (focus?.path) openFile(focus.path) }, [focus?.at])
 
   const searchContents = (): void => {
     const ticket = ++searchTicket.current
@@ -242,10 +272,42 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
                   Add to composer
                 </button>
               </div>
+              {selected.conversation ? (
+                <p className="border-b border-line px-3.5 py-2 text-[11px] text-muted">
+                  <span className="text-ink">{selected.conversation.provider || 'Captured conversation'}</span>
+                  {selected.conversation.title ? ` · ${selected.conversation.title}` : ''}
+                  {selected.conversation.role ? ` · ${selected.conversation.role}` : ''}
+                  {selected.conversation.at ? ` · ${selected.conversation.at.slice(0, 10)}` : ''}
+                  {selected.conversation.url ? (
+                    <>
+                      {' · '}
+                      <button type="button" className="underline hover:text-ink" onClick={() => void window.api?.app?.openExternal?.(selected.conversation!.url)}>
+                        Open original
+                      </button>
+                    </>
+                  ) : null}
+                </p>
+              ) : null}
               <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-3.5 py-3 font-mono text-[11.5px] leading-relaxed text-muted">
                 {selected.content || '(empty file)'}
                 {selected.truncated ? '\n… (the rest is in the file on disk)' : ''}
               </pre>
+              {linkGraph ? (() => {
+                const incoming = linkGraph.edges.filter(edge => edge.to === selected.path).map(edge => edge.from)
+                const outgoing = linkGraph.edges.filter(edge => edge.from === selected.path).map(edge => edge.to)
+                const dead = linkGraph.dead.filter(edge => edge.from === selected.path)
+                return (
+                  <details className="border-t border-line px-3.5 py-2 text-[11px] text-muted">
+                    <summary className="cursor-pointer select-none">
+                      Links · {incoming.length} in · {outgoing.length} out{dead.length ? ` · ${dead.length} unresolved` : ''}
+                    </summary>
+                    {incoming.length ? <p className="mt-1.5"><span className="text-ink">Linked from:</span> {incoming.slice(0, 6).map((path, index) => <span key={path}>{index ? ' · ' : ' '}<button type="button" className="underline hover:text-ink" onClick={() => openFile(path)}>{leaf(path)}</button></span>)}{incoming.length > 6 ? ` · ${incoming.length - 6} more` : ''}</p> : <p className="mt-1.5">Nothing in this vault links here.</p>}
+                    {outgoing.length ? <p className="mt-1"><span className="text-ink">Links to:</span> {outgoing.slice(0, 6).map((path, index) => <span key={path}>{index ? ' · ' : ' '}<button type="button" className="underline hover:text-ink" onClick={() => openFile(path)}>{leaf(path)}</button></span>)}{outgoing.length > 6 ? ` · ${outgoing.length - 6} more` : ''}</p> : null}
+                    {dead.length ? <p className="mt-1"><span className="text-ink">Unresolved here:</span> {dead.slice(0, 6).map(edge => edge.target).join(' · ')}{dead.length > 6 ? ` · ${dead.length - 6} more` : ''}</p> : null}
+                    <button type="button" className="mt-1 underline hover:text-ink" onClick={readLinks}>Refresh links</button>
+                  </details>
+                )
+              })() : null}
             </aside>
           ) : null}
         </div>
