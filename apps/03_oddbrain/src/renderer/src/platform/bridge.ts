@@ -1,3 +1,4 @@
+import type { CommandBridge } from '@shared/lib/commands'
 import type { WorkQueueBridge } from '@shared/lib/workQueue'
 import type { McpReview, NativeMcpInventory } from '@shared/lib/mcpReview'
 import type { SkillDraft, SkillInventory, SkillFile, CatalogSkillReview } from '@shared/lib/installedSkills'
@@ -96,6 +97,7 @@ export type DesktopBridge = {
     /** Save app instructions; native file changes require a separate review. */
     write: (rules: HouseRules) => Promise<{ ok: boolean; written: string[] }>
   }
+  commands: CommandBridge
   projects: {
     attach: (projectId: string) => Promise<import('@shared/lib/projects').ProjectReference[]>
     read: () => Promise<Project[]>
@@ -130,7 +132,7 @@ export type DesktopBridge = {
     update: (patch: {
       vaultPath?: string
       cloud?: { baseUrl?: string; model?: string }
-      permissions?: Permissions
+      permissions?: Partial<Permissions>
     }) => Promise<{
       ok: boolean
       error?: string
@@ -458,6 +460,7 @@ artifacts: {
       written: [],
     }),
   },
+  commands: { context: async () => ({ cwd: '', allowed: false, explanation: 'OS command execution requires the desktop app. This browser preview cannot run commands.', activeId: null }), preview: async () => { throw Error('OS command execution requires the desktop app. Nothing was run.') }, decide: async () => { throw Error('OS command execution requires the desktop app.') }, cancel: async () => ({ requested: false, answer: 'No app command is running in this preview.' }), history: async () => ({ records: [], next: '', notice: 'Command records are available in the desktop app.' }), read: async () => { throw Error('Command records require the desktop app.') }, output: async () => { throw Error('Command output requires the desktop app.') } },
   projects: {
     attach: async () => { throw Error('Choose project references in the desktop app. Nothing was read.') },
     read: async () => [],

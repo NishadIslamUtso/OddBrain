@@ -1,3 +1,4 @@
+import type { ShellRequest } from '../shared/lib/commands'
 import type { SkillDraft } from '../shared/lib/installedSkills'
 import type { NativeConversation, NativeSessionLink, NativeContextTarget } from '../shared/lib/nativeConversation'
 import { type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
@@ -248,6 +249,7 @@ const api = {
       return () => ipcRenderer.removeListener(String(channel), listener)
     },
   },
+  commands: { context: () => ipcRenderer.invoke('commands:context'), preview: (request: ShellRequest) => ipcRenderer.invoke('commands:preview', request), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('commands:decide', token, decision), cancel: () => ipcRenderer.invoke('commands:cancel'), history: (before?: string) => ipcRenderer.invoke('commands:history', before), read: (id: string) => ipcRenderer.invoke('commands:read', id), output: (id: string, stream: 'stdout' | 'stderr') => ipcRenderer.invoke('commands:output', id, stream) },
   projects: {
     attach: (projectId: string) => ipcRenderer.invoke('projects:attach', projectId),
     read: (): Promise<Project[]> => ipcRenderer.invoke('projects:read'),
@@ -297,7 +299,7 @@ const api = {
      * what happened; the renderer is told the result rather than assuming one.
      */
     update: (
-      patch: { vaultPath?: string; cloud?: { baseUrl?: string; model?: string }; permissions?: Permissions }
+      patch: { vaultPath?: string; cloud?: { baseUrl?: string; model?: string }; permissions?: Partial<Permissions> }
     ): Promise<{
       ok: boolean
       error?: string

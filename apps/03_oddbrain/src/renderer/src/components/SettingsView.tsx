@@ -29,7 +29,7 @@ import {
   type InferenceSettings,
 } from '@shared/lib/inference'
 import { CLOUD_PROVIDERS, type CloudProviderView } from '@shared/lib/providers'
-import { DEFAULT_PERMISSIONS, type Permissions } from '@shared/lib/permissions'
+import { DEFAULT_PERMISSIONS, permissionChanges, type Permissions } from '@shared/lib/permissions'
 import { DEFAULT_APPEARANCE, type Appearance } from '../state/appearance'
 import { DEFAULT_LOOK, DEFAULT_SIDEBAR, type LookPreferences, type SidebarPreferences } from '../state/look'
 import AppearancePanel from '../ui/AppearancePanel'
@@ -485,7 +485,7 @@ export default function SettingsView({
    * this component just asked for.
    */
   async function setPermission(next: Permissions): Promise<void> {
-    const result = await bridge.settings.update({ permissions: next })
+    const result = await bridge.settings.update({ permissions: permissionChanges(permissions, next) })
     if (!result?.ok || !result.settings?.permissions) {
       setPermissionProblem(result?.error || 'That permission could not be saved.')
       return
@@ -775,6 +775,11 @@ export default function SettingsView({
                 onChange={checked => void setPermission({ ...permissions, keepConversations: checked })}
               />
             ),
+          },
+          {
+            label: 'Reviewed OS commands',
+            terms: 'shell command runner terminal execute permission',
+            body: <div><Switch label="Allow reviewed OS commands" checked={permissions.manualCommands === true} onChange={checked => void setPermission({ ...permissions, manualCommands: checked })} /><p className="ob-control-scope">Off by default. Each command still needs explicit approval. Commands run as your OS user, outside the engine sandbox, and can access files or networks. Turning this off requests a stop for active app commands. This does not certify that background descendants have stopped.</p></div>,
           },
           {
             label: 'Tool approvals',

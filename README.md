@@ -104,6 +104,14 @@ Skills can be inspected and authored from Settings. Both engines receive the nat
 
 Shared MCP edits preview exact configuration changes before saving. Unrelated native fields and servers are preserved; changed files invalidate approval. Read-only inspection exposes user, workspace and supported project-local declarations without returning environment/auth values. Native server startup can execute programs or contact endpoints, so the review explicitly warns about that. OAuth and interactive authentication remain with the native engine. Native stores, schemas and target-machine behavior still need installed-runtime acceptance.
 
+## Reviewed OS command runner
+
+In the desktop app, enable **Settings → Agent access → Allow reviewed OS commands**, then open **Chat → More chat tools → Review an OS command**. Access is off by default. Every invocation requires an explicit, expiring, one-use review of the exact command, shell and selected working folder. Plan mode and active work block execution; changed authority invalidates pending reviews.
+
+This is **app-owned OS execution**, not a native engine tool or an AI verdict. Commands run with the app’s OS-user rights outside the engine sandbox; the working folder does not confine file/network access. No extra elevation or saved app API keys are supplied. Referenced scripts are not audited or pinned by a command-line review, and commands do not get automatic filesystem checkpoints.
+
+Records retain the original request, raw stdout/stderr bytes, exit status, stop/error notices and output hashes in private app storage. A stop is requested after five minutes or 2 MB of combined output. Incomplete records/exports are labelled; interrupted work never restarts automatically. Stop requests do not prove escaped/background descendants exited. Exit zero does not by itself prove the requested task succeeded. Records are outside vault backups; raw downloads are available from the runner/history. Browser previews cannot execute commands.
+
 ## Browser companion
 
 1. Run the desktop app and select a vault. Open **Settings → AI & connections → Connectors**.

@@ -1,3 +1,5 @@
+import { createCommandRunner, COMMAND_DISCLOSURE } from './commands/runner'
+import type { ShellRequest } from '../shared/lib/commands'
 import { createWorkQueue } from './engine/workQueue'
 import { snapshotNativeArtifacts, collectNativeArtifacts } from './engine/nativeArtifacts'
 import { createMcpReview, inspectNativeMcp } from './engine/mcpReview'
@@ -64,7 +66,7 @@ import {
   writeSettings,
   type AppSettings,
 } from './settings'
-import { cloudEnabled, normalizePermissions } from '../shared/lib/permissions'
+import { cloudEnabled, applyPermissionPatch } from '../shared/lib/permissions'
 import { registerArtifactIpc } from './artifacts/ipc'
 import { createEngineSocket, type EngineSocket } from './engine/socket'
 import { isValidModelName, normalizeEngine } from '../shared/lib/engine'
@@ -321,11 +323,43 @@ function registerBridges(): void {
     if (engine === undefined || engine === 'claude-code') return marketplaceService!
     throw Error('Unknown marketplace engine.')
   }
+  const commandSessions = new WeakMap<object, number>(); let commandSessionSerial = 0
+  const commandScope = (reserved = false) => {
+    const child = engine?.current()
+    if (child && !commandSessions.has(child)) commandSessions.set(child, ++commandSessionSerial)
+    const cwd = resolve(settings.engine.workspace || vaultRoot())
+    const authority = JSON.stringify([cwd, settings.engine, settings.permissions, child ? commandSessions.get(child) : null, engine?.currentTarget(), nativeWork, workDispatchGeneration])
+    const explanation = !settings.permissions.manualCommands ? 'Enable Reviewed OS commands in Settings → Agent access first. This is separate from native engine tool approval.'
+      : settings.engine.approval === 'plan' ? 'Arbitrary OS commands are disabled while the engine is in Plan mode. Choose a non-plan mode explicitly before reviewing a command.'
+      : engine?.turnBusy() || (dispatchingWork && !reserved) || foregroundApiRequests > 0 ? 'Wait for active work before running an app command.' : COMMAND_DISCLOSURE
+    return { cwd, authority, allowed: settings.permissions.manualCommands === true && settings.engine.approval !== 'plan' && !engine?.turnBusy() && (!dispatchingWork || reserved) && foregroundApiRequests === 0, explanation }
+  }
+  const commandRunner = createCommandRunner({ root: join(app.getPath('userData'), 'command-runs'), scope: () => commandScope(),
+    acquire: async (request, authority, signal) => {
+      const initial = commandScope()
+      if (!initial.allowed || initial.authority !== authority || resolve(request.cwd) !== initial.cwd) throw Error('Command authority changed before reservation. Nothing was run.')
+      dispatchingWork = true
+      try {
+        memoryOrganizer?.cancel(); await automation?.cancel(); signal.throwIfAborted()
+        const recheck = () => { const current = commandScope(true); if (!current.allowed || current.authority !== authority) throw Error('Command access, engine, session or working folder changed. Nothing was run.'); signal.throwIfAborted() }
+        recheck()
+        return { recheck, release: () => { dispatchingWork = false; workDispatchGeneration++ } }
+      } catch (error) { dispatchingWork = false; workDispatchGeneration++; throw error }
+    },
+  })
+  app.on('before-quit', () => { commandRunner.cancel() })
   const owners = new Set<number>()
   const track = (sender: Electron.WebContents): number => {
-    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
+    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
     return sender.id
   }
+  handle('commands:context', () => commandRunner.context())
+  handle('commands:preview', (event, request: ShellRequest) => commandRunner.preview(track(event.sender), request))
+  handle('commands:decide', (event, token: string, decision: 'allow' | 'deny') => commandRunner.decide(track(event.sender), token, decision))
+  handle('commands:cancel', () => commandRunner.cancel())
+  handle('commands:history', (_event, before?: string) => commandRunner.history(before))
+  handle('commands:read', (_event, id: string) => commandRunner.read(id))
+  handle('commands:output', (_event, id: string, stream: 'stdout' | 'stderr') => commandRunner.output(id, stream))
   const marketAnswer = async <T,>(run: () => Promise<T>) => { try { return { ok: true as const, value: await run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
   handle('media:authorize-recording', (event, expected: { provider: string; model: string }) => mediaService!.authorizeRecording(track(event.sender), expected))
   handle('media:read', () => mediaService!.read())
@@ -402,14 +436,16 @@ function registerBridges(): void {
       }
       // What an agent may do. Sanitised on the way in — the window asks, the main
       // process decides — and the app's own settings file is the record.
-      if (patch?.permissions && typeof patch.permissions === 'object') {
+      if (patch?.permissions !== undefined) {
         const previousAccess = settings.permissions
-        settings = writeSettings(settingsFile, {
-          ...settings,
-          permissions: normalizePermissions(patch.permissions),
-        })
-        void automation?.cancel(); mediaService?.cancelAll()
-        if (previousAccess.local !== settings.permissions.local || JSON.stringify(previousAccess.cloud) !== JSON.stringify(settings.permissions.cloud)) { workDispatchGeneration++; automation?.stopWork(); engine?.stop() }
+        let nextAccess: typeof previousAccess
+        try { nextAccess = applyPermissionPatch(previousAccess, patch.permissions) }
+        catch (error) { return { ok: false, error: (error as Error).message, settings } }
+        if (JSON.stringify(nextAccess) !== JSON.stringify(previousAccess)) {
+          settings = writeSettings(settingsFile, { ...settings, permissions: nextAccess })
+          commandRunner.cancel(); void automation?.cancel(); mediaService?.cancelAll()
+          if (previousAccess.local !== settings.permissions.local || JSON.stringify(previousAccess.cloud) !== JSON.stringify(settings.permissions.cloud)) { workDispatchGeneration++; automation?.stopWork(); engine?.stop() }
+        }
       }
       // No vault path in the patch means the caller is not moving the vault, so
       // there is nothing to check and nothing to reconsider.
@@ -962,6 +998,7 @@ function registerBridges(): void {
   const briefs = createCompactManager(join(app.getPath('userData'), 'handoffs'))
   handle('compact:save', (_event, input: { brief?: string; workspace?: string; at?: string }) => briefs.save(input ?? {}))
   handle('engine:fresh', (): { ok: boolean; answer: string } => {
+    if (commandRunner.running()) return { ok: false, answer: 'An app command is active. Stop it or wait for its result before resetting the engine session.' }
     preparing?.controller.abort(); permissionTickets.clear()
     workDispatchGeneration++; automation?.stopWork()
     if (!engine) return { ok: false, answer: 'The engine door is not open on this machine yet.' }
@@ -1169,6 +1206,7 @@ function registerBridges(): void {
   handle('engine:restart', () => restartIdleConnection(engine, dispatchingWork))
 
   handle('engine:stop', () => {
+    commandRunner.cancel()
     preparing?.controller.abort(); permissionTickets.clear()
     workDispatchGeneration++
     automation?.stopWork()
@@ -1719,6 +1757,7 @@ function registerBridges(): void {
     const mode: ApprovalMode = APPROVAL_MODES.includes(approval as ApprovalMode)
       ? (approval as ApprovalMode)
       : 'ask'
+    if (approval === 'plan') commandRunner.cancel()
     settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, approval: mode } })
     return { ok: true, answer: mode }
   })

@@ -28,6 +28,7 @@ test('no settings file means nothing chosen yet, not an error', (t) => {
   t.after(() => rmSync(dir, { recursive: true, force: true }))
   assert.deepEqual(readSettings(join(dir, 'settings.json')), EMPTY_SETTINGS)
   assert.deepEqual(EMPTY_SETTINGS.permissions, {
+    manualCommands: false,
     local: true,
     browserCapture: true,
     keepConversations: true,
@@ -53,7 +54,7 @@ test('settings round-trip, and unknown keys are dropped rather than kept', (t) =
     cloud: { baseUrl: 'https://example.test/v1', model: 'my-model' },
     // Nothing was said about permissions, so the file carries the defaults: a
     // local model may answer, a local vault may keep, nothing is switched off.
-    permissions: { local: true, browserCapture: true, keepConversations: true, cloud: {} },
+    permissions: { manualCommands: false, local: true, browserCapture: true, keepConversations: true, cloud: {} },
     // Nothing was said about the engine either, so it carries the brain the
     // owner verified works: Claude Code through the local Ollama door.
     engine: DEFAULT_ENGINE,
@@ -101,6 +102,7 @@ test('permissions round-trip, and anything unreadable becomes the safe default',
     permissions: { local: false, browserCapture: false, keepConversations: false, cloud: { openai: false } },
   })
   assert.deepEqual(written.permissions, {
+    manualCommands: false,
     local: false,
     browserCapture: false,
     keepConversations: false,
@@ -119,6 +121,7 @@ test('permissions round-trip, and anything unreadable becomes the safe default',
   void edited
   const read = readSettings(file)
   assert.deepEqual(read.permissions, {
+    manualCommands: false,
     local: true,
     browserCapture: true,
     keepConversations: true,
@@ -127,6 +130,7 @@ test('permissions round-trip, and anything unreadable becomes the safe default',
 
   writeFileSync(file, '{"permissions": "nonsense"}')
   assert.deepEqual(readSettings(file).permissions, {
+    manualCommands: false,
     local: true,
     browserCapture: true,
     keepConversations: true,
