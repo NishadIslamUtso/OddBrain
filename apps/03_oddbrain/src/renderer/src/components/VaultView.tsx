@@ -28,7 +28,7 @@ export default function VaultView({ onAddToComposer, focus }: {
 }) {
   const [sources, setSources] = useState(false)
   useEffect(() => { const open = () => setSources(true); window.addEventListener('app:vault-sources-select', open); return () => window.removeEventListener('app:vault-sources-select', open) }, [])
-  const mounted = useRef(false), fileTicket = useRef(0), searchTicket = useRef(0)
+  const mounted = useRef(false), fileTicket = useRef(0), searchTicket = useRef(0), mentionTicket = useRef(0)
   const [files, setFiles] = useState<string[]>([])
   const [exported, setExported] = useState('')
   const [root, setRoot] = useState('')
@@ -46,6 +46,8 @@ export default function VaultView({ onAddToComposer, focus }: {
   const [problem, setProblem] = useState('')
   /** What the vault's own link graph says, scanned once when this screen opens. */
   const [linkGraph, setLinkGraph] = useState<{ edges: Array<{ from: string; to: string }>; dead: Array<{ from: string; target: string }> } | null>(null)
+  /** Notes that say this note's name without linking to it. */
+  const [mentions, setMentions] = useState<VaultSearchHit[]>([])
 
   const readLinks = (): void => {
     // A browser preview has no vault to scan; claiming "no links" there would be
@@ -109,6 +111,24 @@ export default function VaultView({ onAddToComposer, focus }: {
   // Ctrl+K can name a file this screen has never listed. Open exactly that file;
   // the tree stays where it is.
   useEffect(() => { if (focus?.path) openFile(focus.path) }, [focus?.at])
+
+  // The other half of backlinks: a note whose text names this one but never
+  // links to it is still a relation the writer meant. The ranked search with
+  // the name in quotes is exactly that scan; the panel removes the notes that
+  // already link, so nothing is counted twice.
+  useEffect(() => {
+    const path = selected?.path
+    const name = path && !selected?.conversation ? leaf(path).replace(/\.md$/, '').replace(/["\u201c\u201d]/g, '').trim() : ''
+    if (!path || !name || isDemo || sampleEnabled()) { setMentions([]); return }
+    const ticket = ++mentionTicket.current
+    vaultGet(`/search?q=${encodeURIComponent(`"${name}"`)}&limit=12&kind=note`)
+      .then((reply) => {
+        if (!mounted.current || ticket !== mentionTicket.current) return
+        const found: VaultSearchHit[] = Array.isArray(reply?.hits) ? reply.hits : []
+        setMentions(found.filter(hit => hit.path !== path && hit.kind === 'note'))
+      })
+      .catch(() => { if (mounted.current && ticket === mentionTicket.current) setMentions([]) })
+  }, [selected?.path])
 
   const searchContents = (): void => {
     const ticket = ++searchTicket.current
@@ -307,6 +327,8 @@ export default function VaultView({ onAddToComposer, focus }: {
                 const incoming = linkGraph.edges.filter(edge => edge.to === selected.path).map(edge => edge.from)
                 const outgoing = linkGraph.edges.filter(edge => edge.from === selected.path).map(edge => edge.to)
                 const dead = linkGraph.dead.filter(edge => edge.from === selected.path)
+                const linked = new Set(incoming)
+                const unlinked = mentions.filter(hit => !linked.has(hit.path))
                 return (
                   <details className="border-t border-line px-3.5 py-2 text-[11px] text-muted">
                     <summary className="cursor-pointer select-none">
@@ -315,6 +337,7 @@ export default function VaultView({ onAddToComposer, focus }: {
                     {incoming.length ? <p className="mt-1.5"><span className="text-ink">Linked from:</span> {incoming.slice(0, 6).map((path, index) => <span key={path}>{index ? ' · ' : ' '}<button type="button" className="underline hover:text-ink" onClick={() => openFile(path)}>{leaf(path)}</button></span>)}{incoming.length > 6 ? ` · ${incoming.length - 6} more` : ''}</p> : <p className="mt-1.5">Nothing in this vault links here.</p>}
                     {outgoing.length ? <p className="mt-1"><span className="text-ink">Links to:</span> {outgoing.slice(0, 6).map((path, index) => <span key={path}>{index ? ' · ' : ' '}<button type="button" className="underline hover:text-ink" onClick={() => openFile(path)}>{leaf(path)}</button></span>)}{outgoing.length > 6 ? ` · ${outgoing.length - 6} more` : ''}</p> : null}
                     {dead.length ? <p className="mt-1"><span className="text-ink">Unresolved here:</span> {dead.slice(0, 6).map(edge => edge.target).join(' · ')}{dead.length > 6 ? ` · ${dead.length - 6} more` : ''}</p> : null}
+                    {unlinked.length ? <p className="mt-1"><span className="text-ink">Mentioned in:</span> {unlinked.slice(0, 6).map((hit, index) => <span key={hit.path}>{index ? ' · ' : ' '}<button type="button" className="underline hover:text-ink" onClick={() => openFile(hit.path)}>{leaf(hit.path)}</button></span>)}{unlinked.length > 6 ? ` · ${unlinked.length - 6} more` : ''}</p> : null}
                     <button type="button" className="mt-1 underline hover:text-ink" onClick={readLinks}>Refresh links</button>
                   </details>
                 )
