@@ -146,3 +146,47 @@ test('one damaged review is reported without hiding the other saved records', as
     const page = review.history(); expect(page.records).toHaveLength(1); expect(page.notice).toContain('could not be read')
   } finally { await review.dispose() }
 })
+
+test('refresh cannot authorize externally changed queued text or conversation scope', () => {
+  for (const change of ['prompt', 'conversation'] as const) {
+    const root = dir(), queue = createWorkQueue(root, () => 'route')
+    const [item] = queue.enqueue(1, 'Original authorized task', { chatId: 'original-chat' })
+    const file = join(root, 'pending', item.id + '.json'), value = JSON.parse(readFileSync(file, 'utf8'))
+    if (change === 'prompt') value.prompt = 'Unreviewed replacement'
+    else value.conversation.chatId = 'different-chat'
+    const changed = JSON.stringify(value); writeFileSync(file, changed)
+    expect(() => queue.view(1)).toThrow(/changed outside/)
+    expect(() => queue.start(1, item.id, value.prompt, value.conversation)).toThrow(/changed outside/)
+    expect(() => queue.block(item.id, 'Would otherwise bless the changed record', 1)).toThrow(/changed outside/)
+    expect(readFileSync(file, 'utf8')).toBe(changed)
+  }
+})
+test('editing disk state cannot re-arm a consumed handoff in the same process', () => {
+  const root = dir(), queue = createWorkQueue(root, () => 'route'), [item] = queue.enqueue(1, 'One authorized attempt')
+  queue.start(1, item.id, item.prompt)
+  const file = join(root, 'pending', item.id + '.json'), value = JSON.parse(readFileSync(file, 'utf8'))
+  value.status = 'queued'; writeFileSync(file, JSON.stringify(value))
+  expect(queue.view(1)[0].eligible).toBe(false)
+  expect(() => queue.start(1, item.id, item.prompt)).toThrow(/not authorized/)
+  value.status = 'held'; writeFileSync(file, JSON.stringify(value))
+  expect(() => queue.resume(1, item.id)).toThrow(/already started/)
+  expect(() => queue.cancel(1, item.id)).toThrow(/no longer waiting/)
+})
+test('handoff receipts cannot be attached to an externally rewritten task', () => {
+  const root = dir(), queue = createWorkQueue(root, () => 'route'), [item] = queue.enqueue(1, 'Actual task')
+  queue.start(1, item.id, item.prompt)
+  const file = join(root, 'pending', item.id + '.json'), value = JSON.parse(readFileSync(file, 'utf8'))
+  value.prompt = 'Different task'; const changed = JSON.stringify(value); writeFileSync(file, changed)
+  expect(() => queue.finish(item.id, { ok: true, answer: 'Accepted', transcriptId: 'actual-record' })).toThrow(/changed outside/)
+  expect(readFileSync(file, 'utf8')).toBe(changed)
+})
+test('restart still requires explicit review instead of trusting a discarded in-memory authorization', () => {
+  const root = dir(), first = createWorkQueue(root, () => 'route'), [item] = first.enqueue(1, 'Original')
+  const file = join(root, 'pending', item.id + '.json'), value = JSON.parse(readFileSync(file, 'utf8'))
+  value.prompt = 'Changed while the app was closed'; writeFileSync(file, JSON.stringify(value))
+  const reopened = createWorkQueue(root, () => 'route')
+  expect(reopened.view(1)[0]).toMatchObject({ prompt: value.prompt, status: 'held', eligible: false })
+  expect(() => reopened.start(1, item.id, value.prompt)).toThrow(/not authorized/)
+  reopened.resume(1, item.id)
+  expect(() => reopened.start(1, item.id, value.prompt)).not.toThrow()
+})
