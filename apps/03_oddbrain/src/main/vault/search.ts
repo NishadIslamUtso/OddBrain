@@ -290,7 +290,10 @@ export function createVaultSearch(files: VaultFiles, now: () => number = Date.no
     const query = request.query.trim()
     const terms = searchTerms(query)
     const phrases = searchPhrases(query)
-    const limit = Math.min(MAX_HITS, Math.max(1, Math.round(request.limit ?? 30)))
+    // A bound that turns into NaN would not bound anything: `kept.length >= NaN`
+    // is never true, so a bad limit would return every matching file.
+    const asked = Number(request.limit ?? 30)
+    const limit = Number.isFinite(asked) ? Math.min(MAX_HITS, Math.max(1, Math.trunc(asked))) : 30
     const kind = request.kind || 'all'
     if (!terms.length) return { ok: true, query, terms, hits: [], scanned: { files: 0, bytes: 0, capped: false, partial: 0 } }
     // The query without its quote marks: `"tin roof"` should still earn the

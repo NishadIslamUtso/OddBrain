@@ -4,6 +4,7 @@ import { Mascot } from '../motion/Mascot'
 import { useEffect, useRef, useState } from 'react'
 import { ExternalLink, FileText, Search } from 'lucide-react'
 import { vaultGet } from '@shared/lib/vault'
+import { vaultHitDetail, vaultHitTitle, vaultScanNote, type VaultSearchHit } from '@shared/lib/vaultSearch'
 import { bridge, isDemo } from '@/platform/bridge'
 
 /**
@@ -40,7 +41,8 @@ export default function VaultView({ onAddToComposer, focus }: {
     conversation?: { title: string; provider: string; url: string; at: string; role?: string }
   } | null>(null)
   const [query, setQuery] = useState('')
-  const [hits, setHits] = useState<Array<{ path: string; line: number; text: string }> | null>(null)
+  const [hits, setHits] = useState<VaultSearchHit[] | null>(null)
+  const [scanNote, setScanNote] = useState('')
   const [problem, setProblem] = useState('')
   /** What the vault's own link graph says, scanned once when this screen opens. */
   const [linkGraph, setLinkGraph] = useState<{ edges: Array<{ from: string; to: string }>; dead: Array<{ from: string; target: string }> } | null>(null)
@@ -115,14 +117,19 @@ export default function VaultView({ onAddToComposer, focus }: {
       setHits(null)
       return
     }
-    vaultGet(`/grep?q=${encodeURIComponent(needle)}`)
+    // The same ranked search the palette uses. The screen's own search used to
+    // call `/grep`, which returned the first matching line of each file in walk
+    // order — a weaker answer to the same question on the same screen.
+    vaultGet(`/search?q=${encodeURIComponent(needle)}&limit=40`)
       .then((reply) => {
         if (!mounted.current || ticket !== searchTicket.current) return
         if (reply?.ok !== true) {
           setProblem(String(reply?.error || 'The search failed.'))
           return
         }
-        setHits(Array.isArray(reply.hits) ? reply.hits : [])
+        const found: VaultSearchHit[] = Array.isArray(reply.hits) ? reply.hits : []
+        setHits(found)
+        setScanNote(vaultScanNote(reply.scanned))
         setProblem('')
       })
       .catch(() => { if (mounted.current && ticket === searchTicket.current) setProblem('The search failed.') })
@@ -181,7 +188,7 @@ export default function VaultView({ onAddToComposer, focus }: {
             <Search size={13} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
             <input
               value={query}
-              onChange={(event) => { searchTicket.current++; setHits(null); setQuery(event.target.value) }}
+              onChange={(event) => { searchTicket.current++; setHits(null); setScanNote(''); setQuery(event.target.value) }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') searchContents()
               }}
@@ -211,24 +218,26 @@ export default function VaultView({ onAddToComposer, focus }: {
                   <h2 className="text-[11px] font-semibold uppercase tracking-wide text-muted">
                     {hits.length ? `${hits.length} ${hits.length === 1 ? 'file mentions it' : 'files mention it'}` : 'Nothing mentions it'}
                   </h2>
-                  <button type="button" onClick={() => setHits(null)} className="text-[11px] text-muted hover:text-ink">
+                  <button type="button" onClick={() => { setHits(null); setScanNote('') }} className="text-[11px] text-muted hover:text-ink">
                     clear
                   </button>
                 </div>
                 <ul className="mt-1.5 flex flex-col gap-1">
                   {hits.map((hit) => (
-                    <li key={`${hit.path}:${hit.line}`}>
+                    <li key={hit.path}>
                       <button
                         type="button"
                         onClick={() => openFile(hit.path)}
+                        title={hit.path}
                         className="w-full rounded-lg px-2 py-1.5 text-left hover:bg-white/[0.04]"
                       >
-                        <span className="block truncate text-[12px] text-ink">{leaf(hit.path)}</span>
-                        <span className="block truncate font-mono text-[11px] text-muted">{hit.text}</span>
+                        <span className="block truncate text-[12px] text-ink">{vaultHitTitle(hit)}</span>
+                        <span className="block truncate text-[11px] text-muted">{vaultHitDetail(hit, 90)}</span>
                       </button>
                     </li>
                   ))}
                 </ul>
+                {scanNote ? <p className="mt-1.5 text-[11px] leading-relaxed text-muted">{scanNote}</p> : null}
               </div>
             ) : (
               Array.from(groups.entries()).map(([folder, groupFiles]) => (

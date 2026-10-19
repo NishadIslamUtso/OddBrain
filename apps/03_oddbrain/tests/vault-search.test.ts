@@ -303,3 +303,20 @@ test('quotes are read in both styles, and a half-typed one is not a phrase', () 
     rmSync(root, { recursive: true, force: true })
   }
 })
+
+test('a nonsense limit still limits, and never quietly removes the cap', () => {
+  const { root, service } = vaultWith({
+    'Projects/One.md': '# One\n\nsage on the sill\n',
+    'Projects/Two.md': '# Two\n\nsage in the pot\n',
+    'Projects/Three.md': '# Three\n\nsage by the door\n',
+  })
+  try {
+    assert.equal(service.search({ query: 'sage', limit: 0 }).hits.length, 1, 'a limit below one is one')
+    assert.equal(service.search({ query: 'sage', limit: -5 }).hits.length, 1)
+    assert.equal(service.search({ query: 'sage', limit: 2.9 }).hits.length, 2, 'a fraction is cut, not rounded up')
+    assert.equal(service.search({ query: 'sage', limit: Number.NaN }).hits.length, 3, 'a broken limit falls back to the default')
+    assert.equal(service.search({ query: 'sage', limit: Number.POSITIVE_INFINITY }).hits.length, 3)
+  } finally {
+    rmSync(root, { recursive: true, force: true })
+  }
+})
