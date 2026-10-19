@@ -147,8 +147,28 @@ here is a plan.
 - `CONTEXT.md` previously said "four message hits per conversation"; the code
   caps at three. Corrected here, along with the search details above.
 
-**Verification at `d5e17ac`:** `npx tsc --noEmit` 0; `npx vitest run` 157 files
-passed + 2 skipped, **1,103 passed** + 2 skipped; `npm run build` 0 (offline
+**Workspace and CI hygiene (same pass)**
+
+- Two tracked source files in the `apps/01` prototype contained a raw NUL byte
+  (`server/zip.cjs` used a literal control byte inside a regex; its test used one
+  inside a string). They were binary to `grep` and `git diff` and were the only
+  non-image files in the repository with control bytes. Both now use the
+  two-character escape; the test that passes a NUL entry name still passes.
+- The native smoke run no longer waits a fixed 1.5 seconds for a window to
+  paint. It polls (bounded at 8 s) for `readyState === 'complete'` with the
+  shell mounted, retries a blank frame up to four captures, and its verdict
+  lives in `src/main/smoke.ts` with tests instead of one boolean expression.
+  Every failure now names its cause in one sentence, and the workflow copies
+  those lines into the check annotations, so the reason is readable from the
+  API even when the artifact cannot be downloaded.
+- Repository health checked, not assumed: `git fsck --full --strict` clean (one
+  dangling commit is the owner's tip kept in the object store), all three packs
+  verify, the index matches HEAD, no case-insensitive path collisions, no
+  Windows-reserved names, no symlinks, no CRLF or invalid UTF-8 (`.gitattributes`
+  pins `* -text`), no zero-byte tracked files, local and remote trees identical.
+
+**Verification at `0b82dd5` + this fix:** `npx tsc --noEmit` 0; `npx vitest run` 158 files
+passed + 2 skipped, **1,108 passed** + 2 skipped; `npm run build` 0 (offline
 renderer preview 565,411 bytes). The push run `39212012706` is green on linux
 and windows. The pull-request run `39212019137` is red only in the linux native
 "Smoke" step, which also flaked on `64f9c46` and `e70b752` while the same

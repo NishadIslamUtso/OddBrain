@@ -97,6 +97,18 @@ jobs:
           name: native-smoke-linux
           path: apps/03_oddbrain/native-smoke.log
           if-no-files-found: warn
+      # Artifacts can be unavailable to a reviewer (or to the next agent). The
+      # reason a smoke failed goes into the check annotations too, so it is
+      # readable from the API and the PR without downloading anything.
+      - name: Smoke speaks
+        if: always()
+        working-directory: apps/03_oddbrain
+        run: |
+          if [ -f native-smoke.log ]; then
+            grep -E '^(SMOKE|  ERROR|  WARN)' native-smoke.log | head -20 | while IFS= read -r line; do
+              echo "::error::$line"
+            done
+          fi
 
 
   windows:
@@ -178,3 +190,11 @@ jobs:
           name: native-smoke-windows
           path: apps/03_oddbrain/native-smoke.log
           if-no-files-found: warn
+      - name: Smoke speaks
+        if: always()
+        working-directory: apps/03_oddbrain
+        shell: pwsh
+        run: |
+          if (Test-Path native-smoke.log) {
+            Get-Content native-smoke.log | Select-String -Pattern '^(SMOKE|  ERROR|  WARN)' | Select-Object -First 20 | ForEach-Object { Write-Host "::error::$($_.Line)" }
+          }

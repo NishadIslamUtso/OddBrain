@@ -75,6 +75,7 @@ import { exportVaultCopy } from './vault/exportCopy'
 import { deployHouseRules } from './engine/houseRulesDeploy'
 import { DEFAULT_HOUSE_RULES, type HouseRules } from '../shared/lib/houseRules'
 import { newProject, normalizeProjects, type Project } from '../shared/lib/projects'
+import { smokeFailure } from './smoke'
 
 /**
  * The main process. Everything that touches the machine lives on this side:
@@ -1822,62 +1823,96 @@ function createWindow(): BrowserWindow {
   return window
 }
 
+/** Poll the renderer until it says it is on screen, or give up. */
+async function waitForRenderer(window: BrowserWindow, timeoutMs: number): Promise<boolean> {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() < deadline) {
+    const ready = (await window.webContents
+      .executeJavaScript(`document.readyState === 'complete' && !!document.querySelector('[data-find-scroll]')`, true)
+      .catch(() => false)) as boolean
+    if (ready) return true
+    await new Promise(resolve => setTimeout(resolve, 100))
+  }
+  return false
+}
+
 /**
  * Headless proof that the shell works: wait for the renderer, photograph the
  * window, and exit non-zero if the renderer logged anything it shouldn't have.
  * This is the test that makes "the window opens" a fact instead of a claim.
+ *
+ * The wait used to be a fixed 1.5 seconds, which is a race: a busy runner can
+ * take longer than that to paint, and a race is not a defect in the app. It now
+ * polls for a painted, mounted interface (bounded at 8 s) and retries a blank
+ * frame before calling it blank. A failure names which part failed.
  */
 function runSmoke(window: BrowserWindow): void {
   const started = Date.now()
   window.webContents.once('did-finish-load', () => {
-    setTimeout(async () => {
+    void (async () => {
       try {
+        const ready = await waitForRenderer(window, 8000)
         // The real machine reported a chat that would not scroll. Photograph
         // alone cannot see that, so the smoke run now proves the scroll
         // chain on the built app: force overflow in the message scroller and
         // demand that it actually moves.
-        let scrollLine = 'SCROLL skipped'
-        try {
-          const probe = (await window.webContents.executeJavaScript(
-            `(() => {
-              const scroller = document.querySelector('[data-find-scroll]')
-              if (!scroller) return { ok: false, why: 'no scroller in the tree' }
-              const filler = document.createElement('div')
-              filler.style.height = '4000px'
-              ;(scroller.firstElementChild ?? scroller).appendChild(filler)
-              const scrollable = scroller.scrollHeight > scroller.clientHeight
-              scroller.scrollTop = 99999
-              const moved = scroller.scrollTop > 100
-              filler.remove()
-              return { ok: scrollable && moved, scrollable, moved }
-            })()`,
-            true,
-          )) as { ok: boolean; why?: string; scrollable?: boolean; moved?: boolean }
-          scrollLine = probe && probe.ok ? 'SCROLL OK' : `SCROLL BROKEN ${JSON.stringify(probe)}`
-        } catch (probeError) {
-          scrollLine = `SCROLL FAILED ${(probeError as Error).message}`
+        let scrollLine = 'SCROLL not run: the interface was not on screen within 8s'
+        if (ready) {
+          try {
+            const probe = (await window.webContents.executeJavaScript(
+              `(() => {
+                const scroller = document.querySelector('[data-find-scroll]')
+                if (!scroller) return { ok: false, why: 'no scroller in the tree' }
+                const filler = document.createElement('div')
+                filler.style.height = '4000px'
+                ;(scroller.firstElementChild ?? scroller).appendChild(filler)
+                const scrollable = scroller.scrollHeight > scroller.clientHeight
+                scroller.scrollTop = 99999
+                const moved = scroller.scrollTop > 100
+                filler.remove()
+                return { ok: scrollable && moved, scrollable, moved }
+              })()`,
+              true,
+            )) as { ok: boolean; why?: string; scrollable?: boolean; moved?: boolean }
+            scrollLine = probe && probe.ok ? 'SCROLL OK' : `SCROLL BROKEN ${JSON.stringify(probe)}`
+          } catch (probeError) {
+            scrollLine = `SCROLL FAILED ${(probeError as Error).message}`
+          }
         }
-        const image = await window.webContents.capturePage()
+        // A frame can be blank while it is still painting; a blank after three
+        // tries, 250 ms apart, is real.
+        let image = await window.webContents.capturePage()
+        for (let attempt = 1; attempt <= 3 && image.isEmpty(); attempt += 1) {
+          await new Promise(resolve => setTimeout(resolve, 250))
+          image = await window.webContents.capturePage()
+        }
         if (smokeOut) writeFileSync(smokeOut, image.toPNG())
         const bounds = window.getBounds()
         const title = window.getTitle()
         const blank = image.isEmpty()
         console.log(
-          `SMOKE ${blank ? 'BLANK' : 'OK'} ${scrollLine} title="${title}" size=${bounds.width}x${bounds.height} ` +
+          `SMOKE ${blank ? 'BLANK' : 'OK'} ready=${ready ? 'yes' : 'no'} ${scrollLine} title="${title}" size=${bounds.width}x${bounds.height} ` +
             `in ${Date.now() - started}ms errors=${consoleErrors.length} warnings=${consoleWarnings.length}`
         )
         for (const line of consoleErrors.slice(0, 10)) console.log(`  ERROR: ${line}`)
         for (const line of consoleWarnings.slice(0, 10)) console.log(`  WARN:  ${line}`)
+        if (!ready) console.log('  ERROR: the renderer never reached readyState complete with the shell mounted')
         // The rule the owner set: a WARNING is already a failure. The smoke
         // run is the console-clean gate, so it enforces the whole sentence.
-        const failed =
-          consoleErrors.length > 0 || consoleWarnings.length > 0 || blank || scrollLine.startsWith('SCROLL BROKEN')
-        app.exit(failed ? 1 : 0)
+        const reason = smokeFailure({
+          ready,
+          errors: consoleErrors.length,
+          warnings: consoleWarnings.length,
+          blank,
+          scrollLine,
+        })
+        if (reason) console.log(`  ERROR: ${reason}`)
+        app.exit(reason ? 1 : 0)
       } catch (error) {
         console.log(`SMOKE FAILED: ${(error as Error).message}`)
         app.exit(1)
       }
-    }, 1500)
+    })()
   })
 }
 
