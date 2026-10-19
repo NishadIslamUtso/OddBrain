@@ -138,6 +138,13 @@ export function createMemoryWorkspace(files: VaultFiles, clock: () => string = (
       job.source.hash = hash(JSON.stringify(message)); job.source.end = text.length
       files.writeOnce(job.source.path, JSON.stringify({ message, records: items, observed_at: job.source.observed }))
     }
+    if ((action.type === 'review' || action.type === 'review-batch') && (action.decision === 'approve' || action.decision === 'correct')) {
+      const ids = action.type === 'review-batch' ? action.ids as string[] : [action.id]
+      for (const id of ids) {
+        const item = state.proposals.find(p => p.id === id)!
+        if (!item.quote || !evidence(item.source).includes(item.quote)) throw Error('The supporting quotation is no longer available. Nothing was approved.')
+      }
+    }
     // Confirmation is durable first. Projections are recoverable, never the only copy.
     save(state)
     try { state.projectionWarnings = project(state) } catch (e) { state.projectionWarnings = [(e as Error).message] }

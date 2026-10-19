@@ -2,7 +2,7 @@
 
 A local-first Windows desktop assistant with chat, projects, artifacts, a Markdown vault and a browser companion. It connects to separately installed engines and keeps source conversations distinct from AI interpretations and user-confirmed memory.
 
-**Development status:** recoverable browser capture is implemented. Better recall, grouped review and the next People/Journal/Life Story improvements remain in progress. The independently verified reliability repairs have been integrated with regression coverage. This is not a fully accepted or signed release.
+**Development status:** recoverable browser capture is implemented. Cross-source keyword search, grouped review, People timelines and verified full-vault folder backups are implemented. Natural-language recall and real-account/target-laptop acceptance remain unfinished. The independently verified reliability repairs have been integrated with regression coverage. This is not a fully accepted or signed release.
 
 [Project context, requirements, known issues and verification →](CONTEXT.md)
 
@@ -44,6 +44,16 @@ Startup animation: **Settings → Appearance → Brain & motion → Startup anim
 Settings has eight groups, with search across every setting. Appearance experiments are in **Appearance → Looks lab**; hooks, folder watches and extra AI review are under **Advanced tools**. Saved choices are preserved.
 
 **Vault → Capture sources** is the single home for source details. In **People**, content comes first; account linking, merging and history are behind **Manage person**.
+
+Use the search button or **Ctrl K** to find app chats, captured conversation text, confirmed memory and saved Markdown files. Results open their sources; this is word search, not an AI-generated answer. Searching does not upload your records or need a running model.
+
+In **Memory inbox**, select related suggestions, inspect their wording and quotations, then confirm the group. Nothing is preselected. **People**, **Journal** and **Life Story** offer readable timelines and in-view search; unknown event dates stay unknown.
+
+### Backup and recovery
+
+In **Vault → Backup & restore**, choose **Back up full vault**. This includes saved attachment bytes and the review database, unlike Markdown export. Keep the copy private and on another drive when possible.
+
+**Restore into a new folder** checks file hashes and never replaces the active vault. After checking the restored copy, choose it under **Settings → Memory & files → Vault**. The current limit is 50,000 files / 2 GiB; larger or linked vaults need a filesystem backup. Installed models, app credentials and unsent browser queues are outside this backup. It is a manual snapshot, not a scheduled backup service.
 
 ## Browser companion
 

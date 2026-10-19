@@ -368,6 +368,7 @@ const api = {
     saveHandoff: (name: string, markdown: string): Promise<{ ok: boolean; answer: string }> =>
       ipcRenderer.invoke('vault:save-handoff', { name, markdown }),
     /** A timestamped portable copy of the vault, written to the exports folder. */
+    backup: (operation: 'create' | 'restore'): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('vault:backup', operation),
     exportCopy: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('vault:export-copy'),
     /** The open conversation, captured into the vault as a capsule. */
     captureChat: (title: string, markdown: string): Promise<{ ok: boolean; answer: string }> =>

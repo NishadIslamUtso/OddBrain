@@ -13,6 +13,7 @@
  *   500 — something genuinely failed; the vault says so rather than reporting a
  *         save that did not happen
  */
+import { searchVault } from './recall'
 import { InputError, VaultMissingError } from './errors'
 import { createSourceMap } from './sources'
 import type { VaultService } from './service'
@@ -41,6 +42,7 @@ export const VAULT_ROUTES: Record<string, string[]> = {
   '/files': ['GET'],
   '/file': ['GET'],
   '/grep': ['GET'],
+  '/recall': ['GET'],
   '/onui': ['GET'],
   '/links': ['GET'],
   '/capture': ['POST'],
@@ -93,6 +95,7 @@ export function handleVaultRequest(service: VaultService, request: VaultRouteReq
         const content = service.files().read(relative)
         return { status: 200, body: { ok: true, path: relative, content: content.slice(0, 200_000), truncated: content.length > 200_000 } }
       }
+      if (route === '/recall') return { status: 200, body: searchVault(service.files(), query) }
       if (route === '/grep') {
         // Content search: which files mention this, with the matching line.
         const needle = query.trim().toLowerCase()

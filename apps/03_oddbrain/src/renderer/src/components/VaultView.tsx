@@ -1,3 +1,4 @@
+import { sourceReading } from '@shared/lib/recall'
 import MemoryMap from './MemoryMap'
 import { sampleEnabled } from '@shared/lib/sampleWorkspace'
 import { Mascot } from '../motion/Mascot'
@@ -20,16 +21,17 @@ import { bridge, isDemo } from '@/platform/bridge'
 const leaf = (path: string): string => path.split('/').filter(Boolean).at(-1) ?? path
 const folderOf = (path: string): string => path.split('/').slice(0, -1).join('/') || '(root)'
 
-export default function VaultView({ onAddToComposer }: { onAddToComposer: (path: string, content: string) => void }) {
+export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRequest?: { path: string; title?: string } | null; onAddToComposer: (path: string, content: string) => void }) {
   const [sources, setSources] = useState(false)
   useEffect(() => { const open = () => setSources(true); window.addEventListener('app:vault-sources-select', open); return () => window.removeEventListener('app:vault-sources-select', open) }, [])
   const mounted = useRef(false), fileTicket = useRef(0), searchTicket = useRef(0)
   const [files, setFiles] = useState<string[]>([])
   const [exported, setExported] = useState('')
+  const [backupBusy, setBackupBusy] = useState(false)
   const [root, setRoot] = useState('')
   const [capped, setCapped] = useState(false)
   const [state, setState] = useState<'loading' | 'ready' | 'missing'>('loading')
-  const [selected, setSelected] = useState<{ path: string; content: string; truncated: boolean } | null>(null)
+  const [selected, setSelected] = useState<{ path: string; content: string; truncated: boolean; title?: string } | null>(null)
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<Array<{ path: string; line: number; text: string }> | null>(null)
   const [problem, setProblem] = useState('')
@@ -61,9 +63,9 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
     return () => { mounted.current = false; fileTicket.current++; searchTicket.current++ }
   }, [])
 
-  const openFile = (path: string): void => {
+  const openFile = (path: string, title?: string): void => {
     const ticket = ++fileTicket.current
-    setProblem('')
+    setProblem(''); setSelected(null)
     vaultGet(`/file?path=${encodeURIComponent(path)}`)
       .then((reply) => {
         if (!mounted.current || ticket !== fileTicket.current) return
@@ -71,10 +73,12 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
           setProblem(String(reply?.error || 'The file could not be read.'))
           return
         }
-        setSelected({ path, content: String(reply.content || ''), truncated: reply.truncated === true })
+        setSelected({ path, title, content: String(reply.content || ''), truncated: reply.truncated === true })
       })
       .catch((reason) => { if (mounted.current && ticket === fileTicket.current) setProblem(reason instanceof Error && reason.message ? reason.message : 'The file could not be read.') })
   }
+
+  useEffect(() => { if (sourceRequest) { setSources(false); openFile(sourceRequest.path, sourceRequest.title) } }, [sourceRequest])
 
   const searchContents = (): void => {
     const ticket = ++searchTicket.current
@@ -133,7 +137,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
                 onClick={() => {
                   void bridge.vault.exportCopy().then((answer) => setExported(answer.answer))
                 }}
-                title="A timestamped, portable copy of every markdown file, hand it to Obsidian, a backup, or another machine"
+                title="A timestamped, portable copy of every markdown file, for Obsidian or another machine; excludes attachments and review history"
                 className="flex shrink-0 items-center gap-1 rounded-lg border border-line px-2.5 py-1.5 text-[11.5px] text-muted hover:text-ink"
               >
                 Export copy
@@ -142,6 +146,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
           ) : null}
         </header>
         {sources ? <div className="min-h-0 flex-1 overflow-auto"><MemoryMap open onClose={() => setSources(false)} embedded /></div> : <>
+        <details className="ob-vault-backup"><summary>Backup &amp; restore</summary><p className="ob-memory-caption">Full vault copies include conversations, attachments, confirmed memory and review history. Markdown export does not. Backups contain sensitive information; choose a private location, preferably on another drive. Models, app credentials and unsent browser queues are not included.</p><div className="ob-memory-actions">{(['create', 'restore'] as const).map(operation => <button type="button" key={operation} className="ob-small-button" disabled={backupBusy} onClick={() => { setBackupBusy(true); setExported(''); void bridge.vault.backup(operation).then(reply => setExported(reply.answer)).catch(() => setExported('The backup operation failed. No complete copy is reported.')).finally(() => setBackupBusy(false)) }}>{operation === 'create' ? 'Back up full vault' : 'Restore into a new folder'}</button>)}</div>{backupBusy && <p role="status">Choose the folders in the desktop dialog. Keep the app open until verification finishes.</p>}</details>
         {exported ? <p className="mt-1 text-[11px] text-muted">{exported}</p> : null}
 
         <div className="mt-4 flex items-center gap-2">
@@ -231,11 +236,11 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
             <aside className="flex w-[46%] max-w-[480px] flex-col rounded-xl border border-line bg-card">
               <div className="flex items-center gap-2 border-b border-line px-3 py-2">
                 <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-ink" title={selected.path}>
-                  {leaf(selected.path)}
+                  {selected.title || leaf(selected.path)}
                 </span>
                 <button
                   type="button"
-                  onClick={() => onAddToComposer(selected.path, selected.content)}
+                  onClick={() => onAddToComposer(selected.path, sourceReading(selected.content))}
                   title="Put this note into the composer as context"
                   className="shrink-0 rounded-lg bg-accent px-2.5 py-1 text-[11.5px] font-medium text-[var(--accent-ink)] hover:bg-accent/90"
                 >
@@ -243,7 +248,7 @@ export default function VaultView({ onAddToComposer }: { onAddToComposer: (path:
                 </button>
               </div>
               <pre className="min-h-0 flex-1 overflow-auto whitespace-pre-wrap px-3.5 py-3 font-mono text-[11.5px] leading-relaxed text-muted">
-                {selected.content || '(empty file)'}
+                {sourceReading(selected.content) || '(empty file)'}
                 {selected.truncated ? '\n… (the rest is in the file on disk)' : ''}
               </pre>
             </aside>

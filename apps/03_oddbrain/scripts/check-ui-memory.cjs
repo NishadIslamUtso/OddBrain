@@ -11,7 +11,7 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     const page = await browser.newPage({ viewport: { width: 1536, height: 864 }, reducedMotion: 'reduce' }); page.setDefaultTimeout(10000)
     page.on('pageerror', error => report.errors.push(error.message))
     page.on('request', request => { if (request.url().includes('/api/') || (/^https?:/.test(request.url()) && !request.url().startsWith(base))) report.apiRequests.push(request.url()) })
-    const view = async name => { await page.keyboard.press('Control+k'); await page.getByRole('textbox', { name: 'Search chats and screens' }).fill(name); await page.locator('.ob-command-results>button').filter({ hasText: new RegExp('^' + name) }).first().click() }
+    const view = async name => { await page.keyboard.press('Control+k'); await page.getByRole('textbox', { name: 'Search everything' }).fill(name); await page.locator('.ob-command-results>button').filter({ hasText: new RegExp('^' + name) }).first().click() }
     const tab = name => page.getByRole('tab', { name, exact: true }).click()
     await page.goto(base); await page.locator('.ob-launch').waitFor({ state: 'hidden' })
     await view('Today'); await page.getByRole('button', { name: /2 memory interpretations awaiting/ }).click()
@@ -56,6 +56,41 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     await page.getByRole('button', { name: 'More chat tools', exact: true }).click(); await page.getByRole('dialog', { name: 'Chat tools' }).getByRole('button', { name: 'Memory inbox', exact: true }).click()
     await page.getByRole('button', { name: 'OddBrain, new chat', exact: true }).first().click(); assert.equal(await page.getByRole('textbox', { name: 'Message', exact: true }).inputValue(),'My unsent draft stays here.')
     report.checks.push('External organizer permission defaults off; configuration, Vault capture sources and Chat review entry are functional without losing drafts')
+    // A fresh sample exercises the new group flow without relying on individual approvals above.
+    await page.evaluate(() => localStorage.removeItem('oddbrain.sample.data.memory-workspace')); await page.reload(); await page.getByRole('button', { name: 'Search OddBrain', exact: true }).first().waitFor(); await page.locator('.ob-launch').waitFor({ state: 'hidden' }); await view('Memory inbox')
+    const group = page.getByRole('region', { name: 'Review group: Workshop planning · sample', exact: true })
+    await group.getByRole('checkbox').first().check(); await group.getByRole('checkbox').last().check()
+    await group.getByRole('button', { name: 'Review selected (2)', exact: true }).click()
+    const preview = page.getByRole('region', { name: 'Review selected interpretations', exact: true })
+    assert.equal(await preview.locator('blockquote').count(), 2)
+    await preview.getByRole('button', { name: 'Cancel group review', exact: true }).click()
+    assert.equal(await page.locator('.ob-memory-record').count(), 2)
+    await group.getByRole('button', { name: 'Review selected (2)', exact: true }).click()
+    await page.screenshot({ path: path.join(output, 'memory-group-review.png'), animations: 'disabled' })
+    await preview.getByRole('button', { name: 'Confirm selected interpretations', exact: true }).click()
+    await tab('Journal'); await page.getByRole('searchbox', { name: 'Find memory records', exact: true }).fill('doesnotexist'); assert.equal(await page.locator('.ob-memory-record').count(),0)
+    await page.getByRole('searchbox', { name: 'Find memory records', exact: true }).fill('repair table'); assert.equal(await page.locator('.ob-memory-record').count(),1)
+    // Explicitly synthetic People fixtures, not observations from a real account.
+    await page.evaluate(() => {
+      const key = 'oddbrain.sample.data.memory-workspace', state = JSON.parse(localStorage.getItem(key)), base = state.proposals[0]
+      const source = { ...base.source, path: 'Projects/Workshop/Workshop plan.md', account: 'sample-messenger', speaker: 'Sam', role: 'other' }
+      state.proposals.push({ ...base, id: 'profile-confirmed', source, kind: 'profile', subject: 'sample-messenger', title: 'An offer of tools', text: 'Sam offered to bring tools. Delivery remains unconfirmed.', state: 'approved', date: '2026-10-18' }, { ...base, id: 'profile-pending', source, kind: 'profile', subject: 'sample-messenger', title: 'A possible interest', text: 'Sam may enjoy repairing things. This needs checking.', state: 'pending' })
+      state.jobs.push({ id: 'profile-source', source, state: 'done', attempts: 0, error: '' }); localStorage.setItem(key, JSON.stringify(state))
+    })
+    await page.reload(); await page.getByRole('button', { name: 'Search OddBrain', exact: true }).first().waitFor(); await page.locator('.ob-launch').waitFor({ state: 'hidden' }); await view('Memory inbox'); await tab('People'); await page.getByRole('combobox', { name: 'Person profile' }).selectOption('sam')
+    assert.equal(await page.locator('.ob-memory-record').count(),1); assert((await page.locator('.ob-memory-record').innerText()).includes('An offer of tools'))
+    await page.screenshot({ path: path.join(output, 'memory-people-reading.png'), animations: 'disabled' })
+    await page.getByRole('button', { name: 'Suggestions to check (1)', exact: true }).click(); assert((await page.locator('.ob-memory-record').innerText()).includes('Awaiting verification'))
+    await page.getByText('All linked source observations', { exact: true }).click(); await page.getByRole('button', { name: 'Read source conversation', exact: true }).click()
+    await page.locator('.ob-vault-view pre').waitFor(); assert((await page.locator('.ob-vault-view pre').innerText()).includes('Workshop plan'))
+    await page.getByRole('button', { name: 'Search OddBrain', exact: true }).first().click(); await page.getByRole('textbox', { name: 'Search everything', exact: true }).fill('concise explanations')
+    await page.locator('.ob-command-results>button').filter({ hasText: 'Saved file' }).first().waitFor()
+    await page.screenshot({ path: path.join(output, 'recall-search.png'), animations: 'disabled' })
+    await page.locator('.ob-command-results>button').filter({ hasText: 'Saved file' }).first().click()
+    assert((await page.locator('.ob-vault-view pre').innerText()).includes('Prefer concise explanations'))
+    await page.getByText('Backup & restore', { exact: true }).click(); await page.getByRole('button', { name: 'Back up full vault', exact: true }).click()
+    await page.getByText('Backup and restore require the desktop app. No files were copied.', { exact: true }).waitFor()
+    report.checks.push('Explicit group preview/cancel/confirm, in-view search, known/unknown timeline dates, separated People suggestions, direct source reading, cross-file search and honest browser backup refusal')
     assert.deepEqual(report.errors,[]); assert.deepEqual(report.apiRequests,[])
     fs.writeFileSync(path.join(output,'memory-browser-acceptance.json'),JSON.stringify(report,null,2)); console.log(JSON.stringify(report,null,2))
   } catch (error) { fs.writeFileSync(path.join(output,'memory-browser-failure.json'),JSON.stringify({ ...report, failure:error.stack },null,2)); throw error } finally { await browser.close() }

@@ -18,7 +18,7 @@ import type { AutomationPreferences, AutomationView, ReviewInput } from '../shar
 import { readUiPreview } from './uiPreview'
 import { createLaunchGate } from './uiLaunch'
 import { app, BrowserWindow, dialog, Menu, safeStorage, shell, globalShortcut, screen, session } from 'electron'
-import { randomBytes } from 'node:crypto'
+import { randomBytes, randomUUID } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { loadAppFlags, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
@@ -71,6 +71,7 @@ import { starterPackFiles } from './engine/vaultSkills'
 import { deployBuiltInSkills } from './engine/vaultSkills'
 import { applyConflictAction, brainFileContents, classifyBrainRoot, defaultVaultPath, planBrainApply, planBrainRefresh } from '../shared/lib/brainStructure'
 import { normalizeBoard } from '../shared/lib/sessionsBoard'
+import { backupVault, restoreVault } from './vault/backup'
 import { exportVaultCopy } from './vault/exportCopy'
 import { deployHouseRules } from './engine/houseRulesDeploy'
 import { DEFAULT_HOUSE_RULES, type HouseRules } from '../shared/lib/houseRules'
@@ -1108,6 +1109,25 @@ function registerBridges(): void {
     const result = exportVaultCopy(service.root, destination)
     if (!result.ok) return { ok: false, answer: result.answer }
     return { ok: true, answer: `${result.count} files copied to ${result.destination}` }
+  })
+
+  handle('vault:backup', async (_event, operation: unknown) => {
+    if (operation !== 'create' && operation !== 'restore') return { ok: false, answer: 'Choose backup or restore.' }
+    let source = vaultRoot()
+    if (operation === 'restore') {
+      const selected = await dialog.showOpenDialog({ title: 'Choose an OddBrain backup folder', properties: ['openDirectory'] })
+      if (selected.canceled || !selected.filePaths[0]) return { ok: false, answer: 'Restore cancelled. Nothing changed.' }
+      source = selected.filePaths[0]
+    }
+    const parent = await dialog.showOpenDialog({ title: operation === 'create' ? 'Choose where to keep the backup' : 'Choose where to create the restored vault', properties: ['openDirectory', 'createDirectory'] })
+    if (parent.canceled || !parent.filePaths[0]) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+    const destination = join(parent.filePaths[0], `OddBrain-${operation === 'create' ? 'backup' : 'restored'}-${Date.now()}-${randomUUID().slice(0,8)}`)
+    const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', operation === 'create' ? 'Create backup' : 'Restore to new folder'], defaultId: 0, cancelId: 0, message: operation === 'create' ? 'Copy the entire vault, including sensitive conversations and attachments?' : 'Restore into a new folder? Your current vault will not be replaced.', detail: `Source: ${source}\nDestination: ${destination}\nVault files only. Installed models, application credentials and browser queues are not included. Keep the backup somewhere private.` })
+    if (confirmation.response !== 1) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+    // Native dialog paths, never arbitrary renderer-provided source/destination paths.
+    const result = operation === 'create' ? backupVault(source, destination) : restoreVault(source, destination)
+    if (!result.ok) return result
+    return { ok: true, answer: `${result.count} files copied and verified at ${result.destination}. ${operation === 'restore' ? 'Your current vault is unchanged. Choose this restored folder in Settings → Memory & files → Vault when ready.' : 'Keep another copy on a different drive. This is not an automatic backup schedule.'}` }
   })
 
   // The skills the owner's engine already has — the import list.

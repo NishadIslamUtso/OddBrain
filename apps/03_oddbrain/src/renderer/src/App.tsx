@@ -46,7 +46,7 @@ import { DEFAULT_INFERENCE, INFERENCE_KEY, normalizeInference } from './state/pe
 import { useChats } from './state/useChats'
 import { bridge, isDemo } from './platform/bridge'
 import { DEFAULT_PERMISSIONS, normalizePermissions, type Permissions } from '@shared/lib/permissions'
-import { vaultPost } from '@shared/lib/vault'
+import { vaultPost, vaultGet } from '@shared/lib/vault'
 import { setMotionMode, setMascotPause } from './motion/motionMode'
 import { setOsReducedMotion } from './motion/motionMode'
 import { conversationCapture } from '@shared/lib/capture'
@@ -537,13 +537,25 @@ export default function App() {
   const newChat = (): void => { chats.create(); setView('chat'); setSettingsOpen(false); setPendingProject(null); setNotice(''); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label=Message]')?.focus()) }
   const items: ShellItem[] = view === 'projects' ? projects.map(p => ({ id: p.id, title: p.name, detail: p.folder, open: () => { setProjectFocus(p.id); setView('projects') } })) : view === 'artifacts' ? library.items.map(item => ({ id: item.id, title: item.title, detail: item.type.toUpperCase(), open: () => { setArtifactFocus(item.id); setView('artifacts') } })) : chats.chats.map(c => ({ id: c.id, title: c.title, detail: c.date, open: () => openChat(c.id) }))
   const commands: CommandItem[] = [{ id: 'memory-inbox', title: 'Memory inbox', detail: 'Review interpretations, people and your life story', run: () => window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' })) }, ...screenCommands(setView), ...chats.chats.slice(0, 6).map(c => ({ id: 'chat-' + c.id, title: c.title, detail: 'Conversation', run: () => openChat(c.id) })), { id: 'screen-code', title: 'Code', detail: 'All project folders', run: () => { setCodeFocus(''); setView('code') } }, ...SECTIONS.map(section => ({ id: 'settings-' + section.id, title: section.id === 'models' ? 'Models & API keys' : section.id === 'connectors' ? 'Apps & extensions' : section.title, detail: section.id === 'maps' ? 'Vault' : 'Settings', run: () => section.id === 'maps' ? window.dispatchEvent(new Event('app:capture-sources')) : openSettings(section.id) }))]
+  const [sourceRequest, setSourceRequest] = useState<{ path: string; root: string; title?: string } | null>(null)
+  useEffect(() => {
+    const open = (event: Event) => { const detail = (event as CustomEvent).detail, path = typeof detail === 'string' ? detail : detail?.path; if (typeof path !== 'string') return; setSourceRequest({ path, root: vault.path, title: typeof detail?.title === 'string' ? detail.title : undefined }); setSettingsOpen(false); setView('vault') }
+    window.addEventListener('app:open-source', open)
+    return () => window.removeEventListener('app:open-source', open)
+  }, [vault.path])
+  const searchSaved = useCallback(async (query: string, signal: AbortSignal) => {
+    if (isDemo && !sampleEnabled()) return { items: [], notice: 'Open the desktop app to search saved vault records. App chats are searched here.' }
+    const reply = await vaultGet('/recall?q=' + encodeURIComponent(query), signal)
+    if (!reply.ok) return { items: [], notice: Array.isArray(reply.notices) ? reply.notices.join(' ') : 'Saved vault search is unavailable. App chats are still searched.' }
+    return { items: (reply.hits as import('@shared/lib/recall').RecallHit[]).map(hit => ({ id: 'recall:' + hit.id, title: hit.title, detail: `${hit.kind === 'confirmed' ? 'Confirmed memory' : hit.kind === 'conversation' ? 'Original conversation' : 'Saved file'} · ${hit.speaker}${hit.date ? ' · ' + hit.date : ''} — ${hit.text}`, run: () => window.dispatchEvent(new CustomEvent('app:open-source', { detail: { path: hit.path, title: hit.title } })) })), notice: [...(reply.notices || []), reply.hits.length ? 'Word matches, not an AI answer. Open a result to read its source.' : 'No saved records matched these words. Try names, dates or a phrase from the conversation.'].join(' ') }
+  }, [vault.path])
   const searchCommands = (query: string): CommandItem[] => searchChats(chats.chats, query).map(result => ({ id: 'chat-' + result.chat.id, title: result.chat.title, detail: result.matches[0]?.snippet || 'Conversation', run: () => openChat(result.chat.id) }))
   if (!welcomed) return <LookContext value={look}><LookActions value={updateLook}><div className="ob-app-root"><FirstRunView onFinish={() => setWelcomed(true)} onName={name => setProfile({ ...profile, name })} /></div><LaunchOverlay enabled={appearance.startupAnimation} /></LookActions></LookContext>
 
   return <LookContext value={look}><LookActions value={updateLook}>
     <div className="ob-app-root flex h-full flex-col bg-bg text-ink">
       <div className="ob-shell-host" hidden={settingsOpen} inert={settingsOpen}>
-        <DesktopShell layout={look.layout} navigation={{ view, onView: setView, onNew: newChat, onBack: navigation.back, canBack: navigation.canBack, onSettings: () => openSettings('appearance'), name: profile.name }} items={items} commands={commands} extraSearch={searchCommands} suspended={settingsOpen} sidebar={
+        <DesktopShell layout={look.layout} navigation={{ view, onView: setView, onNew: newChat, onBack: navigation.back, canBack: navigation.canBack, onSettings: () => openSettings('appearance'), name: profile.name }} items={items} commands={commands} extraSearch={searchCommands} searchSaved={searchSaved} suspended={settingsOpen} sidebar={
         <Sidebar
           view={view}
           onView={setView}
@@ -571,7 +583,7 @@ export default function App() {
         ) : view === 'brain' ? (
           <BrainView vault={vault} isDemo={isDemo && !sampleEnabled()} onOpenVault={() => setView('vault')} />
         ) : view === 'vault' ? (
-          <VaultView
+          <VaultView key={vault.path} sourceRequest={sourceRequest?.root === vault.path ? sourceRequest : null}
             onAddToComposer={(path, content) => {
               // A note becomes context: quoted, capped, and named — never a
               // silent paste of a whole file into the draft.

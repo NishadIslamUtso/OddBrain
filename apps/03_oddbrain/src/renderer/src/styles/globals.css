@@ -182,3 +182,12 @@ body {
 .ob-settings-subsections button { padding: 5px 0; }
 .ob-settings-subsections [aria-current="page"] { color: var(--color-ink); text-decoration: underline; text-underline-offset: 6px; }
 #ob-person-management:not([hidden]) { margin-block: 12px; padding-block: 12px; border-block: 1px solid var(--color-line); }
+
+/* Reading and review use the existing typography and separators, not another dashboard. */
+.ob-review-group, .ob-memory-timeline { margin-top: 24px; }
+.ob-review-group > h3, .ob-memory-timeline > h3 { font-size: 15px; font-weight: 600; }
+.ob-memory-batch-preview { border-top: 1px solid var(--color-line); padding: 16px 0; }
+.ob-memory-batch-preview article { margin: 16px 0; }
+.ob-memory-batch-preview p, .ob-memory-batch-preview blockquote { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ob-memory-reading-search { display: block; margin: 20px 0 8px; max-width: 480px; }
+.ob-command-results .ob-recall-result small { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }

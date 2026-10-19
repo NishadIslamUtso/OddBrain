@@ -9,12 +9,21 @@ export type MemoryJob = { id: string; source: MemorySource; state: 'queued' | 'd
 export type MemoryPreferences = { enabled: boolean; model: string; allowExternal: boolean }
 export type MemoryWorkspace = { version: 1; revision: number; preferences: MemoryPreferences; proposals: MemoryProposal[]; people: MemoryPerson[]; accounts: MemoryAccount[]; jobs: MemoryJob[]; merges: Array<{ id: string; from: string; to: string; accounts: string[]; at: string; undone: boolean }>; scanCapped: boolean; discoveryWarnings: string[]; projectionWarnings: string[] }
 export type MemoryView = MemoryWorkspace & { desktop: boolean; running: boolean; status: string; root: string }
-export type MemoryAction = { type: 'preferences' | 'review' | 'person' | 'link' | 'merge' | 'undo-merge' | 'retry' | 'draft-chapter'; expectedRevision: number; [key: string]: unknown }
+export type MemoryAction = { type: 'preferences' | 'review-batch' | 'review' | 'person' | 'link' | 'merge' | 'undo-merge' | 'retry' | 'draft-chapter'; expectedRevision: number; [key: string]: unknown }
 export type MemoryBridge = { read(): Promise<{ ok: boolean; view?: MemoryView; error?: string }>; act(action: MemoryAction): Promise<{ ok: boolean; view?: MemoryView; error?: string }>; run(): Promise<{ ok: boolean; view?: MemoryView; error?: string }> }
 export const emptyMemory = (): MemoryWorkspace => ({ version: 1, revision: 0, preferences: { enabled: true, model: '', allowExternal: false }, proposals: [], people: [], accounts: [], jobs: [], merges: [], scanCapped: false, discoveryWarnings: [], projectionWarnings: [] })
 const string = (v: unknown, label: string, max = 20000): string => { if (typeof v !== 'string' || v.length > max) throw Error(`Invalid ${label}.`); return v.trim() }
 export function changeMemory(before: MemoryWorkspace, action: MemoryAction, now: string, newId: string): MemoryWorkspace {
   if (action.expectedRevision !== before.revision) throw Error('Memory changed since this preview. Refresh and review the current version.')
+  if (action.type === 'review-batch') {
+    if (!Array.isArray(action.ids) || !action.ids.length || action.ids.length > 32 || new Set(action.ids).size !== action.ids.length || action.ids.some(id => typeof id !== 'string')) throw Error('Choose 1–32 different interpretations.')
+    if (action.decision !== 'approve' && action.decision !== 'reject') throw Error('Choose approve or reject for this group.')
+    // Work on private copies. One invalid or stale item rejects the entire group.
+    let next = before
+    for (const id of action.ids) next = changeMemory(next, { type: 'review', expectedRevision: next.revision, id, decision: action.decision }, now, newId)
+    next.revision = before.revision + 1
+    return next
+  }
   const state = structuredClone(before)
   const person = (id: unknown) => { const p = state.people.find(p => p.id === id); if (!p) throw Error('That person no longer exists.'); return p }
   if (action.type === 'draft-chapter') {

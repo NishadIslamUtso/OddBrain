@@ -193,6 +193,7 @@ export type DesktopBridge = {
     /** A finished turn, written into the vault as a handoff document. */
     saveHandoff: (name: string, markdown: string) => Promise<{ ok: boolean; answer: string }>
     /** A timestamped portable copy of the vault, written to the exports folder. */
+    backup: (operation: 'create' | 'restore') => Promise<{ ok: boolean; answer: string }>
     exportCopy: () => Promise<{ ok: boolean; answer: string }>
     /** The open conversation, captured into the vault as a capsule. */
     captureChat: (title: string, markdown: string) => Promise<{ ok: boolean; answer: string }>
@@ -334,7 +335,7 @@ const demoBridge: DesktopBridge = {
     resolve: async () => ({ ok: false, error: 'Settling a conflict needs the desktop app.' }),
     linkCheck: async () => ({ files: 0, checked: 0, dead: [], ambiguous: [], edges: [], error: 'The link check needs the desktop app.' }),
   },
-  vault: { chooseFolder: async () => null, useDefault: async () => ({ ok: false, error: 'Choosing the default vault needs the desktop app.' }), saveHandoff: async () => ({ ok: false, answer: 'Writing a handoff needs the desktop app.' }), exportCopy: async () => ({ ok: false, answer: 'Exporting needs the desktop app.' }), captureChat: async () => ({ ok: false, answer: 'Capturing needs the desktop app.' }) },
+  vault: { backup: async () => ({ ok: false, answer: 'Backup and restore require the desktop app. No files were copied.' }), chooseFolder: async () => null, useDefault: async () => ({ ok: false, error: 'Choosing the default vault needs the desktop app.' }), saveHandoff: async () => ({ ok: false, answer: 'Writing a handoff needs the desktop app.' }), exportCopy: async () => ({ ok: false, answer: 'Exporting needs the desktop app.' }), captureChat: async () => ({ ok: false, answer: 'Capturing needs the desktop app.' }) },
   // No socket is open here, and none can be: this is a page, not the app.
   extension: {
     status: async () => ({

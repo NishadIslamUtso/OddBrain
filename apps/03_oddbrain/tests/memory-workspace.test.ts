@@ -326,3 +326,48 @@ describe('organizer recovery across failed preflight and stale transports', () =
     } finally { timeout.mockRestore() }
   })
 })
+
+describe('grouped review and changing models', () => {
+  it('reviews an explicit group atomically, keeps every qualification and rejects stale or repeated selections', () => {
+    const h = setup(), first = h.complete()
+    h.message.id = 'm2'; h.message.text = 'I offered to carry the tools.'; h.save(); const second = h.complete()
+    const before = h.store.read()
+    expect(() => h.act({ type: 'review-batch', decision: 'approve', ids: [first.id, 'missing'] })).toThrow('no longer exists')
+    expect(h.store.read()).toEqual(before)
+    expect(() => h.act({ type: 'review-batch', decision: 'approve', ids: [first.id, first.id] })).toThrow('different')
+    const after = h.act({ type: 'review-batch', decision: 'approve', ids: [first.id, second.id] })
+    expect(after.revision).toBe(before.revision + 1)
+    expect(after.proposals.every(p => p.state === 'approved' && p.history.length === 1 && p.uncertainty === 'The event date is unknown.')).toBe(true)
+    expect(() => h.store.act({ type: 'review-batch', decision: 'reject', ids: [first.id], expectedRevision: before.revision })).toThrow('changed since')
+    expect(() => h.act({ type: 'review-batch', decision: 'approve', ids: [second.id] })).toThrow('already reviewed')
+  })
+  it('refuses the entire approval when any selected evidence changed or was excluded, but permits rejection', () => {
+    const h = setup(), first = h.complete()
+    h.message.id = 'm2'; h.save(); const second = h.complete(), before = h.store.read()
+    h.vault.files().writeAtomic(second.source.path, '{broken')
+    expect(() => h.act({ type: 'review-batch', decision: 'approve', ids: [first.id, second.id] })).toThrow()
+    expect(h.store.read()).toEqual(before)
+    expect(h.act({ type: 'review-batch', decision: 'reject', ids: [first.id, second.id] }).proposals.every(p => p.state === 'rejected')).toBe(true)
+    const other = setup(), proposal = other.complete()
+    other.vault.files().writeAtomic('00 System/Privacy & Access.md', '---\nexcluded_patterns: ["example.com/*"]\n---\n')
+    expect(() => other.act({ type: 'review', id: proposal.id, decision: 'approve' })).toThrow('excluded')
+    expect(other.store.read().proposals[0].state).toBe('pending')
+  })
+  it('stops spending calls after malformed output; changing model can resume without rewriting confirmed facts', async () => {
+    const h = setup(), confirmed = h.complete(); h.act({ type: 'review', id: confirmed.id, decision: 'approve' })
+    const original = h.store.read().proposals[0]
+    h.message.id = 'm2'; h.save(); h.message.id = 'm3'; h.save()
+    let model = 'weak-v1', calls = 0
+    const organizer = createMemoryOrganizer({ store: () => h.store, busy: () => false, configuration: () => model, intervalMs: 20, run: async () => { calls++; return { text: model === 'weak-v1' ? 'I have saved everything permanently!' : h.proposal(), model } } })
+    disposables.push(() => organizer.dispose())
+    await organizer.run()
+    await new Promise(r => setTimeout(r, 100))
+    expect(calls).toBe(1); expect(h.store.read().jobs.filter(j => j.state === 'blocked')).toHaveLength(1)
+    expect(h.store.read().proposals).toHaveLength(1)
+    model = 'replacement-v2'; await organizer.run()
+    expect(h.store.read().proposals[0]).toEqual(original)
+    expect(h.store.read().proposals.at(-1)?.state).toBe('pending')
+    expect(h.store.read().proposals.at(-1)?.model).toBe('replacement-v2')
+    expect(h.vault.files().read(confirmed.source.path)).toContain(h.message.text)
+  })
+})

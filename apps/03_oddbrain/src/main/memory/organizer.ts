@@ -43,7 +43,7 @@ export function createMemoryOrganizer(options: {
       store.complete(job.id, result.text, result.model)
       status = 'Interpretations ready for your review'
     } catch (error) {
-      if (!controller.signal.aborted && valid()) { lastFailure = (error as Error).message; store.fail(job.id, lastFailure); status = 'Source needs attention' }
+      if (!controller.signal.aborted && valid()) { pausedConfiguration = configuration; lastFailure = (error as Error).message; store.fail(job.id, lastFailure); status = 'Source needs attention' }
     } finally { clearInterval(gate); if (active === controller) active = null }
   }
   const timer = setInterval(() => { void pump().catch(e => { lastFailure = String(e.message || e) }) }, options.intervalMs ?? 10000)

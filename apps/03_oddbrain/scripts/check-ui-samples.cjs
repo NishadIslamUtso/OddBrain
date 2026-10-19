@@ -13,7 +13,7 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     page.on('pageerror', error => report.errors.push(error.message))
     page.on('request', request => { if (request.url().includes('/api/') || (/^https?:/.test(request.url()) && !request.url().startsWith(base))) report.apiRequests.push(request.url()) })
     await page.addInitScript(() => { if (window.top !== window) return; if (!localStorage.getItem('ai-assistant.chats')) localStorage.setItem('ai-assistant.chats', JSON.stringify([{ id: 'private-existing', title: 'Keep this work', messages: [] }])) })
-    const view = async name => { await page.keyboard.press('Control+k'); await page.getByRole('textbox', { name: 'Search chats and screens' }).fill(name); await page.locator('.ob-command-results>button').filter({ hasText: new RegExp('^' + name) }).first().click() }
+    const view = async name => { await page.keyboard.press('Control+k'); await page.getByRole('textbox', { name: 'Search everything' }).fill(name); await page.locator('.ob-command-results>button').filter({ hasText: new RegExp('^' + name) }).first().click() }
     const settings = async name => { if (!await page.locator('.ob-settings-host').count()) await page.keyboard.press('Control+,'); await openSettingsSection(page, name) }
     const close = async () => page.getByRole('button', { name: 'Close settings', exact: true }).click()
     await page.goto(base); await page.locator('.ob-launch').waitFor({ state: 'hidden' })
