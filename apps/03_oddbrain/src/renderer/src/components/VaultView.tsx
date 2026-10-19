@@ -46,7 +46,9 @@ export default function VaultView({ onAddToComposer, focus }: {
   const [linkGraph, setLinkGraph] = useState<{ edges: Array<{ from: string; to: string }>; dead: Array<{ from: string; target: string }> } | null>(null)
 
   const readLinks = (): void => {
-    if (sampleEnabled()) return
+    // A browser preview has no vault to scan; claiming "no links" there would be
+    // a statement about a folder that was never read.
+    if (isDemo || sampleEnabled()) return
     bridge.structure.linkCheck()
       .then((answer) => { if (Array.isArray(answer?.edges)) setLinkGraph({ edges: answer.edges, dead: Array.isArray(answer.dead) ? answer.dead : [] }) })
       .catch(() => setLinkGraph(null))
