@@ -28,7 +28,7 @@ export function commandSpec(command: string, platform: NodeJS.Platform = process
   if (platform !== 'linux' && platform !== 'darwin') throw Error('This OS has no configured command runner. Nothing was executed.')
   return { program: '/bin/sh', arguments: ['-c', command], script: command, environmentKeys }
 }
-type Scope = { cwd: string; authority: string; allowed: boolean; explanation: string }
+type Scope = { cwd: string; authority: string; stableAuthority?: string; busy?: boolean; allowed: boolean; explanation: string }
 type Lease = { recheck(): void; release(): void }
 export function createCommandRunner(options: {
   root: string
@@ -72,15 +72,13 @@ export function createCommandRunner(options: {
     execution.program = program
     const environment = commandEnvironment(process.env)
     const stamp = sha(JSON.stringify([scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs]))
-    return { scope, execution, stamp }
+    const stableStamp = sha(JSON.stringify([scope.stableAuthority || scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs]))
+    return { scope, execution, stamp, stableStamp }
   }
-  const execute = async (owner: number, request: ShellRequest, expected: string): Promise<ShellResult> => {
-    const checked = inspect(request)
-    if (checked.stamp !== expected) throw Error('Command authority, folder, shell or environment changed. Review again; nothing was run.')
-    const controller = new AbortController(), own = { owner, controller, id: null as string | null }; active = own
-    let lease: Lease | undefined
-    try {
-      lease = await options.acquire(request, checked.scope.authority, controller.signal)
+  type Checked = ReturnType<typeof inspect>
+  type Active = { owner: number; controller: AbortController; id: string | null }
+  const runOne = async (request: ShellRequest, checked: Checked, own: Active, lease: Lease, outputLimit = limit, recorded?: (id: string) => void): Promise<ShellResult> => {
+      const controller = own.controller, expected = checked.stamp
       controller.signal.throwIfAborted(); lease.recheck()
       // Repeat filesystem/environment checks without treating our own reservation as another run.
       const folder = statSync(request.cwd); noLinkedPath(request.cwd)
@@ -95,6 +93,7 @@ export function createCommandRunner(options: {
       const persist = () => { const text = JSON.stringify(record); commitConfigs([{ path: file(id), text, expected: previous }]); previous = Buffer.from(text) }
       try {
         persist() // No process before a durable, inspectable work order exists.
+        recorded?.(id)
         out = openSync(stdoutFile, 'wx', 0o600); err = openSync(stderrFile, 'wx', 0o600)
         controller.signal.throwIfAborted(); lease.recheck(); checkSource(request)
         const result = await new Promise<ShellResult>(resolveResult => {
@@ -131,7 +130,7 @@ export function createCommandRunner(options: {
           }
           const receive = (stream: 'stdout' | 'stderr', data: Buffer) => {
             if (ended || saveFault || stopNote) return
-            const remaining = limit - record.stdoutBytes - record.stderrBytes, chunk = Buffer.from(data).subarray(0, Math.max(0, remaining))
+            const remaining = outputLimit - record.stdoutBytes - record.stderrBytes, chunk = Buffer.from(data).subarray(0, Math.max(0, remaining))
             try {
               let offset = 0; while (offset < chunk.length) { const n = writeSync(stream === 'stdout' ? out! : err!, chunk, offset, chunk.length - offset); if (!n) throw Error(); offset += n }
               buffers[stream].push(Buffer.from(chunk)); if (stream === 'stdout') record.stdoutBytes += chunk.length; else record.stderrBytes += chunk.length
@@ -154,8 +153,49 @@ export function createCommandRunner(options: {
         })
         return result
       } finally { if (out !== undefined) closeSync(out); if (err !== undefined) closeSync(err) }
-    } finally { lease?.release(); if (active === own) active = null }
   }
+  const execute = async (owner: number, request: ShellRequest, expected: string): Promise<ShellResult> => {
+    const checked = inspect(request)
+    if (checked.stamp !== expected) throw Error('Command authority, folder or environment changed. Review again; nothing was run.')
+    const own: Active = { owner, controller: new AbortController(), id: null }; active = own
+    let lease: Lease | undefined
+    try { lease = await options.acquire(request, checked.scope.authority, own.controller.signal); return await runOne(request, checked, own, lease) }
+    finally { lease?.release(); if (active === own) active = null }
+  }
+  /** Main-only capability. No IPC exposes run(); workflow approval owns it. */
+  const plan = (input: ShellRequest[]) => {
+    if (!Array.isArray(input) || !input.length || input.length > 8) throw Error('A workflow has one to eight exact commands.')
+    const requests = structuredClone(input), checked = requests.map(request => inspect(request))
+    const fingerprint = sha(JSON.stringify(checked.map(entry => entry.stamp))), stableFingerprint = sha(JSON.stringify(checked.map(entry => entry.stableStamp)))
+    let consumed = false
+    return {
+      fingerprint, stableFingerprint, executions: checked.map(entry => entry.execution),
+      async run(owner: number, signal: AbortSignal, callbacks: { starting(index: number): void; recorded(index: number, id: string): void; finished(index: number, result: ShellResult): void }) {
+        if (consumed) throw Error('Workflow execution capability was already consumed.')
+        consumed = true; signal.throwIfAborted()
+        const fresh = requests.map(request => inspect(request))
+        if (sha(JSON.stringify(fresh.map(entry => entry.stamp))) !== fingerprint) throw Error('Workflow authority or targets changed. Review again.')
+        const own: Active = { owner, controller: new AbortController(), id: null }; active = own
+        const abort = () => own.controller.abort(signal.reason)
+        signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort()
+        const timer = setTimeout(() => own.controller.abort('Workflow time budget reached'), 900_000)
+        let lease: Lease | undefined, remaining = 8_000_000
+        try {
+          lease = await options.acquire(requests[0], checked[0].scope.authority, own.controller.signal)
+          for (let index = 0; index < requests.length; index++) {
+            own.controller.signal.throwIfAborted(); lease.recheck()
+            if (remaining <= 0) throw Error('Workflow output budget reached; later steps were not started.')
+            callbacks.starting(index)
+            const result = await runOne(requests[index], checked[index], own, lease, Math.min(limit, remaining), id => callbacks.recorded(index, id))
+            callbacks.finished(index, result)
+            if (result.runId) { const record = readRecord(result.runId); remaining -= record.stdoutBytes + record.stderrBytes }
+            if (result.interrupted || !result.outputComplete || result.exitCode !== 0) return
+          }
+        } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); lease?.release(); if (active === own) active = null }
+      },
+    }
+  }
+
   const service = (owner: number) => {
     let review = reviews.get(owner)
     if (!review) {
@@ -173,6 +213,8 @@ export function createCommandRunner(options: {
     return bytes
   }
   return {
+    plan,
+    readiness: () => ({ ...options.scope(), busy: !!active || options.scope().busy === true }),
     running: () => active !== null,
     context() { const scope = options.scope(); return { cwd: scope.cwd, allowed: scope.allowed && !active, explanation: active ? 'An app command is preparing or running.' : scope.explanation || COMMAND_DISCLOSURE, activeId: active?.id || null } },
     // Ordinary IPC cannot forge saved-command provenance.

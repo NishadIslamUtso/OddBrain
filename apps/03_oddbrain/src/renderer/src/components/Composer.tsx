@@ -77,7 +77,7 @@ export default function Composer({
 }) {
   const box = useRef<HTMLTextAreaElement | null>(null)
   const [boxOpen, setBoxOpen] = useState<'engine' | 'models' | null>(null)
-  const [commandsOpen, setCommandsOpen] = useState(false)
+  const [commandsOpen, setCommandsOpen] = useState<'command' | 'workflows' | null>(null)
   const [cook, setCook] = useState(false)
   const [editor, setEditor] = useState<{ scope: string; text: string } | null>(null)
   const cookBase = useRef({ scope: draftScope, text: value })
@@ -236,7 +236,8 @@ export default function Composer({
             {tools ? <div className="ob-tools-popup" role="dialog" aria-label="Chat tools">
               <ProjectDropdown projects={projects} project={project} onProject={onProject} />
               <RecipeButton />
-              <button type="button" onClick={() => { setCommandsOpen(true); setTools(false) }}>Review an OS command</button>
+              <button type="button" onClick={() => { setCommandsOpen('command'); setTools(false) }}>Review an OS command</button>
+              <button type="button" onClick={() => { setCommandsOpen('workflows'); setTools(false) }}>Workflows &amp; schedules</button>
               <button type="button" disabled={listening || pickingFiles} onClick={() => { void mentionFiles(); setTools(false) }}><Paperclip size={14} />Mention files</button>
               <button type="button" disabled={listening} onClick={() => { setSavedDrafts(true); setTools(false) }}><ScrollText size={14} />Saved drafts</button>
               <MapButton onInsert={map => onChange(value.trim() ? `${value.trimEnd()}\n\n${map}\n` : `${map}\n`)} />
@@ -276,7 +277,7 @@ export default function Composer({
           </span>
         </div>
       </ComposerSurface>
-      {commandsOpen && <CommandPanel close={() => setCommandsOpen(false)} />}
+      {commandsOpen && <CommandPanel initialView={commandsOpen} close={() => setCommandsOpen(null)} />}
       {editor ? <PromptEditor initial={editor.text} apply={text => onChange(replaceDraft({ scope: currentScope.current, text: liveDraft.current }, editor, text))} close={() => setEditor(null)} /> : null}
       {savedDrafts ? <SavedDrafts draft={value} insert={text => onChange(liveDraft.current ? `${liveDraft.current}\n\n${text}` : text)} close={() => setSavedDrafts(false)} /> : null}
       {cook ? <CookDialog draft={value} onDone={next => { if (next !== null) { try { onChange(replaceDraft({ scope: currentScope.current, text: liveDraft.current }, cookBase.current, next)) } catch { setFileNote('Cook result was not inserted because the draft changed. Reopen Cook context for the current draft; your draft and attachments are unchanged.') } } setCook(false) }} /> : null}

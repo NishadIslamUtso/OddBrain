@@ -1,3 +1,5 @@
+import type { WorkflowStep } from '../shared/lib/workflows'
+import type { ScheduleInput } from '../shared/lib/schedules'
 import type { ShellRequest } from '../shared/lib/commands'
 import type { SkillDraft } from '../shared/lib/installedSkills'
 import type { NativeConversation, NativeSessionLink, NativeContextTarget } from '../shared/lib/nativeConversation'
@@ -249,6 +251,8 @@ const api = {
       return () => ipcRenderer.removeListener(String(channel), listener)
     },
   },
+  workflows: { list: (before?: string) => ipcRenderer.invoke('workflows:list', before), save: (input: { name: string; cwd: string; steps: WorkflowStep[] }) => ipcRenderer.invoke('workflows:save', input), archive: (id: string, archived: boolean) => ipcRenderer.invoke('workflows:archive', id, archived), preview: (id: string) => ipcRenderer.invoke('workflows:preview', id), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('workflows:decide', token, decision), cancel: () => ipcRenderer.invoke('workflows:cancel'), runs: (before?: string) => ipcRenderer.invoke('workflows:runs', before), readRun: (id: string) => ipcRenderer.invoke('workflows:read-run', id) },
+  schedules: { list: () => ipcRenderer.invoke('schedules:list'), preview: (input: ScheduleInput) => ipcRenderer.invoke('schedules:preview', input), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('schedules:decide', token, decision), pause: (id: string) => ipcRenderer.invoke('schedules:pause', id), inbox: (before?: string) => ipcRenderer.invoke('schedules:inbox', before), acknowledge: (id: string) => ipcRenderer.invoke('schedules:acknowledge', id) },
   commands: { saved: (before?: string) => ipcRenderer.invoke('commands:saved', before), save: (input: { name: string; command: string; cwd: string }) => ipcRenderer.invoke('commands:save', input), archiveSaved: (id: string, archived: boolean) => ipcRenderer.invoke('commands:archive-saved', id, archived), previewSaved: (id: string) => ipcRenderer.invoke('commands:preview-saved', id), context: () => ipcRenderer.invoke('commands:context'), preview: (request: ShellRequest) => ipcRenderer.invoke('commands:preview', request), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('commands:decide', token, decision), cancel: () => ipcRenderer.invoke('commands:cancel'), history: (before?: string) => ipcRenderer.invoke('commands:history', before), read: (id: string) => ipcRenderer.invoke('commands:read', id), output: (id: string, stream: 'stdout' | 'stderr') => ipcRenderer.invoke('commands:output', id, stream) },
   projects: {
     attach: (projectId: string) => ipcRenderer.invoke('projects:attach', projectId),

@@ -75,6 +75,41 @@ const BASE = process.env.ODDBRAIN_UI_URL || 'http://127.0.0.1:5174/', QA = proce
   assert.equal(await draft.inputValue(), 'Preserve this chat draft')
   report.checks.push('Exact script renders as text; no dispatch before Allow; deny, busy protection, stop request and incomplete outcome work through the UI')
   report.checks.push('Raw binary output download retains its bytes; the runner fits 940×620 and preserves the separate chat draft')
+  await page.evaluate(async () => {
+   const url = performance.getEntriesByType('resource').map(e => e.name).find(url => url.includes('/src/platform/bridge.ts'))
+   const { bridge } = await import(url)
+   const workflow = { id: 'wf-fixture', name: 'Checked fixture', cwd: '/fixture/selected folder', platform: 'linux', at: new Date().toISOString(), archived: false, digest: 'a'.repeat(64), steps: [{ name: 'Check input', command: 'echo check' }, { name: 'Build output', command: 'echo build' }] }
+   const executions = workflow.steps.map(step => ({ program: '/fixture/sh', arguments: ['-c', step.command], script: step.command, environmentKeys: [] }))
+   window.workflowFixture = { runs: 0, schedules: 0 }
+   bridge.workflows.list = async () => ({ items: [workflow], next: '', notice: '' })
+   bridge.workflows.preview = async () => ({ token: 'wf-review', workflow, executions, expiresAt: Date.now() + 120000, explanation: 'Fixture workflow review' })
+   bridge.workflows.decide = async (_token, decision) => { if (decision === 'deny') return { denied: true }; workflowFixture.runs++; return { id: 'wf-run', workflow, at: new Date().toISOString(), state: 'failed', note: 'First step failed; later work was not started.', steps: [{ ...workflow.steps[0], state: 'failed', exitCode: 9 }, { ...workflow.steps[1], state: 'skipped' }] } }
+   bridge.workflows.runs = async () => ({ records: [], next: '', notice: '' })
+   bridge.schedules.list = async () => ({ items: [], notice: '' })
+   bridge.schedules.preview = async input => ({ token: 'recurring', input, workflow, executions, expiresAt: Date.now() + 120000, explanation: 'Fixture recurring approval, not native scheduling proof' })
+   bridge.schedules.decide = async (_token, decision) => { if (decision === 'deny') return { denied: true }; workflowFixture.schedules++; return { id: 'schedule-fixture' } }
+  })
+  await page.getByRole('button', { name: 'More chat tools', exact: true }).click()
+  await page.getByRole('button', { name: 'Workflows & schedules', exact: true }).click()
+  panel = page.getByRole('dialog', { name: 'Command runner', exact: true })
+  await panel.getByText('Checked fixture', { exact: true }).click()
+  await panel.getByRole('button', { name: 'Review workflow Checked fixture', exact: true }).click()
+  assert.equal(await page.evaluate(() => workflowFixture.runs), 0)
+  await panel.getByRole('button', { name: 'Allow this whole workflow once', exact: true }).click()
+  await panel.getByRole('heading', { name: 'Build output · skipped', exact: true }).waitFor()
+  assert.equal(await page.evaluate(() => workflowFixture.runs), 1)
+  await panel.getByRole('button', { name: 'Set up schedule', exact: true }).click()
+  await panel.getByRole('button', { name: 'Prepare recurring workflow review', exact: true }).click()
+  assert(await panel.getByRole('button', { name: 'Allow recurring execution', exact: true }).isDisabled())
+  await panel.getByRole('checkbox', { name: 'I authorize recurring OS execution of this exact workflow while the app process is running', exact: true }).check()
+  await panel.getByRole('button', { name: 'Allow recurring execution', exact: true }).click()
+  assert.equal(await page.evaluate(() => workflowFixture.schedules), 1)
+  assert.equal(await page.evaluate(() => workflowFixture.runs), 1)
+  assert(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 2))
+  await page.screenshot({ path: path.join(QA, 'workflow-schedule-fixture.png'), animations: 'disabled' })
+  await panel.getByRole('button', { name: 'Close command runner', exact: true }).click()
+  assert.equal(await draft.inputValue(), 'Preserve this chat draft')
+  report.checks.push('Workflow review requires explicit approval, displays failed/skipped steps, and keeps recurring consent separate; saving the fixture schedule never runs its workflow')
   assert.deepEqual(report.errors, [])
  } catch (error) { report.failure = error.stack; process.exitCode = 1 }
  finally { fs.writeFileSync(path.join(QA, 'command-review-results.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2)); await browser.close() }

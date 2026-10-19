@@ -1,3 +1,8 @@
+import { createApprovalSigner } from './workflows/approvalSigner'
+import { createWorkflowScheduler } from './workflows/scheduler'
+import type { ScheduleInput } from '../shared/lib/schedules'
+import { createWorkflowService } from './workflows/service'
+import type { WorkflowStep } from '../shared/lib/workflows'
 import { createCommandRunner, COMMAND_DISCLOSURE } from './commands/runner'
 import type { ShellRequest } from '../shared/lib/commands'
 import { createWorkQueue } from './engine/workQueue'
@@ -332,7 +337,7 @@ function registerBridges(): void {
     const explanation = !settings.permissions.manualCommands ? 'Enable Reviewed OS commands in Settings → Agent access first. This is separate from native engine tool approval.'
       : settings.engine.approval === 'plan' ? 'Arbitrary OS commands are disabled while the engine is in Plan mode. Choose a non-plan mode explicitly before reviewing a command.'
       : engine?.turnBusy() || (dispatchingWork && !reserved) || foregroundApiRequests > 0 ? 'Wait for active work before running an app command.' : COMMAND_DISCLOSURE
-    return { cwd, authority, allowed: settings.permissions.manualCommands === true && settings.engine.approval !== 'plan' && !engine?.turnBusy() && (!dispatchingWork || reserved) && foregroundApiRequests === 0, explanation }
+    return { cwd, authority, stableAuthority: JSON.stringify([cwd, settings.engine.approval, settings.permissions]), busy: !!engine?.turnBusy() || (dispatchingWork && !reserved) || foregroundApiRequests > 0, allowed: settings.permissions.manualCommands === true && settings.engine.approval !== 'plan' && !engine?.turnBusy() && (!dispatchingWork || reserved) && foregroundApiRequests === 0, explanation }
   }
   const commandRunner = createCommandRunner({ root: join(app.getPath('userData'), 'command-runs'), scope: () => commandScope(),
     acquire: async (request, authority, signal) => {
@@ -347,12 +352,36 @@ function registerBridges(): void {
       } catch (error) { dispatchingWork = false; workDispatchGeneration++; throw error }
     },
   })
-  app.on('before-quit', () => { commandRunner.cancel() })
+  const workflows = createWorkflowService(join(app.getPath('userData'), 'workflows'), commandRunner)
+  const scheduleSigner = createApprovalSigner(join(app.getPath('userData'), 'workflow-approval-key.json'), {
+    available: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
+    encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value),
+  })
+  const scheduler = createWorkflowScheduler({ root: join(app.getPath('userData'), 'workflow-schedules'), workflows, signer: scheduleSigner,
+    busy: () => workQueue.view(-1).some(item => item.status === 'queued') || automation?.view().current?.automatic === false,
+  })
+  scheduler.start()
+
+  app.on('before-quit', () => { scheduler.dispose(); workflows.cancel(); commandRunner.cancel() })
   const owners = new Set<number>()
   const track = (sender: Electron.WebContents): number => {
-    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
+    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { scheduler.forget(sender.id); workflows.forget(sender.id); commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
     return sender.id
   }
+  handle('schedules:list', () => scheduler.list())
+  handle('schedules:preview', (event, input: ScheduleInput) => scheduler.preview(track(event.sender), input))
+  handle('schedules:decide', (event, token: string, decision: 'allow' | 'deny') => scheduler.decide(track(event.sender), token, decision))
+  handle('schedules:pause', (_event, id: string) => scheduler.pause(id))
+  handle('schedules:inbox', (_event, before?: string) => scheduler.inbox(before))
+  handle('schedules:acknowledge', (_event, id: string) => scheduler.acknowledge(id))
+  handle('workflows:list', (_event, before?: string) => workflows.list(before))
+  handle('workflows:save', (_event, input: { name: string; cwd: string; steps: WorkflowStep[] }) => workflows.save(input))
+  handle('workflows:archive', (_event, id: string, archived: boolean) => workflows.archive(id, archived))
+  handle('workflows:preview', (event, id: string) => workflows.preview(track(event.sender), id))
+  handle('workflows:decide', (event, token: string, decision: 'allow' | 'deny') => workflows.decide(track(event.sender), token, decision))
+  handle('workflows:cancel', () => workflows.cancel())
+  handle('workflows:runs', (_event, before?: string) => workflows.runs(before))
+  handle('workflows:read-run', (_event, id: string) => workflows.readRun(id))
   handle('commands:saved', (_event, before?: string) => commandRunner.saved(before))
   handle('commands:save', (_event, input: { name: string; command: string; cwd: string }) => commandRunner.save(input))
   handle('commands:archive-saved', (_event, id: string, archived: boolean) => commandRunner.archiveSaved(id, archived))
@@ -447,7 +476,7 @@ function registerBridges(): void {
         catch (error) { return { ok: false, error: (error as Error).message, settings } }
         if (JSON.stringify(nextAccess) !== JSON.stringify(previousAccess)) {
           settings = writeSettings(settingsFile, { ...settings, permissions: nextAccess })
-          commandRunner.cancel(); void automation?.cancel(); mediaService?.cancelAll()
+          workflows.cancel(); commandRunner.cancel(); void automation?.cancel(); mediaService?.cancelAll()
           if (previousAccess.local !== settings.permissions.local || JSON.stringify(previousAccess.cloud) !== JSON.stringify(settings.permissions.cloud)) { workDispatchGeneration++; automation?.stopWork(); engine?.stop() }
         }
       }
@@ -1210,7 +1239,7 @@ function registerBridges(): void {
   handle('engine:restart', () => restartIdleConnection(engine, dispatchingWork))
 
   handle('engine:stop', () => {
-    commandRunner.cancel()
+    workflows.cancel(); commandRunner.cancel()
     preparing?.controller.abort(); permissionTickets.clear()
     workDispatchGeneration++
     automation?.stopWork()
@@ -1761,7 +1790,7 @@ function registerBridges(): void {
     const mode: ApprovalMode = APPROVAL_MODES.includes(approval as ApprovalMode)
       ? (approval as ApprovalMode)
       : 'ask'
-    if (approval === 'plan') commandRunner.cancel()
+    if (approval === 'plan') { workflows.cancel(); commandRunner.cancel() }
     settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, approval: mode } })
     return { ok: true, answer: mode }
   })
