@@ -199,10 +199,10 @@ const mediaApi: MediaBridge = {
   dictate: () => ipcRenderer.invoke('media:dictate'), cancel: () => ipcRenderer.invoke('media:cancel'),
 }
 const marketplaceApi: MarketplaceBridge = {
-  sources: () => ipcRenderer.invoke('market:sources'), browse: repo => ipcRenderer.invoke('market:browse', repo),
-  probe: () => ipcRenderer.invoke('market:probe'), installed: () => ipcRenderer.invoke('market:installed'),
-  plan: (repo, action, plugin) => ipcRenderer.invoke('market:plan', repo, action, plugin),
-  confirm: token => ipcRenderer.invoke('market:confirm', token), cancel: () => ipcRenderer.invoke('market:cancel'),
+  sources: engine => ipcRenderer.invoke('market:sources', engine), browse: (repo, engine) => ipcRenderer.invoke('market:browse', repo, engine),
+  probe: engine => ipcRenderer.invoke('market:probe', engine), installed: engine => ipcRenderer.invoke('market:installed', engine),
+  plan: (repo, action, plugin, engine) => ipcRenderer.invoke('market:plan', repo, action, plugin, engine),
+  confirm: (token, engine) => ipcRenderer.invoke('market:confirm', token, engine), cancel: engine => ipcRenderer.invoke('market:cancel', engine),
 }
 const api = {
   media: mediaApi, marketplace: marketplaceApi,

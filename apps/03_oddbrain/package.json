@@ -40,7 +40,7 @@
     "@electron/fuses": "^1.8.0",
     "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/vite": "^4.0.0",
-    "@types/node": "^22.10.2",
+    "@types/node": "^24.19.2",
     "@types/react": "^19.0.2",
     "@types/react-dom": "^19.0.2",
     "@types/yauzl": "^3.4.0",
@@ -61,6 +61,6 @@
     "@electron/get": "^5.1.0"
   },
   "engines": {
-    "node": ">=22.13"
+    "node": ">=24 <25"
   }
 }

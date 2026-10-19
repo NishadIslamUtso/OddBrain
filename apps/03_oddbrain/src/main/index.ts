@@ -9,6 +9,7 @@ import type { MemoryAction } from '../shared/lib/memoryWorkspace'
 import { normalizeExtensionAppearance, type ExtensionAppearance } from '../shared/lib/extensionAppearance'
 import { createMediaService } from './media/service'
 import { createMarketplaceService } from './engine/marketplace'
+import { createAgyMarketplaceService } from './engine/agyMarketplace'
 import type { MediaInput, MediaPreferences } from '../shared/lib/mediaBridge'
 import type { MarketplaceAction } from '../shared/lib/marketplace'
 import { fitWindow } from './windowBounds'
@@ -271,12 +272,19 @@ function inferencePermissions() {
 
 let mediaService: ReturnType<typeof createMediaService> | undefined
 let marketplaceService: ReturnType<typeof createMarketplaceService> | undefined
+let agyMarketplaceService: ReturnType<typeof createAgyMarketplaceService> | undefined
 function registerBridges(): void {
   mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
   marketplaceService = createMarketplaceService({ file: join(app.getPath('userData'), 'marketplaces.json') })
+  agyMarketplaceService = createAgyMarketplaceService({ cacheFile: join(app.getPath('home'), '.gemini', 'antigravity', 'cache', 'marketplaces', 'antigravity-plugins-official', 'marketplace.json') })
+  const market = (engine: unknown) => {
+    if (engine === 'agy') return agyMarketplaceService!
+    if (engine === undefined || engine === 'claude-code') return marketplaceService!
+    throw Error('Unknown marketplace engine.')
+  }
   const owners = new Set<number>()
   const track = (sender: Electron.WebContents): number => {
-    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
+    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
     return sender.id
   }
   const marketAnswer = async <T,>(run: () => Promise<T>) => { try { return { ok: true as const, value: await run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
@@ -291,13 +299,13 @@ function registerBridges(): void {
   handle('media:decode', (event, input: MediaInput) => mediaService!.decode(track(event.sender), input))
   handle('media:dictate', event => mediaService!.dictate(track(event.sender)))
   handle('media:cancel', event => { mediaService!.cancel(event.sender.id) })
-  handle('market:sources', () => marketplaceService!.sources())
-  handle('market:browse', (event, repo: string) => marketAnswer(() => marketplaceService!.browse(repo, track(event.sender))))
-  handle('market:probe', event => marketAnswer(() => marketplaceService!.probe(track(event.sender))))
-  handle('market:installed', event => marketAnswer(() => marketplaceService!.installed(track(event.sender))))
-  handle('market:plan', (event, repo: string, action: MarketplaceAction, plugin?: string) => marketAnswer(() => marketplaceService!.plan(track(event.sender), repo, action, plugin)))
-  handle('market:confirm', (event, token: string) => marketAnswer(() => marketplaceService!.confirm(track(event.sender), token)))
-  handle('market:cancel', event => { marketplaceService!.cancel(event.sender.id) })
+  handle('market:sources', (_event, engine?: unknown) => market(engine).sources())
+  handle('market:browse', (event, repo: string, engine?: unknown) => marketAnswer(() => market(engine).browse(repo, track(event.sender))))
+  handle('market:probe', (event, engine?: unknown) => marketAnswer(() => market(engine).probe(track(event.sender))))
+  handle('market:installed', (event, engine?: unknown) => marketAnswer(() => market(engine).installed(track(event.sender))))
+  handle('market:plan', (event, repo: string, action: MarketplaceAction, plugin?: string, engine?: unknown) => marketAnswer(() => market(engine).plan(track(event.sender), repo, action, plugin)))
+  handle('market:confirm', (event, token: string, engine?: unknown) => marketAnswer(() => market(engine).confirm(track(event.sender), token)))
+  handle('market:cancel', (event, engine?: unknown) => { market(engine).cancel(event.sender.id) })
   const memoryAnswer = async (run: () => unknown) => { try { if (!memoryOrganizer) throw Error('Memory organizer is still starting.'); return { ok: true, view: await run() } } catch (e) { return { ok: false, error: (e as Error).message } } }
   handle('memory-workspace:read', () => memoryAnswer(() => memoryOrganizer!.read()))
   handle('memory-workspace:act', (_event, action: MemoryAction) => memoryAnswer(() => memoryOrganizer!.act(action)))
@@ -1158,7 +1166,7 @@ function registerBridges(): void {
   handle('skills:install-catalog', async (_event, name: string): Promise<{ ok: boolean; answer: string; written?: string[] }> => {
     const result = await installCatalogSkill(String(name ?? ''), skillTargets())
     if (!result.ok) return { ok: false, answer: result.answer }
-    return { ok: true, answer: `${result.skill.name} installed to ${result.written.length} engine folders`, written: result.written }
+    return { ok: true, answer: `${result.skill.name} installed for Claude Code and agy (${result.written.length} files written)`, written: result.written }
   })
 
   // Deploy the app's vault into every engine's own folder. The renderer sends
@@ -2197,6 +2205,7 @@ app.whenReady().then(async () => {
   app.on('before-quit', () => {
     mediaService?.cancelAll()
     marketplaceService?.cancelAll()
+    agyMarketplaceService?.cancelAll()
     void api?.close()
     void extensionApi?.close()
   })

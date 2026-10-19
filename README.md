@@ -21,7 +21,7 @@ Runtime Markdown, skill files and legal notices remain in their required locatio
 
 ## Run from source
 
-Use Node.js 22.13 or newer. Install the desired engine separately and configure its executable in the app. Ollama is a separately installed model server, not a bundled download.
+Use Node.js 24 LTS (`.nvmrc`, package requirements and CI agree). Electron 41 has its own embedded Node 24 runtime; changing the development runtime does not replace external engines. Install the desired engine separately and configure its executable in the app. Ollama is a separately installed model server, not a bundled download.
 
 ```sh
 cd apps/03_oddbrain
@@ -59,7 +59,11 @@ In **Vault → Backup & restore**, choose **Back up full vault**. This includes 
 
 Fresh profiles and **Reset appearance** use **Ink & Sketchbook**, including its eight brain-behaviour roles. Existing saved choices are preserved. Settings groups now describe their contents and expand their pages in the sidebar.
 
-**AI & connections → Connectors** has shortcuts to Skills, the engine plugin catalogs and API providers. **Models & API keys** supports Anthropic, OpenAI, Gemini, OpenRouter, Groq, DeepSeek, xAI and custom OpenAI-compatible endpoints; Ollama is optional. Available engines/models still depend on the configured adapter. Skills and Plugins also remain under **Advanced tools**. Claude catalogs are available; agy's store adapter is not implemented. MCP configuration is not a universal connector marketplace.
+**AI & connections → Connectors** has shortcuts to Skills, the engine plugin catalogs and API providers. **Models & API keys** supports Anthropic, OpenAI, Gemini, OpenRouter, Groq, DeepSeek, xAI and custom OpenAI-compatible endpoints; Ollama is optional. Available engines/models still depend on the configured adapter. Skills and Plugins also remain under **Advanced tools**.
+
+**Skills, Plugins and Connectors** have a source picker for Claude Code or agy. Claude offers Anthropic's official marketplace and saved public GitHub sources; agy reads its official Antigravity catalog, with a labelled engine-cache fallback when offline. Changes require command review, and installed state can be read back from the engine. These catalogs distribute whole plugin packages, which can include skills, connectors, hooks, rules and agents—not independently installable items in every category.
+
+The **shared skill collection** and **shared MCP configuration** still deploy to both engines; engine-marketplace actions affect only the chosen engine. Packs, API providers and Ollama remain separate. Installed/enabled does not mean a connector is authenticated or working. Interactive plugin settings and sign-in remain in the engine. The agy adapter has regression and fixture-process coverage; live Google-catalog access, real agy installs and target-laptop acceptance are still pending.
 
 ## Browser companion
 
