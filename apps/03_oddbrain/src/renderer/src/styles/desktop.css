@@ -60,6 +60,7 @@ button[role=switch]{border-radius:999px}
 .ob-command-results{max-height:55vh;overflow:auto;padding:6px}
 .ob-command-results>button{display:flex;align-items:center;width:100%;min-height:40px;border:0;background:none;padding:8px 10px;text-align:left;gap:14px;color:var(--color-ink)}
 .ob-command-results>button:hover{background:var(--color-panel)}
+.ob-command-results>button[aria-selected="true"]{background:var(--color-panel);box-shadow:inset 2px 0 var(--color-accent,var(--color-ink))}
 .ob-command-results>button>span{flex:1;min-width:0}
 .ob-command-results small{display:block;font-size:11px;color:var(--color-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
 /* Same compact home, transcript and composer used by the live app and preview. */
