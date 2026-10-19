@@ -2,7 +2,7 @@
 
 A local-first Windows desktop assistant with chat, projects, artifacts, a Markdown vault and a browser companion. It connects to separately installed engines and keeps source conversations distinct from AI interpretations and user-confirmed memory.
 
-**Development status:** recoverable browser capture is implemented. Better recall, grouped review and the next People/Journal/Life Story improvements remain in progress. The latest audit also reproduced reliability defects awaiting integration. This is not a fully accepted or signed release.
+**Development status:** recoverable browser capture is implemented. Better recall, grouped review and the next People/Journal/Life Story improvements remain in progress. The independently verified reliability repairs have been integrated with regression coverage. This is not a fully accepted or signed release.
 
 [Project context, requirements, known issues and verification →](CONTEXT.md)
 

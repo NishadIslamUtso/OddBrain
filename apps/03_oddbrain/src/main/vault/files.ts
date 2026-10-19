@@ -77,6 +77,16 @@ export function createVaultFiles(root: string, clock: () => Date) {
     return full
   }
 
+  /**
+   * Whether a file is there to read. A preview that cannot tell this apart from
+   * an empty file shows a blank pane and calls it a note; the two answers are
+   * different and the interface needs the true one.
+   */
+  function exists(relative: string): boolean {
+    const full = filePath(relative)
+    return existsSync(full) && statSync(full).isFile()
+  }
+
   function read(relative: string): string {
     const full = filePath(relative)
     if (!existsSync(full)) return ''
@@ -268,6 +278,7 @@ export function createVaultFiles(root: string, clock: () => Date) {
     root,
     filePath,
     ensureDirectory,
+    exists,
     read,
     readHead,
     readBytes,

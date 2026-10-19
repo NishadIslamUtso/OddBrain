@@ -92,7 +92,10 @@ test('browse is cancellable and rejects concurrent operations instead of multipl
   } finally { await rm(root, { recursive: true, force: true }) }
 })
 
-test('real fixture process installs and uninstalls only after confirmation; cancellation changes nothing', async () => {
+// Six real child processes with the host's own Node. Windows CI under load can
+// spend more than the 5 s default starting them, which says nothing about the
+// behaviour being tested.
+test('real fixture process installs and uninstalls only after confirmation; cancellation changes nothing', { timeout: 30_000 }, async () => {
   const root = await mkdtemp(join(tmpdir(), 'ob-market-process-'))
   const script = join(root, 'cli.cjs'), state = join(root, 'installed.json')
   try {

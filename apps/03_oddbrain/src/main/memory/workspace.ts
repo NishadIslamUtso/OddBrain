@@ -2,16 +2,20 @@ import { createHash, randomUUID } from 'node:crypto'
 import type { VaultFiles } from '../vault/files'
 import { yamlDocument } from '../vault/text'
 import { excluded, readPatterns } from '../vault/blacklist'
-import { changeMemory, chapterEvidence, staleBasis, mergedProfiles, emptyMemory, parseMemoryProposals, type MemoryAction, type MemorySource, type MemoryWorkspace } from '../../shared/lib/memoryWorkspace'
+import { changeMemory, chapterEvidence, staleBasis, mergedProfiles, emptyMemory, memoryStateProblem, parseMemoryProposals, type MemoryAction, type MemorySource, type MemoryWorkspace } from '../../shared/lib/memoryWorkspace'
 const hash = (s: string): string => createHash('sha256').update(s).digest('hex')
 const STATE = '06 Review/Organizer/state.json'
 const AI = new Set(['oddbrain','chatgpt','claude','gemini','aistudio','deepseek','arena','glm','kimi','grok','qwen','mistral','perplexity','copilot','poe'])
 export function createMemoryWorkspace(files: VaultFiles, clock: () => string = () => new Date().toISOString()) {
   function read(): MemoryWorkspace {
     const raw = files.read(STATE)
-    if (!raw) return emptyMemory()
-    const s = JSON.parse(raw)
-    if (s.version !== 1 || !['jobs','proposals','accounts','people','merges','projectionWarnings'].every(k => Array.isArray(s[k])) || !s.preferences || typeof s.preferences.enabled !== 'boolean' || typeof s.preferences.allowExternal !== 'boolean' || typeof s.preferences.model !== 'string' || !Number.isInteger(s.revision)) throw Error('Memory state needs repair. It was not replaced or reset.')
+    if (!raw && !files.exists(STATE)) return emptyMemory()
+    let s: MemoryWorkspace
+    // Name the file: "repair the state" is not actionable on its own, and this
+    // folder is one the person can open.
+    try { s = JSON.parse(raw) } catch { throw Error(`Memory state is not readable as JSON (${STATE}). It was not replaced or reset.`) }
+    const problem = memoryStateProblem(s)
+    if (problem) throw Error(`Memory state needs repair: ${problem} (${STATE}). It was not replaced or reset.`)
     s.discoveryWarnings ||= []
     return s
   }
@@ -54,14 +58,23 @@ export function createMemoryWorkspace(files: VaultFiles, clock: () => string = (
     if (changed) { state.revision++; save(state) }
     return state
   }
-  function evidence(source: MemorySource): string {
+  function evidence(source: MemorySource, seen: Set<string> = new Set()): string {
     if (source.kind === 'confirmed') {
       if (!/^06 Review\/Organizer\/Chapter sources\/[a-f0-9-]{36}\.json$/.test(source.path)) throw Error('Invalid chapter evidence path.')
-      if (staleBasis(source, read())) throw Error('Confirmed chapter evidence changed. Request a new draft.')
-      for (const basis of source.basis || []) { const original = read().proposals.find(p => p.id === basis.id); if (original) evidence(original.source) }
-      const bundle = JSON.parse(files.read(source.path) || 'null')
-      if (!bundle || hash(JSON.stringify(bundle.message)) !== source.hash) throw Error('Chapter evidence is missing or changed.')
-      return bundle.message.text
+      // The state file is plain JSON inside the vault, where anything else with
+      // file access can edit it. A basis that loops back to itself must be one
+      // clear sentence, not a stack overflow. `seen` is the current path only,
+      // so two chapters sharing one confirmed record are still both allowed.
+      if (seen.has(source.id)) throw Error('This chapter’s basis loops back to itself. Reject the draft and build it again from confirmed records.')
+      seen.add(source.id)
+      try {
+        const state = read()
+        if (staleBasis(source, state)) throw Error('Confirmed chapter evidence changed. Request a new draft.')
+        for (const basis of source.basis || []) { const original = state.proposals.find(p => p.id === basis.id); if (original) evidence(original.source, seen) }
+        const bundle = JSON.parse(files.read(source.path) || 'null')
+        if (!bundle || hash(JSON.stringify(bundle.message)) !== source.hash) throw Error('Chapter evidence is missing or changed.')
+        return bundle.message.text
+      } finally { seen.delete(source.id) }
     }
     if (!/^02 Sources\/Conversations\/(?:Browser|App)\/[a-f0-9]{64}\/revisions\/[a-f0-9]{64}-[a-f0-9]{64}\.json$/.test(source.path)) throw Error('Invalid memory source path.')
     const base = source.path.split('/revisions/')[0], conversation = JSON.parse(files.read(base + '/conversation.json') || 'null')

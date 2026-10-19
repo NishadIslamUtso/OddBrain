@@ -28,7 +28,9 @@ export type VaultRouteRequest = {
 export type VaultRouteReply = { status: number; body: Record<string, any> }
 
 /** The whole surface, so a wrong method is answered as one instead of as a 404. */
-const ROUTES: Record<string, string[]> = {
+export const VAULT_ROUTES: Record<string, string[]> = {
+  // `/api/vault` and `/api/vault/` are the same address to a caller.
+  '/': ['GET'],
   '/health': ['GET'],
   '/status': ['GET'],
   '/today': ['GET'],
@@ -85,6 +87,9 @@ export function handleVaultRequest(service: VaultService, request: VaultRouteReq
         // capped — a preview is a reading, not a download.
         const relative = String(request.query.get('path') || '')
         if (!relative || relative.includes('\\')) return { status: 400, body: { ok: false, error: 'A file path is required.' } }
+        if (!service.files().exists(relative)) {
+          return { status: 404, body: { ok: false, error: `There is no file at ${relative} in the vault. The preview was not shown.` } }
+        }
         const content = service.files().read(relative)
         return { status: 200, body: { ok: true, path: relative, content: content.slice(0, 200_000), truncated: content.length > 200_000 } }
       }
@@ -168,7 +173,7 @@ const unknownRoute = (route: string): VaultRouteReply => ({
  * left guessing whether they used the wrong verb or the wrong address.
  */
 function fallback(route: string, method: string): VaultRouteReply {
-  const allowed = ROUTES[route]
+  const allowed = VAULT_ROUTES[route]
   if (!allowed) return unknownRoute(route)
   return {
     status: 405,

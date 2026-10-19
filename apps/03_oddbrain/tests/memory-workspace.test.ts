@@ -246,3 +246,83 @@ describe('organizer model transport and extension boundary', () => {
     expect(() => changeMemory(emptyMemory(), { type: 'preferences', enabled: true, allowExternal: 'yes', model: '', expectedRevision: 0 }, now, 'id')).toThrow('explicit organizer permissions')
   })
 })
+
+describe('a state file that lies', () => {
+  it('reports a looping chapter basis as a sentence, never a stack overflow', () => {
+    // The state file is JSON inside the vault: anything else with file access can
+    // edit it. A basis that points back at its own chapter used to recurse until
+    // the stack died, which is a crash, not an answer.
+    const root = mkdtempSync(join(tmpdir(), 'ob-memory-loop-')); roots.push(root)
+    const vault = createVaultService({ vaultPath: root }), store = createMemoryWorkspace(vault.files(), () => now)
+    const id = 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+    const source: MemorySource = {
+      id, path: `06 Review/Organizer/Chapter sources/${id}.json`, title: 'Loop', provider: 'Your confirmed memory',
+      conversation: id, message: id, role: 'reviewed-facts', speaker: 'You', account: '', kind: 'confirmed',
+      basis: [{ id, revision: 1 }], observed: now, hash: 'x', start: 0, end: 10,
+    }
+    vault.files().writeAtomic('06 Review/Organizer/state.json', JSON.stringify({
+      ...emptyMemory(), revision: 1,
+      proposals: [{ id, revision: 1, state: 'approved', kind: 'story', subject: 'self', title: 'Loop', text: 't', quote: 'q', date: '', uncertainty: '', authored: 'ai', reviewedAt: now, model: 'm', history: [], source }],
+    }))
+    let thrown: unknown = null
+    try { store.evidence(store.read().proposals[0].source) } catch (error) { thrown = error }
+    expect(thrown).toBeInstanceOf(Error)
+    expect((thrown as Error).message).toContain('loops back to itself')
+    expect((thrown as Error).name).not.toBe('RangeError')
+  })
+})
+
+describe('organizer recovery across failed preflight and stale transports', () => {
+  it('does not leave the organizer permanently busy when privacy preflight fails', async () => {
+    const h = setup()
+    const privacy = vi.spyOn(h.store, 'privacyFingerprint').mockImplementationOnce(() => { throw Error('privacy file unavailable') })
+    const run = vi.fn(async () => ({ text: h.proposal(), model: 'fixture' }))
+    const scheduler = createMemoryOrganizer({ store: () => h.store, busy: () => false, configuration: () => 'same', run }); disposables.push(() => scheduler.dispose())
+    try {
+      await expect(scheduler.run()).rejects.toThrow('privacy file unavailable')
+      expect(scheduler.read().running).toBe(false)
+      await scheduler.run()
+      expect(run).toHaveBeenCalledOnce()
+      expect(h.store.read().proposals).toHaveLength(1)
+    } finally { privacy.mockRestore() }
+  })
+
+  it('a failed vault does not pause queued work in another vault with identical model settings', async () => {
+    vi.useFakeTimers()
+    const first = setup(), second = setup(); let current = first.store
+    const run = vi.fn(async () => { if (current === first.store) throw Error('first vault transport failure'); return { text: second.proposal(), model: 'fixture' } })
+    const scheduler = createMemoryOrganizer({ store: () => current, busy: () => false, configuration: () => 'same', intervalMs: 1000, run }); disposables.push(() => scheduler.dispose())
+    await scheduler.run()
+    current = second.store
+    await vi.advanceTimersByTimeAsync(1000)
+    expect(run).toHaveBeenCalledTimes(2)
+    expect(second.store.read().proposals).toHaveLength(1)
+  })
+
+  it('a late transport rejection cannot mark a job failed after switching vaults', async () => {
+    const first = setup(), second = setup(); let current = first.store
+    const started = Promise.withResolvers<void>(), response = Promise.withResolvers<{ text: string; model: string }>()
+    const scheduler = createMemoryOrganizer({ store: () => current, busy: () => false, configuration: () => 'same', run: async () => { started.resolve(); return response.promise } }); disposables.push(() => scheduler.dispose())
+    const pending = scheduler.run(); await started.promise
+    current = second.store; response.reject(Error('late failure'))
+    await pending
+    expect(first.store.read().jobs[0].state).toBe('queued')
+    expect(first.store.read().jobs[0].attempts).toBe(0)
+    expect(second.store.read().jobs).toHaveLength(0)
+  })
+
+  it('discards successful late replies after the deadline even when transport ignores abort', async () => {
+    const h = setup(), deadline = new AbortController()
+    const timeout = vi.spyOn(AbortSignal, 'timeout').mockReturnValue(deadline.signal)
+    const started = Promise.withResolvers<void>(), response = Promise.withResolvers<{ text: string; model: string }>()
+    const scheduler = createMemoryOrganizer({ store: () => h.store, busy: () => false, configuration: () => 'same', run: async () => { started.resolve(); return response.promise } }); disposables.push(() => scheduler.dispose())
+    try {
+      const pending = scheduler.run(); await started.promise
+      deadline.abort(new DOMException('Timed out', 'TimeoutError'))
+      response.resolve({ text: h.proposal(), model: 'fixture' }); await pending
+      expect(h.store.read().proposals).toHaveLength(0)
+      expect(h.store.read().jobs[0].state).toBe('blocked')
+      expect(scheduler.read().running).toBe(false)
+    } finally { timeout.mockRestore() }
+  })
+})

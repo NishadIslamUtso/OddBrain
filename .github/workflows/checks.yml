@@ -6,7 +6,7 @@ name: checks
 on: [push, pull_request]
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
     steps:
@@ -16,13 +16,29 @@ jobs:
           node-version: 22
       - name: Install
         working-directory: apps/03_oddbrain
-        run: npm install --no-audit --no-fund
+        run: npm ci --no-audit --no-fund
+      - name: Install Chromium for reader and durable-restart tests
+        working-directory: apps/03_oddbrain
+        run: npx playwright-core install --with-deps chromium
+      - name: Configure browser tests
+        working-directory: apps/03_oddbrain
+        run: node scripts/ci-browser.cjs
       - name: Types
         working-directory: apps/03_oddbrain
         run: npx tsc --noEmit -p tsconfig.json
       - name: Tests
         working-directory: apps/03_oddbrain
-        run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-linux.xml
+        run: npx vitest run --maxWorkers=2 --reporter=default --reporter=junit --outputFile=junit-linux.xml
+      - name: Enforce browser coverage and explicit skip policy
+        working-directory: apps/03_oddbrain
+        run: node scripts/check-ci-tests.cjs junit-linux.xml
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-linux
+          path: apps/03_oddbrain/junit-linux.xml
+          if-no-files-found: error
       - name: Linux speaks
         if: always()
         uses: actions/github-script@v7
@@ -51,6 +67,14 @@ jobs:
                 });
               }
             }
+      - name: Extension companion in Chromium
+        working-directory: apps/03_oddbrain
+        run: |
+          node ../../extension/scripts/preview-server.cjs > "$RUNNER_TEMP/extension-preview.log" 2>&1 &
+          PREVIEW_PID=$!
+          trap 'kill "$PREVIEW_PID"' EXIT
+          node -e 'const deadline=Date.now()+15000; async function ready(){try {const r=await fetch("http://127.0.0.1:5175");if(r.ok)return;}catch{}if(Date.now()>deadline)throw Error("Extension preview did not start");await new Promise(r=>setTimeout(r,200));return ready();}ready().catch(e=>{console.error(e);process.exit(1)});'
+          node ../../extension/scripts/check-browser.cjs
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build
@@ -63,8 +87,17 @@ jobs:
         env:
           ELECTRON_DISABLE_SANDBOX: 1
         run: |
+          set -o pipefail
           sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64
-          xvfb-run -a npx electron . --smoke
+          xvfb-run -a npx electron . --smoke 2>&1 | tee native-smoke.log
+      - name: Upload native smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-smoke-linux
+          path: apps/03_oddbrain/native-smoke.log
+          if-no-files-found: warn
+
 
   windows:
     runs-on: windows-latest
@@ -78,12 +111,28 @@ jobs:
       - name: Install
         working-directory: apps/03_oddbrain
         run: npm ci --no-audit --no-fund
+      - name: Install Chromium for reader and durable-restart tests
+        working-directory: apps/03_oddbrain
+        run: npx playwright-core install chromium
+      - name: Configure browser tests
+        working-directory: apps/03_oddbrain
+        run: node scripts/ci-browser.cjs
       - name: Types
         working-directory: apps/03_oddbrain
         run: npx tsc --noEmit -p tsconfig.json
       - name: Tests
         working-directory: apps/03_oddbrain
-        run: npx vitest run --reporter=default --reporter=junit --outputFile=junit-windows.xml
+        run: npx vitest run --maxWorkers=2 --reporter=default --reporter=junit --outputFile=junit-windows.xml
+      - name: Enforce browser coverage and explicit skip policy
+        working-directory: apps/03_oddbrain
+        run: node scripts/check-ci-tests.cjs junit-windows.xml
+      - name: Upload test evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: junit-windows
+          path: apps/03_oddbrain/junit-windows.xml
+          if-no-files-found: error
       - name: Windows speaks
         if: always()
         uses: actions/github-script@v7
@@ -119,4 +168,13 @@ jobs:
         working-directory: apps/03_oddbrain
         timeout-minutes: 5
         shell: pwsh
-        run: npx electron . --smoke
+        run: |
+          npx electron . --smoke 2>&1 | Tee-Object -FilePath native-smoke.log
+          exit $LASTEXITCODE
+      - name: Upload native smoke evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: native-smoke-windows
+          path: apps/03_oddbrain/native-smoke.log
+          if-no-files-found: warn

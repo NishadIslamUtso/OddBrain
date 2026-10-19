@@ -480,6 +480,43 @@ describe("extension worker against the real paired vault API", () => {
       await h.dispose();
     }
   });
+  it("refuses captures past the outbox cap (200) instead of growing without bound, and recovers", async () => {
+    const h = await harness();
+    try {
+      h.setOffline(true);
+      for (let i = 0; i < 200; i++) {
+        const r = await h.dispatch({
+          type: "ob-capture",
+          payload: { ...page, title: "Page " + i, url: page.url + "/" + i },
+        });
+        expect(r.queued).toBe(true);
+      }
+      expect(h.local.queue).toHaveLength(200);
+      // One past the cap: refused out loud — queued:false with a reason the
+      // person can read — and the queue does not grow. chrome.storage.local
+      // is a bounded jar; silently overflowing it would lose captures.
+      const over = await h.dispatch({
+        type: "ob-capture",
+        payload: { ...page, title: "One past the cap", url: page.url + "/over" },
+      });
+      expect(over).toMatchObject({ ok: false, queued: false });
+      expect(String(over.error)).toContain("Outbox full");
+      expect(h.local.queue).toHaveLength(200);
+      // The cap does not wedge the outbox: online again, everything drains.
+      // The flush is deliberately budgeted (20 delivered per call, to keep
+      // the handler responsive), so drain it until it is empty.
+      h.setOffline(false);
+      for (let i = 0; i < 12 && h.local.queue.length > 0; i++) {
+        await h.dispatch({ type: "ob-flush" });
+      }
+      expect(h.local.queue).toHaveLength(0);
+      expect(
+        h.local.activity.filter((e: any) => e.success).length,
+      ).toBeGreaterThan(0);
+    } finally {
+      await h.dispose();
+    }
+  });
   it("never retries excluded captures, and keeps an offline exclusion edit", async () => {
     const h = await harness();
     try {

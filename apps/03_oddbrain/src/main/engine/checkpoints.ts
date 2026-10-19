@@ -6,7 +6,7 @@
  * was taken FROM. Restore puts that copy back exactly where it came from.
  */
 import { copyFile, mkdir, readFile, readdir, rm, writeFile, lstat, realpath, open } from 'node:fs/promises'
-import { createHash } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 import { join, basename, sep } from 'node:path'
 
 export type Checkpoint = {
@@ -58,8 +58,18 @@ export async function snapshotFile(
     return { original, copy: '', at: new Date(epochMs).toISOString(), existed: false }
   }
   await mkdir(dir, { recursive: true })
-  const copy = join(dir, copyName(original, epochMs))
-  await writeFile(copy, before)
+  const stem = copyName(original, epochMs)
+  let copy = join(dir, stem)
+  for (;;) {
+    try {
+      await writeFile(copy, before, { flag: 'wx' })
+      break
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      // Two edits can occur in the same millisecond. Keep both preimages.
+      copy = join(dir, `${stem}-${randomUUID()}`)
+    }
+  }
   return { original, copy, at: new Date(epochMs).toISOString(), existed: true }
 }
 

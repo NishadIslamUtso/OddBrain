@@ -10,7 +10,7 @@ Target acceptance machine: ASUS TUF A15, Ryzen 7, 8 GB RAM, RTX 3050 4 GB, Windo
 
 Runtime Markdown is intentionally preserved: `vault/Brain/` holds actual vault content, templates and engine rulebooks; `apps/03_oddbrain/store/packs/` contains installable prompts and `SKILL.md` files. The predecessor app’s `THIRD_PARTY_NOTICES.md` is a legal notice. These are not competing project-context documents. This is **two root documentation files**, not a claim that the repository contains only two Markdown files.
 
-**Current working branch: `arena/cc83a507-oddbrain`.** Based on the entire `clean-build` tree at `6835309cdfc3a3b5a16cea5b80f38c318badb934`, including its PDF fix and test shim. The reviewed appearance/navigation foundation is retained; the memory workflow and extension changes described below are layered on top. Product work was published at `b9d4072`, then durable capture at `9977ae2ef764c80332ab282f648e07f2cf72c763`. This audit independently confirmed that remote tip and byte-compared every tracked working file against it before editing documentation. No other branch was merged during the audit.
+**Current working branch: `arena/cc83a507-oddbrain`.** Based on the entire `clean-build` tree at `6835309cdfc3a3b5a16cea5b80f38c318badb934`, including its PDF fix and test shim. The reviewed appearance/navigation foundation is retained; the memory workflow and extension changes described below are layered on top. Product work was published at `b9d4072`, then durable capture at `9977ae2ef764c80332ab282f648e07f2cf72c763`. This audit independently confirmed that remote tip and byte-compared every tracked working file against it before editing documentation. No other branch was merged during the audit or subsequent selective integration.
 
 ---
 
@@ -21,17 +21,17 @@ Runtime Markdown is intentionally preserved: `vault/Brain/` holds actual vault c
 | Stage 1: reliable capture | Implemented and published at `9977ae2`; normal browser-restart recovery tested. Not a guarantee of complete account capture or all failures being handled. |
 | Stage 2: useful recall | Pending: search original messages and memory, source-linked recall, grouped interpretation review and shared confirmed facts. |
 | Stage 3: comfortable daily use | Pending: content-first People/Journal/Life Story and unified setup, preserving the approved design and controls. |
-| Newly verified reliability defects | Still present at `9977ae2`: vault preview guard, chapter-cycle handling, damaged memory-state handling, organizer lifecycle, artifact/checkpoint/key persistence edge cases. See the audit below. Do not mark these fixed merely because another branch contains a repair. |
+| Verified reliability repairs | Integrated after the audit: vault preview guard, chapter-cycle handling, damaged memory-state handling, organizer lifecycle, artifact/checkpoint/key persistence edge cases and test timeout forwarding. Regression cases now run on this branch; see the integration record below. |
 | Documentation | README + this context file; stale `.ai` handovers retired. No runtime Markdown or feature removed. |
 
-Recommended next integration is targeted reliability repair, keeping the Stage 1 queue intact, before resuming Stages 2/3. No blanket merge is justified by a higher test count.
+Targeted reliability integration is complete; Stage 1’s queue is unchanged. Next product work remains Stages 2/3 and real-machine acceptance. No blanket merge is justified by a higher test count.
 
 ## The laws
 
 1. **Honesty above all.** No invented model names, no colored-dot lies — words, not dots. Every number on screen is countable from records the user can see. A feature that does not exist gets one muted line, never a nav item.
 2. **Engines are exactly two**: `claude-code` and `agy`. Ollama is the local brain server, not an engine. Cloud keys ride claude-code.
 3. **Automatic conversation capture is on for supported AI sites after pairing.** People/Classroom sites require explicit site grants. No browser-history collection; existing visits are preserved. Collection is limited to accessible content in open conversations, not an account-wide archive.
-4. **Stay within the authorized work.** The three-stage daily-use plan is authorized; this turn is claim verification and documentation consolidation, not wholesale integration of other branches. Ask about consequential ambiguities, not already-settled goals. Real-machine reports outrank every plan.
+4. **Stay within the authorized work.** The three-stage daily-use plan is authorized; the user subsequently authorized selective integration of the demonstrated repairs, not wholesale replacement by another branch. Ask about consequential ambiguities, not already-settled goals. Real-machine reports outrank every plan.
 5. **Features need regression tests and scoped verification.** Target gate: typecheck, full suite, builds, native smoke and Linux/Windows CI. State which checks actually ran, the source SHA, and any skips. Green tests establish their assertions, not universal correctness.
 6. One landing = one commit. No new fonts, no cloud services, no telemetry. The in-app Ollama downloader is benched by owner decision — the route is `winget install Ollama.Ollama` (any installed copy is found automatically).
 
@@ -174,6 +174,8 @@ Extension structural-selector references (facts, not copied automation): [timeli
 
 ## Independent audit of other agents’ claims
 
+**Historical baseline:** this audit was recorded at `6f78969` against product `9977ae2`. The faults described below have since been selectively repaired here as recorded in the integration section; the original findings remain for provenance.
+
 **Method and scope (2026-10-19):** fetched remote refs, checked commit tree IDs and diffs, queried GitHub run/job/artifact records, read workflow implementations, and ran targeted regression tests in isolated `git archive` snapshots. No product code was modified or other branch merged. Local audit dependencies came from the published `9977ae2` lockfile; snapshots reused those dependencies. This is a differential check of the cited source fixes, not an independent clean-room recreation of each branch’s complete install.
 
 ### Verdicts
@@ -213,4 +215,30 @@ Extension structural-selector references (facts, not copied automation): [timeli
 
 **Queue distinction:** the legacy manual capture outbox is 200 items / 4 MB; the new conversation IndexedDB outbox is 128 MiB / 4,096 operations. A test of the former does not validate the latter. Audits of `b9d4072` do not establish the behavior of the later `9977ae2` capture-recovery implementation.
 
-**Decision:** keep the current product branch as the integration base. The cited lanes contain useful, demonstrably necessary repairs, but none is a safe wholesale replacement for the current feature set. This audit records the faults; it does not fix them or complete Stages 2/3.
+**Decision at audit time:** keep the current product branch as the integration base. The cited lanes contain useful, demonstrably necessary repairs, but none is a safe wholesale replacement for the current feature set. The audit itself did not fix the faults or complete Stages 2/3. The user then authorized the integration below.
+
+## Selective reliability integration (2026-10-19)
+
+Authorized after the independent audit. Source fixes were adapted from `80fcadb` (PR11), `6baff89` (artifact/organizer lane) and `d28f0d3` (clean-build), not merged as whole branches. PR12’s older feature tree was not substituted for this one.
+
+### Changes and preserved behavior
+
+- **Vault previews:** allow the renderer’s existing same-origin GET route through the API guard, retain vault path/link restrictions and distinguish a missing file from an empty note. Renderer error messages expose the actual refusal rather than a generic sentence. No navigation, styling or controls changed.
+- **Memory state and chapters:** reject malformed state with the repair file’s path, without resetting it; detect cyclic chapter evidence. Adapted the imported validator to accept older valid version-1 files lacking `discoveryWarnings`. An existing empty state file is corruption, not a new workspace; only a genuinely absent file initializes empty memory.
+- **Organizer:** complete privacy preflight before marking work active; scope transport backoff to the vault/configuration; ignore stale-vault failures; discard late success after the timeout even if the transport ignored abort. Existing review/approval and external-processing permissions remain in force.
+- **Artifact history:** recover orphaned versions into existing history without renumbering earlier public slots or replacing selected content/metadata. Ignore linked/broken/non-file entries during recovery. Deduplicate identities and use exclusive version writes so gaps or interrupted index updates cannot overwrite earlier versions.
+- **Checkpoints and keys:** exclusive checkpoint filenames preserve same-millisecond preimages. Encrypt credentials before replacing the private file, and update in-memory state only after persistence succeeds. Tests cover failed set and failed clear, plus Linux file permissions. These are not power-loss or concurrent-multi-process atomicity guarantees.
+- **Ollama:** diagnostics use the configured endpoint; model pull refuses redirects, consistent with the existing model-discovery/delete boundary.
+- **Test runner:** forward both canonical second-argument and existing legacy third-argument timeouts. Restore mocks after synchronous exceptions, rejected promises and failing cleanup hooks. Added independent tests of the actual shim’s registration and cleanup behavior.
+- **CI:** use `npm ci` and two test workers on both OSes; install Chromium through Playwright and publish its actual path via `GITHUB_ENV`. Require the reader and durable-restart suites to exist and run, not merely report zero skips. Linux permits no skips; Windows allows only the two named artifact-symlink cases and the POSIX key-permissions case. Unknown skips fail. Linux also runs the actual extension UI harness. JUnit and native-smoke logs are uploaded, and smoke exit codes survive output capture.
+- **Preserved byte-for-byte relative to `9977ae2`:** the entire extension (including the 0.5 durable conversation queue), starter vault, appearance state and UI artwork/catalog sources. Existing conversation-worker tests remain, with clean-build’s separate 200-item manual-outbox test added alongside them. No new Markdown document, dependency or branch relocation was introduced.
+
+### Validation
+
+- Full suite: **1,067 passed across 154 files, zero skips**, with real Chromium enabled. Includes original reader-to-vault integration, IndexedDB restart recovery and the new repairs. `check-ci-tests.cjs` accepted the generated full JUnit report; its own regressions reject missing/skipped browser suites, unexpected platform skips, malformed reports and inconsistent counters.
+- TypeScript and Electron/web builds passed. Existing CSS `::highlight` optimizer and bundle-size warnings remain.
+- All nine app browser suites passed, including the full appearance/layout inventory, graph, samples and reviewed memory flow. The extension harness passed its queue/privacy/discard checks and 8 looks × 2 surfaces × 4 screens.
+- One UI navigation check initially exceeded its 7-second deadline while full-suite and browser runs competed for resources. The complete nine-suite UI run passed when rerun serially; no timeout was relaxed and no assertion removed.
+- Browser dependencies were restored in ignored cache storage. Initial browser setup failed before launch because of module resolution/shared-library availability; those environment issues were fixed before the full browser-enabled run. No generated binary, screenshot or audit log is committed.
+- Local logs: `.cache/integrate/{full-tests.log,full.xml,typecheck.log,build.log,build-web.log,app-ui.log,extension-ui.log}`. Cache files are temporary, not durable published evidence. CI validation for the new commit must be read from its run record; the older green run is not evidence for these new changes.
+- Native Windows target-laptop acceptance, signed-in provider layouts, native MV3 lifecycle and real model interpretation quality remain outstanding. Stages 2/3 remain pending. No installer or signed release is claimed by this integration.
