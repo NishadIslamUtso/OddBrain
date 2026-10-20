@@ -63,3 +63,33 @@ test('desktop hook migrates exact legacy strings, sends changed chats only, and 
   // untouched in localStorage as an additional migration fallback.
   expect(localStorage.getItem('ai-assistant.chats')).toBe(rawChats)
 })
+
+test('an open failure stays globally actionable and retry preserves edits made while storage was unavailable', async () => {
+  const rawChats = JSON.stringify([first]), rawCurrent = JSON.stringify('one')
+  localStorage.setItem('ai-assistant.chats', rawChats); localStorage.setItem('ai-assistant.current-chat', rawCurrent)
+  let reads = 0
+  let snapshot: ChatStoreSnapshot = { initialized: true, revision: 4, chats: [first], currentChat: 'one' }
+  const read = vi.fn(async (): Promise<ChatStoreAnswer> => ++reads === 1 ? { ok: false, error: 'Both conversation indexes are damaged.' } : { ok: true, snapshot })
+  const write = vi.fn(async (input: ChatStoreWrite): Promise<ChatStoreAnswer> => {
+    const changed = new Map((input.upserts as Chat[]).map(chat => [chat.id, chat]))
+    snapshot = { initialized: true, revision: snapshot.revision + 1, chats: (input.order as string[]).map(id => changed.get(id) || snapshot.chats.find(chat => chat.id === id)!), currentChat: input.currentChat as string }
+    return { ok: true, snapshot }
+  })
+  const exportRecovery = vi.fn(async (input: ChatStoreMigration) => ({ ok: true, answer: `exported ${String((input.chats as Chat[])[0]?.title)}` }))
+  window.api = { chats: { read, migrate: vi.fn(), write, exportRecovery, openLocation: async () => ({ ok: true, answer: 'opened' }) } } as NonNullable<Window['api']>
+  const { useChats } = await import('../src/renderer/src/state/useChats')
+  let state!: ReturnType<typeof useChats>
+  function Harness() { state = useChats(); return createElement('span', null, state.storage.state) }
+  await act(async () => { root.render(createElement(Harness)); await Promise.resolve(); await Promise.resolve() })
+  expect(state.ready).toBe(true); expect(state.storage).toMatchObject({ state: 'attention', message: expect.stringContaining('damaged') })
+
+  await act(() => state.rename('one', 'Kept while unavailable'))
+  expect(write).not.toHaveBeenCalled()
+  await act(async () => { expect(await state.retryStorage()).toBe(true) })
+  expect(state.chats[0].title).toBe('Kept while unavailable')
+  // Retry is not reported successful until the retained edit is durably written.
+  expect(write).toHaveBeenCalledOnce()
+  expect((write.mock.calls[0][0].upserts as Chat[])[0].title).toBe('Kept while unavailable')
+  await act(async () => { expect((await state.exportRecovery()).ok).toBe(true) })
+  expect(exportRecovery.mock.calls[0][0].rawChats).toBe(rawChats)
+})

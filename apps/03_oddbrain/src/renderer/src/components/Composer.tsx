@@ -45,6 +45,7 @@ export default function Composer({
   onSend,
   onStop,
   busy,
+  preparing = false,
   notice,
   preview,
   projects = [],
@@ -62,6 +63,7 @@ export default function Composer({
   onSend: () => void
   onStop: () => void
   busy: boolean
+  preparing?: boolean
   notice: string
   /** Set in the browser preview, where there is no machine behind the window. */
   preview?: string
@@ -83,7 +85,7 @@ export default function Composer({
   const cookBase = useRef({ scope: draftScope, text: value })
   const lease = useRef(draftLease()), picking = useRef(false), currentScope = useRef(draftScope)
   if (currentScope.current !== draftScope) { currentScope.current = draftScope; lease.current.invalidate() }
-  useEffect(() => { if (busy) lease.current.invalidate() }, [busy])
+  useEffect(() => { if (busy || preparing) lease.current.invalidate() }, [busy, preparing])
   const sendDraft = () => { if (looksLikeNativeSlashCommand(liveDraft.current)) { setFileNote('Native slash commands need a verified engine action. Choose a saved prompt template or use the engine’s supported controls; nothing was sent.'); return }; lease.current.invalidate(); onSend() }
   const [savedDrafts, setSavedDrafts] = useState(false)
   const [fileNote, setFileNote] = useState(''), [pickingFiles, setPickingFiles] = useState(false)
@@ -123,9 +125,13 @@ export default function Composer({
   const [slashDismissed, setSlashDismissed] = useState(false), [slashIndex, setSlashIndex] = useState(0)
   useEffect(() => { setSlashDismissed(false); setSlashIndex(0) }, [value])
   const promptChoices = value.startsWith('/') && !/\s/.test(value.slice(1)) ? filterPrompts(loadPrompts(), value.slice(1)) : []
-  const slashOpen = !slashDismissed && !busy && !listening && promptChoices.length > 0
+  const slashOpen = !slashDismissed && !busy && !preparing && !listening && promptChoices.length > 0
   const pickPrompt = (index: number): void => { const chosen = promptChoices[index]; if (chosen) { onChange(chosen.body); setSlashDismissed(true); box.current?.focus() } }
-  const canSend = (value.trim().length > 0 || attachments.length > 0) && !busy && !listening
+  // A running native turn does not lock the composer: another text request can
+  // be durably queued and will run only after the active turn finishes. Exact
+  // image/source bytes cannot be represented by that text-only queue.
+  const queueHasFiles = busy && attachments.some(entry => entry.kind === 'image' || !!entry.originalFile)
+  const canSend = (value.trim().length > 0 || attachments.length > 0) && !preparing && !listening && !queueHasFiles
 
   /** Files pasted straight onto the box ride like picked files. */
   const paste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
@@ -251,6 +257,7 @@ export default function Composer({
             </div> : null}
           </div>
           <span className="ml-auto flex items-center gap-2">
+            {preparing ? <span role="status" className="text-[11.5px] text-muted">Saving before send…</span> : queueHasFiles ? <span role="status" className="text-[11.5px] text-muted">Files send after current work.</span> : null}
             {busy ? (
               <button
                 type="button"
@@ -266,13 +273,13 @@ export default function Composer({
               type="button"
               onClick={sendDraft}
               disabled={!canSend}
-              aria-label="Send"
-              title="Send (Enter)"
-              className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
+              aria-label={queueHasFiles ? 'Files cannot be queued' : busy ? 'Add request to queue' : 'Send'}
+              title={queueHasFiles ? 'Remove the files to queue text, or wait for current work to finish' : busy ? 'Add to queue (Enter)' : 'Send (Enter)'}
+              className={`flex h-7 items-center justify-center gap-1 rounded-lg transition-colors ${busy ? 'px-2 text-[11.5px]' : 'w-7'} ${
                 canSend ? 'bg-accent text-[var(--accent-ink)] hover:bg-accent/90' : 'bg-white/[0.06] text-muted'
               }`}
             >
-              <ArrowUp size={15} />
+              <ArrowUp size={15} />{busy ? 'Queue' : null}
             </button>
           </span>
         </div>

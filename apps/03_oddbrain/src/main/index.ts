@@ -59,7 +59,7 @@ import { userInfo } from 'node:os'
 import { registerStagingRoot, setBinaryOverride, binaryOverride, resolveEngineCommand } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path'
-import { existsSync, statSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, openSync, statSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
 import { createVaultService, resolveVaultRoot } from './vault/service'
@@ -116,7 +116,7 @@ import { createProjectRuleReview, houseRulesFile as nativeHouseRulesFile } from 
 import { DEFAULT_HOUSE_RULES, instructionBlock, type HouseRules } from '../shared/lib/houseRules'
 import { newProject, type Project } from '../shared/lib/projects'
 import { scanTextHazards } from '../shared/lib/textHazards'
-import { createChatStore } from './chats/store'
+import { chatRecoveryDocument, createChatStore } from './chats/store'
 import type { ChatStoreMigration, ChatStoreSnapshot, ChatStoreWrite } from '../shared/lib/chatStore'
 
 /**
@@ -315,7 +315,8 @@ let mediaService: ReturnType<typeof createMediaService> | undefined
 let marketplaceService: ReturnType<typeof createMarketplaceService> | undefined
 let agyMarketplaceService: ReturnType<typeof createAgyMarketplaceService> | undefined
 function registerBridges(): void {
-  const chatStore = createChatStore(join(app.getPath('userData'), 'chats-v1'))
+  const chatRoot = join(app.getPath('userData'), 'chats-v1')
+  const chatStore = createChatStore(chatRoot)
   const chatAnswer = <T,>(run: () => T) => {
     try { return { ok: true as const, ...run() } }
     catch (error) {
@@ -326,6 +327,27 @@ function registerBridges(): void {
   handle('chats:read', () => chatAnswer(() => ({ snapshot: chatStore.read() })))
   handle('chats:migrate', (_event, input: ChatStoreMigration) => chatAnswer(() => chatStore.migrate(input)))
   handle('chats:write', (_event, input: ChatStoreWrite) => chatAnswer(() => ({ snapshot: chatStore.write(input) })))
+  handle('chats:export-recovery', async (_event, input: ChatStoreMigration) => {
+    try {
+      const document = chatRecoveryDocument(input)
+      const chosen = await dialog.showSaveDialog({ title: 'Export OddBrain chat recovery data', defaultPath: `OddBrain-chat-recovery-${Date.now()}.json`, filters: [{ name: 'JSON recovery file', extensions: ['json'] }] })
+      if (chosen.canceled || !chosen.filePath) return { ok: false, answer: 'Export cancelled. Nothing was written.' }
+      noLinkedPath(chosen.filePath)
+      const fd = openSync(chosen.filePath, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW || 0), 0o600)
+      try {
+        writeFileSync(fd, document, 'utf8'); fsyncSync(fd)
+        if (fstatSync(fd).size !== Buffer.byteLength(document)) throw Error('The exported file could not be verified.')
+      } finally { closeSync(fd) }
+      return { ok: true, answer: `Chat recovery data exported to ${chosen.filePath}`, path: chosen.filePath }
+    } catch (error) { return { ok: false, answer: `${(error as Error).message || 'Chat recovery data could not be exported.'} The live chat store was not changed.` } }
+  })
+  handle('chats:open-location', async () => {
+    try {
+      mkdirSync(chatRoot, { recursive: true, mode: 0o700 })
+      const error = await shell.openPath(chatRoot)
+      return error ? { ok: false, answer: `The chat storage folder could not be opened: ${error}` } : { ok: true, answer: 'Opened the private app-chat storage folder.', path: chatRoot }
+    } catch (error) { return { ok: false, answer: (error as Error).message || 'The chat storage folder could not be opened.' } }
+  })
 
   const workQueue = createWorkQueue(join(app.getPath('userData'), 'work-queue'), () => JSON.stringify(settings.engine), () => createHash('sha256').update(JSON.stringify([settings.engine, settings.permissions, automation?.preferences().allowCloudInference !== false, resolveEngineCommand(settings.engine.id), settings.engine.cloudProvider === 'anthropic' ? keyStore?.get('anthropic') || '' : ''])).digest('hex'))
   const permissionTickets = createPermissionTickets(() => engine?.current() || null)
@@ -1013,7 +1035,7 @@ function registerBridges(): void {
               }
             } else {
               if (eligible) pendingReads.set(requestId, { candidate, owner: requestOwner, file: eligible.file, folder: eligible.folder })
-              event = { ...event, requestId, ...(eligible ? { readScopes: { file: eligible.file, folder: eligible.folder, project: !!context?.projectId } } : {}) }
+              event = { ...event, requestId, ...(eligible ? { readScopes: { file: eligible.file, folder: eligible.folder, workspace: eligible.workspace, project: !!context?.projectId } } : {}) }
             }
           } catch { engine?.stop(); event = { kind: 'error', text: 'The permission could not be bound to the active engine. Stop requested; no approval was sent.', chatId: context?.chatId, transcriptId: event.transcriptId } }
         }
@@ -1568,7 +1590,7 @@ function registerBridges(): void {
     const parent = await dialog.showOpenDialog({ title: operation === 'create' ? 'Choose where to keep the backup' : 'Choose where to create the restored vault', properties: ['openDirectory', 'createDirectory'] })
     if (parent.canceled || !parent.filePaths[0]) return { ok: false, answer: 'Cancelled. Nothing changed.' }
     const destination = join(parent.filePaths[0], `OddBrain-${operation === 'create' ? 'backup' : 'restored'}-${Date.now()}-${randomUUID().slice(0,8)}`)
-    const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', operation === 'create' ? 'Create backup' : 'Restore to new folder'], defaultId: 0, cancelId: 0, message: operation === 'create' ? 'Copy the entire vault, including sensitive conversations and attachments?' : 'Restore into a new folder? Your current vault will not be replaced.', detail: `Source: ${source}\nDestination: ${destination}\nVault files only. Installed models, application credentials and browser queues are not included. Keep the backup somewhere private.` })
+    const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', operation === 'create' ? 'Create backup' : 'Restore to new folder'], defaultId: 0, cancelId: 0, message: operation === 'create' ? 'Copy the entire vault, including sensitive conversations and attachments?' : 'Restore into a new folder? Your current vault will not be replaced.', detail: `Source: ${source}\nDestination: ${destination}\nVault files only. App chat history, installed models, application credentials and browser queues are not included. Export app chats separately from Settings → System. Keep the backup somewhere private.` })
     if (confirmation.response !== 1) return { ok: false, answer: 'Cancelled. Nothing changed.' }
     // Native dialog paths, never arbitrary renderer-provided source/destination paths.
     const result = operation === 'create' ? backupVault(source, destination) : restoreVault(source, destination)

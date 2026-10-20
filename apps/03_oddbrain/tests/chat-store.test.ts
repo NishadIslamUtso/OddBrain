@@ -3,7 +3,7 @@ import { afterEach, expect, test } from 'vitest'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createChatStore } from '../src/main/chats/store'
+import { chatRecoveryDocument, createChatStore } from '../src/main/chats/store'
 import type { Chat } from '../src/shared/types'
 
 const roots: string[] = []
@@ -82,4 +82,18 @@ test('damaged legacy JSON is refused without initializing or replacing it', () =
   const folder = root(), store = createChatStore(folder)
   expect(() => store.migrate({ chats: [], currentChat: '', rawChats: '{damaged', rawCurrentChat: null })).toThrow()
   expect(store.read()).toEqual({ initialized: false, revision: 0, chats: [], currentChat: '' })
+})
+
+test('recovery export keeps visible chats and exact legacy bytes without changing the store', () => {
+  const visible = [chat('visible', 'unsaved words')], rawChats = '{damaged legacy bytes'
+  const document = JSON.parse(chatRecoveryDocument({ chats: visible, currentChat: 'visible', rawChats, rawCurrentChat: '"visible"' }))
+  expect(document).toMatchObject({ format: 'oddbrain-chat-recovery-export', version: 1, chats: visible, currentChat: 'visible', legacy: { rawChats, rawCurrentChat: '"visible"' } })
+  expect(document.exportedAt).toMatch(/^\d{4}-\d{2}-\d{2}T/)
+})
+
+test('recovery export remains available when the visible library just exceeds the live chat-count limit', () => {
+  const visible = Array.from({ length: 20_001 }, (_, index): Chat => ({ id: `recovery-${index}`, title: `Recovery ${index}`, date: 'Today', messages: [] }))
+  const document = JSON.parse(chatRecoveryDocument({ chats: visible, currentChat: 'recovery-20000', rawChats: null, rawCurrentChat: null }))
+  expect(document.chats).toHaveLength(20_001)
+  expect(document.currentChat).toBe('recovery-20000')
 })

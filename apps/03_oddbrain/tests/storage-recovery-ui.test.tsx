@@ -1,0 +1,88 @@
+// @vitest-environment jsdom
+import { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import ChatStorageBanner from '../src/renderer/src/components/ChatStorageBanner'
+import ReadTrustManager from '../src/renderer/src/components/ReadTrustManager'
+import type { ChatState } from '../src/renderer/src/state/useChats'
+
+let host: HTMLDivElement, root: Root
+
+beforeEach(() => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+  host = document.createElement('div')
+  document.body.append(host)
+  root = createRoot(host)
+  localStorage.clear()
+})
+
+afterEach(async () => {
+  await act(() => root.unmount())
+  host.remove()
+  delete (window as any).api
+  delete (window as any).engineApi
+})
+
+test('storage attention stays visible and exposes all recovery actions', async () => {
+  const retryStorage = vi.fn().mockResolvedValue(true)
+  const exportRecovery = vi.fn().mockResolvedValue({ ok: true, answer: 'Recovery data exported.' })
+  const openStorageLocation = vi.fn().mockResolvedValue({ ok: true, answer: 'Storage folder opened.' })
+  const chats: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'openStorageLocation'> = {
+    storage: { state: 'attention', message: 'Conversation storage could not be opened.' },
+    retryStorage,
+    exportRecovery,
+    openStorageLocation,
+  }
+  await act(async () => root.render(<ChatStorageBanner chats={chats} />))
+  expect(host.querySelector('[role="alert"]')?.textContent).toContain(chats.storage.message)
+  for (const [label, action] of [
+    ['Retry', retryStorage],
+    ['Export recovery data', exportRecovery],
+    ['Open storage folder', openStorageLocation],
+  ] as const) {
+    await act(async () => {
+      ;[...host.querySelectorAll('button')].find(button => button.textContent === label)!.click()
+      await Promise.resolve()
+    })
+    expect(action).toHaveBeenCalledOnce()
+  }
+})
+
+test('remembered Read access shows its authority and is revocable outside an active prompt', async () => {
+  const rule = {
+    id: 'rule-1',
+    mode: 'folder' as const,
+    engine: 'claude-code' as const,
+    scope: 'C:\\owner\\project',
+    workspace: 'C:\\owner',
+    createdAt: '2026-10-20T00:00:00.000Z',
+  }
+  const revoke = vi.fn().mockResolvedValue({
+    ok: true,
+    answer: 'Remembered Read access removed.',
+    view: { rules: [] },
+  })
+  Object.assign(window, {
+    api: {},
+    engineApi: {
+      readTrust: {
+        list: vi.fn().mockResolvedValue({ ok: true, view: { rules: [rule] } }),
+        migrateLegacy: vi.fn(),
+        revoke,
+      },
+    },
+  })
+  await act(async () => {
+    root.render(<ReadTrustManager always />)
+    await Promise.resolve()
+    await Promise.resolve()
+  })
+  expect(host.textContent).toContain('C:\\owner\\project')
+  expect(host.textContent).toContain('Claude Code · Working folder: C:\\owner')
+  await act(async () => {
+    ;[...host.querySelectorAll('button')].find(button => button.textContent === 'Revoke')!.click()
+    await Promise.resolve()
+  })
+  expect(revoke).toHaveBeenCalledExactlyOnceWith('rule-1')
+  expect(host.textContent).toContain('No active read approvals.')
+})

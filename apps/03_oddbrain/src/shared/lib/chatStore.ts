@@ -30,8 +30,14 @@ export type ChatStoreAnswer =
   | { ok: true; snapshot: ChatStoreSnapshot; migrated?: boolean }
   | { ok: false; error: string; snapshot?: ChatStoreSnapshot }
 
+export type ChatStorageAction = { ok: boolean; answer: string; path?: string }
+
 export type ChatStoreBridge = {
   read: () => Promise<ChatStoreAnswer>
   migrate: (input: ChatStoreMigration) => Promise<ChatStoreAnswer>
   write: (input: ChatStoreWrite) => Promise<ChatStoreAnswer>
+  /** Export the visible library plus the exact legacy strings through a native save dialog. */
+  exportRecovery: (input: ChatStoreMigration) => Promise<ChatStorageAction>
+  /** Open the private app-chat folder. The renderer never supplies a path. */
+  openLocation: () => Promise<ChatStorageAction>
 }

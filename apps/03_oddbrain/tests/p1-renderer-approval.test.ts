@@ -45,7 +45,7 @@ test('a late acknowledgement cannot consume a new turn’s same-named request', 
 })
 test('broader read approval uses the main-process ticket and named scope', async () => {
   engineStore().turn!.permissions = []
-  engineStore().ingest({ kind: 'permission', requestId: 'read-ticket', tool: 'Read', summary: 'notes.txt', file: 'notes.txt', readScopes: { file: 'C:\\work\\notes.txt', folder: 'C:\\work', project: true } })
+  engineStore().ingest({ kind: 'permission', requestId: 'read-ticket', tool: 'Read', summary: 'notes.txt', file: 'notes.txt', readScopes: { file: 'C:\\work\\notes.txt', folder: 'C:\\work', workspace: 'C:\\work', project: true } })
   await engineStore().rememberAndAnswerRead('project')
   expect(approve).toHaveBeenCalledExactlyOnceWith('read-ticket', 'project')
   expect(answer).not.toHaveBeenCalled()

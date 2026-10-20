@@ -22,6 +22,7 @@ export type ReadTrustView = {
 export type ReadApprovalScopes = {
   file: string
   folder: string
+  workspace: string
   project: boolean
 }
 

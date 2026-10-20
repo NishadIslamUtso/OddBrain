@@ -36,6 +36,7 @@ export default function ChatView({
   onSend,
   onStop,
   busy,
+  preparing = false,
   notice,
   preview,
   live,
@@ -64,6 +65,7 @@ export default function ChatView({
   onSend: () => void
   onStop: () => void
   busy: boolean
+  preparing?: boolean
   notice: string
   preview?: string
   /** What the streaming sweep currently has, so a draft redraws as it is written. */
@@ -133,7 +135,7 @@ export default function ChatView({
   }
 
   const home = messages.length === 0 && (!engine.turn || (!!engine.turn.chatId && engine.turn.chatId !== chat?.id)) && !engine.ambient.busy
-  const composer = <Composer draftScope={chat?.id || `new:${project || "none"}`} value={draft} onChange={setDraft} onSend={onSend} onStop={onStop} busy={busy} notice={notice} preview={preview} projects={projects} project={project} onProject={onProject} attachments={attachments} onFiles={onFiles} fileTools={fileTools} onDetach={onDetach} />
+  const composer = <Composer draftScope={chat?.id || `new:${project || "none"}`} value={draft} onChange={setDraft} onSend={onSend} onStop={onStop} busy={busy} preparing={preparing} notice={notice} preview={preview} projects={projects} project={project} onProject={onProject} attachments={attachments} onFiles={onFiles} fileTools={fileTools} onDetach={onDetach} />
   return <main className={`ob-chat-view ${home ? 'ob-chat-home' : ''}`}>
     <div ref={scroller} data-find-root data-find-scroll onScroll={trackScroll} className="ob-chat-scroller">
       {home ? <div className="ob-home-stack">

@@ -29,7 +29,17 @@ test('Escape dismisses a template; normal Enter sends, Shift+Enter does not, bus
   await render('/'); await key('Escape'); expect(container.querySelector('[role="listbox"]')).toBeNull()
   await render('A normal draft'); await key('Enter', true); expect(send).not.toHaveBeenCalled()
   await key('Enter'); expect(send).toHaveBeenCalledTimes(1)
-  await render('A normal draft', true); await key('Escape'); expect(stop).toHaveBeenCalledTimes(1)
+  await render('A normal draft', true)
+  expect(container.querySelector('[aria-label="Add request to queue"]')).not.toBeNull()
+  await key('Enter'); expect(send).toHaveBeenCalledTimes(2)
+  await key('Escape'); expect(stop).toHaveBeenCalledTimes(1)
+})
+test('busy work queues text but keeps exact files for a later send', async () => {
+  await act(() => root.render(<Composer value="Use this picture" onChange={change} onSend={send} onStop={stop} busy notice="" attachments={[{ id: 'image-1', name: 'photo.png', kind: 'image', data: 'AA==' }]} />))
+  const button = container.querySelector('[aria-label="Files cannot be queued"]') as HTMLButtonElement
+  expect(button.disabled).toBe(true)
+  expect(container.textContent).toContain('Files send after current work.')
+  await key('Enter'); expect(send).not.toHaveBeenCalled()
 })
 test('attachment picker accepts broad formats and all chat tools remain reachable', async () => {
   await render('A normal draft')

@@ -15,6 +15,8 @@ import MediaSettings from './MediaSettings'
 import ConnectorsSection from './ConnectorsSection'
 import ErrorBoundary from './ErrorBoundary'
 import EngineBay from './EngineBay'
+import ReadTrustManager from './ReadTrustManager'
+import type { ChatState } from '../state/useChats'
 import AutomationControls from '../ui/AutomationControls'
 import RecipesSection from './RecipesSection'
 import HooksSection from './HooksSection'
@@ -314,6 +316,19 @@ function Switch({
   )
 }
 
+function ChatStorageControls({ storage }: { storage: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'openStorageLocation'> }): React.JSX.Element {
+  const [busy, setBusy] = useState(''), [notice, setNotice] = useState('')
+  const run = async (action: 'retry' | 'export' | 'open'): Promise<void> => {
+    if (busy) return
+    setBusy(action); setNotice('')
+    try {
+      if (action === 'retry') setNotice(await storage.retryStorage() ? 'Conversation storage is working.' : 'Conversation storage still needs attention.')
+      else setNotice((action === 'export' ? await storage.exportRecovery() : await storage.openStorageLocation()).answer)
+    } finally { setBusy('') }
+  }
+  return <div><p className="text-[12px] leading-relaxed text-muted">App chats use private revisioned storage, separate from the vault. A vault backup does not include them.</p><p className={`mt-1 text-[11.5px] ${storage.storage.state === 'attention' ? 'text-warn' : 'text-muted'}`}>{storage.storage.message}</p><div className="ob-inline-actions mt-2"><button type="button" disabled={!!busy} onClick={() => void run('retry')}>{busy === 'retry' ? 'Retrying…' : 'Retry storage'}</button><button type="button" disabled={!!busy} onClick={() => void run('export')}>{busy === 'export' ? 'Exporting…' : 'Export app chats'}</button><button type="button" disabled={!!busy} onClick={() => void run('open')}>{busy === 'open' ? 'Opening…' : 'Open storage folder'}</button></div>{notice ? <p className="ob-inline-note" role="status">{notice}</p> : null}</div>
+}
+
 export default function SettingsView({
   open,
   /** The pane to land on when opened; the account menu can aim straight at
@@ -330,6 +345,7 @@ export default function SettingsView({
   onInferenceChange,
   permissions,
   onPermissionsChange,
+  chatStorage,
   contextModels = [],
   contextProfiles = {},
   onContextProfilesChange = () => undefined,
@@ -340,6 +356,7 @@ export default function SettingsView({
   onClose: () => void
   permissions: Permissions
   onPermissionsChange: (next: Permissions) => void
+  chatStorage: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'openStorageLocation'>
   vault: VaultState
   /** Called after the vault moves, so the rest of the app re-reads it. */
   onChanged: () => void
@@ -686,6 +703,7 @@ export default function SettingsView({
           </div>
         ),
       },
+      ...(!isDemo ? [{ label: 'App-chat storage', terms: 'chat conversation storage recovery export retry folder backup', body: <ChatStorageControls storage={chatStorage} /> }] : []),
       ...(isDemo
         ? [
             {
@@ -794,9 +812,14 @@ export default function SettingsView({
             terms: 'files shell web mcp future tools',
             body: (
               <p className="text-[12px] leading-relaxed text-muted">
-                Engine tool approvals appear in chat. Connected tools may also require permission in their own app.
+                Claude Code tool requests appear in chat and eligible Read choices can be remembered below. agy currently exposes no interactive permission-card channel, so OddBrain does not pretend it can remember approvals for requests agy never reports. Connected tools may also require permission in their own app.
               </p>
             ),
+          },
+          {
+            label: 'Remembered reads',
+            terms: 'read approvals remembered file folder project revoke recovery',
+            body: <ReadTrustManager always />,
           },
           ...(permissionProblem
             ? [

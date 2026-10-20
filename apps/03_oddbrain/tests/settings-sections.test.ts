@@ -29,6 +29,7 @@ beforeEach(async () => {
       profileName: 'Friend', onProfileNameChange: noop, onTryWorkspace: noop, onReplaySetup: noop,
       inference: DEFAULT_INFERENCE, onInferenceChange: noop,
       permissions: DEFAULT_PERMISSIONS, onPermissionsChange: noop,
+      chatStorage: { storage: { state: 'ready', message: 'Conversations saved' }, retryStorage: async () => true, exportRecovery: async () => ({ ok: true, answer: 'exported' }), openStorageLocation: async () => ({ ok: true, answer: 'opened' }) },
     }))
     await new Promise(resolve => setTimeout(resolve, 40))
   }) }

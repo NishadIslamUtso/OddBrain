@@ -13,6 +13,7 @@ import { DEFAULT_MODEL } from '@shared/lib/storage'
 import { DEFAULT_PROFILE, normalizeProfile } from '@shared/lib/profile'
 import TitleBar from './components/TitleBar'
 import EnginePanel from './components/EnginePanel'
+import ChatStorageBanner from './components/ChatStorageBanner'
 import ArtifactsRail from './components/ArtifactsRail'
 import { chatArtifacts } from './state/artifactView'
 import { restoredInPlace, withNewVersion } from './state/artifactEdits'
@@ -85,16 +86,27 @@ function QuickMode(): React.JSX.Element {
   const [draft, setDraft] = useState('')
   const [problem, setProblem] = useState('')
   // The gate is the TURN, not the process: the session stays alive between
-  // turns on purpose, and a living idle process accepts the next ask.
-  const turnRunning = engine.turn?.state === 'running'
+  // turns on purpose, and a living idle process accepts the next ask. Work in
+  // another window uses the same durable text queue instead of deadening input.
+  const machineBusy = engine.turn?.state === 'running' || engine.ambient.busy
   const send = async (): Promise<void> => {
     const text = draft.trim()
-    if (!text || turnRunning) return
+    if (!text) return
     const pendingBrief = peekSeed(), prompt = pendingBrief ? buildSeededPrompt(pendingBrief, text) : text
     if (prompt.length > 20000) { setProblem('The prompt and queued brief exceed the engine limit. Nothing was sent.'); return }
-    const answer = await engine.send(prompt)
-    if (answer.ok) { consumeSeed(pendingBrief); setDraft(current => current.trim() === text ? '' : current); setProblem('') }
-    else setProblem(answer.answer)
+    try {
+      if (machineBusy) {
+        await engine.enqueue(prompt)
+        consumeSeed(pendingBrief); setDraft(current => current.trim() === text ? '' : current)
+        setProblem('Saved to the queue. It runs after the active work finishes.')
+        return
+      }
+      const answer = await engine.send(prompt)
+      if (answer.ok) { consumeSeed(pendingBrief); setDraft(current => current.trim() === text ? '' : current); setProblem('') }
+      else if (answer.answer.startsWith('The engine is already working') || answer.answer.startsWith('An engine is already working')) {
+        await engine.enqueue(prompt); consumeSeed(pendingBrief); setDraft(current => current.trim() === text ? '' : current); setProblem('Saved to the queue. It runs after the active work finishes.')
+      } else setProblem(answer.answer)
+    } catch (error) { setProblem((error as Error).message || 'The request could not be saved. Your draft is unchanged.') }
   }
   return (
     <div className="flex h-screen flex-col bg-bg px-3 py-2.5">
@@ -125,11 +137,11 @@ function QuickMode(): React.JSX.Element {
         <button
           type="button"
           onClick={() => void send()}
-          disabled={!draft.trim() || turnRunning}
-          aria-label="Send"
+          disabled={!draft.trim()}
+          aria-label={machineBusy ? 'Add request to queue' : 'Send'}
           className="rounded-xl bg-accent px-3 py-2 text-[12.5px] font-medium text-[var(--accent-ink)] hover:bg-accent/90 disabled:opacity-50"
         >
-          Send
+          {machineBusy ? 'Queue' : 'Send'}
         </button>
       </div>
       {problem ? <p className="mt-2 text-[12px] text-warn" role="status">{problem}</p> : null}
@@ -571,6 +583,7 @@ export default function App() {
   }, [])
 
   const nativeSendLock = useRef(false)
+  const [preparingSend, setPreparingSend] = useState(false)
   const send = async (): Promise<void> => {
     if (nativeSendLock.current) return
     nativeSendLock.current = true
@@ -583,6 +596,7 @@ export default function App() {
       return 'Attachments changed while sending. They were kept; remove any you already sent.'
     }
     if (!text.trim() && attachments.length === 0) return
+    setPreparingSend(true)
     // The only path: the engine. The text is a work order. The same
     // keep-the-draft-on-refusal rule applies, so nothing is ever typed twice.
     // After a Compact, the brief rides along with exactly one send.
@@ -627,12 +641,12 @@ export default function App() {
       await engineStore().enqueue(order, conversation)
       consumeSeed(pendingBrief)
       const retained = clearSentComposer()
-      setNotice(retained || 'Saved to the queue. It runs when this window’s active work finishes. After a restart, review and resume it explicitly.')
+      setNotice(retained || 'Saved to the queue. It runs when the active work finishes. After a restart, review and resume it explicitly.')
     } else {
       setNotice(answer.answer)
     }
     } catch (failure) { setNotice((failure as Error).message || 'The task could not be prepared. Your draft is unchanged.') }
-    finally { nativeSendLock.current = false }
+    finally { nativeSendLock.current = false; setPreparingSend(false) }
   }
 
   const location = { view, chatId: chats.currentChat, projectFocus, artifactFocus, settings: settingsOpen ? settingsSection : null }
@@ -671,6 +685,7 @@ export default function App() {
 
   return <LookContext value={look}><LookActions value={updateLook}>
     <div className="ob-app-root flex h-full flex-col bg-bg text-ink">
+      <ChatStorageBanner chats={chats} />
       <div className="ob-shell-host" hidden={settingsOpen} inert={settingsOpen}>
         <DesktopShell layout={look.layout} navigation={{ view, onView: setView, onNew: newChat, onBack: navigation.back, canBack: navigation.canBack, onSettings: () => openSettings('appearance'), name: profile.name }} items={items} commands={commands} extraSearch={searchCommands} searchSaved={searchSaved} suspended={settingsOpen} sidebar={
         <Sidebar
@@ -769,7 +784,8 @@ export default function App() {
           setDraft={setDraft}
           onSend={() => void send()}
           onStop={() => void engine.stop()}
-          busy={engine.turn?.state === 'running'}
+          busy={engine.turn?.state === 'running' || engine.ambient.busy}
+          preparing={preparingSend}
           live={chatApi.live}
           highlightId={highlight}
           notice={notice}
@@ -834,6 +850,7 @@ export default function App() {
           onSectionChange={setSettingsSection}
           onClose={() => setSettingsOpen(false)}
           permissions={permissions}
+          chatStorage={chats}
           onPermissionsChange={(next: Permissions) => {
             setPermissions(next)
             // Re-read from the main process, so what the window shows is what the

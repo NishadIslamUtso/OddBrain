@@ -96,7 +96,7 @@ function prepare(chatsInput: unknown, currentInput: unknown): Prepared {
     ids.add(chat.id)
     const text = JSON.stringify(chat)
     const bytes = Buffer.byteLength(text)
-    if (bytes > CHAT_LIMIT) throw Error('One conversation exceeds the 64 MB safety limit. Nothing was shortened or replaced.')
+    if (bytes > CHAT_LIMIT) throw Error(`“${chat.title.trim().slice(0, 80) || chat.id}” is ${(bytes / 1_000_000).toFixed(1)} MB; one app chat can be at most 64 MB. Remove large embedded content or branch before retrying. Nothing was shortened or replaced.`)
     total += bytes
     if (total > CHAT_TOTAL_LIMIT) throw Error('Conversation history exceeds the 512 MB migration limit. Nothing was shortened or replaced.')
     return { chat, text, bytes }
@@ -104,6 +104,30 @@ function prepare(chatsInput: unknown, currentInput: unknown): Prepared {
   if (typeof currentInput !== 'string' || currentInput.length > ID_LIMIT) throw Error('The current conversation identifier is invalid. Nothing was replaced.')
   const currentChat = ids.has(currentInput) ? currentInput : ''
   return { chats, currentChat, serialized }
+}
+
+/** A user-requested, portable rescue copy. It does not replace or repair the live store. */
+export function chatRecoveryDocument(input: ChatStoreMigration): string {
+  // Recovery deliberately has a wider envelope than live storage: exceeding a
+  // live limit is one reason the owner may need this export in the first place.
+  if (!Array.isArray(input?.chats) || input.chats.length > CHAT_COUNT_LIMIT + 1_000) throw Error('The chat recovery export exceeds its 21,000-chat safety limit. Nothing was exported.')
+  const chats = normalizeChats(input.chats)
+  if (typeof input?.currentChat !== 'string') throw Error('The current chat recovery value is invalid. Nothing was exported.')
+  const currentChat = input.currentChat
+  if (!(input?.rawChats === null || typeof input?.rawChats === 'string') || !(input?.rawCurrentChat === null || typeof input?.rawCurrentChat === 'string')) {
+    throw Error('The original browser recovery values are invalid. Nothing was exported.')
+  }
+  const document = `${JSON.stringify({
+    format: 'oddbrain-chat-recovery-export',
+    version: 1,
+    exportedAt: new Date().toISOString(),
+    currentChat,
+    chats,
+    legacy: { rawChats: input.rawChats, rawCurrentChat: input.rawCurrentChat },
+  }, null, 2)}\n`
+  const limit = CHAT_TOTAL_LIMIT + 256_000_000
+  if (Buffer.byteLength(document) > limit) throw Error(`The chat recovery export exceeds its ${(limit / 1_000_000).toFixed(0)} MB safety limit. Nothing was exported.`)
+  return document
 }
 
 export function createChatStore(root: string) {
@@ -188,7 +212,7 @@ export function createChatStore(root: string) {
       chats.push(chat)
       if (replacement) {
         const text = JSON.stringify(replacement), bytes = Buffer.byteLength(text)
-        if (bytes > CHAT_LIMIT) throw Error('One conversation exceeds the 64 MB safety limit. Nothing was shortened or replaced.')
+        if (bytes > CHAT_LIMIT) throw Error(`“${replacement.title.trim().slice(0, 80) || replacement.id}” is ${(bytes / 1_000_000).toFixed(1)} MB; one app chat can be at most 64 MB. Remove large embedded content or branch before retrying. Nothing was shortened or replaced.`)
         total += bytes; serialized.push({ chat: replacement, text, bytes })
       } else {
         const item = existingItems.get(id)

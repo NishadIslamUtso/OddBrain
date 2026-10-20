@@ -316,6 +316,8 @@ const demoBridge: DesktopBridge = {
     read: async () => ({ ok: false, error: 'Main-process conversation storage requires the installed app.' }),
     migrate: async () => ({ ok: false, error: 'Main-process conversation storage requires the installed app.' }),
     write: async () => ({ ok: false, error: 'Main-process conversation storage requires the installed app.' }),
+    exportRecovery: async () => ({ ok: false, answer: 'Chat recovery export requires the installed app.' }),
+    openLocation: async () => ({ ok: false, answer: 'Chat storage folders require the installed app.' }),
   },
   media: {
     authorizeRecording: async () => ({ ok: false, name: 'Microphone', error: 'Provider recording requires the desktop app.' }), onCancelled: () => () => {},
