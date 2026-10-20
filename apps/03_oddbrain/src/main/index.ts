@@ -4,6 +4,7 @@ import type { ScheduleInput } from '../shared/lib/schedules'
 import { createWorkflowService } from './workflows/service'
 import type { WorkflowStep } from '../shared/lib/workflows'
 import { createCommandRunner, COMMAND_DISCLOSURE } from './commands/runner'
+import { createWorktreeService } from './worktrees/service'
 import type { ShellRequest } from '../shared/lib/commands'
 import { createWorkQueue } from './engine/workQueue'
 import { snapshotNativeArtifacts, collectNativeArtifacts } from './engine/nativeArtifacts'
@@ -335,27 +336,45 @@ function registerBridges(): void {
     throw Error('Unknown marketplace engine.')
   }
   const commandSessions = new WeakMap<object, number>(); let commandSessionSerial = 0
-  const commandScope = (reserved = false) => {
+  const worktrees = createWorktreeService({ root: join(app.getPath('userData'), 'worktrees'), folder: () => resolve(settings.engine.workspace || vaultRoot()) })
+  // One command at a time in the selected folder; a second only in an isolated
+  // checkout this app created (see createCommandRunner's cap and checks).
+  let commandLeases = 0
+  const commandScope = (reserved = false, request?: ShellRequest) => {
     const child = engine?.current()
     if (child && !commandSessions.has(child)) commandSessions.set(child, ++commandSessionSerial)
-    const cwd = resolve(settings.engine.workspace || vaultRoot())
+    const checkout = request?.cwd && typeof request.cwd === 'string' ? worktrees.check(request.cwd) : { ok: false }
+    const cwd = checkout.ok ? checkout.path! : resolve(settings.engine.workspace || vaultRoot())
+    const parallel = checkout.ok
     const authority = JSON.stringify([cwd, settings.engine, settings.permissions, child ? commandSessions.get(child) : null, engine?.currentTarget(), nativeWork, workDispatchGeneration])
+    const blocked = !!engine?.turnBusy() || foregroundApiRequests > 0
+    const occupied = (dispatchingWork || commandLeases > 0) && !reserved && !parallel
+    const atCap = commandLeases >= 2 && !reserved
     const explanation = !settings.permissions.manualCommands ? 'Enable Reviewed OS commands in Settings → Agent access first. This is separate from native engine tool approval.'
       : settings.engine.approval === 'plan' ? 'Arbitrary OS commands are disabled while the engine is in Plan mode. Choose a non-plan mode explicitly before reviewing a command.'
-      : engine?.turnBusy() || (dispatchingWork && !reserved) || foregroundApiRequests > 0 ? 'Wait for active work before running an app command.' : COMMAND_DISCLOSURE
-    return { cwd, authority, stableAuthority: JSON.stringify([cwd, settings.engine.approval, settings.permissions]), busy: !!engine?.turnBusy() || (dispatchingWork && !reserved) || foregroundApiRequests > 0, allowed: settings.permissions.manualCommands === true && settings.engine.approval !== 'plan' && !engine?.turnBusy() && (!dispatchingWork || reserved) && foregroundApiRequests === 0, explanation }
+      : blocked || occupied || atCap ? 'Wait for active work before running an app command.' : COMMAND_DISCLOSURE
+    return { cwd, authority, stableAuthority: JSON.stringify([cwd, settings.engine.approval, settings.permissions]), busy: blocked || occupied || atCap, allowed: settings.permissions.manualCommands === true && settings.engine.approval !== 'plan' && !blocked && !occupied && !atCap, explanation }
   }
-  const commandRunner = createCommandRunner({ root: join(app.getPath('userData'), 'command-runs'), scope: () => commandScope(),
+  const commandRunner = createCommandRunner({ root: join(app.getPath('userData'), 'command-runs'), scope: request => commandScope(false, request),
+    isolated: path => worktrees.check(path).ok,
     acquire: async (request, authority, signal) => {
-      const initial = commandScope()
-      if (!initial.allowed || initial.authority !== authority || resolve(request.cwd) !== initial.cwd) throw Error('Command authority changed before reservation. Nothing was run.')
+      const initial = commandScope(false, request)
+      if (!initial.allowed || initial.authority !== authority || resolve(request.cwd) !== resolve(initial.cwd)) throw Error('Command authority changed before reservation. Nothing was run.')
+      commandLeases++
       dispatchingWork = true
       try {
         memoryOrganizer?.cancel(); await automation?.cancel(); signal.throwIfAborted()
-        const recheck = () => { const current = commandScope(true); if (!current.allowed || current.authority !== authority) throw Error('Command access, engine, session or working folder changed. Nothing was run.'); signal.throwIfAborted() }
+        const recheck = () => { const current = commandScope(true, request); if (!current.allowed || current.authority !== authority) throw Error('Command access, engine, session or working folder changed. Nothing was run.'); signal.throwIfAborted() }
         recheck()
-        return { recheck, release: () => { dispatchingWork = false; workDispatchGeneration++ } }
-      } catch (error) { dispatchingWork = false; workDispatchGeneration++; throw error }
+        return { recheck, release: () => {
+          commandLeases = Math.max(0, commandLeases - 1)
+          if (commandLeases === 0) { dispatchingWork = false; workDispatchGeneration++ }
+        } }
+      } catch (error) {
+        commandLeases = Math.max(0, commandLeases - 1)
+        if (commandLeases === 0) { dispatchingWork = false; workDispatchGeneration++ }
+        throw error
+      }
     },
   })
   const workflows = createWorkflowService(join(app.getPath('userData'), 'workflows'), commandRunner)
@@ -399,6 +418,9 @@ function registerBridges(): void {
   handle('commands:history', (_event, before?: string) => commandRunner.history(before))
   handle('commands:read', (_event, id: string) => commandRunner.read(id))
   handle('commands:output', (_event, id: string, stream: 'stdout' | 'stderr') => commandRunner.output(id, stream))
+  handle('worktrees:list', () => worktrees.list())
+  handle('worktrees:create', () => worktrees.create())
+  handle('worktrees:remove', (_event, id: string, discardChanges: boolean) => worktrees.remove(id, discardChanges))
   const marketAnswer = async <T,>(run: () => Promise<T>) => { try { return { ok: true as const, value: await run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
   handle('media:authorize-recording', (event, expected: { provider: string; model: string }) => mediaService!.authorizeRecording(track(event.sender), expected))
   handle('media:read', () => mediaService!.read())

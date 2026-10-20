@@ -1,3 +1,4 @@
+import type { WorktreeBridge } from './worktrees'
 export type CommandSource = { id: string; name: string; digest: string }
 export type SavedCommand = { id: string; name: string; command: string; cwd: string; platform: string; at: string; archived: boolean; digest: string }
 export type ShellRequest = { command: string; cwd: string; source?: CommandSource }
@@ -15,7 +16,9 @@ export type CommandBridge = {
   save(input: { name: string; command: string; cwd: string }): Promise<SavedCommand>
   archiveSaved(id: string, archived: boolean): Promise<void>
   previewSaved(id: string): Promise<ShellReviewTicket>
-  context(): Promise<{ cwd: string; allowed: boolean; explanation: string; activeId: string | null }>
+  context(): Promise<{ cwd: string; allowed: boolean; explanation: string; activeId: string | null; activeCount?: number }>
+  /** Optional: isolated checkouts, when the desktop app provides them. */
+  worktrees?: WorktreeBridge
   preview(request: ShellRequest): Promise<ShellReviewTicket>
   decide(token: string, decision: 'allow' | 'deny'): Promise<{ denied: true } | ShellResult>
   cancel(): Promise<{ requested: boolean; answer: string }>

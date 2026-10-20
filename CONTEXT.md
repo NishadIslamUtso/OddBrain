@@ -702,3 +702,28 @@ Continuing from `4e7ab82`. "Sourced research" up to now meant citation chips ext
 - No search engine and no crawling: the owner supplies the address. If the app cannot reach it (certificate, proxy, offline), the answer says so and writes nothing.
 - A fetched page is text only; images, scripts and layout are not kept, and a JavaScript-rendered page may contribute little text.
 - The page joins the vault as a source; it is not automatically attached to a chat. Citing it still means referencing the file.
+
+## Solo continuation: a second command in its own checkout — 2026-10-20
+
+Continuing from `9ec7052`. Reviewed OS commands used to run exactly one at a time, in the owner's folder, and nothing in the app knew what a Git worktree was. Both changed together: parallelism without a separate tree would just be two processes editing the same files, and a checkout without a second slot would not be usable beside a long command.
+
+### Implemented
+
+- `src/main/worktrees/service.ts` + `src/shared/lib/worktrees.ts`: the app creates a **detached** checkout of the selected folder's repository at the reviewed commit, in its own storage (`userData/worktrees/<timestamp>-<uuid>`), and records the commit, repo and creation time in a config file written through `commitConfigs`. Only `rev-parse`, `worktree add --detach`, `worktree remove`, `worktree prune` and `status --porcelain` are used — with no shell, a minimal environment, a 15 s limit and 1 MB of output. No branch is created or deleted, nothing is committed, pushed, fetched or staged, and no mutating Git command ever runs with the owner's own folder as its `cwd`. A folder that is not inside a Git working tree, or a repository with no commit, is refused with a sentence saying why.
+- Removal refuses a checkout with changed or untracked files unless the owner explicitly chose to discard them; either way the record stays as history and the folder is checked with `git worktree remove` rather than deleted by hand. `check()` is the synchronous gate used before a path is authorized: it accepts only a direct child of this app's checkout storage whose record names that exact path, is not removed, and still exists.
+- Command runner (`src/main/commands/runner.ts`): the single `active` slot became a set with a cap of **two** runs. A folder runs one command at a time; a second run is admitted only when it targets a checkout this app created, and the two runs can never share a folder. Refusals are specific (same folder, selected folder, cap). `cancel(owner)` stops every run that action covers, `context()` reports `activeCount`, and a run whose stop is requested after launch still reports an interrupted result rather than a success.
+- `src/main/index.ts`: `commandScope(reserved, request)` resolves the requested folder through `worktrees.check()`, so a review can name a checkout and nothing else outside the app's own storage; the authority string still includes the resolved folder, engine, session, permissions and dispatch generation. App-wide dispatch gating counts leases instead of a boolean, so engine work stays blocked while any command runs and the second run cannot clear the first run's block. Worktrees are exposed over IPC (`worktrees:list/create/remove`) and through the preload and browser-preview ports.
+- The command review screen gains "Run in an isolated checkout": the disclosure verbatim ("the folder is separate, the permissions are not"), a create button, a list of checkouts with changed-file counts, "Run here", "Remove checkout", an explicit "Discard uncommitted changes" checkbox, and a "Use the selected folder instead" way back. The browser preview says checkouts require the desktop app.
+
+### Verification
+
+- Typecheck clean; `npx vitest run` = **1,532 passed / 2 skipped / 1,534 tests** across 211 files (the same two file-level skips as before); `npm run build` passed (offline preview 619,491 bytes).
+- `tests/worktrees.test.ts` (8) drives real repositories: refusal outside Git, refusal before a first commit, a detached checkout at the exact commit with the owner's folder clean and still on `main`, changed-file counting, refusal to remove a dirty checkout and removal after an explicit discard, clean removal, forged ids and paths outside the app's storage, an unreadable record reported instead of trusted, and a settings change between calls checking out the newly selected repository rather than a stale one.
+- `tests/parallel-commands.test.ts` (3) covers two checkouts running at once, the same folder refused, the selected folder refusing a second command while a checkout may still run beside it, the cap of two, a stop that covers both runs, a stop that leaves another window's run alone, and a stop after launch surfacing as an interrupted result. `tests/command-review-ui.test.tsx` gained two cases (checkout named, chosen, used as the reviewed folder, removed with its discard choice; no control when the desktop app offers none) — 7 in that file.
+
+### Limits
+
+- This isolates **folders**, not permissions. A command in a checkout runs as the OS user with the same network and file access as one in the selected folder; the screen says so. It is not a sandbox and not a container.
+- The checkout is at one commit with no branch: work done there is not merged, reviewed or pushed back. Keeping changes means copying files out before removal; removing with the discard choice deletes them.
+- Two is the cap. Background work (engine turns, workflows, memory organizing) stays blocked while any app command runs, so this makes a second *reviewed command* possible, not parallel engine tasks.
+- Shallow/partial clones, submodules and Git LFS may produce a checkout that cannot build; the app does not fetch missing objects.

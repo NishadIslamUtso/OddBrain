@@ -53,6 +53,31 @@ test('permission refusal keeps preview unavailable without inventing an executio
   expect(api.preview).not.toHaveBeenCalled(); expect(api.decide).not.toHaveBeenCalled()
 })
 
+test('an isolated checkout is named, chosen and removed explicitly, never called a sandbox', async () => {
+  const api = port()
+  const entry = { id: '1700000000000-00000000-0000-4000-8000-000000000000', path: '/app/checkouts/1700000000000-00000000-0000-4000-8000-000000000000', repo: '/repo', base: 'a'.repeat(40), createdAt: '2026-10-20T00:00:00.000Z', changes: 2 }
+  const worktrees = { list: vi.fn(async () => ({ worktrees: [entry], problem: '' })), create: vi.fn(async () => ({ ok: true, answer: 'Isolated checkout created.', worktree: entry })), remove: vi.fn(async () => ({ ok: true, answer: 'The checkout was removed. Its record stays as history.' })) }
+  api.worktrees = worktrees
+  await mount(api); await input('npm test')
+  expect(host.textContent).toContain('the folder is separate, the permissions are not')
+  expect(host.textContent).toContain('2 changed or untracked files')
+  await click('Run here')
+  expect(host.textContent).toContain(`Commands will run in the checkout at ${entry.path}`)
+  expect(host.textContent).toContain('Nothing is committed, pushed or merged back')
+  await click('Prepare command review')
+  expect(api.preview).toHaveBeenCalledWith({ command: 'npm test', cwd: entry.path })
+  await click('Allow this command once')
+  expect(api.decide).toHaveBeenCalledWith('reviewed', 'allow')
+  // Removing a checkout states the discard choice it was given; it never guesses.
+  await click('Remove checkout')
+  expect(worktrees.remove).toHaveBeenCalledWith(entry.id, false)
+  expect(host.textContent).toContain('The checkout was removed.')
+})
+test('no checkout control appears when the desktop app does not offer one', async () => {
+  const api = port(); await mount(api)
+  expect(host.textContent).not.toContain('Run in an isolated checkout')
+  expect(api.preview).not.toHaveBeenCalled()
+})
 test('saving a named command never invokes preview or execution', async () => {
   const api = port(); api.save = vi.fn(async value => ({ ...value, id: 'saved', platform: 'linux', archived: false, at: new Date().toISOString(), digest: 'a'.repeat(64) }))
   await mount(api); await input('echo saved')

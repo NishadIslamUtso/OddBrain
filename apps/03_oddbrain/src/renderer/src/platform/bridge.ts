@@ -1,6 +1,7 @@
 import type { WorkflowBridge } from '@shared/lib/workflows'
 import type { ScheduleBridge } from '@shared/lib/schedules'
 import type { CommandBridge } from '@shared/lib/commands'
+import type { WorktreeBridge } from '@shared/lib/worktrees'
 import type { WorkQueueBridge } from '@shared/lib/workQueue'
 import type { McpReview, NativeMcpInventory } from '@shared/lib/mcpReview'
 import type { SkillDraft, SkillInventory, SkillFile, CatalogSkillReview } from '@shared/lib/installedSkills'
@@ -101,6 +102,7 @@ export type DesktopBridge = {
   }
   workflows: WorkflowBridge
   schedules: ScheduleBridge
+  worktrees: WorktreeBridge
   commands: CommandBridge
   projects: {
     attach: (projectId: string) => Promise<import('@shared/lib/projects').ProjectReference[]>
@@ -472,6 +474,7 @@ artifacts: {
   },
   workflows: { list: async () => ({ items: [], next: '', notice: 'Workflow files require the desktop app.' }), save: async () => { throw Error('Saving workflows requires the desktop app.') }, archive: async () => { throw Error('Workflow files require the desktop app.') }, preview: async () => { throw Error('Workflow execution requires the desktop app.') }, decide: async () => { throw Error('Workflow execution requires the desktop app.') }, cancel: async () => ({ requested: false, answer: 'No workflow runs in this preview.' }), runs: async () => ({ records: [], next: '', notice: 'Workflow history requires the desktop app.' }), readRun: async () => { throw Error('Workflow history requires the desktop app.') } },
   schedules: { list: async () => ({ items: [], notice: 'Schedules require the running desktop app and OS-protected approval storage.' }), preview: async () => { throw Error('Recurring command approval requires the desktop app.') }, decide: async () => { throw Error('Schedules cannot run in a browser preview.') }, pause: async () => { throw Error('Schedules require the desktop app.') }, inbox: async () => ({ items: [], next: '', notice: 'The scheduled-work inbox requires the desktop app.' }), acknowledge: async () => { throw Error('The scheduled-work inbox requires the desktop app.') } },
+  worktrees: { list: async () => ({ worktrees: [], problem: 'Isolated checkouts require the desktop app.' }), create: async () => ({ ok: false, answer: 'Creating an isolated checkout requires the desktop app. Nothing was created.' }), remove: async () => ({ ok: false, answer: 'Removing an isolated checkout requires the desktop app. Nothing was removed.' }) },
   commands: { saved: async () => ({ items: [], next: '', notice: 'Saved OS commands require the desktop app.' }), save: async () => { throw Error('Saving OS commands requires the desktop app.') }, archiveSaved: async () => { throw Error('Saved OS commands require the desktop app.') }, previewSaved: async () => { throw Error('Saved OS commands require the desktop app.') }, context: async () => ({ cwd: '', allowed: false, explanation: 'OS command execution requires the desktop app. This browser preview cannot run commands.', activeId: null }), preview: async () => { throw Error('OS command execution requires the desktop app. Nothing was run.') }, decide: async () => { throw Error('OS command execution requires the desktop app.') }, cancel: async () => ({ requested: false, answer: 'No app command is running in this preview.' }), history: async () => ({ records: [], next: '', notice: 'Command records are available in the desktop app.' }), read: async () => { throw Error('Command records require the desktop app.') }, output: async () => { throw Error('Command output requires the desktop app.') } },
   projects: {
     attach: async () => { throw Error('Choose project references in the desktop app. Nothing was read.') },
