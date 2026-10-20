@@ -742,6 +742,7 @@ Continuing from `bc2f2c8`. Two gaps were left after the turn archive landed: a r
 ### Verification
 
 - Typecheck clean; `npx vitest run` = **1,537 passed / 2 skipped / 1,539 tests** across 212 files (the same two file-level skips); `npm run build` passed (offline preview 620,591 bytes).
+- The native smoke gate now retries an empty frame once (after two requested animation frames) instead of calling a busy Linux runner's unpainted capture a blank window; a genuinely blank window still fails, and the console error/warning gate is untouched.
 - `tests/native-history-recovery.test.ts` (3) covers the offer-once rule, the limit, missing conversations, records without a chat id, a partial trailing write read back as interrupted, the written-back message keeping `stopped` status and its transcript id, a finished turn restored as complete, idempotence, and refusal to apply another conversation’s record. `tests/turn-archive.test.ts` gained the chat-filter case. `tests/transcript-and-drafts-ui.test.tsx` gained the scoped list, the explicit widening, and the reworded picture notice.
 
 ### Limits

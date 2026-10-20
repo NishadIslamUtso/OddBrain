@@ -2195,7 +2195,15 @@ function runSmoke(window: BrowserWindow): void {
         } catch (probeError) {
           scrollLine = `SCROLL FAILED ${(probeError as Error).message}`
         }
-        const image = await window.webContents.capturePage()
+        // A loaded Linux runner can hand back an unpainted frame; ask for two
+        // frames and retry once within a bound. A window that is really blank
+        // still fails, and the console gate above is unchanged.
+        let image = await window.webContents.capturePage()
+        if (image.isEmpty()) {
+          await window.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))', true).catch(() => {})
+          await new Promise(resolve => setTimeout(resolve, 750))
+          image = await window.webContents.capturePage()
+        }
         if (smokeOut) writeFileSync(smokeOut, image.toPNG())
         const bounds = window.getBounds()
         const title = window.getTitle()
