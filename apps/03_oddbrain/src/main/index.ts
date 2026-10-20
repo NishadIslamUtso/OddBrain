@@ -61,6 +61,7 @@ import { existsSync, statSync, realpathSync, mkdirSync, readFileSync, readdirSyn
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
 import { createVaultService, resolveVaultRoot } from './vault/service'
+import { searchVault } from './vault/recall'
 import { canonicalStructureRoot, conflictWasSettled, normalizeSettledConflicts, settleStructureConflict, validStructureRelative, type SettledStructureConflict } from './vault/settled'
 import { createKeyStore, type KeyStore } from './cloud/keys'
 import { createCloudClient, type CloudClient } from './cloud/client'
@@ -317,7 +318,12 @@ function registerBridges(): void {
   const ruleReviews = new Map<number, Map<string, { service: ReturnType<typeof createProjectRuleReview>; expiresAt: number }>>()
   const skillReviews = new Map<number, ReturnType<typeof createSkillAuthoring>>()
   const checkpointReviews = new Map<number, ReturnType<typeof createCheckpointReviewGate>>()
-  const nativeContext = createNativeContext(join(app.getPath('userData'), 'projects.json'), join(app.getPath('userData'), 'project-context-grants.json'))
+  const nativeContext = createNativeContext(
+    join(app.getPath('userData'), 'projects.json'),
+    join(app.getPath('userData'), 'project-context-grants.json'),
+    undefined,
+    query => searchVault(createVaultService({ vaultPath: vaultRoot() }).files(), query),
+  )
   // Deliberately memory-only: each app start requires fresh folder trust. A
   // changed declaration fingerprint invalidates trust within the same process.
   const nativeLaunchTrust = new Map<string, { digest: string; fullSpeed: boolean }>()

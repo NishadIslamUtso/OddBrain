@@ -24,9 +24,9 @@ test('missing response body reports a failure', async () => {
   await assert.rejects(async () => { for await (const record of readNdjson(null)) void record }, /no response stream/)
 })
 test('capabilities come from Ollama metadata, not names', () => {
-  assert.deepEqual(getCapabilities({ name: 'qwen3-vl:4b' }), { verified: false, vision: false, thinking: false })
-  assert.deepEqual(getCapabilities({ capabilities: ['completion', 'vision', 'thinking'] }), { verified: true, vision: true, thinking: true })
-  assert.deepEqual(getCapabilities({ capabilities: ['completion'] }), { verified: true, vision: false, thinking: false })
+  assert.deepEqual(getCapabilities({ name: 'qwen3-vl:4b' }), { verified: false, vision: false, thinking: false, contextWindowTokens: null })
+  assert.deepEqual(getCapabilities({ capabilities: ['completion', 'vision', 'thinking'], model_info: { 'qwen.context_length': 32768 } }), { verified: true, vision: true, thinking: true, contextWindowTokens: 32768 })
+  assert.deepEqual(getCapabilities({ capabilities: ['completion'] }), { verified: true, vision: false, thinking: false, contextWindowTokens: null })
 })
 test('thinking separates native output and think tags, including streaming opening tags', () => {
   assert.deepEqual(splitThinking('<think>Work it out</think>Answer', 'Native'), { content: 'Answer', thinking: 'Native\nWork it out' })

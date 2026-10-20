@@ -55,6 +55,9 @@ import { vaultPost, vaultGet } from '@shared/lib/vault'
 import { setMotionMode, setMascotPause } from './motion/motionMode'
 import { setOsReducedMotion } from './motion/motionMode'
 import { conversationCapture } from '@shared/lib/capture'
+import { parseCloudModel } from '@shared/lib/providers'
+import { modelContextKey, normalizeModelContextOverrides } from '@shared/lib/modelContext'
+import type { ContextModelChoice } from './components/ModelContextProfiles'
 
 /**
  * The app.
@@ -192,6 +195,12 @@ export default function App() {
   const [permissions, setPermissions] = useState<Permissions>(DEFAULT_PERMISSIONS)
   const [permissionsRevision, setPermissionsRevision] = useState(0)
   const models = useModels(model, setModel, permissions)
+  const [contextProfiles, setContextProfiles] = usePersistentState(
+    workspaceKey('oddbrain.model-context.v1'),
+    {},
+    normalizeModelContextOverrides,
+    setNotice
+  )
   const [draft, setDraft] = usePersistentState(workspaceKey('ai-assistant.composer-draft'), '', value => typeof value === 'string' ? value : '', setNotice)
   // Media for the next engine task: pictures, video frames, text files. Read
   // the moment they arrive (the reader refuses honestly), sent with the words,
@@ -299,6 +308,20 @@ export default function App() {
   )
 
   const engine = useEngine()
+  const contextModels = useMemo<ContextModelChoice[]>(() => {
+    const choices: ContextModelChoice[] = models.models.map(entry => ({
+      key: modelContextKey(entry.cloud ? `cloud:${entry.provider || 'provider'}` : 'ollama', entry.name),
+      label: `${entry.cloud ? entry.provider || 'Cloud' : 'Ollama'} · ${entry.name}`,
+      ...(entry.name === models.model ? { reportedTokens: models.capabilities.contextWindowTokens } : {}),
+    }))
+    if (!models.models.some(entry => entry.name === models.model)) {
+      const cloud = parseCloudModel(models.model)
+      choices.push({ key: modelContextKey(cloud ? `cloud:${cloud.provider}` : 'ollama', models.model), label: `Selected chat model · ${models.model}`, reportedTokens: models.capabilities.contextWindowTokens })
+    }
+    for (const entry of engine.models.entries) choices.push({ key: modelContextKey(`engine:${engine.settings.id}:${entry.provider || 'local'}`, entry.name), label: `${engine.settings.id} · ${entry.displayName || entry.name}` })
+    if (engine.settings.model) choices.push({ key: modelContextKey(`engine:${engine.settings.id}:${engine.settings.cloudProvider || 'local'}`, engine.settings.model), label: `${engine.settings.id} selected · ${engine.settings.model}` })
+    return choices
+  }, [models.models, models.model, models.capabilities.contextWindowTokens, engine.models.entries, engine.settings.id, engine.settings.model, engine.settings.cloudProvider])
   const commitNativeChat = useRef(chats.commit), nativeRecorded = useRef(new Set<string>()), nativeRecoveryStarted = useRef(false)
   commitNativeChat.current = chats.commit
   useEffect(() => {
@@ -356,6 +379,8 @@ export default function App() {
     // What Settings > Performance chose. Left alone it is the 4 GB profile:
     // the one that cannot overflow a small card.
     inference,
+    contextProfiles,
+    setContextProfiles,
     // Where finished conversations are kept. In the browser preview there is no
     // vault behind the interface, so nothing is attempted and no failed request
     // appears in the console — the preview stays quiet, as it must.
@@ -556,10 +581,11 @@ export default function App() {
     if (order.length > 20000) { setNotice('The prompt and attached text exceed the engine’s 20,000-character limit. Reduce the text or attachments; nothing was sent.'); return }
     const originalFiles = await originalSourceFiles(attachments)
     const chatId = chat?.id || newId(), projectId = pendingProject ?? chat?.projectId ?? null
-    const overrides = chatNotesStore(localStorage, workspaceKey('oddbrain.chat-notes.v1'), chatId).read()?.value.overrides || {}
-    const target = await bridge.engine.contextTarget({ chatId, projectId, overrides })
+    const savedNotes = chatNotesStore(localStorage, workspaceKey('oddbrain.chat-notes.v1'), chatId).read()?.value || emptyChatNotes()
+    const overrides = savedNotes.overrides
+    const target = await bridge.engine.contextTarget({ chatId, projectId, overrides, workingNotes: savedNotes.working, vaultSearch: savedNotes.vaultSearch })
     const resume = target.resume
-    const conversation: NativeConversation = { chatId, projectId, overrides, expectedRoute: target.route || undefined, continuationExpected: resume,
+    const conversation: NativeConversation = { chatId, projectId, overrides, workingNotes: savedNotes.working, vaultSearch: savedNotes.vaultSearch, expectedRoute: target.route || undefined, continuationExpected: resume,
       ...(!resume ? { history: pendingBrief ? [] : (chat?.messages || []).filter(m => m.origin !== 'import' && (!m.status || m.status === 'complete')).map(m => ({ role: m.role, content: m.content })) } : {}) }
     if (!chats.commit(previous => previous.some(entry => entry.id === chatId)
       ? previous.map(entry => entry.id === chatId ? { ...entry, projectId } : entry)
@@ -816,6 +842,9 @@ export default function App() {
           onAppearanceChange={setAppearance}
           inference={inference}
           onInferenceChange={setInference}
+          contextModels={contextModels}
+          contextProfiles={contextProfiles}
+          onContextProfilesChange={setContextProfiles}
           />
       </div></div> : null}
       <TurnJournal />

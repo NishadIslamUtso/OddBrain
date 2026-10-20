@@ -1,4 +1,5 @@
 import { validContextReceipt } from './nativeConversation'
+import { validModelContextReceipt } from './modelContext'
 import { validNativeArtifacts } from './nativeArtifacts'
 import { validTranscriptAttachments, validTranscriptImages } from './transcripts'
 import type { Chat, Message, Settings } from '../types'
@@ -53,6 +54,7 @@ export function normalizeChats(value: unknown): Chat[] {
         typeof message.id !== 'string' ||
         !['user', 'assistant'].includes(message.role) ||
         typeof message.content !== 'string' ||
+        (message.contextReceipt !== undefined && !validModelContextReceipt(message.contextReceipt)) ||
         (message.nativeRecord !== undefined && (!message.nativeRecord || typeof message.nativeRecord.transcriptId !== 'string' || typeof message.nativeRecord.chatId !== 'string' || !['claude-code', 'agy'].includes(message.nativeRecord.engine) || !(message.nativeRecord.sessionId === null || typeof message.nativeRecord.sessionId === 'string') || (message.nativeRecord.context !== undefined && !validContextReceipt(message.nativeRecord.context)) || (message.nativeRecord.artifacts !== undefined && !validNativeArtifacts(message.nativeRecord.artifacts)) || (message.nativeRecord.pictures !== undefined && (!Number.isSafeInteger(message.nativeRecord.pictures) || message.nativeRecord.pictures < 0)) || (message.nativeRecord.images !== undefined && (message.nativeRecord.pictures === undefined || !validTranscriptImages(message.nativeRecord.images, message.nativeRecord.pictures))) || !validTranscriptAttachments(message.nativeRecord.attachments))) ||
         (message.artifacts &&
           (!Array.isArray(message.artifacts) ||

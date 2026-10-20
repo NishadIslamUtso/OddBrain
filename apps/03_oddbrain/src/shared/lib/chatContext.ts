@@ -57,9 +57,36 @@ export function estimateChatContext(chat: Chat, draft: string, explicitContext =
     contextWindow: null, cost: null }
 }
 
-export type ChatNotes = { pins: string[]; recaps: Array<{ id: string; text: string; author: 'user' | 'ai'; basedOn: string[]; at: string }>; overrides: ChatOverrides }
+export type WorkingNotes = {
+  objective: string
+  plan: string[]
+  decisions: string[]
+  constraints: string[]
+  openQuestions: string[]
+  uncertainties: string[]
+  findings: Array<{ text: string; sourceIds: string[] }>
+  nextActions: string[]
+  updatedAt: string
+  author: 'user' | 'ai'
+}
+export type ChatNotes = { pins: string[]; recaps: Array<{ id: string; text: string; author: 'user' | 'ai'; basedOn: string[]; at: string }>; overrides: ChatOverrides; working: WorkingNotes; vaultSearch: boolean }
 export type NotesVersion = { id: string; parent: string | null; value: ChatNotes }
-export const emptyChatNotes = (): ChatNotes => ({ pins: [], recaps: [], overrides: {} })
+export const emptyWorkingNotes = (): WorkingNotes => ({ objective: '', plan: [], decisions: [], constraints: [], openQuestions: [], uncertainties: [], findings: [], nextActions: [], updatedAt: '', author: 'user' })
+export const emptyChatNotes = (): ChatNotes => ({ pins: [], recaps: [], overrides: {}, working: emptyWorkingNotes(), vaultSearch: false })
+
+export function normalizeWorkingNotes(value: unknown): WorkingNotes {
+  const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
+  const text = (field: string, limit: number): string => typeof raw[field] === 'string' && raw[field].length <= limit ? raw[field] as string : ''
+  const list = (field: string): string[] => Array.isArray(raw[field]) && (raw[field] as unknown[]).length <= 100 && (raw[field] as unknown[]).every(item => typeof item === 'string' && item.length <= 2_000) ? [...raw[field] as string[]] : []
+  const findings = Array.isArray(raw.findings) && raw.findings.length <= 100 && raw.findings.every((item: any) => item && typeof item.text === 'string' && item.text.length <= 2_000 && Array.isArray(item.sourceIds) && item.sourceIds.length <= 50 && item.sourceIds.every((id: unknown) => typeof id === 'string' && id.length <= 500))
+    ? raw.findings.map((item: any) => ({ text: item.text, sourceIds: [...item.sourceIds] })) : []
+  return { objective: text('objective', 10_000), plan: list('plan'), decisions: list('decisions'), constraints: list('constraints'), openQuestions: list('openQuestions'), uncertainties: list('uncertainties'), findings, nextActions: list('nextActions'), updatedAt: text('updatedAt', 100), author: raw.author === 'ai' ? 'ai' : 'user' }
+}
+
+export function workingNotesText(notes: WorkingNotes): string {
+  const clean = normalizeWorkingNotes(notes)
+  return JSON.stringify(clean)
+}
 /** Immutable versions: quota/conflict errors never replace old records. No silent eviction. */
 export function chatNotesStore(storage: Storage, prefix: string, chatId: string) {
   const base = `${prefix}.${encodeURIComponent(chatId).replace(/\./g, '%2E')}.`
@@ -71,7 +98,10 @@ export function chatNotesStore(storage: Storage, prefix: string, chatId: string)
       if (!row || typeof row.id !== 'string' || key !== base + row.id || !(row.parent === null || typeof row.parent === 'string') || !Array.isArray(row.value?.pins) || !Array.isArray(row.value?.recaps) || !row.value.overrides) throw Error('Chat notes are damaged. Original versions were kept.')
       if (row.value.pins.some(id => typeof id !== 'string') || row.value.recaps.some(r => typeof r.id !== 'string' || typeof r.text !== 'string' || !['user', 'ai'].includes(r.author) || !Array.isArray(r.basedOn) || r.basedOn.some(id => typeof id !== 'string') || typeof r.at !== 'string')) throw Error('Chat notes are damaged. Original versions were kept.')
       resolveChatContext({ goal: '', style: '', workspace: '', additionalFolders: [] }, row.value.overrides)
-      result.push(row)
+      const working = normalizeWorkingNotes(row.value.working)
+      if (row.value.working !== undefined && JSON.stringify(working) !== JSON.stringify(row.value.working)) throw Error('Working notes are damaged or exceed their limits. Original versions were kept.')
+      if (row.value.vaultSearch !== undefined && typeof row.value.vaultSearch !== 'boolean') throw Error('Vault-search choice is damaged. Original versions were kept.')
+      result.push({ ...row, value: { ...row.value, working, vaultSearch: row.value.vaultSearch === true } })
     }
     return result
   }
@@ -86,6 +116,8 @@ export function chatNotesStore(storage: Storage, prefix: string, chatId: string)
   }
   return { read, versions, save(value: ChatNotes, expected: string | null, id: string): NotesVersion {
     if (!/^[a-zA-Z0-9-]{1,100}$/.test(id)) throw Error('Invalid note revision.')
+    if (JSON.stringify(normalizeWorkingNotes(value.working)) !== JSON.stringify(value.working)) throw Error('Working notes exceed their supported limits. Nothing was shortened.')
+    if (typeof value.vaultSearch !== 'boolean') throw Error('Choose whether this chat may search approved vault sources.')
     if ((read()?.id ?? null) !== expected) throw Error('Chat notes changed in another window. Reload before saving.')
     if (versions().length >= 500) throw Error('500 note revisions retained. Export them before starting a new notes history; nothing was deleted.')
     const next = { id, parent: expected, value }, bytes = JSON.stringify(next)

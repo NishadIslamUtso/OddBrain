@@ -35,6 +35,8 @@ import { DEFAULT_LOOK, DEFAULT_SIDEBAR, type LookPreferences, type SidebarPrefer
 import AppearancePanel from '../ui/AppearancePanel'
 import WatchSection from './WatchSection'
 import { useQuickPreference, setQuickPreference } from '../state/quickPreference'
+import ModelContextProfiles, { type ContextModelChoice } from './ModelContextProfiles'
+import type { ModelContextOverrides } from '@shared/lib/modelContext'
 import {
   CUSTOM_FIELDS,
   DEFAULT_INFERENCE,
@@ -328,6 +330,9 @@ export default function SettingsView({
   onInferenceChange,
   permissions,
   onPermissionsChange,
+  contextModels = [],
+  contextProfiles = {},
+  onContextProfilesChange = () => undefined,
 }: {
   open: boolean
   initialSection?: SectionId
@@ -352,6 +357,9 @@ export default function SettingsView({
   onOpenBrain?: () => void
   inference: InferenceSettings
   onInferenceChange: (next: InferenceSettings) => void
+  contextModels: ContextModelChoice[]
+  contextProfiles: ModelContextOverrides
+  onContextProfilesChange: (next: ModelContextOverrides) => void
 }) {
   const [localSection, setLocalSection] = useState<SectionId>(initialSection ?? 'appearance')
   const section = initialSection ?? localSection
@@ -805,6 +813,11 @@ export default function SettingsView({
     models: isDemo
       ? [
           {
+            label: 'Context capacity',
+            terms: 'model context window tokens auto manual unknown capacity working memory',
+            body: <ModelContextProfiles choices={contextModels} value={contextProfiles} save={onContextProfilesChange} />,
+          },
+          {
             label: 'Providers',
             terms: 'claude anthropic gpt openai gemini openrouter groq deepseek grok xai custom key',
             body: (
@@ -818,6 +831,11 @@ export default function SettingsView({
           },
         ]
       : [
+          {
+            label: 'Context capacity',
+            terms: 'model context window tokens auto manual unknown capacity working memory overflow retry',
+            body: <ModelContextProfiles choices={contextModels} value={contextProfiles} save={onContextProfilesChange} />,
+          },
           {
             label: 'Keys',
             terms: 'keychain encryption sealed safe storage',

@@ -13,8 +13,9 @@ function storage(): Storage {
 test('notes keep every original recap version and reject stale saves without altering other chats', () => {
   const disk = storage(), first = chatNotesStore(disk, 'real', 'first'), second = chatNotesStore(disk, 'real', 'second'), sample = chatNotesStore(disk, 'sample', 'first')
   const notes = emptyChatNotes(); notes.recaps.push({ id: 'r', author: 'ai', text: 'unverified recap', basedOn: ['m'], at: 'now' })
-  first.save(notes, null, 'v1'); first.save({ ...notes, pins: ['m'] }, 'v1', 'v2')
+  first.save(notes, null, 'v1'); first.save({ ...notes, pins: ['m'], working: { ...notes.working, objective: 'Keep context across models', decisions: ['Use cited evidence'], updatedAt: '2026-10-20T00:00:00.000Z' } }, 'v1', 'v2')
   expect(first.versions()).toHaveLength(2); expect(first.versions()[0].value.pins).toEqual([])
+  expect(first.read()?.value.working).toMatchObject({ objective: 'Keep context across models', decisions: ['Use cited evidence'], author: 'user' })
   expect(() => first.save(notes, 'v1', 'v3')).toThrow('another window'); expect(second.read()).toBeNull(); expect(sample.read()).toBeNull()
 })
 test('concurrent immutable revision forks are detected and retained', () => {

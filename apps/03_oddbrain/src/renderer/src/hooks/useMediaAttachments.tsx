@@ -39,9 +39,9 @@ export default function useMediaAttachments(attachments: Attachment[], setAttach
       if (isDemo && route === 'local' && !/\.(pdf|docx|xlsx|pptx|odt|ods|odp)$/i.test(source.file.name)) {
         if (/^video\//.test(source.file.type)) {
           const frames = await extractFrames(source.file, 3)
-          added = await Promise.all(frames.map(file => readAttachment(file, { verified: true, vision: true, thinking: false })))
+          added = await Promise.all(frames.map(file => readAttachment(file, { verified: true, vision: true, thinking: false, contextWindowTokens: null })))
           description = 'Three or fewer evenly spaced still frames. Audio was not transcribed; this is not full video analysis.'
-        } else { added = [await readAttachment(source.file, { verified: true, vision: true, thinking: false })]; description = 'Browser-local text/image reading. No provider upload.' }
+        } else { added = [await readAttachment(source.file, { verified: true, vision: true, thinking: false, contextWindowTokens: null })]; description = 'Browser-local text/image reading. No provider upload.' }
         added = added.map(file => ({ ...file, extraction: description }))
       } else {
         const bytes = new Uint8Array(await source.file.arrayBuffer()); if (ticket !== generation.current) return

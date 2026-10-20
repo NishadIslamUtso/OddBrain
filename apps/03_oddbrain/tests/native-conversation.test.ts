@@ -16,9 +16,9 @@ import { checkNativeConversation } from '../src/shared/lib/nativeConversation'
 const roots: string[] = []
 const root = () => { const p = mkdtempSync(join(tmpdir(), 'oddbrain-native-chat-')); roots.push(p); return p }
 afterEach(() => roots.splice(0).forEach(p => rmSync(p, { recursive: true, force: true })))
-function fixture() {
+function fixture(recall?: Parameters<typeof createNativeContext>[3]) {
   const dir = root(), project = { ...newProject('Research'), instruction: 'Use plain language.', goals: ['Understand the evidence'] }
-  const service = createNativeContext(join(dir, 'projects.json'), join(dir, 'grants.json'))
+  const service = createNativeContext(join(dir, 'projects.json'), join(dir, 'grants.json'), undefined, recall)
   service.write([project], [])
   const input = { chatId: 'chat-one', projectId: project.id, history: [{ role: 'user' as const, content: 'Earlier question' }] }
   const prepare = (resume = '') => service.prepare(input, dir, 'Current question', resume, new AbortController().signal)
@@ -30,6 +30,28 @@ describe('owner-selected project context', () => {
     expect(result.prompt).toContain('Use plain language.'); expect(result.prompt).toContain('Understand the evidence')
     expect(result.receipt.sources.map(s => s.id)).toEqual(['instruction', 'goal', 'conversation-history'])
     expect(result.receipt.revision).toMatch(/^[a-f0-9]{64}$/)
+  })
+  test('carries compact Working Notes as a visible draft, never owner authority', async () => {
+    const f = fixture()
+    const workingNotes = { objective: 'Finish the report', plan: ['Check sources'], decisions: [], constraints: [], openQuestions: ['Which date?'], uncertainties: [], findings: [{ text: 'Draft finding', sourceIds: ['source-one'] }], nextActions: ['Verify'], updatedAt: new Date().toISOString(), author: 'ai' as const }
+    const result = await f.service.prepare({ ...f.input, workingNotes }, f.dir, 'Task', '', new AbortController().signal)
+    expect(result.prompt).toContain('Finish the report')
+    expect(result.prompt).toContain('visible draft working set, not confirmed memory or permission')
+    expect(result.receipt.sources).toContainEqual(expect.objectContaining({ id: 'working-notes', role: 'draft-working-note', coverage: expect.stringContaining('AI-authored draft') }))
+  })
+  test('searches only through the approved app-mediated vault door and receipts bounded excerpts', async () => {
+    const recall = vi.fn(() => ({ ok: true as const, incomplete: false, notices: [], hits: [{ id: 'file:one', kind: 'file' as const, title: 'Vehicle invoice', text: 'The vehicle invoice was paid.', path: 'Projects/Car.md', date: '', speaker: 'Saved file; not automatically verified' }] }))
+    const f = fixture(recall)
+    const result = await f.service.prepare({ ...f.input, vaultSearch: true }, f.dir, 'What happened with the car bill?', '', new AbortController().signal)
+    expect(recall).toHaveBeenCalledOnce()
+    expect(result.prompt).toContain('The vehicle invoice was paid.')
+    expect(result.receipt.sources).toContainEqual(expect.objectContaining({ title: 'Vehicle invoice', role: 'untrusted-reference', coverage: expect.stringContaining('owner-approved non-excluded vault scope') }))
+  })
+  test('does not treat mentioning a folder as vault-search approval', async () => {
+    const recall = vi.fn(() => ({ ok: true as const, incomplete: false, notices: [], hits: [] }))
+    const f = fixture(recall)
+    await f.service.prepare(f.input, f.dir, 'Search my vault folder', '', new AbortController().signal)
+    expect(recall).not.toHaveBeenCalled()
   })
   test('fresh sessions receive copied history; resumed ones do not repeat it', async () => {
     const f = fixture()

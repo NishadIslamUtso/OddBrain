@@ -21,8 +21,19 @@ import {
 import { askLocal } from '@shared/lib/ask'
 import { extractCitations } from '@shared/lib/citations'
 import { wantsChart } from '@shared/lib/chart'
-import type { InferenceSettings } from '@shared/lib/inference'
+import { resolveInference, type InferenceSettings } from '@shared/lib/inference'
 import { readStored } from '@shared/lib/storage'
+import { parseCloudModel } from '@shared/lib/providers'
+import {
+  modelContextKey,
+  packModelContext,
+  parseContextOverflow,
+  resolveModelContext,
+  trimOneContextGroup,
+  type ModelContextOverrides,
+  type ModelContextReceipt,
+  type PackedContextMessage,
+} from '@shared/lib/modelContext'
 
 /**
  * Sending a message, and everything that happens after it.
@@ -67,6 +78,8 @@ export type UseChatOptions = {
   vision: ChatVision
   notify: (message: string) => void
   inference?: InferenceSettings | string
+  contextProfiles?: ModelContextOverrides
+  setContextProfiles?: (value: ModelContextOverrides | ((previous: ModelContextOverrides) => ModelContextOverrides)) => void
   /** Where a finished conversation goes to be kept. Defaults to doing nothing,
    *  which is what happens until the vault service exists — see capture() below. */
   capture?: (chat: Chat) => Promise<void>
@@ -92,6 +105,8 @@ export default function useChat({
   vision,
   notify,
   inference,
+  contextProfiles = {},
+  setContextProfiles,
   capture: captureTo,
 }: UseChatOptions) {
   const [busyChatId, setBusyChatId] = useState<string | null>(null)
@@ -332,38 +347,81 @@ export default function useChat({
         patch(chat.id, assistant.id, { stage: '' })
       }
 
-      // 2 — the answering model.
-      const requestMessages: Array<{ role: string; content: string; images?: string[] }> = [
-        { role: 'system', content: systemPrompt(requested, wantsChart(userMessage.content)) },
-        ...(await toOllamaMessages(history, models.capabilities)),
+      // 2 — the answering model. Unknown models in Auto mode get no invented
+      // small cap. Reported, observed or owner-set capacities retain the newest
+      // complete turns; the receipt names every omitted message.
+      const converted = await toOllamaMessages(history, models.capabilities)
+      const eligible = history.filter(message => message.status !== 'error' && message.origin !== 'import')
+      const selectedModel = assistant.model || models.model
+      const cloud = parseCloudModel(selectedModel)
+      const key = modelContextKey(cloud ? `cloud:${cloud.provider}` : 'ollama', selectedModel)
+      const runtimeLimit = cloud ? null : resolveInference(inference).options.num_ctx ?? null
+      const reportedLimit = [models.capabilities.contextWindowTokens, runtimeLimit]
+        .filter((value): value is number => typeof value === 'number' && value > 0)
+        .reduce<number | null>((smallest, value) => smallest === null ? value : Math.min(smallest, value), null)
+      let profile = resolveModelContext({ key, label: selectedModel, reportedTokens: reportedLimit, override: contextProfiles[key] })
+      const items: PackedContextMessage[] = [
+        { id: 'system', required: true, message: { role: 'system', content: systemPrompt(requested, wantsChart(userMessage.content)) } },
+        ...converted.map((message, index) => ({ id: eligible[index]?.id || `message-${index}`, required: index === converted.length - 1, message })),
       ]
-      const size = requestMessages.reduce((total, message) => total + message.content.length, 0)
-      if (size > 12_000) {
-        throw new Error(
-          'This chat and its files exceed the conservative 12,000-character budget for the local context window. Start a new chat, or shorten the last message. Your transcript is kept either way.'
-        )
-      }
-
+      let packed = packModelContext(items, profile)
+      let active = packed.messages
+      let omitted = [...packed.omitted]
+      let attempts = 0
+      let overflowRetry = false
       let raw = ''
       let nativeThinking = ''
-      await streamChat(
-        {
-          model: assistant.model || models.model,
-          messages: requestMessages,
-          ...(models.capabilities.thinking ? { think: Boolean(thinking) } : {}),
-        },
-        controller.signal,
-        record => {
-          raw += record.message?.content || ''
-          nativeThinking += record.message?.thinking || ''
-          const piece = splitThinking(raw, nativeThinking)
-          final = { ...final, ...piece, stage: '' }
-          patch(chat.id, assistant.id, final)
-          sweep(piece.content)
-        },
-        inference,
-        readStored<boolean>('oddbrain.keepLoadedAlways', false).value ? -1 : undefined
-      )
+      for (;;) {
+        attempts += 1
+        try {
+          await streamChat(
+            {
+              model: selectedModel,
+              messages: active.map(item => item.message),
+              ...(models.capabilities.thinking ? { think: Boolean(thinking) } : {}),
+            },
+            controller.signal,
+            record => {
+              raw += record.message?.content || ''
+              nativeThinking += record.message?.thinking || ''
+              const piece = splitThinking(raw, nativeThinking)
+              final = { ...final, ...piece, stage: '' }
+              patch(chat.id, assistant.id, final)
+              sweep(piece.content)
+            },
+            inference,
+            readStored<boolean>('oddbrain.keepLoadedAlways', false).value ? -1 : undefined,
+            profile.mode === 'manual' && !cloud ? profile.capacityTokens ?? undefined : undefined
+          )
+          break
+        } catch (error) {
+          const overflow = parseContextOverflow(error)
+          if (!overflow.overflow || profile.mode === 'manual' || raw || attempts >= 4) throw error
+          overflowRetry = true
+          patch(chat.id, assistant.id, { stage: 'The model rejected an oversized context. Retrying with lower-priority history removed…' })
+          let next
+          if (overflow.limitTokens) {
+            setContextProfiles?.(previous => ({ ...previous, [key]: { ...(previous[key] || { mode: 'auto' }), mode: 'auto', observedTokens: overflow.limitTokens! } }))
+            profile = resolveModelContext({ key, label: selectedModel, override: { ...(contextProfiles[key] || { mode: 'auto' }), mode: 'auto', observedTokens: overflow.limitTokens } })
+            next = packModelContext(active, profile, 'provider-overflow')
+          } else next = trimOneContextGroup(active)
+          if (next.messages.length >= active.length) throw error
+          active = next.messages
+          omitted = [...omitted, ...next.omitted].filter((entry, index, all) => all.findIndex(other => other.id === entry.id) === index)
+          packed = next
+        }
+      }
+      const contextReceipt: ModelContextReceipt = {
+        model: selectedModel,
+        capacity: { source: profile.source, tokens: profile.capacityTokens, mode: profile.mode },
+        estimate: { inputTokens: packed.estimatedInputTokens, exact: false, method: 'UTF-8 bytes divided by three, plus message and image allowances; provider tokenization may differ.' },
+        includedMessages: active.length,
+        omitted,
+        attempts,
+        overflowRetry,
+        note: overflowRetry ? 'The provider rejected the larger request before generation. OddBrain reported it, removed lower-priority history, and retried without changing stored messages.' : omitted.length ? 'Lower-priority stored messages were not sent to stay within this model profile. Stored history was not changed.' : 'No stored conversation message was omitted by OddBrain.',
+      }
+      final.contextReceipt = contextReceipt
       final.status = 'complete'
       final.stage = ''
       final.artifacts = extractArtifacts(final.content, {

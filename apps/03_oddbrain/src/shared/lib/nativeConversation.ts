@@ -1,15 +1,19 @@
-import { resolveChatContext, type ChatOverrides } from './chatContext'
+import { normalizeWorkingNotes, resolveChatContext, workingNotesText, type ChatOverrides, type WorkingNotes } from './chatContext'
 export type NativeConversation = {
   chatId: string
   expectedRoute?: string
   projectId?: string | null
   overrides?: ChatOverrides
+  /** Compact, versioned AI/user draft state. It is context, never confirmed memory or authority. */
+  workingNotes?: WorkingNotes
+  /** Persistent, revocable approval for app-mediated read-only search of non-excluded vault sources. */
+  vaultSearch?: boolean
   /** Refuse, rather than silently start fresh, if this saved native link disappeared. */
   continuationExpected?: boolean
   /** Supplied only for a new native context. Stored chat text, never another native ID. */
   history?: Array<{ role: 'user' | 'assistant'; content: string }>
 }
-export type ContextSourceRole = 'app-instruction' | 'owner-instruction' | 'owner-preference' | 'untrusted-reference' | 'conversation-history' | 'owner-request'
+export type ContextSourceRole = 'app-instruction' | 'owner-instruction' | 'owner-preference' | 'draft-working-note' | 'untrusted-reference' | 'conversation-history' | 'owner-request'
 export type ContextReceipt = {
   projectId: string | null; revision: string; workspace: string
   sources: Array<{ id: string; title: string; chars: number; digest?: string; coverage: string; role?: ContextSourceRole; hazards?: import('./textHazards').TextHazardReport }>
@@ -25,9 +29,11 @@ export function checkNativeConversation(value: unknown): NativeConversation | un
   if (raw.expectedRoute !== undefined && (typeof raw.expectedRoute !== 'string' || raw.expectedRoute.length > 16_000)) throw Error('Invalid engine route.')
   if (raw.projectId !== undefined && raw.projectId !== null && (typeof raw.projectId !== 'string' || !/^[a-zA-Z0-9_-]{6,64}$/.test(raw.projectId))) throw Error('Invalid project identity.')
   if (raw.continuationExpected !== undefined && typeof raw.continuationExpected !== 'boolean') throw Error('Invalid resume choice.')
+  if (raw.vaultSearch !== undefined && typeof raw.vaultSearch !== 'boolean') throw Error('Invalid vault-search choice.')
   if (raw.history !== undefined && (!Array.isArray(raw.history) || raw.history.some(m => !m || !['user', 'assistant'].includes(m.role) || typeof m.content !== 'string'))) throw Error('Invalid stored conversation context.')
   resolveChatContext({ goal: '', style: '', workspace: '', additionalFolders: [] }, raw.overrides || {})
-  if (JSON.stringify(raw).length > 100_000) throw Error('Conversation context exceeds 100,000 characters. Nothing was clipped or sent; use a shorter explicit recap in a new chat.')
+  if (raw.workingNotes !== undefined && workingNotesText(normalizeWorkingNotes(raw.workingNotes)) !== JSON.stringify(raw.workingNotes)) throw Error('Invalid or oversized chat Working Notes. Nothing was sent.')
+  if (JSON.stringify(raw).length > 140_000) throw Error('Conversation context exceeds 100,000 characters. Nothing was clipped or sent; use a shorter explicit recap in a new chat.')
   return structuredClone(raw)
 }
 
@@ -40,5 +46,5 @@ export function validContextReceipt(value: unknown): value is ContextReceipt {
   const launch = v?.launch === undefined || (!!v.launch && typeof v.launch.digest === 'string' && /^[a-f0-9]{64}$/i.test(v.launch.digest) && typeof v.launch.complete === 'boolean' && ['files', 'connectorFiles', 'ruleFiles', 'hookFiles'].every(key => Number.isSafeInteger((v.launch as any)[key]) && (v.launch as any)[key] >= 0) && Array.isArray(v.launch.warnings) && v.launch.warnings.length <= 100 && v.launch.warnings.every(item => typeof item === 'string' && item.length <= 2_000))
   return !!v && typeof v === 'object' && (v.projectId === null || typeof v.projectId === 'string') && typeof v.revision === 'string' && /^[a-f0-9]{64}$/i.test(v.revision) && typeof v.workspace === 'string' && session && launch &&
     Number.isSafeInteger(v.characters) && v.characters >= 0 && Number.isSafeInteger(v.historyMessages) && v.historyMessages >= 0 && Array.isArray(v.sources) && v.sources.length <= 100 && v.sources.every(source =>
-      source && typeof source.id === 'string' && typeof source.title === 'string' && typeof source.coverage === 'string' && (source.role === undefined || ['app-instruction', 'owner-instruction', 'owner-preference', 'untrusted-reference', 'conversation-history', 'owner-request'].includes(source.role)) && hazard(source.hazards) && Number.isSafeInteger(source.chars) && source.chars >= 0 && (source.digest === undefined || (typeof source.digest === 'string' && /^[a-f0-9]{64}$/i.test(source.digest))))
+      source && typeof source.id === 'string' && typeof source.title === 'string' && typeof source.coverage === 'string' && (source.role === undefined || ['app-instruction', 'owner-instruction', 'owner-preference', 'draft-working-note', 'untrusted-reference', 'conversation-history', 'owner-request'].includes(source.role)) && hazard(source.hazards) && Number.isSafeInteger(source.chars) && source.chars >= 0 && (source.digest === undefined || (typeof source.digest === 'string' && /^[a-f0-9]{64}$/i.test(source.digest))))
 }

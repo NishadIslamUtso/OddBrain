@@ -106,6 +106,8 @@ export type Message = {
   citations?: Citation[]
   /** How long the reply took, in milliseconds. */
   ms?: number
+  /** Inspectable record of what a local/API model received and any overflow repack. */
+  contextReceipt?: import('./lib/modelContext').ModelContextReceipt
   /** An error string when the turn failed. Never a silent empty reply. */
   error?: string
 }
@@ -196,6 +198,8 @@ export type ModelCapabilities = {
   verified: boolean
   vision: boolean
   thinking: boolean
+  /** Model metadata only. null means the model/runtime did not report it. */
+  contextWindowTokens: number | null
 }
 
 /** One turn as the model API expects it. */
