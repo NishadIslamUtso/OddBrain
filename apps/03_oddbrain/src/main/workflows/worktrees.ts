@@ -10,6 +10,28 @@ const commandEnvironment = (source: NodeJS.ProcessEnv): NodeJS.ProcessEnv => Obj
 const REVISION = /^[a-f0-9]{40,64}$/
 const sha = (value: Buffer | string) => createHash('sha256').update(value).digest('hex')
 const inside = (parent: string, child: string) => { const rel = relative(resolve(parent), resolve(child)); return rel === '' || (!rel.startsWith('..' + sep) && rel !== '..' && !isAbsolute(rel)) }
+const RETAINED_WORKTREE_BYTES = 2_000_000_000
+const TREE_ENTRY_LIMIT = 200_000
+function treeUsage(root: string, skipGit = false): { bytes: number; entries: number; complete: boolean } {
+  let bytes = 0, entries = 0, complete = true
+  const walk = (path: string) => {
+    if (!complete) return
+    let stat
+    try { stat = lstatSync(path) } catch { complete = false; return }
+    entries++
+    if (entries > TREE_ENTRY_LIMIT) { complete = false; return }
+    if (stat.isSymbolicLink() || stat.isFile()) { bytes += stat.size; return }
+    if (!stat.isDirectory()) return
+    let names: string[]
+    try { names = readdirSync(path) } catch { complete = false; return }
+    for (const name of names) {
+      if (skipGit && path === root && name === '.git') continue
+      walk(join(path, name))
+    }
+  }
+  if (existsSync(root)) walk(root)
+  return { bytes, entries, complete }
+}
 const sameDirectory = (left: string, right: string) => {
   const leftPath = realpathSync(left), rightPath = realpathSync(right)
   const leftInfo = statSync(leftPath), rightInfo = statSync(rightPath)
@@ -33,6 +55,8 @@ export type WorktreeReceipt = {
   statusBytes?: number
   statusEntries?: number
   statusSha256?: string
+  retainedBytes?: number
+  retainedEntries?: number
   note: string
 }
 
@@ -114,6 +138,9 @@ export function createDetachedWorktree(repository: WorktreeRepository, storageRo
   const retained = existsSync(storageRoot) ? readdirSync(storageRoot).filter(name => RUN_ID.test(name)).filter(name => { try { const info = lstatSync(join(storageRoot, name)); return !info.isDirectory() || info.isSymbolicLink() || readdirSync(join(storageRoot, name)).length > 0 } catch { return true } }).length : 0
   const runRoot = join(storageRoot, runId)
   if (!existsSync(runRoot) && retained >= 20) throw Error('Twenty isolated batches are already retained. Inspect and remove old Git worktrees before starting another batch.')
+  const retainedUsage = treeUsage(storageRoot), checkoutEstimate = treeUsage(repository.root, true)
+  if (!retainedUsage.complete || !checkoutEstimate.complete) throw Error('Retained-worktree storage could not be measured within the 200,000-entry census limit. Inspect it before starting another batch.')
+  if (retainedUsage.bytes + checkoutEstimate.bytes > RETAINED_WORKTREE_BYTES) throw Error(`The new checkout could exceed the ${(RETAINED_WORKTREE_BYTES / 1_000_000_000).toFixed(0)} GB retained-worktree budget. Remove old retained work before starting another batch.`)
   if (existsSync(destination)) throw Error('The isolated task folder already exists. It was not reused or overwritten.')
   mkdirSync(runRoot, { recursive: true, mode: 0o700 }); noLinkedPath(destination)
   const hooks = join(storageRoot, '.disabled-hooks')
@@ -134,12 +161,14 @@ export function finishDetachedWorktree(repository: WorktreeRepository, storageRo
   const receipt: WorktreeReceipt = { path, baseRevision: repository.revision, retained: true, note: 'The isolated checkout is retained. Nothing was merged, pushed, or copied into the source repository.' }
   try {
     noLinkedPath(path)
-    if (!existsSync(path) || !lstatSync(path).isDirectory()) return { ...receipt, note: 'The task removed or replaced its isolated checkout. Git metadata or side effects may remain; cleanup was not guessed.' }
+    if (!existsSync(path) || !lstatSync(path).isDirectory()) return { ...receipt, retained: false, note: 'The isolated checkout path is no longer present. The task may have removed or replaced it; Git metadata and external side effects remain uncertain, so no result was fabricated.' }
     const headRevision = text(runGit(repository.gitProgram, hooks, path, ['rev-parse', '--verify', 'HEAD'])).toLowerCase()
     const status = runGit(repository.gitProgram, hooks, path, ['status', '--porcelain=v1', '-z', '--untracked-files=all'])
     const changed = headRevision !== repository.revision || status.length > 0
-    Object.assign(receipt, { headRevision, changed, statusBytes: status.length, statusEntries: status.length ? status.subarray(0, -1).toString('binary').split('\0').length : 0, statusSha256: sha(status) })
-    if (changed) return receipt
+    const usage = treeUsage(path)
+    Object.assign(receipt, { headRevision, changed, statusBytes: status.length, statusEntries: status.length ? status.subarray(0, -1).toString('binary').split('\0').length : 0, statusSha256: sha(status), retainedBytes: usage.bytes, retainedEntries: usage.entries })
+    if (!usage.complete) return { ...receipt, note: `${receipt.note} Its size census exceeded ${TREE_ENTRY_LIMIT.toLocaleString()} entries or encountered an unreadable path; automatic removal was refused.` }
+    if (changed) return { ...receipt, note: `${receipt.note} It currently uses ${usage.bytes.toLocaleString()} filesystem bytes across ${usage.entries.toLocaleString()} entries.` }
     runGit(repository.gitProgram, hooks, repository.root, ['worktree', 'remove', '--force', path], false, 1_000_000)
     return { ...receipt, retained: false, note: 'The isolated checkout was clean and still at the reviewed revision, so it was removed. Command output remains in the run record.' }
   } catch (error) {

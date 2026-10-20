@@ -3,26 +3,24 @@ function oddExtractPage(mode = "page") {
   const privateSelector =
     'script,style,noscript,template,iframe,form,input,textarea,select,[contenteditable]:not([contenteditable="false"]),[hidden],[aria-hidden="true"],[data-private],[data-oddbrain]';
   const selection = window.getSelection();
+  const visuallyHidden = (element, style) => {
+    const rect = element.getBoundingClientRect();
+    const clipped = style.clipPath === "inset(100%)" || /rect\(0(?:px)?[, ]+0(?:px)?[, ]+0(?:px)?[, ]+0(?:px)?\)/i.test(style.clip || "");
+    const transparentText = style.color === "transparent" || /rgba?\([^)]*,\s*0\s*\)$/i.test(style.color || "") || style.webkitTextFillColor === "transparent";
+    const collapsedTransform = /(?:scale(?:X|Y)?\(0(?:[),])|matrix\(0,\s*0,\s*0,\s*0,)/i.test(style.transform || "");
+    return style.display === "none" || style.visibility === "hidden" || style.visibility === "collapse" || style.contentVisibility === "hidden" || style.opacity !== "" && Number(style.opacity) === 0 || Number.parseFloat(style.fontSize || "16") < 2 || clipped || transparentText || collapsedTransform || ((rect.width <= 1 || rect.height <= 1) && [style.overflow, style.overflowX, style.overflowY].some((value) => ["hidden", "clip"].includes(value)));
+  };
   const cleanText = (element) => {
     if (element.closest?.(privateSelector)) return "";
     const ownStyle = element.isConnected ? getComputedStyle(element) : null;
-    if (
-      ownStyle &&
-      (ownStyle.display === "none" || ownStyle.visibility === "hidden")
-    )
-      return "";
+    if (ownStyle && visuallyHidden(element, ownStyle)) return "";
     const copy = element.cloneNode(true);
     if (element.isConnected) {
       const originals = element.querySelectorAll("*"),
         clones = copy.querySelectorAll("*");
       originals.forEach((original, index) => {
         const style = getComputedStyle(original);
-        if (
-          style.display === "none" ||
-          style.visibility === "hidden" ||
-          style.visibility === "collapse"
-        )
-          clones[index]?.remove();
+        if (visuallyHidden(original, style)) clones[index]?.remove();
       });
     }
     copy
@@ -68,11 +66,7 @@ function oddExtractPage(mode = "page") {
         parent = parent.parentElement
       ) {
         const style = getComputedStyle(parent);
-        if (
-          style.display === "none" ||
-          style.visibility === "hidden" ||
-          style.visibility === "collapse"
-        ) {
+        if (visuallyHidden(parent, style)) {
           hidden = true;
           break;
         }

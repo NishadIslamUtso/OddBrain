@@ -171,14 +171,19 @@
         return;
       }
       chosen.focus();
-      const addition = preview.value;
+      const reviewed = preview.value;
+      let addition = reviewed;
       if ("value" in chosen) {
         const start = replacing
             ? 0
             : (chosen.selectionStart ?? chosen.value.length),
-          end = replacing ? chosen.value.length : (chosen.selectionEnd ?? start);
+          end = replacing ? chosen.value.length : (chosen.selectionEnd ?? start),
+          left = chosen.value.slice(0, start),
+          right = chosen.value.slice(end),
+          separator = chosen.tagName === "INPUT" ? " " : "\n\n";
+        addition = (replacing ? "" : left && !/\s$/.test(left) ? separator : "") + reviewed + (replacing ? "" : right && !/^\s/.test(right) ? separator : "");
         const next =
-          chosen.value.slice(0, start) + addition + chosen.value.slice(end);
+          left + addition + right;
         const prototype =
           chosen.tagName === "TEXTAREA"
             ? HTMLTextAreaElement.prototype
@@ -195,6 +200,7 @@
           }),
         );
       } else {
+        addition = (replacing || !current.trim() ? "" : "\n\n") + reviewed;
         const selection = window.getSelection();
         const range = document.createRange();
         range.selectNodeContents(chosen);

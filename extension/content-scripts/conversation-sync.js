@@ -16,7 +16,8 @@
     label,
     detail,
     bar,
-    pause;
+    pause,
+    mounting;
   let prefs = {},
     pending = false,
     unsafeToClose = false,
@@ -42,6 +43,8 @@
   }
   async function mount() {
     if (host?.isConnected && shadow) return true;
+    if (mounting) return mounting;
+    mounting = (async () => {
     const root = document.documentElement;
     if (!root?.isConnected) return false;
     host = el("div");
@@ -75,6 +78,9 @@
     if (globalThis.OddAppearance)
       OddAppearance.apply(prefs.appAppearance, host);
     return host.isConnected;
+    })();
+    try { return await mounting; }
+    finally { mounting = null; }
   }
   async function status(state, text, done = 0, total = 0, media = "") {
     if (await mount()) {

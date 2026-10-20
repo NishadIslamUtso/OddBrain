@@ -63,10 +63,10 @@ export function createCommandRunner(options: {
     return value
   }
   const observed = (record: CommandRecord) => !active?.ids.has(record.id) && ['starting', 'running'].includes(record.state) ? { ...record, state: 'interrupted' as const, outputComplete: false, note: 'No final result is recorded and this app has no active handle for this run. It may have been interrupted before or during execution; escaped descendants may have continued. Nothing was automatically retried.' } : record
-  const inspect = (request: ShellRequest) => {
+  const inspect = (request: ShellRequest, ownWorkflow = false) => {
     checkSource(request)
     const scope = options.scope()
-    if (!scope.allowed || active) throw Error(active ? 'Another app command is preparing or running.' : scope.explanation)
+    if ((!scope.allowed && !ownWorkflow) || (active && !ownWorkflow)) throw Error(active ? 'Another app command is preparing or running.' : scope.explanation)
     if (!isAbsolute(request.cwd) || resolve(request.cwd) !== resolve(scope.cwd)) throw Error('Use the app’s selected working folder. Mentioning another path does not authorize it.')
     noLinkedPath(request.cwd)
     const folder = statSync(request.cwd)
@@ -202,7 +202,12 @@ export function createCommandRunner(options: {
             own.controller.signal.throwIfAborted(); lease.recheck()
             if (remaining <= 0) throw Error('Workflow output budget reached; later steps were not started.')
             callbacks.starting(index)
-            const result = await runOne(requests[index], checked[index], own, lease, Math.min(limit, remaining), id => callbacks.recorded(index, id))
+            // Earlier reviewed workflow steps may legitimately create a link or
+            // config entry. Bind the next launch to a fresh post-step census;
+            // runOne checks it again immediately before spawn, so later races
+            // still fail closed instead of mislabelling an authorized effect.
+            const current = index === 0 ? checked[index] : inspect(requests[index], true)
+            const result = await runOne(requests[index], current, own, lease, Math.min(limit, remaining), id => callbacks.recorded(index, id))
             callbacks.finished(index, result)
             if (result.runId) { const record = readRecord(result.runId); remaining -= record.stdoutBytes + record.stderrBytes }
             if (result.interrupted || !result.outputComplete || result.exitCode !== 0) return

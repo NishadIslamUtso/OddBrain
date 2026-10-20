@@ -3,6 +3,7 @@ import type { VaultFiles } from '../vault/files'
 import { yamlDocument } from '../vault/text'
 import { excluded, readPatterns } from '../vault/blacklist'
 import { changeMemory, chapterEvidence, staleBasis, mergedProfiles, emptyMemory, memoryStateProblem, parseMemoryProposals, type MemoryAction, type MemorySource, type MemoryWorkspace } from '../../shared/lib/memoryWorkspace'
+import { scanInstructionSignals, scanTextHazards } from '../../shared/lib/textHazards'
 const hash = (s: string): string => createHash('sha256').update(s).digest('hex')
 const STATE = '06 Review/Organizer/state.json'
 const AI = new Set(['oddbrain','chatgpt','claude','gemini','aistudio','deepseek','arena','glm','kimi','grok','qwen','mistral','perplexity','copilot','poe'])
@@ -48,7 +49,8 @@ export function createMemoryWorkspace(files: VaultFiles, clock: () => string = (
         for (let start = 0; start < m.text.length; start += 5500) {
           const id = hash(`${revision}\n${start}`)
           if (known.has(id)) continue
-          const source: MemorySource = { id, path: revision, note: path.includes('/Browser/') ? base + '/conversation.md' : conversation.original, title: conversation.title, provider: conversation.provider, conversation: conversation.key, message: m.id, role: m.role, speaker: m.speaker || '', account, kind, observed: record.observed_at, timestamp: typeof m.timestamp === 'string' ? m.timestamp : '', hash: record.hash, start, end: Math.min(start + 6000, m.text.length) }
+          const reviewedText = m.text.slice(start, Math.min(start + 6000, m.text.length))
+          const source: MemorySource = { id, path: revision, note: path.includes('/Browser/') ? base + '/conversation.md' : conversation.original, title: conversation.title, provider: conversation.provider, conversation: conversation.key, message: m.id, role: m.role, speaker: m.speaker || '', account, kind, observed: record.observed_at, timestamp: typeof m.timestamp === 'string' ? m.timestamp : '', hash: record.hash, start, end: Math.min(start + 6000, m.text.length), ...(path.includes('/Browser/') ? { warnings: { invisibleText: scanTextHazards(reviewedText).total, instructionLike: scanInstructionSignals(reviewedText).total } } : {}) }
           state.jobs.push({ id, source, state: 'queued', attempts: 0, error: '' }); known.add(id); changed = true
           if (++added >= 64) { state.scanCapped = true; break sources }
         }

@@ -1,9 +1,28 @@
 import { createHash } from 'node:crypto'
-import { lstatSync, readdirSync } from 'node:fs'
-import { basename, join, relative, resolve } from 'node:path'
+import { closeSync, constants, fstatSync, lstatSync, openSync, readlinkSync, readSync, readdirSync, realpathSync } from 'node:fs'
+import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import type { EngineId } from '../../shared/lib/engine'
 import { scanTextHazards } from '../../shared/lib/textHazards'
-import { configBytes, noLinkedPath } from './configTransaction'
+import { noLinkedPath } from './configTransaction'
+
+const INVENTORY_FILE_LIMIT = 8_000_000
+function inventoryBytes(path: string): Buffer | null {
+  noLinkedPath(path)
+  let descriptor: number
+  try { descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0)) }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null; throw error }
+  try {
+    const before = fstatSync(descriptor)
+    if (!before.isFile() || before.size > INVENTORY_FILE_LIMIT) throw Error('Inventory entry is not a regular file within the 8 MB observation limit.')
+    const bytes = Buffer.alloc(before.size + 1)
+    let size = 0
+    while (size < bytes.length) { const count = readSync(descriptor, bytes, size, bytes.length - size, null); if (!count) break; size += count }
+    const after = fstatSync(descriptor)
+    noLinkedPath(path)
+    if (size !== before.size || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) throw Error('Inventory entry changed while it was being read.')
+    return bytes.subarray(0, size)
+  } finally { closeSync(descriptor) }
+}
 
 export type NativeLaunchFile = {
   path: string
@@ -12,6 +31,7 @@ export type NativeLaunchFile = {
   bytes: number
   sha256: string
   textHazards: number
+  linkedTarget?: string
 }
 export type NativeLaunchInventory = {
   engine: EngineId
@@ -36,6 +56,7 @@ const kindOf = (path: string): NativeLaunchFile['kind'] => {
   return 'settings'
 }
 const relativeLabel = (path: string, root: string, scope: 'workspace' | 'user') => `${scope}:${relative(root, path).replaceAll('\\', '/') || basename(path)}`
+const inside = (parent: string, child: string) => { const rel = relative(resolve(parent), resolve(child)); return rel === '' || (!rel.startsWith(`..${sep}`) && rel !== '..' && !isAbsolute(rel)) }
 
 /** Read-only, bounded, no-follow inventory of declarations a native engine or
  * nearby developer tooling may execute when a folder activates. It inventories
@@ -51,14 +72,27 @@ export function inspectNativeLaunch(engine: EngineId, workspace: string, home: s
   const read = (path: string, scope: 'workspace' | 'user', requiredLabel?: string) => {
     const label = relativeLabel(path, scope === 'workspace' ? root : user, scope)
     try {
-      const bytes = configBytes(path)
+      let observedPath = path, linkEvidence: unknown[] = []
+      try {
+        const before = lstatSync(path)
+        if (before.isSymbolicLink()) {
+          const linkText = readlinkSync(path), target = realpathSync(path)
+          if (!inside(root, target) && !inside(user, target)) throw Error('Configuration symlink points outside the reviewed workspace and user profile.')
+          if (!lstatSync(target).isFile()) throw Error('Configuration symlink does not resolve to a regular file.')
+          observedPath = target
+          linkEvidence = [linkText, target, before.mtimeMs, before.ctimeMs]
+          warn(`${label}: linked file was followed within the reviewed workspace/user profile and its exact target bytes were fingerprinted.`)
+        }
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error }
+      const bytes = inventoryBytes(observedPath)
+      if (observedPath !== path && (realpathSync(path) !== observedPath || readlinkSync(path) !== linkEvidence[0])) throw Error('Configuration symlink changed while it was inventoried.')
       if (bytes === null) { if (requiredLabel) { missing.push(requiredLabel); evidence.push([label, 'missing']) }; return }
       if (++visited > MAX_FILES || total + bytes.length > MAX_TOTAL) { complete = false; warn('Native launch inventory reached its 256-file or 8 MB limit.'); evidence.push([label, 'limit']); return }
       total += bytes.length
       let hazards = 0
       try { hazards = scanTextHazards(new TextDecoder('utf-8', { fatal: true }).decode(bytes)).total } catch { /* Binary hook/support files remain hashed exactly. */ }
-      const item = { path, scope, kind: kindOf(path), bytes: bytes.length, sha256: sha(bytes), textHazards: hazards } as const
-      files.push(item); evidence.push([label, item.kind, item.bytes, item.sha256, hazards])
+      const item: NativeLaunchFile = { path, scope, kind: kindOf(path), bytes: bytes.length, sha256: sha(bytes), textHazards: hazards, ...(observedPath !== path ? { linkedTarget: observedPath } : {}) }
+      files.push(item); evidence.push([label, item.kind, item.bytes, item.sha256, hazards, ...linkEvidence])
     } catch (error) {
       complete = false
       const linked = /symlink/i.test((error as Error).message)
@@ -82,7 +116,11 @@ export function inspectNativeLaunch(engine: EngineId, workspace: string, home: s
           const changed = relativeLabel(path, scope === 'workspace' ? root : user, scope)
           complete = false; warn(`${changed} changed during inventory.`); evidence.push([changed, 'changed']); continue
         }
-        if (entry.isSymbolicLink()) { complete = false; warn(`${relativeLabel(path, scope === 'workspace' ? root : user, scope)}: link was not followed.`); evidence.push([relativeLabel(path, scope === 'workspace' ? root : user, scope), 'linked']); continue }
+        if (entry.isSymbolicLink()) {
+          try { if (lstatSync(realpathSync(path)).isFile()) read(path, scope); else throw Error() }
+          catch { complete = false; warn(`${relativeLabel(path, scope === 'workspace' ? root : user, scope)}: linked directory or unreadable target was not followed.`); evidence.push([relativeLabel(path, scope === 'workspace' ? root : user, scope), 'linked-directory']); }
+          continue
+        }
         if (entry.isDirectory()) walk(path, scope, depth + 1)
         else if (entry.isFile()) read(path, scope)
       }
@@ -120,7 +158,7 @@ export function nativeLaunchSummary(value: NativeLaunchInventory): string {
     `Folder: ${value.workspace}`,
     `Observed and fingerprinted ${value.files.length} configuration file(s), including ${value.connectorFiles} connector, ${value.ruleFiles} rule/instruction and ${value.hookFiles} Git hook/config file(s).`,
     `Inventory fingerprint: ${value.digest}`,
-    ...sensitive.slice(0, 18).map(file => `${file.kind}: ${file.path}${file.textHazards ? ` · ${file.textHazards} invisible-text warning(s)` : ''}`),
+    ...sensitive.slice(0, 18).map(file => `${file.kind}: ${file.path}${file.linkedTarget ? ` → ${file.linkedTarget}` : ''}${file.textHazards ? ` · ${file.textHazards} invisible-text warning(s)` : ''}`),
     ...(sensitive.length > 18 ? [`${sensitive.length - 18} additional execution-relevant file(s) are included in the fingerprint.`] : []),
     ...value.warnings.slice(0, 18),
     ...(value.warnings.length > 18 ? [`${value.warnings.length - 18} additional warning(s) are retained in the receipt but omitted from this dialog.`] : []),

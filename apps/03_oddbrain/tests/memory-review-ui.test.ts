@@ -16,7 +16,7 @@ test('group selection is explicit, previews exact text and quotations, cancellat
   expect(button('Review selected (0)').disabled).toBe(true)
   await click(host.querySelector('input')!)
   await click(button('Review selected (1)'))
-  expect(host.textContent).toContain('Original quote 1'); expect(host.textContent).toContain('Not certain')
+  expect(host.textContent).toContain('Original quote 1'); expect(host.textContent).toContain('Not certain'); expect(host.textContent).toContain('not-approved'); expect(host.textContent).toContain('would-be-confirmed')
   expect(send).not.toHaveBeenCalled()
   await click(button('Cancel group review')); expect(send).not.toHaveBeenCalled()
   await click(button('Review selected (1)')); await click(button('Confirm selected interpretations'))

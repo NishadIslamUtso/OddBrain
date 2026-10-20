@@ -4,6 +4,10 @@ const path = require('node:path')
 const root = path.resolve(__dirname, '..')
 const args = process.argv.slice(2)
 const mode = args[0]
+const manifest = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'))
+const version = String(manifest.version || '')
+if (!/^\d+\.\d+\.\d+$/.test(version)) throw Error('package.json must contain a numeric release version')
+const installerName = `OddBrain-Setup-${version}.exe`
 const failures = []
 const fail = message => failures.push(message)
 const forbiddenName = /(?:^|\/)(?:\.env(?:\.|$)|id_(?:rsa|ed25519)(?:\.|$)|credentials?(?:\.|$)|secrets?(?:\.|$))|\.(?:map|ts|tsx)$/i
@@ -55,8 +59,8 @@ if (mode === '--build') {
   else {
     const approved = /^(?:OddBrain-Setup-\d+\.\d+\.\d+\.exe(?:\.blockmap|\.sha256)?|oddbrain-sbom\.cdx\.json|latest\.yml|builder-(?:debug|effective-config)\.ya?ml|win-unpacked)$/
     for (const name of fs.readdirSync(dist)) if (!approved.test(name)) fail(`dist/${name} is not on the release-output allowlist`)
-    const installer = path.join(dist, 'OddBrain-Setup-0.9.0.exe')
-    if (!fs.existsSync(installer) || !fs.statSync(installer).isFile()) fail('the expected installer is missing')
+    const installer = path.join(dist, installerName)
+    if (!fs.existsSync(installer) || !fs.statSync(installer).isFile()) fail(`the expected installer ${installerName} is missing`)
     inspectTree(dist, 'dist')
   }
 } else {

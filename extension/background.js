@@ -777,7 +777,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name === "oddbrain-sync")
     void (async () => {
       const status = await synchronize();
-      await flushConversations();
+      await flushConversations(false);
       if (status.ok) await flushQueue();
     })().catch(() => {});
 });

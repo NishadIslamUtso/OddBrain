@@ -3,6 +3,8 @@
   "name": "OddBrain",
   "version": "0.5.1",
   "description": "Remember AI conversations and messages while you use supported sites. Incremental saving, original attachments, and honest progress. Pairs with OddBrain.",
+  "author": "NishadIslamUtso",
+  "homepage_url": "https://github.com/NishadIslamUtso/OddBrain",
   "permissions": [
     "storage",
     "unlimitedStorage",

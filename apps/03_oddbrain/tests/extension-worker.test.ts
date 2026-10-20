@@ -710,6 +710,10 @@ it("durable replay survives a lost acknowledgement without a second immutable me
   const h = await harness();
   try {
     await offlineQueue(h);
+    const delayed = await h.queued()
+    expect(delayed[0].attempts).toBeGreaterThan(0)
+    expect(delayed[0].retryAt).toBeGreaterThan(delayed[0].lastAttempt)
+    expect(delayed[0].retryReason).toMatch(/unavailable|connection|confirm/i)
     h.setOffline(false);
     h.loseAck();
     await h.drain();

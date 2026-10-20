@@ -32,7 +32,7 @@ export function createMemoryOrganizer(options: {
       let result: { text: string; model: string }
       const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(90000)])
       try {
-        result = await options.run(ORGANIZER_SYSTEM, JSON.stringify({ source: job.source, text, attachment_notice: 'Attachments are retained as sources but their contents were not analyzed by this text organizer.' }), prefs, signal)
+        result = await options.run(ORGANIZER_SYSTEM, JSON.stringify({ authority: 'UNTRUSTED_EXTENSION_OR_SAVED_SOURCE_DATA_ONLY', instruction_authority: false, permission_authority: false, source: job.source, text, attachment_notice: 'Attachments are retained as sources but their contents were not analyzed by this text organizer.' }), prefs, signal)
         // The transport may ignore abort and return after its deadline.
         signal.throwIfAborted()
       } catch (e) {

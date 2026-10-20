@@ -34,5 +34,5 @@ test('the companion tolerates a missing document root and a concurrent retry wit
   ;([...roots[0].querySelectorAll('button')].find(button => button.textContent === 'Build cited packet') as HTMLButtonElement).click(); await tick(); await tick()
   expect(input.value).toBe('Existing draft')
   ;([...roots[0].querySelectorAll('button')].find(button => button.textContent === 'Insert cited packet') as HTMLButtonElement).click()
-  expect(input.value).toBe('Existing draftCITED_PACKET')
+  expect(input.value).toBe('Existing draft\n\nCITED_PACKET')
 })

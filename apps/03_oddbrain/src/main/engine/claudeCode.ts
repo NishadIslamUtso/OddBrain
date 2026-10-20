@@ -143,12 +143,17 @@ const CREDENTIAL_ENV_KEY = /(?:^|_)(?:API_?KEY|ACCESS_?KEY(?:_ID)?|SECRET(?:_ACC
  * with the CLI on their own machine is their own affair; this app neither
  * forwards it through settings nor plants it there.)
  */
-export function sanitizeEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
-  const clean: Record<string, string> = {}
-  for (const [key, value] of Object.entries(env)) {
+export function strippedEnvironmentNames(env: NodeJS.ProcessEnv = process.env): string[] {
+  return Object.keys(env).filter(key => {
     const upper = key.toUpperCase()
-    if (value !== undefined && !UNSAFE_ENV_KEYS.has(upper) && !CREDENTIAL_ENV_KEY.test(upper)) clean[key] = value
-  }
+    return UNSAFE_ENV_KEYS.has(upper) || CREDENTIAL_ENV_KEY.test(upper)
+  }).sort((a, b) => a.localeCompare(b))
+}
+
+export function sanitizeEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
+  const stripped = new Set(strippedEnvironmentNames(env))
+  const clean: Record<string, string> = {}
+  for (const [key, value] of Object.entries(env)) if (value !== undefined && !stripped.has(key)) clean[key] = value
   return clean
 }
 

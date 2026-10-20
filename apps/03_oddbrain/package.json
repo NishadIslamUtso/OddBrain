@@ -3,7 +3,15 @@
   "version": "0.9.0",
   "private": true,
   "description": "OddBrain — a local-first desktop assistant. Your files, your models, your machine.",
-  "author": "",
+  "author": {
+    "name": "NishadIslamUtso",
+    "url": "https://github.com/NishadIslamUtso"
+  },
+  "homepage": "https://github.com/NishadIslamUtso/OddBrain",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NishadIslamUtso/OddBrain.git"
+  },
   "license": "Apache-2.0",
   "main": "./out/main/index.js",
   "scripts": {
@@ -19,7 +27,6 @@
     "smoke": "electron-vite build && electron . --smoke",
     "dist:win": "npm run build && electron-builder --win",
     "dist:win:dir": "npm run build && electron-builder --win --dir",
-    "dist:linux": "npm run build && electron-builder --linux",
     "build:ui-preview": "node scripts/build-ui-preview.mjs",
     "test:ui": "node scripts/check-ui.cjs && node scripts/check-ui-turns.cjs && node scripts/check-ui-standalone.cjs && node scripts/check-ui-motion.cjs && node scripts/check-ui-integration.cjs && node scripts/check-ui-media.cjs && node scripts/check-ui-graph.cjs && node scripts/check-ui-samples.cjs && node scripts/check-ui-memory.cjs && node scripts/check-ui-settings.cjs && node scripts/check-ui-productivity.cjs && node scripts/check-ui-conversations.cjs && node scripts/check-ui-commands.cjs",
     "test:media-runtime": "node scripts/check-media-runtime.cjs",
@@ -41,6 +48,7 @@
     "zustand": "5.0.15"
   },
   "devDependencies": {
+    "@electron/asar": "3.4.1",
     "@electron/fuses": "1.8.0",
     "@resvg/resvg-js": "2.6.2",
     "@tailwindcss/vite": "4.3.3",

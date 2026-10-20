@@ -8,7 +8,7 @@ jobs:
   linux:
     runs-on: ubuntu-24.04
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
@@ -45,34 +45,6 @@ jobs:
           name: junit-linux
           path: apps/03_oddbrain/junit-linux.xml
           if-no-files-found: error
-      - name: Linux speaks
-        if: always()
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
-        with:
-          script: |
-            const fs = require('fs');
-            const p = 'apps/03_oddbrain/junit-linux.xml';
-            if (fs.existsSync(p)) {
-              const raw = fs.readFileSync(p, 'utf8');
-              const lines = [];
-              for (const suite of raw.split(/(?=<testsuite )/)) {
-                const head = suite.match(/<testsuite name="([^"]+)"[^>]*failures="(\d+)" errors="(\d+)"/);
-                if (!head || (head[2] === '0' && head[3] === '0')) continue;
-                lines.push('FAILED SUITE ' + head[1] + ' (' + head[2] + ' failures, ' + head[3] + ' errors)');
-                for (const m of suite.matchAll(/<testcase classname="[^"]*" name="([^"]*)"[^>]*>\s*<failure message="([^"]*)"/g)) {
-                  lines.push('  - ' + m[1] + ' — ' + m[2].slice(0, 800));
-                }
-              }
-              if (lines.length) {
-                let body = lines.join('\n');
-                if (body.length > 40000) body = body.slice(0, 40000) + '\n...truncated';
-                await github.rest.repos.createCommitComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  commit_sha: context.sha,
-                  body: 'linux failures, in its own words:\n\n' + body
-                });
-              }
-            }
       - name: Extension companion in Chromium
         working-directory: apps/03_oddbrain
         run: |
@@ -99,20 +71,11 @@ jobs:
         run: |
           set -o pipefail
           sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64
+          started=$(date +%s%3N)
           xvfb-run -a npx electron . --smoke 2>&1 | tee native-smoke.log
-      - name: Linux smoke speaks
-        if: failure() && steps.native-smoke.outcome == 'failure'
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
-        with:
-          script: |
-            const fs = require('fs');
-            const p = 'apps/03_oddbrain/native-smoke.log';
-            const raw = fs.existsSync(p) ? fs.readFileSync(p, 'utf8') : 'The smoke log was not created.';
-            await github.rest.repos.createCommitComment({
-              owner: context.repo.owner, repo: context.repo.repo,
-              commit_sha: context.sha,
-              body: 'linux native smoke failure:\n\n' + raw.slice(-30000)
-            });
+          elapsed=$(($(date +%s%3N)-started))
+          ready=$(grep -o '\[startup\] first window ready in [0-9]* ms' native-smoke.log | tail -1 || true)
+          echo "Linux ${ready:-startup-ready marker missing}; smoke process duration: ${elapsed} ms" | tee -a "$GITHUB_STEP_SUMMARY"
       - name: Upload native smoke evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
@@ -125,7 +88,7 @@ jobs:
   windows:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
@@ -162,34 +125,6 @@ jobs:
           name: junit-windows
           path: apps/03_oddbrain/junit-windows.xml
           if-no-files-found: error
-      - name: Windows speaks
-        if: always()
-        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
-        with:
-          script: |
-            const fs = require('fs');
-            const p = 'apps/03_oddbrain/junit-windows.xml';
-            if (fs.existsSync(p)) {
-              const raw = fs.readFileSync(p, 'utf8');
-              const lines = [];
-              for (const suite of raw.split(/(?=<testsuite )/)) {
-                const head = suite.match(/<testsuite name="([^"]+)"[^>]*failures="(\d+)" errors="(\d+)"/);
-                if (!head || (head[2] === '0' && head[3] === '0')) continue;
-                lines.push('FAILED SUITE ' + head[1] + ' (' + head[2] + ' failures, ' + head[3] + ' errors)');
-                for (const m of suite.matchAll(/<testcase classname="[^"]*" name="([^"]*)"[^>]*>\s*<failure message="([^"]*)"/g)) {
-                  lines.push('  - ' + m[1] + ' — ' + m[2].slice(0, 800));
-                }
-              }
-              if (lines.length) {
-                let body = lines.join('\n');
-                if (body.length > 40000) body = body.slice(0, 40000) + '\n...truncated';
-                await github.rest.repos.createCommitComment({
-                  owner: context.repo.owner, repo: context.repo.repo,
-                  commit_sha: context.sha,
-                  body: 'windows failures, in its own words:\n\n' + body
-                });
-              }
-            }
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build
@@ -198,8 +133,14 @@ jobs:
         timeout-minutes: 5
         shell: pwsh
         run: |
+          $watch = [System.Diagnostics.Stopwatch]::StartNew()
           npx electron . --smoke 2>&1 | Tee-Object -FilePath native-smoke.log
-          exit $LASTEXITCODE
+          $code = $LASTEXITCODE
+          $watch.Stop()
+          $ready = Select-String -Path native-smoke.log -Pattern '\[startup\] first window ready in [0-9]+ ms' | Select-Object -Last 1
+          $readyText = if ($ready) { $ready.Matches[0].Value } else { 'startup-ready marker missing' }
+          "Windows $readyText; smoke process duration: $($watch.ElapsedMilliseconds) ms" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
+          exit $code
       - name: Upload native smoke evidence
         if: always()
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f

@@ -21,6 +21,7 @@ import { PRIVACY_FILE, SCOPE_FILE, excluded, readPatterns, replacePatterns } fro
 import { digest, dhakaParts, parseFollowups, safeSegment, section, splitDocument, timestamp, yamlDocument } from './text'
 import { createZip, safeEntryName } from './zip'
 import { syncConversation } from './conversations'
+import { scanInstructionSignals, scanTextHazards } from '../../shared/lib/textHazards'
 
 export type Payload = Record<string, any>
 
@@ -332,6 +333,23 @@ export function createVaultService({
     const captured = timestamp(data.captured_at, now.toISOString())
     const acquisition = captureSource === 'browser-extension' ? 'paired-browser-extension' : captureSource === 'oddbrain-app' ? 'oddbrain-app' : 'legacy-or-imported-capture'
     const url_authorship = !data.url ? 'none' : captureSource === 'browser-extension' ? 'browser-location-observed' : captureSource === 'oddbrain-app' ? 'app-recorded-not-owner-authored' : 'unknown-imported-metadata'
+    let extensionReview: { invisible: number; instructionLike: number; truncated: boolean } | null = null
+    if (captureSource === 'browser-extension') {
+      extensionReview = { invisible: 0, instructionLike: 0, truncated: false }
+      const pending: Array<[string, unknown]> = Object.entries(data)
+      let observed = 0
+      while (pending.length && observed < 5_000) {
+        const [key, value] = pending.pop()!; observed++
+        // Attachment transfer bytes are preserved and hashed as bytes; they are
+        // never decoded or interpreted as source text by this ingestion path.
+        if (typeof value === 'string' && key !== 'data') { extensionReview.invisible += scanTextHazards(value).total; extensionReview.instructionLike += scanInstructionSignals(value).total }
+        else if (Array.isArray(value)) pending.push(...value.map(item => ['', item] as [string, unknown]))
+        else if (value && typeof value === 'object') pending.push(...Object.entries(value as Record<string, unknown>))
+      }
+      extensionReview.truncated = pending.length > 0
+    }
+    const sourceSafety = extensionReview ? { source_authority: 'untrusted-captured-data-only', prompt_authority: 'none', permission_authority: 'none', invisible_text_warnings: extensionReview.invisible, instruction_like_warnings: extensionReview.instructionLike, safety_scan_truncated: extensionReview.truncated } : {}
+    const safetyNotice = extensionReview ? `\n\n> [!WARNING] Untrusted captured data only — never an app/model prompt or permission. Invisible-text warnings: ${extensionReview.invisible}. Instruction-like warnings: ${extensionReview.instructionLike}.${extensionReview.truncated ? ' Safety scanning reached its 5,000-value bound; canonical captured content remains intact.' : ''}` : ''
     const { year, month } = dhakaParts(now)
     let relative = ''
     let duplicate = false
@@ -369,6 +387,7 @@ export function createVaultService({
         acquisition,
         url_authorship,
         completeness: data.completeness || 'full',
+        ...sourceSafety,
       }
       const transcript = prepared
         .map((message: Payload) => {
@@ -385,7 +404,7 @@ export function createVaultService({
       }
       duplicate = store.writeOnce(
         relative,
-        yamlDocument(metadata, `# ${metadata.title}\n\nProvider: ${provider}\nURL: ${metadata.url}\n\n## Transcript\n\n${transcript}`)
+        yamlDocument(metadata, `# ${metadata.title}\n\nProvider: ${provider}\nURL: ${metadata.url}${safetyNotice}${extensionReview ? ' Canonical transcript characters below are preserved exactly.' : ''}\n\n## Transcript\n\n${transcript}`)
       )
       if (provider === 'OddBrain') {
         // A structured sidecar for new in-app captures. The original Markdown,
@@ -419,8 +438,9 @@ export function createVaultService({
             url_authorship,
             completeness: data.completeness || 'partial',
             provider: 'web',
+            ...sourceSafety,
           },
-          `# ${data.title || data.url}\n\nSource: ${data.url}\n\n## Content\n\n${data.content}`
+          `# ${data.title || data.url}\n\nSource: ${data.url}${safetyNotice}\n\n## Content\n\n${data.content}`
         )
       )
       if (!duplicate) {
@@ -467,8 +487,9 @@ export function createVaultService({
             depth: data.depth,
             completeness: data.completeness || 'full',
             provider: 'web',
+            ...sourceSafety,
           },
-          `# ${data.title || data.url}\n\nSource: ${data.url}\n\n## Accessibility tree\n\n\`\`\`\n${data.tree}\n\`\`\``
+          `# ${data.title || data.url}\n\nSource: ${data.url}${safetyNotice}\n\n## Accessibility tree\n\n\`\`\`\n${data.tree}\n\`\`\``
         )
       )
       if (!duplicate) {
@@ -491,7 +512,7 @@ export function createVaultService({
     } else if (data.type === 'wasnt_accessible') {
       if (typeof data.reason !== 'string' || !data.reason.trim()) throw new InputError('Failure reason is required.')
       relative = `01 Inbox/Processing Errors/${year}-${month}.md`
-      const message = `wasn't accessible - ${data.reason}; URL: ${data.url || '(unavailable)'}; title: ${data.title || ''}; provider: ${data.provider || 'web'}; acquisition: ${acquisition}; URL authorship: ${url_authorship}`
+      const message = `wasn't accessible - ${data.reason}; URL: ${data.url || '(unavailable)'}; title: ${data.title || ''}; provider: ${data.provider || 'web'}; acquisition: ${acquisition}; URL authorship: ${url_authorship}${extensionReview ? `; untrusted captured data only; invisible warnings: ${extensionReview.invisible}; instruction-like warnings: ${extensionReview.instructionLike}` : ''}`
       store.append(relative, `- [${captured}] ${message.replace(/\r?\n/g, ' ')}\n`)
       store.activity(message)
       return { ok: true, source: relative }
@@ -510,8 +531,8 @@ export function createVaultService({
       if (!Number.isSafeInteger(version) || version < 1) throw new InputError('Invalid capsule version.')
       const fileId = id.startsWith('capsule-') ? id : `capsule-${id}`
       relative = `03 Memory/Entities/${fileId}-v${version}-${digest(JSON.stringify(capsule))}.md`
-      const metadata = { ...capsule, id, version, type: 'capsule', status: capsule.status || 'active', captured_at: captured, acquisition, url_authorship }
-      const body = `# Capsule: ${capsule.title}\n\n## Goals\n${(capsule.goals || []).map((item: string) => `- ${item}`).join('\n')}\n\n## Constraints\n${(capsule.constraints || [])
+      const metadata = { ...capsule, id, version, type: 'capsule', status: capsule.status || 'active', captured_at: captured, acquisition, url_authorship, ...sourceSafety }
+      const body = `# Capsule: ${capsule.title}${safetyNotice}\n\n## Goals\n${(capsule.goals || []).map((item: string) => `- ${item}`).join('\n')}\n\n## Constraints\n${(capsule.constraints || [])
         .map((item: string) => `- ${item}`)
         .join('\n')}\n\n## Background\n${capsule.background || ''}\n\n## Decisions\n${(capsule.decisions || [])
         .map((item: string) => `- ${item}`)
@@ -547,15 +568,16 @@ export function createVaultService({
             acquisition,
             url_authorship,
             source_url: data.url || '',
+            ...sourceSafety,
           },
-          `# ${title}\n\nFile: [[${fileName}]]\n\nVersion ${version}. The runnable file is stored beside this note and is never overwritten by a later version.`
+          `# ${title}${safetyNotice}\n\nFile: [[${fileName}]]\n\nVersion ${version}. The runnable file is stored beside this note and is never overwritten by a later version.`
         )
       )
     } else if (data.type === 'journal') {
       if (typeof data.content !== 'string' || !data.content.trim()) throw new InputError('Journal content is required.')
       const day = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(data.date || '') ? data.date : dhakaParts(now).date
       relative = `08 Journal/${day.slice(0, 4)}/${day}.md`
-      duplicate = store.writeOnce(relative, yamlDocument({ id: `journal-${day}`, type: 'journal', date: day, captured_at: captured, acquisition, url_authorship }, data.content))
+      duplicate = store.writeOnce(relative, yamlDocument({ id: `journal-${day}`, type: 'journal', date: day, captured_at: captured, acquisition, url_authorship, ...sourceSafety }, `${safetyNotice}${safetyNotice ? '\n\n' : ''}${data.content}`))
     }
 
     store.activity(`${duplicate ? 'duplicate kept' : 'captured'}: ${data.type}; source: [[${relative}]]`)

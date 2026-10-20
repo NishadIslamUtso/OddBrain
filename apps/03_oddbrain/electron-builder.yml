@@ -2,11 +2,10 @@
 #
 # Deliberately small, and every line here is a decision rather than a default:
 #
-# - The payload is `out/` and nothing else. `out/` is what electron-vite builds:
-#   the main process, the preload script and the renderer. `node_modules` is not
-#   shipped because nothing in the packaged app needs it — the dependencies that
-#   do (React, Tailwind) are compiled into `out/renderer` by Vite, and the main
-#   process uses only Node built-ins and Electron itself.
+# - The app payload is `out/` plus only production runtime dependencies. React
+#   is bundled into the renderer; document/media readers used by the main process
+#   remain runtime packages. Source maps and TypeScript sources are explicitly
+#   excluded from both the app and dependency payload.
 # - `asar` on, so the app's own files are not laid out loose in the install
 #   directory where a stray edit by hand would change behaviour silently.
 # - One target: NSIS. Per-user, not per-machine, so installing does not ask for
@@ -18,6 +17,7 @@
 #   publisher" warning. Signing needs a certificate this project does not have.
 appId: com.oddbrain.desktop
 productName: OddBrain
+copyright: Copyright © 2026 NishadIslamUtso
 
 directories:
   output: dist
@@ -36,6 +36,15 @@ directories:
 files:
   - out/**/*
   - package.json
+  - '!**/*.map'
+  - '!**/*.ts'
+  - '!**/*.tsx'
+  - '!**/test/**'
+  - '!**/tests/**'
+# Native bindings must remain real files for Windows to load. This is explicit
+# rather than relying on electron-builder's smart-unpack heuristic.
+asarUnpack:
+  - node_modules/**/*.node
 
 # The browser extension ships with the app: it lands in the install folder as
 # `resources/extension` so "Load unpacked" at chrome://extensions has a folder to

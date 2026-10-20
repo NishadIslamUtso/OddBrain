@@ -128,6 +128,10 @@
             sequence: tally.sequence + 1,
             at: Date.now(),
             problem: "",
+            attempts: 0,
+            lastAttempt: 0,
+            retryAt: 0,
+            retryReason: "",
           };
           rows.add(row);
           tx.objectStore("bodies").add({ id, body });
@@ -193,6 +197,19 @@
           row = await request(rows.get(id));
         if (row) rows.put({ ...row, problem: String(problem).slice(0, 500) });
       });
+    const attempt = (id) =>
+      transaction(["rows"], "readwrite", async (tx) => {
+        const rows = tx.objectStore("rows"), row = await request(rows.get(id));
+        if (row) rows.put({ ...row, lastAttempt: Date.now(), retryAt: 0, retryReason: "" });
+      });
+    const retry = (id, reason) =>
+      transaction(["rows"], "readwrite", async (tx) => {
+        const rows = tx.objectStore("rows"), row = await request(rows.get(id));
+        if (!row) return;
+        const attempts = Math.min(20, Number(row.attempts || 0) + 1);
+        const delay = Math.min(60 * 60 * 1000, 30_000 * (2 ** Math.min(7, attempts - 1)));
+        rows.put({ ...row, attempts, retryAt: Date.now() + delay, retryReason: String(reason).slice(0, 500) });
+      });
     const receipts = (ids) =>
       transaction(["rows", "receipts"], "readonly", async (tx) => {
         if (
@@ -227,7 +244,7 @@
       if (opening) (await opening).close();
       opening = null;
     };
-    return { enqueue, list, body, remove, mark, receipts, clear, close };
+    return { enqueue, list, body, remove, mark, attempt, retry, receipts, clear, close };
   }
   globalThis.OddConversationOutbox = { create };
   if (typeof module !== "undefined") module.exports = { create };

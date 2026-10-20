@@ -1,7 +1,5 @@
-# The installer, made by machines: every push to v3 or main packages the
-# Windows exe on a real Windows runner and uploads it as an artifact anyone
-# (the owner, a judge) can download from the run page - no local build needed.
-# Push a tag v* and the exe + its sha256 attach to a GitHub Release.
+# Windows 11 installer and provenance. A GitHub profile/repository link identifies
+# the source owner but does not pretend to be an Authenticode certificate.
 name: installer
 on:
   push:
@@ -16,7 +14,7 @@ jobs:
   windows-installer:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
       id-token: write
       attestations: write
     timeout-minutes: 40
@@ -25,6 +23,18 @@ jobs:
       - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
+      - name: Resolve versioned release paths
+        id: package
+        working-directory: apps/03_oddbrain
+        shell: pwsh
+        run: |
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($package.version -notmatch '^\d+\.\d+\.\d+$') { throw 'package.json needs a numeric release version' }
+          $name = "OddBrain-Setup-$($package.version).exe"
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "relative=dist/$name" >> $env:GITHUB_OUTPUT
+          "subject=apps/03_oddbrain/dist/$name" >> $env:GITHUB_OUTPUT
+          "checksum=apps/03_oddbrain/dist/$name.sha256" >> $env:GITHUB_OUTPUT
       - name: Install
         working-directory: apps/03_oddbrain
         run: npm ci --ignore-scripts --no-audit --no-fund
@@ -37,20 +47,36 @@ jobs:
       - name: Build and package the installer
         working-directory: apps/03_oddbrain
         run: npm run dist:win
+      - name: Launch the packaged Windows app
+        working-directory: apps/03_oddbrain
+        shell: pwsh
+        run: |
+          $exe = (Resolve-Path 'dist/win-unpacked/OddBrain.exe').Path
+          $process = Start-Process -FilePath $exe -ArgumentList '--smoke' -PassThru
+          if (-not $process.WaitForExit(60000)) {
+            Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+            throw 'Packaged OddBrain.exe did not finish its smoke check within 60 seconds.'
+          }
+          if ($process.ExitCode -ne 0) { throw "Packaged OddBrain.exe smoke check exited $($process.ExitCode)." }
       - name: Generate dependency SBOM
         working-directory: apps/03_oddbrain
         shell: pwsh
         run: npm sbom --sbom-format cyclonedx | Out-File -Encoding utf8 dist/oddbrain-sbom.cdx.json
-      - name: Prove it - sha256 into the summary
+      - name: Prove it - sha256 and source identity
         working-directory: apps/03_oddbrain
         shell: pwsh
+        env:
+          INSTALLER: ${{ steps.package.outputs.relative }}
+          INSTALLER_NAME: ${{ steps.package.outputs.name }}
         run: |
-          $h = (Get-FileHash dist/OddBrain-Setup-0.9.0.exe -Algorithm SHA256).Hash.ToLower()
-          "$h  OddBrain-Setup-0.9.0.exe" | Out-File -Encoding ascii dist/OddBrain-Setup-0.9.0.exe.sha256
-          Add-Content $env:GITHUB_STEP_SUMMARY "## Installer built"
+          $h = (Get-FileHash $env:INSTALLER -Algorithm SHA256).Hash.ToLower()
+          "$h  $env:INSTALLER_NAME" | Out-File -Encoding ascii "$env:INSTALLER.sha256"
+          Add-Content $env:GITHUB_STEP_SUMMARY "## Windows 11 installer built and launched"
           Add-Content $env:GITHUB_STEP_SUMMARY '```'
           Add-Content $env:GITHUB_STEP_SUMMARY "sha256: $h"
           Add-Content $env:GITHUB_STEP_SUMMARY '```'
+          Add-Content $env:GITHUB_STEP_SUMMARY 'Source owner: [NishadIslamUtso](https://github.com/NishadIslamUtso) · [OddBrain repository](https://github.com/NishadIslamUtso/OddBrain)'
+          Add-Content $env:GITHUB_STEP_SUMMARY 'These links and the build attestation establish source provenance; they are not an Authenticode publisher signature.'
       - name: Verify packaged Electron fuses
         working-directory: apps/03_oddbrain
         run: npm run security:fuses
@@ -58,23 +84,37 @@ jobs:
         working-directory: apps/03_oddbrain
         run: npm run security:installer
       - name: Attest installer build provenance
-        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
         with:
-          subject-path: apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe
+          subject-path: ${{ steps.package.outputs.subject }}
       - name: Upload the artifact (30 days)
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: OddBrain-Setup-${{ github.sha }}
           path: |
-            apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe
-            apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe.sha256
+            ${{ steps.package.outputs.subject }}
+            ${{ steps.package.outputs.checksum }}
             apps/03_oddbrain/dist/oddbrain-sbom.cdx.json
           retention-days: 30
           if-no-files-found: error
-      - name: Attach to the release (on a version tag only)
-        if: startsWith(github.ref, 'refs/tags/v')
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows-installer
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the already-tested installer artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: OddBrain-Setup-${{ github.sha }}
+          path: release
+      - name: Attach the tested files to the version release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          gh release create "$env:GITHUB_REF_NAME" --generate-notes --title "OddBrain $env:GITHUB_REF_NAME" dist/OddBrain-Setup-0.9.0.exe dist/OddBrain-Setup-0.9.0.exe.sha256 dist/oddbrain-sbom.cdx.json
+          $installer = @(Get-ChildItem release -Filter 'OddBrain-Setup-*.exe' -File)
+          if ($installer.Count -ne 1) { throw 'Expected exactly one versioned OddBrain installer.' }
+          gh release create "$env:GITHUB_REF_NAME" --generate-notes --title "OddBrain $env:GITHUB_REF_NAME" $installer.FullName "$($installer.FullName).sha256" release/oddbrain-sbom.cdx.json

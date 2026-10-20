@@ -26,7 +26,12 @@ const LABELS: Record<TextHazardKind, string> = {
 const kindOf = (code: number): TextHazardKind | '' => {
   if (code >= 0xe0000 && code <= 0xe007f) return 'unicode-tags'
   if (code === 0x061c || code === 0x200e || code === 0x200f || (code >= 0x202a && code <= 0x202e) || (code >= 0x2066 && code <= 0x206f)) return 'bidi-controls'
-  if ([0x00ad, 0x034f, 0x180e, 0x200b, 0x200c, 0x200d, 0x2060, 0xfeff].includes(code)) return 'zero-width'
+  if ([
+    0x00ad, 0x034f, 0x115f, 0x1160, 0x17b4, 0x17b5,
+    0x180b, 0x180c, 0x180d, 0x180e,
+    0x200b, 0x200c, 0x200d, 0x2060, 0x2061, 0x2062, 0x2063, 0x2064,
+    0x3164, 0xfeff, 0xffa0,
+  ].includes(code)) return 'zero-width'
   if ((code < 0x20 && ![0x09, 0x0a, 0x0d].includes(code)) || code === 0x7f) return 'control-characters'
   return ''
 }
@@ -82,4 +87,55 @@ export function scanTextHazards(value: unknown): TextHazardReport {
 
 export function textHazardDetails(report: TextHazardReport): string[] {
   return report.findings.map(item => `${item.label}: ${item.count.toLocaleString()} (${item.codePoints.join(', ') || 'code point unavailable'}; UTF-16 positions ${item.positions.join(', ') || 'unavailable'})`)
+}
+
+export type InstructionSignalKind = 'authority-claim' | 'instruction-override' | 'execution-request' | 'secret-request'
+export type InstructionSignalFinding = {
+  kind: InstructionSignalKind
+  label: string
+  count: number
+  positions: number[]
+  excerpts: string[]
+}
+export type InstructionSignalReport = {
+  total: number
+  findings: InstructionSignalFinding[]
+  notice: string
+}
+
+const INSTRUCTION_SIGNALS: Array<{ kind: InstructionSignalKind; label: string; pattern: RegExp }> = [
+  { kind: 'authority-claim', label: 'text claiming system, developer or administrator authority', pattern: /\b(?:system|developer|administrator)\s+(?:message|instruction|prompt|override|command)\b/giu },
+  { kind: 'instruction-override', label: 'text asking a model to ignore or replace instructions', pattern: /\b(?:ignore|disregard|forget|override|replace|reveal)\b[^\n.!?]{0,80}\b(?:previous|prior|above|hidden|system|developer|instructions?|prompt|rules?)\b/giu },
+  { kind: 'execution-request', label: 'text attempting to direct tool or command execution', pattern: /\b(?:run|execute|invoke|call|launch|install|delete|upload|send)\b[^\n.!?]{0,80}\b(?:tool|command|shell|powershell|terminal|script|file|credentials?|secrets?|tokens?)\b/giu },
+  { kind: 'secret-request', label: 'text requesting credentials or hidden data', pattern: /\b(?:show|reveal|print|copy|send|upload|return|exfiltrate)\b[^\n.!?]{0,80}\b(?:api\s*key|access\s*token|password|credential|secret|system\s*prompt|private\s*key)\b/giu },
+]
+
+/**
+ * Heuristic review for untrusted source text. A match is not a verdict: quoted
+ * security discussions and ordinary conversation can match. The report exists
+ * so extension material is visibly treated as data with zero instruction
+ * authority. It never rewrites or silently drops the source.
+ */
+export function scanInstructionSignals(value: unknown): InstructionSignalReport {
+  const text = typeof value === 'string' ? value : ''
+  const findings: InstructionSignalFinding[] = []
+  for (const rule of INSTRUCTION_SIGNALS) {
+    const positions: number[] = [], excerpts: string[] = []
+    let count = 0
+    rule.pattern.lastIndex = 0
+    for (const match of text.matchAll(rule.pattern)) {
+      count++
+      if (positions.length < 8) positions.push(match.index)
+      if (excerpts.length < 4) excerpts.push(excerpt(text, match.index))
+    }
+    if (count) findings.push({ kind: rule.kind, label: rule.label, count, positions, excerpts })
+  }
+  const total = findings.reduce((sum, finding) => sum + finding.count, 0)
+  return {
+    total,
+    findings,
+    notice: total
+      ? `Review warning: ${total.toLocaleString()} instruction-like phrase${total === 1 ? '' : 's'} detected in untrusted source text. The source has no prompt, permission or instruction authority.`
+      : '',
+  }
 }

@@ -1,34 +1,59 @@
 name: security
 on:
-  pull_request:
   push:
-    branches: [main, v3]
-
+    branches: [main, v3, 'arena/**']
+  pull_request:
+  schedule:
+    - cron: '17 3 * * 1'
 permissions:
   contents: read
-
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
 jobs:
   dependency-review:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-24.04
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-      - name: Review dependency changes when the repository dependency graph is enabled
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
+        with:
+          node-version: 24
+      - name: GitHub dependency review
         id: dependency-review
         continue-on-error: true
         uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294
         with:
           fail-on-severity: high
-      - name: Report unavailable or failed dependency review
-        if: steps.dependency-review.outcome == 'failure'
+          deny-licenses: GPL-3.0, AGPL-3.0
+      - name: Fail-closed lockfile fallback when dependency graph is unavailable
+        if: steps.dependency-review.outcome != 'success'
+        working-directory: apps/03_oddbrain
         shell: bash
         run: |
-          echo '::warning::Dependency review could not enforce this change. Enable the repository dependency graph, then inspect the dependency-review action result before merging.'
-          echo '## Dependency review needs repository attention' >> "$GITHUB_STEP_SUMMARY"
-          echo 'The pinned review action could not enforce this change. Enable the repository dependency graph and inspect dependency changes before merging.' >> "$GITHUB_STEP_SUMMARY"
-
+          set -euo pipefail
+          base='${{ github.event.pull_request.base.sha }}'
+          changed=$(git diff --name-only "$base" "${{ github.sha }}" -- package.json package-lock.json)
+          if [[ -z "$changed" ]]; then
+            echo 'GitHub dependency review was unavailable, but this pull request does not change the npm manifest or lockfile.'
+            exit 0
+          fi
+          echo 'GitHub dependency review was unavailable. Enforcing lockfile integrity, exact direct versions, release policy, and a high-severity registry audit instead.'
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm audit --audit-level=high
+          node -e "const p=require('./package-lock.json'),bad=Object.entries(p.packages||{}).filter(([,v])=>/(?:^|\\W)A?GPL-3(?:\\.0)?(?:\\W|$)/i.test(String(v.license||'')));if(bad.length){console.error('Denied dependency licenses:',bad);process.exit(1)}"
+          npm run security:policy
+      - name: Report dependency-review mode
+        if: always()
+        shell: bash
+        run: |
+          if [[ '${{ steps.dependency-review.outcome }}' == 'success' ]]; then
+            echo 'GitHub dependency graph review enforced high-severity and license policy.' >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo 'GitHub dependency review was unavailable; the fail-closed lockfile fallback ran when dependency files changed.' >> "$GITHUB_STEP_SUMMARY"
+          fi
   codeql:
     runs-on: ubuntu-24.04
     permissions:
@@ -36,10 +61,8 @@ jobs:
       security-events: write
     steps:
       - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
-      - name: Initialize CodeQL
-        uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee
+      - uses: github/codeql-action/init@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee
         with:
           languages: javascript-typescript
-          build-mode: none
-      - name: Analyze
-        uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee
+          queries: security-extended
+      - uses: github/codeql-action/analyze@6f2ac81f5cd81fe351a197ba0b00d91d03cd2aee

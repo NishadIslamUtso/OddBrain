@@ -30,6 +30,7 @@ type Kept = { copy: string; original: string; at: string; existed?: boolean }
 export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
   const engine = useEngine()
   const turn = engine.turn
+  const unapprovedChanges = turn?.permissions.filter(permission => permission.detail && permission.detail.split('\n').filter(line => /^(---|\+\+\+|@@|[+-])\s?/.test(line)).length >= 2) || []
   const [handed, setHanded] = useState('')
   // What the app kept before allowed writes this session, and what a restore said.
   const [kept, setKept] = useState<Kept[]>([])
@@ -297,6 +298,7 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
         </p>
       ) : null}
 
+      {unapprovedChanges.length ? <details className="ob-permission-request mt-2.5 rounded-lg border border-line bg-bg p-2.5" open><summary className="cursor-pointer text-[12.5px] font-medium text-ink">Not approved ({unapprovedChanges.length})</summary><p className="mt-1 text-[11.5px] text-muted">These exact file changes are waiting for you. Only changes that still need a decision appear here, and the count reaches zero as you allow or deny them.</p>{unapprovedChanges.map(change => <section key={change.requestId} aria-label={`Unapproved ${change.tool} change`}><p className="mt-2 font-mono text-[11.5px] text-muted">{change.tool} · {change.summary}</p><DiffBlock detail={change.detail!} /></section>)}</details> : null}
       {turn.permissions.length > 0 ? (
         <div className="ob-permission-request mt-2.5 rounded-lg border border-line bg-bg p-2.5" tabIndex={-1} role="region" aria-label="Permission request">
           <p className="flex items-center gap-2 text-[12.5px] text-ink">

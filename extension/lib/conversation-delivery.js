@@ -100,6 +100,7 @@ async function conversationQueueSummary() {
     }
     if (row.op === "media-finish") group.completeFiles.add(row.attachment);
     if (row.problem) group.problem = row.problem;
+    else if (row.retryReason) group.problem = `${row.retryReason} Automatic retry ${row.retryAt > Date.now() ? "is scheduled" : "is due"}; ${row.attempts || 0} attempt(s) recorded.`;
   }
   const summary = {
     count: rows.length,
@@ -188,17 +189,19 @@ async function queueConversation(payload) {
   void flushConversations().catch(() => {});
   return { ok: true, queued: true, receipt: row.id };
 }
-async function flushConversations() {
+async function flushConversations(force = true) {
   if (conversationFlight) return conversationFlight;
-  conversationFlight = drainConversations().finally(() => {
+  conversationFlight = drainConversations(force).finally(() => {
     conversationFlight = null;
   });
   return conversationFlight;
 }
-async function drainConversations() {
+async function drainConversations(force = true) {
   const epoch = conversationEpoch;
   await pruneConversations();
-  if (!(await conversationOutbox.list()).length) return;
+  const waiting = await conversationOutbox.list();
+  if (!waiting.length) return;
+  if (!force && waiting.every((row) => Number(row.retryAt || 0) > Date.now())) return;
   const status = await connection();
   if (!status.ok) {
     if (status.unpaired) {
@@ -220,7 +223,12 @@ async function drainConversations() {
             "Pairing was refused. Waiting captures were kept in this browser; re-pair to finish saving. Nothing was sent anywhere else.",
           captured_at: new Date().toISOString(),
         });
+    } else {
+      for (const row of waiting)
+        if (Number(row.retryAt || 0) <= Date.now())
+          await conversationOutbox.retry(row.id, "OddBrain was unavailable at the last delivery attempt.");
     }
+    await conversationQueueSummary();
     return;
   }
   if (status.captures === false) {
@@ -257,6 +265,7 @@ async function drainConversations() {
   let attempted = 0;
   for (const row of rows) {
     if (Date.now() > deadline || epoch !== conversationEpoch) break;
+    if (!force && Number(row.retryAt || 0) > Date.now()) continue;
     const group = row.target + row.conversation;
     if (blocked.has(group)) continue;
     if (!sameCaptureDestination(row, destination)) {
@@ -280,6 +289,7 @@ async function drainConversations() {
     if (++attempted > 64) break;
     const payload = await conversationOutbox.body(row.id);
     if (!payload || epoch !== conversationEpoch) continue;
+    await conversationOutbox.attempt(row.id);
     conversationAbort = new AbortController();
     const post = (data) =>
       api("/conversation-sync", {
@@ -366,8 +376,12 @@ async function drainConversations() {
             "Capture refused. Check the desktop app, then retry or discard.",
         );
         blocked.add(group);
-      } else break; // offline/5xx/rate limiting: retain bytes, retry on next alarm
+      } else {
+        await conversationOutbox.retry(row.id, result.status === 429 ? "OddBrain asked the extension to slow down." : "OddBrain did not confirm this delivery.");
+        break; // offline/5xx/rate limiting: retain bytes with durable backoff
+      }
     } catch {
+      await conversationOutbox.retry(row.id, "The delivery connection ended before OddBrain confirmed the capture.");
       break;
     } finally {
       conversationAbort = null;

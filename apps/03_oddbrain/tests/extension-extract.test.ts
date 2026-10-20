@@ -10,7 +10,7 @@ beforeEach(() => {
 describe("page previews exclude secrets and preserve plain text", () => {
   it("omits form fields, contenteditable drafts, scripts and excluded UI", () => {
     document.body.innerHTML =
-      '<article><h1>Public title</h1><p>Public prose</p><form>SECRET_FORM<input value="SECRET_VALUE"></form><textarea>SECRET_DRAFT</textarea><div contenteditable="true">SECRET_EDITOR</div><div hidden>SECRET_HIDDEN</div><div style="display:none">SECRET_CSS</div><div data-private>SECRET_PRIVATE</div><div data-oddbrain>SECRET_UI</div><script>SECRET_SCRIPT</script></article>';
+      '<article><h1>Public title</h1><p>Public prose</p><form>SECRET_FORM<input value="SECRET_VALUE"></form><textarea>SECRET_DRAFT</textarea><div contenteditable="true">SECRET_EDITOR</div><div hidden>SECRET_HIDDEN</div><div style="display:none">SECRET_CSS</div><div style="opacity:0">SECRET_OPACITY</div><div style="font-size:0">SECRET_TINY</div><div style="color:transparent">SECRET_TRANSPARENT</div><div style="transform:scale(0)">SECRET_SCALE</div><div data-private>SECRET_PRIVATE</div><div data-oddbrain>SECRET_UI</div><script>SECRET_SCRIPT</script></article>';
     const result = oddExtractPage("page");
     expect(result.ok).toBe(true);
     expect(result.content).toContain("Public prose");

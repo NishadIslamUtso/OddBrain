@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MemoryAction, MemoryProposal } from '@shared/lib/memoryWorkspace'
+import { DiffBlock } from './EnginePanel'
 
 /** Individual editing remains in each record; bulk changes always get a preview. */
 export default function MemoryReviewGroup({ records, busy, act, children }: { records: MemoryProposal[]; busy: boolean; act: (action: Omit<MemoryAction, 'expectedRevision'>) => Promise<boolean>; children: (item: MemoryProposal) => React.ReactNode }) {
@@ -16,7 +17,7 @@ export default function MemoryReviewGroup({ records, busy, act, children }: { re
     {preview && <section ref={previewPanel} tabIndex={-1} className="ob-memory-batch-preview" aria-label="Review selected interpretations">
       <h3>{preview.decision === 'approve' ? 'Confirm these exact interpretations?' : 'Reject these interpretations?'}</h3>
       <p>Only the selected records change. Original conversations stay untouched. To change wording, cancel and use “Edit before approving” on that record.</p>
-      {preview.records.map(p => <article key={p.id}><h4>{p.title}</h4><p>{p.text}</p><p className="ob-memory-caption">{p.kind} · {p.date || 'Event date unknown'}</p>{p.uncertainty && <p>Qualification: {p.uncertainty}</p>}<blockquote>{p.quote}</blockquote><p className="ob-memory-caption">{p.source.path}</p></article>)}
+      {preview.records.map(p => <article key={p.id}><h4>{p.title}</h4><DiffBlock detail={['--- not-approved', '+++ would-be-confirmed', `@@ ${p.kind} interpretation @@`, `+ Title: ${p.title}`, ...p.text.split('\n').map(line => `+ ${line}`), `+ Event date: ${p.date || 'not established'}`, ...(p.uncertainty ? [`+ Qualification: ${p.uncertainty}`] : []), `+ Evidence: ${p.quote}`, `+ Source: ${p.source.path}`].join('\n')} />{p.source.warnings && (p.source.warnings.invisibleText || p.source.warnings.instructionLike) ? <p role="alert">Untrusted extension source: {p.source.warnings.invisibleText} invisible-text warning(s), {p.source.warnings.instructionLike} instruction-like phrase(s). It has no prompt or permission authority.</p> : null}</article>)}
       {changed && <p role="alert">These records changed. Cancel and review the current versions.</p>}
       <div className="ob-memory-actions"><button type="button" className="ob-small-button" disabled={busy || !!changed} onClick={() => void act({ type: 'review-batch', ids: preview.ids, decision: preview.decision }).then(ok => { if (ok) { setPreview(null); setIds([]) } })}>{preview.decision === 'approve' ? 'Confirm selected interpretations' : 'Confirm rejection'}</button><button type="button" className="ob-small-button" disabled={busy} onClick={() => setPreview(null)}>Cancel group review</button></div>
     </section>}

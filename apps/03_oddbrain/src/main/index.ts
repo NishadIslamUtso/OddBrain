@@ -9,6 +9,7 @@ import { createWorkQueue } from './engine/workQueue'
 import { snapshotNativeArtifacts, collectNativeArtifacts } from './engine/nativeArtifacts'
 import { createMcpReview, inspectNativeMcp } from './engine/mcpReview'
 import { inspectNativeLaunch, nativeLaunchSummary } from './engine/nativeLaunchInventory'
+import { strippedEnvironmentNames } from './engine/claudeCode'
 import { createSkillAuthoring, readInstalledSkills, inspectInstalledSkill, type SkillRoot } from './engine/installedSkills'
 import type { SkillDraft } from '../shared/lib/installedSkills'
 import { createPermissionTickets } from './engine/permissionTickets'
@@ -806,18 +807,20 @@ function registerBridges(): void {
         automation?.rejectWork(); return { ok: false, answer: access.answer || 'The task was canceled or its model changed before dispatch. Send again when ready.' }
       }
       let launchInventory = inspectNativeLaunch(usedEngine.id, usedEngine.workspace || vaultRoot(), app.getPath('home'))
+      const strippedNames = strippedEnvironmentNames(process.env)
+      const environmentDisclosure = strippedNames.length ? `\n\nAmbient environment values are hidden. Variable names removed before launch: ${strippedNames.join(', ')}.` : '\n\nNo credential-shaped or process-injection environment variable names were present to remove.'
       const trustKey = JSON.stringify([usedEngine.id, resolve(usedEngine.workspace || vaultRoot())]), trusted = nativeLaunchTrust.get(trustKey)
       const needsLaunchReview = trusted?.digest !== launchInventory.digest || (usedEngine.approval === 'full' && !trusted?.fullSpeed)
       if (needsLaunchReview) {
         if (usedEngine.approval === 'full' && !launchInventory.complete) {
           automation?.rejectWork()
-          return { ok: false, answer: `Full speed was not started because native connector, rule, hook or task configuration could not be completely inventoried without following links or exceeding bounds. Fix the listed configuration paths or choose Ask, Plan or Allow edits.\n\n${nativeLaunchSummary(launchInventory)}` }
+          return { ok: false, answer: `Full speed was not started because native connector, rule, hook or task configuration could not be completely inventoried without following links or exceeding bounds. Fix the listed configuration paths or choose Ask, Plan or Allow edits.\n\n${nativeLaunchSummary(launchInventory)}${environmentDisclosure}` }
         }
         const full = usedEngine.approval === 'full'
         const options: Electron.MessageBoxOptions = {
           type: 'warning', title: full ? 'Trust this folder for Full speed' : 'Review native folder activation',
           message: full ? `Start ${usedEngine.id} in Full speed for this folder?` : `Start ${usedEngine.id} with this folder’s native configuration?`,
-          detail: `${full ? 'Full speed skips native tool prompts. Connector declarations may start programs or network connections before a tool call. This trust lasts only for this app run and this exact configuration fingerprint.\n\n' : 'Native engines can load connector, rule, hook and task declarations outside OddBrain’s approval cards. Review this bounded inventory before activation.\n\n'}${nativeLaunchSummary(launchInventory)}`,
+          detail: `${full ? 'Full speed skips native tool prompts. Connector declarations may start programs or network connections before a tool call. This trust lasts only for this app run and this exact configuration fingerprint.\n\n' : 'Native engines can load connector, rule, hook and task declarations outside OddBrain’s approval cards. Review this bounded inventory before activation.\n\n'}${nativeLaunchSummary(launchInventory)}${environmentDisclosure}`,
           buttons: ['Cancel', full ? 'Trust folder & start Full speed' : 'Review & start'], defaultId: 0, cancelId: 0, noLink: true,
         }
         const owner = BrowserWindow.fromWebContents(event.sender)
@@ -1968,6 +1971,8 @@ try {
   /* a broken override file must never block the boot */
 }
 
+const processStartedAt = performance.now()
+let startupReported = false
 const isSmoke = process.argv.includes('--smoke')
 const smokeOutArg = process.argv.find(arg => arg.startsWith('--smoke-out='))
 const smokeOut = smokeOutArg ? smokeOutArg.split('=')[1] : ''
@@ -2138,7 +2143,13 @@ function createWindow(): BrowserWindow {
 
   // Show on first paint so there is never a white flash, and so a screenshot
   // taken by the smoke run captures something real rather than an unpainted frame.
-  window.once('ready-to-show', () => window.show())
+  window.once('ready-to-show', () => {
+    window.show()
+    if (!startupReported) {
+      startupReported = true
+      console.log(`[startup] first window ready in ${Math.round(performance.now() - processStartedAt)} ms`)
+    }
+  })
 
   // The interface is always loaded over http, never from file://, so that its
   // fetch calls are same-origin and the local API boundary sees a real Origin.
@@ -2293,8 +2304,12 @@ if (!gotLock) {
       label: 'Help',
       submenu: [
         {
-          label: 'Learn more',
+          label: 'OddBrain source & help',
           click: () => void shell.openExternal('https://github.com/NishadIslamUtso/OddBrain'),
+        },
+        {
+          label: 'Source owner · NishadIslamUtso',
+          click: () => void shell.openExternal('https://github.com/NishadIslamUtso'),
         },
         {
           label: 'About OddBrain',
@@ -2303,7 +2318,7 @@ if (!gotLock) {
               type: 'info',
               title: 'About OddBrain',
               message: `OddBrain ${app.getVersion()}`,
-              detail: 'The face of your engines. Local vault, local memory, $0.',
+              detail: 'The face of your engines. Local vault, local memory, $0.\n\nSource owner: NishadIslamUtso (GitHub). This source identity is not a Windows code-signing certificate.',
             })
           },
         },
