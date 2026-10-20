@@ -2160,7 +2160,15 @@ function runSmoke(window: BrowserWindow): void {
         } catch (probeError) {
           scrollLine = `SCROLL FAILED ${(probeError as Error).message}`
         }
-        const image = await window.webContents.capturePage()
+        // Under virtual Linux displays the DOM can be fully interactive one paint before
+        // capturePage receives pixels. Show explicitly and wait for a non-empty frame;
+        // the final observation still fails closed if Chromium never paints one.
+        window.show()
+        let image = await window.webContents.capturePage()
+        for (let attempt = 0; image.isEmpty() && attempt < 40; attempt++) {
+          await new Promise(resolve => setTimeout(resolve, 250))
+          image = await window.webContents.capturePage()
+        }
         if (smokeOut) writeFileSync(smokeOut, image.toPNG())
         const bounds = window.getBounds()
         const title = window.getTitle()

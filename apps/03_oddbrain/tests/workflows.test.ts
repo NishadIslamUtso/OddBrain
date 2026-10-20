@@ -36,7 +36,9 @@ function parallelFixture() {
   execFileSync('git', ['init', '-q'], { cwd: repo }); execFileSync('git', ['config', 'user.email', 'test@example.invalid'], { cwd: repo }); execFileSync('git', ['config', 'user.name', 'OddBrain test'], { cwd: repo })
   writeFileSync(join(repo, 'source.txt'), 'source\n'); execFileSync('git', ['add', 'source.txt'], { cwd: repo }); execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: repo })
   let locked = false, epoch = 0
-  const commands = createCommandRunner({ root: join(base, 'commands'), isolationRoot: join(base, 'worktrees'), deadlineMs: 30_000,
+  // Windows CI can spend tens of seconds in concurrent PowerShell CreateProcess/Defender startup before either script advances.
+  // The product budget is five minutes; this fixture keeps a realistic launch allowance while still bounding a genuine hang.
+  const commands = createCommandRunner({ root: join(base, 'commands'), isolationRoot: join(base, 'worktrees'), deadlineMs: 120_000,
     scope: () => ({ cwd: repo, authority: `parallel-${epoch}`, stableAuthority: 'parallel', allowed: !locked, busy: locked, explanation: 'Busy' }),
     acquire: async (_request, authority, signal) => { if (locked || authority !== `parallel-${epoch}`) throw Error('Denied'); locked = true; return { recheck() { if (signal.aborted || authority !== `parallel-${epoch}`) throw Error('Changed') }, release() { locked = false; epoch++ } } },
   })
@@ -67,7 +69,7 @@ test('one approval runs exact steps sequentially and retains real command result
 test('parallel workflow commands use separate retained worktrees and actually overlap, never the source checkout', async () => {
   const f = parallelFixture(), marker = join(f.base, 'second-ready')
   const waitForSecond = process.platform === 'win32'
-    ? `for($i=0; $i -lt 250 -and -not (Test-Path -LiteralPath ${literal(marker)}); $i++){ Start-Sleep -Milliseconds 100 }; if(-not (Test-Path -LiteralPath ${literal(marker)})){ exit 8 }; ${isolatedWrite('one.txt', 'one')}`
+    ? `for($i=0; $i -lt 1000 -and -not (Test-Path -LiteralPath ${literal(marker)}); $i++){ Start-Sleep -Milliseconds 100 }; if(-not (Test-Path -LiteralPath ${literal(marker)})){ exit 8 }; ${isolatedWrite('one.txt', 'one')}`
     : `i=0; while [ ! -f ${literal(marker)} ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i+1)); done; test -f ${literal(marker)}; ${isolatedWrite('one.txt', 'one')}`
   const announceSecond = process.platform === 'win32' ? `${isolatedWrite(marker, 'ready')}; ${isolatedWrite('two.txt', 'two')}` : `${isolatedWrite(marker, 'ready')}; ${isolatedWrite('two.txt', 'two')}`
   const definition = f.workflows.save({ name: 'Isolated pair', cwd: f.repo, mode: 'parallel-worktrees', steps: [{ name: 'Waits for sibling', command: waitForSecond }, { name: 'Signals sibling', command: announceSecond }] })
@@ -82,7 +84,7 @@ test('parallel workflow commands use separate retained worktrees and actually ov
   expect(readFileSync(join(paths[0], 'one.txt'), 'utf8')).toBe('one'); expect(readFileSync(join(paths[1], 'two.txt'), 'utf8')).toBe('two')
   expect(existsSync(join(f.repo, 'one.txt'))).toBe(false); expect(existsSync(join(f.repo, 'two.txt'))).toBe(false)
   expect(f.commands.history().records).toHaveLength(2); expect(f.locked()).toBe(false)
-}, 60_000)
+}, 180_000)
 test('one stop request reaches both active parallel commands and no third task starts', async () => {
   const f = parallelFixture(), definition = f.workflows.save({ name: 'Stop pair', cwd: f.repo, mode: 'parallel-worktrees', steps: [{ name: 'Slow one', command: slow }, { name: 'Slow two', command: slow }, { name: 'Never starts', command: say('no') }] })
   const review = f.workflows.preview(1, definition.id), pending = f.workflows.decide(1, review.token, 'allow')
