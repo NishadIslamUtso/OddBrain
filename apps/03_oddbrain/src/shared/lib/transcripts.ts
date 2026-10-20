@@ -65,7 +65,7 @@ export function transcriptMarkdown(turn: Transcript): string {
     flush()
     if (e.kind === 'thinking') lines.push('## Engine-supplied thinking', '', e.text, '')
     else if (e.kind === 'tool') lines.push(`## Tool: ${e.name}`, '', e.summary, '')
-    else if (e.kind === 'permission') lines.push(`## Approval requested: ${e.tool}`, '', e.summary, e.detail || '', '')
+    else if (e.kind === 'permission') lines.push(`## Approval requested: ${e.tool}`, '', e.summary, ...(e.risk ? [e.risk] : []), e.detail || '', '')
     else if (e.kind === 'error' || e.kind === 'status') lines.push(`## ${e.kind === 'error' ? 'Error' : 'Activity'}`, '', e.text, '')
     else if (e.kind === 'session') lines.push(`Native session: ${e.id}`, '')
   }

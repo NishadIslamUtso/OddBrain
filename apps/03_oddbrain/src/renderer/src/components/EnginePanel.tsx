@@ -314,6 +314,11 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
           {turn.permissions[0].summary ? (
             <p className="mt-0.5 break-words font-mono text-[11.5px] text-muted">{turn.permissions[0].summary}</p>
           ) : null}
+          {turn.permissions[0].risk ? (
+            <p role="note" className="mt-1.5 rounded-md border border-warn/50 bg-warn/5 px-2 py-1 text-[11.5px] leading-relaxed text-warn">
+              {turn.permissions[0].risk} Allowing this writes a file that can start a program; the next reload or commit may run it.
+            </p>
+          ) : null}
           {turn.permissions[0].detail ? <DiffBlock detail={turn.permissions[0].detail} /> : null}
           <div className="mt-2 flex gap-2">
             <button

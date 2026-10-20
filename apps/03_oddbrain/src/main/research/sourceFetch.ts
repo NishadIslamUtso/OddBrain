@@ -20,7 +20,7 @@
 import { createHash } from 'node:crypto'
 import { lookup } from 'node:dns/promises'
 import { boundedResponse } from '../network/boundedResponse'
-import { privateHost, researchUrlProblem, researchSummary, type ResearchReply } from '../../shared/lib/research'
+import { privateHost, researchUrlProblem, researchSummary, withoutInvisible, UNTRUSTED_CONTENT_NOTICE, type ResearchReply } from '../../shared/lib/research'
 
 export const MAX_RESPONSE_BYTES = 2_000_000
 export const MAX_TEXT_CHARS = 300_000
@@ -158,25 +158,35 @@ function decodeEntities(text: string): string {
 }
 
 /** Readable text and title from an HTML page, without running anything in it. */
-export function readableHtml(html: string, limit = MAX_TEXT_CHARS): { title: string; text: string; truncated: boolean } {
+export function readableHtml(html: string, limit = MAX_TEXT_CHARS): { title: string; text: string; truncated: boolean; hiddenRemoved: number; invisibleRemoved: number } {
   const titleMatch = /<title[^>]*>([\s\S]{0,500}?)<\/title>/i.exec(html)
   const social = /<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']{0,300})["']/i.exec(html)
   const title = decodeEntities((titleMatch?.[1] ?? social?.[1] ?? '').replace(/\s+/g, ' ').trim()).slice(0, 200)
+  // A human never reads these, but a model reading the text does: one-pixel
+  // white text, `hidden`, display:none. They are dropped before extraction and
+  // counted, never quietly carried into the vault as if they were page text.
+  let hiddenRemoved = 0
+  const HIDDEN = /<(\w+)\b[^>]*\b(?:hidden|aria-hidden\s*=\s*["']?true["']?)[^>]*>[\s\S]*?<\/\1\s*>/gi
+  const HIDDEN_STYLE = /<(\w+)\b[^>]*\bstyle\s*=\s*["'][^"']*(?:display\s*:\s*none|visibility\s*:\s*hidden|font-size\s*:\s*0(?:\.0+)?(?:px|em|rem|pt)?\b|opacity\s*:\s*0(?:\.0+)?\b|color\s*:\s*(?:transparent|#fff(?:fff)?\b)|height\s*:\s*0|width\s*:\s*0)[^"']*["'][^>]*>[\s\S]*?<\/\1\s*>/gi
   const body = html
     .replace(/<!--[\s\S]*?-->/g, ' ')
     .replace(/<(script|style|noscript|template|svg)\b[^>]*>[\s\S]*?<\/\1>/gi, ' ')
+    .replace(HIDDEN, () => { hiddenRemoved += 1; return ' ' })
+    .replace(HIDDEN_STYLE, () => { hiddenRemoved += 1; return ' ' })
     .replace(/<(?:br|hr)\s*\/?>/gi, '\n')
     .replace(/<\/(?:p|div|li|tr|h[1-6]|section|article|blockquote|pre|td|th)>/gi, '\n')
     .replace(/<li\b[^>]*>/gi, '· ')
     .replace(/<[^>]{0,4000}>/g, ' ')
-  const text = decodeEntities(body)
+  const decoded = decodeEntities(body)
     .replace(/\r\n?/g, '\n')
     .split('\n')
     .map(line => line.replace(/[ \t\f\v\u00a0]+/g, ' ').trim())
     .join('\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim()
-  return { title, text: text.slice(0, limit), truncated: text.length > limit }
+  const invisible = withoutInvisible(decoded)
+  const text = invisible.text
+  return { title, text: text.slice(0, limit), truncated: text.length > limit, hiddenRemoved, invisibleRemoved: invisible.removed }
 }
 
 /** Resolve every address for a public host; any private answer refuses. */
@@ -193,10 +203,10 @@ async function publicHost(hostname: string, resolve: NonNullable<FetchDeps['reso
 
 const LOOPBACK_HOSTS = new Set(['localhost', '127.0.0.1', '[::1]', '::1'])
 
-const textOf = (contentType: string, raw: string, limit: number): { title: string; text: string; truncated: boolean } => {
+const textOf = (contentType: string, raw: string, limit: number): { title: string; text: string; truncated: boolean; hiddenRemoved: number; invisibleRemoved: number } => {
   if (/^text\/html|application\/xhtml\+xml/i.test(contentType)) return readableHtml(raw, limit)
-  const text = raw.replace(/\r\n?/g, '\n').trim()
-  return { title: '', text: text.slice(0, limit), truncated: text.length > limit }
+  const invisible = withoutInvisible(raw.replace(/\r\n?/g, '\n').trim()), text = invisible.text
+  return { title: '', text: text.slice(0, limit), truncated: text.length > limit, hiddenRemoved: 0, invisibleRemoved: invisible.removed }
 }
 
 /** Fetch one page and write it as a source. Cancellable; never retries. */
@@ -258,6 +268,10 @@ export async function fetchWebSource(rawUrl: unknown, deps: FetchDeps, signal?: 
       `Fetched by OddBrain on ${at} from ${url.toString()}`,
       `HTTP ${response.status} · ${contentType} · ${bytes.toLocaleString()} bytes · sha256 ${sha256}`,
       `Text below was extracted from the response${/html/i.test(contentType) ? ' with HTML tags removed' : ''}. No summary or interpretation was added.`,
+      UNTRUSTED_CONTENT_NOTICE,
+      extracted.hiddenRemoved || extracted.invisibleRemoved
+        ? `Removed before saving: ${extracted.hiddenRemoved.toLocaleString()} element(s) a reader would not see, ${extracted.invisibleRemoved.toLocaleString()} invisible or text-direction character(s). Neither is evidence of intent; both were dropped rather than followed.`
+        : 'No hidden elements or invisible characters were found.',
       extracted.truncated ? `The readable text exceeded ${MAX_TEXT_CHARS.toLocaleString()} characters and was cut at that limit.` : 'The whole readable text is below.',
       'A fetched page is evidence of what this address returned at that moment, not proof that its claims are true.',
     ].join('\n')
@@ -289,6 +303,8 @@ export async function fetchWebSource(rawUrl: unknown, deps: FetchDeps, signal?: 
       sha256,
       truncated: extracted.truncated,
       duplicate: Boolean(written.duplicate),
+      hiddenRemoved: extracted.hiddenRemoved,
+      invisibleRemoved: extracted.invisibleRemoved,
     }
     const elapsed = clock().getTime() - started.getTime()
     return { ...reply, answer: `${researchSummary(reply)}${Number.isFinite(elapsed) && elapsed >= 0 ? ` Fetched in ${elapsed.toLocaleString()} ms.` : ''}` }

@@ -36,7 +36,7 @@ export type EngineItem =
 
 /** A question from the engine that a person must answer. */
 const answering = new WeakSet<object>()
-export type EnginePermission = { requestId: string; tool: string; summary: string; detail?: string }
+export type EnginePermission = { requestId: string; tool: string; summary: string; detail?: string; risk?: string }
 
 /** The engine's brains, as its own door reports them. */
 export type EngineModels = { loading: boolean; entries: EngineModelEntry[]; error: string }
@@ -348,6 +348,7 @@ const ingest = (event: EngineEvent): void => {
       tool: event.tool,
       summary: event.summary,
       detail: event.detail,
+      risk: event.risk,
     })
   } else if (event.kind === 'done') {
     // The wire says the same goodbye twice (once as the engine's last words,

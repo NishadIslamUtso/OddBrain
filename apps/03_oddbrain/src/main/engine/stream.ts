@@ -12,6 +12,7 @@
  */
 import type { EngineEvent } from '../../shared/lib/engine'
 import { toolDetail, toolSummary, type EngineUsage } from '../../shared/lib/engine'
+import { executionConfigRisk } from '../../shared/lib/executionConfig'
 
 export type EngineParser = {
   /** Feed raw output; returns every complete event found in it. */
@@ -179,6 +180,9 @@ export function createEngineParser(): EngineParser {
           summary: toolSummary(request.tool_name, request.input),
           detail: toolDetail(request.tool_name, request.input),
           ...(file ? { file } : {}),
+          // The Kiro/Cursor lesson: a write to the file that decides what runs
+          // is not an ordinary edit, and the approval card must say so.
+          ...(file ? { risk: executionConfigRisk(file) } : {}),
         },
       ]
     }
