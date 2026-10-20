@@ -53,6 +53,44 @@ describe('owner-selected project context', () => {
     await f.service.prepare(f.input, f.dir, 'Search my vault folder', '', new AbortController().signal)
     expect(recall).not.toHaveBeenCalled()
   })
+  test('applies an owner model capacity to native context and receipts every omission', async () => {
+    const f = fixture()
+    const history = [
+      { id: 'u-old', role: 'user' as const, content: 'old question '.repeat(500) },
+      { id: 'a-old', role: 'assistant' as const, content: 'old answer '.repeat(500) },
+      { id: 'u-new', role: 'user' as const, content: 'recent question' },
+      { id: 'a-new', role: 'assistant' as const, content: 'recent answer' },
+    ]
+    const result = await f.service.prepare({ ...f.input, history, contextProfile: { mode: 'manual', source: 'owner', capacityTokens: 2400, outputReserveTokens: 400 } }, f.dir, 'Current task', '', new AbortController().signal)
+    expect(result.prompt).not.toContain('old question')
+    expect(result.prompt).toContain('recent question')
+    expect(result.receipt.modelContext).toMatchObject({ mode: 'manual', source: 'owner', capacityTokens: 2400, exact: false })
+    expect(result.receipt.omitted?.map(item => item.id)).toEqual(['u-old', 'a-old'])
+  })
+  test('leaves an unknown Auto model uncapped', async () => {
+    const f = fixture()
+    const result = await f.service.prepare({ ...f.input, contextProfile: { mode: 'auto', source: 'unknown', capacityTokens: null, outputReserveTokens: 1024 } }, f.dir, 'Task', '', new AbortController().signal)
+    expect(result.receipt.modelContext).toMatchObject({ source: 'unknown', capacityTokens: null })
+    expect(result.receipt.omitted).toBeUndefined()
+  })
+  test('an unknown overflow retry removes one complete oldest group without inventing a capacity', async () => {
+    const f = fixture()
+    const history = [
+      { id: 'u-old', role: 'user' as const, content: 'old question' },
+      { id: 'a-old', role: 'assistant' as const, content: 'old answer' },
+      { id: 'u-new', role: 'user' as const, content: 'recent question' },
+      { id: 'a-new', role: 'assistant' as const, content: 'recent answer' },
+    ]
+    const profile = { mode: 'auto' as const, source: 'unknown' as const, capacityTokens: null, outputReserveTokens: 1024 }
+    const result = await f.service.prepare({ ...f.input, history, contextProfile: profile }, f.dir, 'Task', '', new AbortController().signal, true)
+    expect(result.prompt).not.toContain('old question')
+    expect(result.prompt).toContain('recent question')
+    expect(result.receipt.modelContext?.capacityTokens).toBeNull()
+    expect(result.receipt.omitted).toEqual([
+      { id: 'u-old', title: 'Stored user message', reason: 'provider-overflow' },
+      { id: 'a-old', title: 'Stored assistant message', reason: 'provider-overflow' },
+    ])
+  })
   test('fresh sessions receive copied history; resumed ones do not repeat it', async () => {
     const f = fixture()
     expect((await f.prepare()).receipt.historyMessages).toBe(1)

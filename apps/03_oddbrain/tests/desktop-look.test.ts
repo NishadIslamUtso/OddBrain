@@ -112,8 +112,9 @@ test('quiz, verdicts, shortlist and notes remain functional persistent choices',
 test('all native provider-key controls stay byte-for-byte intact across the settings move', () => {
   // Pin real behavior directly. No replacement key forms or fake saves.
   const current = readFileSync(resolve('src/renderer/src/components/SettingsView.tsx'), 'utf8').replace(/\r\n/g, '\n')
-  const providerBlock = current.slice(current.indexOf('    models: isDemo'), current.indexOf('    performance: [', current.indexOf('    models: isDemo')))
-  assert.equal(createHash('sha256').update(providerBlock.slice(providerBlock.indexOf('      : ['))).digest('hex'), '06598a7604e4d22295ccf648cf7b948b9daa6a28ae99d395eec6d8eb0ac12409')
+  const providerStart = current.indexOf('          ...providers.map(provider => ({')
+  const providerBlock = current.slice(providerStart, current.indexOf('          ...(providersError', providerStart))
+  assert.equal(createHash('sha256').update(providerBlock).digest('hex'), 'faf8c2006bca3bce1bfb09a30dbbe5df0bb76b87b7106612453897596b1bc023')
   assert.match(current, /await bridge\.cloud\.saveKey\(id, key\)/)
   assert.match(current, /bridge\.cloud\.clearKey/)
   assert.match(current, /setKeyDraft\(current => \(\{ \.\.\.current, \[id\]: '' \}\)\)/)

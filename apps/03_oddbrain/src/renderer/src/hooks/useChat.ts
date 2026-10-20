@@ -24,6 +24,7 @@ import { wantsChart } from '@shared/lib/chart'
 import { resolveInference, type InferenceSettings } from '@shared/lib/inference'
 import { readStored } from '@shared/lib/storage'
 import { parseCloudModel } from '@shared/lib/providers'
+import { WORKING_NOTES_PROPOSAL_GUIDANCE } from '@shared/lib/workingNotesProposal'
 import {
   modelContextKey,
   packModelContext,
@@ -361,7 +362,7 @@ export default function useChat({
         .reduce<number | null>((smallest, value) => smallest === null ? value : Math.min(smallest, value), null)
       let profile = resolveModelContext({ key, label: selectedModel, reportedTokens: reportedLimit, override: contextProfiles[key] })
       const items: PackedContextMessage[] = [
-        { id: 'system', required: true, message: { role: 'system', content: systemPrompt(requested, wantsChart(userMessage.content)) } },
+        { id: 'system', required: true, message: { role: 'system', content: `${systemPrompt(requested, wantsChart(userMessage.content))}\n\nWorking Notes proposals:\n${WORKING_NOTES_PROPOSAL_GUIDANCE}` } },
         ...converted.map((message, index) => ({ id: eligible[index]?.id || `message-${index}`, required: index === converted.length - 1, message })),
       ]
       let packed = packModelContext(items, profile)
@@ -396,7 +397,7 @@ export default function useChat({
           break
         } catch (error) {
           const overflow = parseContextOverflow(error)
-          if (!overflow.overflow || profile.mode === 'manual' || raw || attempts >= 4) throw error
+          if (!overflow.overflow || profile.mode === 'manual' || raw || attempts >= 2) throw error
           overflowRetry = true
           patch(chat.id, assistant.id, { stage: 'The model rejected an oversized context. Retrying with lower-priority history removed…' })
           let next

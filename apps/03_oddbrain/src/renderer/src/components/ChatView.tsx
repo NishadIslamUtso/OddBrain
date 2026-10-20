@@ -12,6 +12,7 @@ import { useDesignTokens } from '@/hooks/useDesignTokens'
 import { viewsForMessage, type LiveArtifacts } from '@/state/artifactView'
 import Composer from './Composer'
 import EnginePanel from './EnginePanel'
+import TurnStateCard from './TurnStateCard'
 import BattleSection from './BattleSection'
 import SplitSection from './SplitSection'
 import MessageRow from './MessageRow'
@@ -140,9 +141,11 @@ export default function ChatView({
         <BattleSection /><SplitSection />
         {composer}
         <HomeStarters onPick={setDraft} />
+        <TurnStateCard chatId={chat?.id} />
         <EnginePanel chatId={chat?.id || ''} />
       </div> : <div className="ob-transcript mx-auto w-full max-w-[var(--chat-width)] px-6 py-6">
         <div className="flex flex-col gap-7">{messages.map(message => <MessageRow key={message.id} message={message} artifacts={viewsForMessage(message.id, message.artifacts, liveArtifacts)} tokens={tokens} highlightId={highlightId} onRewrite={onRewrite} onRestore={onRestore} busyArtifactId={busyArtifactId} rewriteStage={rewriteStage} rewriteError={rewriteError} rewriteErrorFor={rewriteErrorFor} />)}</div>
+        <TurnStateCard chatId={chat?.id} />
         <div className="ob-engine-transcript">{engine.turn?.state !== 'running' && chat?.messages.some(m => m.nativeRecord?.transcriptId === engine.turn?.transcriptId) ? <details><summary>Last run details and kept files</summary><EnginePanel chatId={chat?.id || ''} /></details> : <EnginePanel chatId={chat?.id || ''} />}</div>
       </div>}
     </div>

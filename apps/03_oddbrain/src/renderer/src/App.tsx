@@ -56,7 +56,7 @@ import { setMotionMode, setMascotPause } from './motion/motionMode'
 import { setOsReducedMotion } from './motion/motionMode'
 import { conversationCapture } from '@shared/lib/capture'
 import { parseCloudModel } from '@shared/lib/providers'
-import { modelContextKey, normalizeModelContextOverrides } from '@shared/lib/modelContext'
+import { modelContextKey, normalizeModelContextOverrides, resolveModelContext } from '@shared/lib/modelContext'
 import type { ContextModelChoice } from './components/ModelContextProfiles'
 
 /**
@@ -308,6 +308,18 @@ export default function App() {
   )
 
   const engine = useEngine()
+  const learnedNativeCapacity = useRef('')
+  useEffect(() => {
+    const observed = engine.turn?.context?.overflowRecovery?.observedCapacityTokens
+    const revision = engine.turn?.context?.revision || ''
+    if (!observed || revision === learnedNativeCapacity.current) return
+    learnedNativeCapacity.current = revision
+    const key = engine.turn?.context?.modelContext?.key || modelContextKey(`engine:${engine.settings.id}:${engine.settings.cloudProvider || 'local'}`, engine.settings.model || 'provider default')
+    const current = contextProfiles[key]
+    if (current?.mode === 'manual') return
+    setContextProfiles({ ...contextProfiles, [key]: { ...current, mode: 'auto', observedTokens: observed } })
+    setNotice(`The provider reported a ${observed.toLocaleString()}-token context limit. OddBrain saved it as observed capacity for this model; you can edit it in Settings → Models.`)
+  }, [engine.turn?.context?.revision, engine.settings.id, engine.settings.model, engine.settings.cloudProvider, contextProfiles, setContextProfiles])
   const contextModels = useMemo<ContextModelChoice[]>(() => {
     const choices: ContextModelChoice[] = models.models.map(entry => ({
       key: modelContextKey(entry.cloud ? `cloud:${entry.provider || 'provider'}` : 'ollama', entry.name),
@@ -583,10 +595,13 @@ export default function App() {
     const chatId = chat?.id || newId(), projectId = pendingProject ?? chat?.projectId ?? null
     const savedNotes = chatNotesStore(localStorage, workspaceKey('oddbrain.chat-notes.v1'), chatId).read()?.value || emptyChatNotes()
     const overrides = savedNotes.overrides
-    const target = await bridge.engine.contextTarget({ chatId, projectId, overrides, workingNotes: savedNotes.working, vaultSearch: savedNotes.vaultSearch })
+    const nativeContextKey = modelContextKey(`engine:${engine.settings.id}:${engine.settings.cloudProvider || 'local'}`, engine.settings.model || 'provider default')
+    const nativeProfile = resolveModelContext({ key: nativeContextKey, label: engine.settings.model || 'provider default', override: contextProfiles[nativeContextKey] })
+    const contextProfile = { key: nativeContextKey, mode: nativeProfile.mode, source: nativeProfile.source, capacityTokens: nativeProfile.capacityTokens, outputReserveTokens: nativeProfile.outputReserveTokens }
+    const target = await bridge.engine.contextTarget({ chatId, projectId, overrides, workingNotes: savedNotes.working, vaultSearch: savedNotes.vaultSearch, contextProfile })
     const resume = target.resume
-    const conversation: NativeConversation = { chatId, projectId, overrides, workingNotes: savedNotes.working, vaultSearch: savedNotes.vaultSearch, expectedRoute: target.route || undefined, continuationExpected: resume,
-      ...(!resume ? { history: pendingBrief ? [] : (chat?.messages || []).filter(m => m.origin !== 'import' && (!m.status || m.status === 'complete')).map(m => ({ role: m.role, content: m.content })) } : {}) }
+    const conversation: NativeConversation = { chatId, projectId, overrides, workingNotes: savedNotes.working, vaultSearch: savedNotes.vaultSearch, contextProfile, expectedRoute: target.route || undefined, continuationExpected: resume,
+      ...(!resume ? { history: pendingBrief ? [] : (chat?.messages || []).filter(m => m.origin !== 'import' && (!m.status || m.status === 'complete')).map(m => ({ id: m.id, role: m.role, content: m.content })) } : {}) }
     if (!chats.commit(previous => previous.some(entry => entry.id === chatId)
       ? previous.map(entry => entry.id === chatId ? { ...entry, projectId } : entry)
       : [{ id: chatId, title: plain.replace(/\s+/g, ' ').slice(0, 80) || 'New chat', date: 'Today', projectId, messages: [] }, ...previous])) return

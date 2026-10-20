@@ -62,6 +62,8 @@ import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
 import { createVaultService, resolveVaultRoot } from './vault/service'
 import { searchVault } from './vault/recall'
+import { estimateModelTokens, parseContextOverflow } from '../shared/lib/modelContext'
+import { WORKING_NOTES_PROPOSAL_GUIDANCE } from '../shared/lib/workingNotesProposal'
 import { canonicalStructureRoot, conflictWasSettled, normalizeSettledConflicts, settleStructureConflict, validStructureRelative, type SettledStructureConflict } from './vault/settled'
 import { createKeyStore, type KeyStore } from './cloud/keys'
 import { createCloudClient, type CloudClient } from './cloud/client'
@@ -313,6 +315,7 @@ function registerBridges(): void {
   let nativeWork = 0
   let activeTranscript: { transcriptId: string; chatId?: string; prompt: string } | undefined
   let preparing: { owner: number; controller: AbortController } | undefined
+  let overflowRetryPending = false, retryPreparing: AbortController | undefined
   const catalogReviews = new Map<number, ReturnType<typeof createCatalogInstallReview>>()
   const mcpReviews = new Map<number, ReturnType<typeof createMcpReview>>()
   const ruleReviews = new Map<number, Map<string, { service: ReturnType<typeof createProjectRuleReview>; expiresAt: number }>>()
@@ -853,8 +856,13 @@ function registerBridges(): void {
         }
         auth = { provider: 'anthropic', apiKey: key }
       }
+      const appInstructions = `${instructionBlock(usedEngine.id, usedEngine.model, effectiveRules(), settings.memoryFolder || '')}\n## Chat Working Notes proposals\n\n${WORKING_NOTES_PROPOSAL_GUIDANCE}\n`
+      const envelopeReserve = estimateModelTokens(`OddBrain app instructions (not additional tool permissions):\n${appInstructions}\n\n`)
+      const preparationContext = context?.contextProfile?.capacityTokens !== null && context?.contextProfile?.capacityTokens !== undefined
+        ? { ...context, contextProfile: { ...context.contextProfile, outputReserveTokens: Math.min(10_000_000, context.contextProfile.outputReserveTokens + envelopeReserve) } }
+        : context
       let nativeSession = engine.nextSession({ settings: usedEngine, cwd: usedEngine.workspace || vaultRoot(), chatId: context?.chatId, auth })
-      const prepared = context ? await nativeContext.prepare(context, usedEngine.workspace || vaultRoot(), text,
+      const prepared = preparationContext ? await nativeContext.prepare(preparationContext, usedEngine.workspace || vaultRoot(), text,
         nativeSession.state !== 'fresh', preparing.controller.signal) : undefined
       if (ownDispatch !== workDispatchGeneration || policy() !== usedPolicy || JSON.stringify(settings.engine) !== JSON.stringify(savedEngine) || usedCommand !== resolveEngineCommand(usedEngine.id)) throw Error('Task settings changed while reading context. Nothing was sent.')
       if (preparing.controller.signal.aborted) throw Error('Task preparation canceled. Nothing was sent.')
@@ -869,36 +877,77 @@ function registerBridges(): void {
       const finalLaunchInventory = inspectNativeLaunch(usedEngine.id, usedEngine.workspace || vaultRoot(), app.getPath('home'))
       if (finalLaunchInventory.digest !== launchInventory.digest || (usedEngine.approval === 'full' && !finalLaunchInventory.complete)) throw Error('Native connector, rule, hook or task configuration changed before launch. Nothing was sent; review the folder again.')
       launchInventory = finalLaunchInventory
-      const appInstructions = instructionBlock(usedEngine.id, usedEngine.model, effectiveRules(), settings.memoryFolder || '')
-      const dispatchedText = `OddBrain app instructions (not additional tool permissions):\n${appInstructions}\n\n${prepared?.prompt || text}`
-      if (dispatchedText.length > 100_000) throw Error('App instructions plus selected context exceed 100,000 characters. Nothing was shortened or sent.')
-      const receipt = prepared?.receipt || { projectId: null, revision: '', workspace: usedEngine.workspace || vaultRoot(), sources: [], historyMessages: 0, characters: 0 }
       const appHazards = scanTextHazards(appInstructions), requestHazards = scanTextHazards(text)
-      receipt.sources.unshift({ id: 'app-instructions', title: 'OddBrain app instruction envelope', chars: appInstructions.length, digest: createHash('sha256').update(appInstructions).digest('hex'), coverage: 'Complete app-authored instruction block; descriptive guidance, not an additional permission grant', role: 'app-instruction', ...(appHazards.total ? { hazards: appHazards } : {}) })
-      receipt.sources.push({ id: 'owner-request', title: 'Current owner request', chars: text.length, digest: createHash('sha256').update(text).digest('hex'), coverage: 'Complete owner-entered request before the app envelope was added', role: 'owner-request', ...(requestHazards.total ? { hazards: requestHazards } : {}) })
-      receipt.characters = dispatchedText.length
-      receipt.session = nativeSession
-      receipt.launch = { digest: launchInventory.digest, complete: launchInventory.complete, files: launchInventory.files.length, connectorFiles: launchInventory.connectorFiles, ruleFiles: launchInventory.ruleFiles, hookFiles: launchInventory.hookFiles, warnings: launchInventory.warnings }
-      receipt.revision = createHash('sha256').update(JSON.stringify([receipt.revision, appInstructions, text, receipt.session, receipt.launch])).digest('hex')
+      const finishContext = (value: typeof prepared, shownProfile = context?.contextProfile) => {
+        const prompt = `OddBrain app instructions (not additional tool permissions):\n${appInstructions}\n\n${value?.prompt || text}`
+        if (prompt.length > 250_000) throw Error('App instructions plus selected context exceed the app’s 250,000-character transport safety limit. Nothing was shortened or sent.')
+        const result = value?.receipt || { projectId: null, revision: '', workspace: usedEngine.workspace || vaultRoot(), sources: [], historyMessages: 0, characters: 0 }
+        result.sources.unshift({ id: 'app-instructions', title: 'OddBrain app instruction envelope', chars: appInstructions.length, digest: createHash('sha256').update(appInstructions).digest('hex'), coverage: 'Complete app-authored instruction block; descriptive guidance, not an additional permission grant', role: 'app-instruction', ...(appHazards.total ? { hazards: appHazards } : {}) })
+        result.sources.push({ id: 'owner-request', title: 'Current owner request', chars: text.length, digest: createHash('sha256').update(text).digest('hex'), coverage: 'Complete owner-entered request before the app envelope was added', role: 'owner-request', ...(requestHazards.total ? { hazards: requestHazards } : {}) })
+        result.characters = prompt.length
+        if (shownProfile) {
+          result.modelContext = { ...shownProfile, estimatedInputTokens: estimateModelTokens(prompt), exact: false }
+          const allowance = shownProfile.capacityTokens === null ? null : Math.max(0, shownProfile.capacityTokens - shownProfile.outputReserveTokens)
+          if (allowance !== null && result.modelContext.estimatedInputTokens > allowance) throw Error(`Essential app instructions and owner request exceed this model profile’s ${allowance.toLocaleString()}-token input allowance. Nothing essential was clipped.`)
+        }
+        result.session = nativeSession
+        result.launch = { digest: launchInventory.digest, complete: launchInventory.complete, files: launchInventory.files.length, connectorFiles: launchInventory.connectorFiles, ruleFiles: launchInventory.ruleFiles, hookFiles: launchInventory.hookFiles, warnings: launchInventory.warnings }
+        result.revision = createHash('sha256').update(JSON.stringify([result.revision, appInstructions, text, result.session, result.launch])).digest('hex')
+        return { prompt, receipt: result }
+      }
+      const finishedContext = finishContext(prepared)
+      const dispatchedText = finishedContext.prompt, receipt = finishedContext.receipt
       const artifactBefore = snapshotNativeArtifacts(usedEngine.workspace || vaultRoot())
-      const sent = dispatchRecordedTurn(turnArchive, { prompt: dispatchedText, userPrompt: text, chatId: context?.chatId, context: receipt, engine: usedEngine.id, model: usedEngine.model, workspace: usedEngine.workspace || vaultRoot(), pictures: images.length, images, ...(retainedFiles.length ? { attachments: retainedFiles } : {}) }, receive => engine!.send(dispatchedText, {
-        chatId: context?.chatId,
-        cwd: usedEngine.workspace || vaultRoot(),
-        settings: usedEngine,
-        auth, images,
-        checkpointDir: join(app.getPath('userData'), 'checkpoints'),
-        shouldCheckpoint: () => automation?.preferences().autoKeep !== false,
-        onEvent: output => {
-          if (output.kind === 'done') {
-            try {
-              const observed = collectNativeArtifacts(join(app.getPath('userData'), 'artifacts'), usedEngine.workspace || vaultRoot(), artifactBefore, context?.chatId)
-              for (const notice of observed.notices) receive({ kind: 'status', text: notice })
-              output = { ...output, ...(observed.links.length ? { artifacts: observed.links } : {}) }
-            } catch { receive({ kind: 'status', text: 'Artifact inspection could not finish. Original outputs remain in the working folder.' }) }
-          }
-          receive(output)
-        },
-      }), () => engine?.stop(), (event: EngineEvent) => {
+      let overflowRetried = false, generationBegan = false
+      const sent = dispatchRecordedTurn(turnArchive, { prompt: dispatchedText, userPrompt: text, chatId: context?.chatId, context: receipt, engine: usedEngine.id, model: usedEngine.model, workspace: usedEngine.workspace || vaultRoot(), pictures: images.length, images, ...(retainedFiles.length ? { attachments: retainedFiles } : {}) }, receive => {
+        const dispatchAttempt = (attemptPrompt: string) => engine!.send(attemptPrompt, {
+          chatId: context?.chatId,
+          cwd: usedEngine.workspace || vaultRoot(),
+          settings: usedEngine,
+          auth, images,
+          checkpointDir: join(app.getPath('userData'), 'checkpoints'),
+          shouldCheckpoint: () => automation?.preferences().autoKeep !== false,
+          onEvent: output => {
+            const errorText = output.kind === 'error' ? output.text : ''
+            const overflow = errorText ? parseContextOverflow(errorText) : null
+            if (overflow?.overflow && !overflowRetried && !generationBegan && context?.contextProfile?.mode === 'auto' && context.contextProfile.source === 'unknown' && context.contextProfile.capacityTokens === null) {
+              overflowRetried = true
+              overflowRetryPending = true
+              const retryContext = context, observedCapacity = overflow.limitTokens, providerMessage = errorText.slice(0, 2_000)
+              receive({ kind: 'status', text: observedCapacity ? `The provider rejected this unknown Auto context before generation and reported a ${observedCapacity.toLocaleString()}-token limit. OddBrain is making its one allowed bounded retry.` : 'The provider rejected this unknown Auto context before generation. OddBrain is making its one allowed retry after removing one oldest complete lower-priority context group; it is not guessing a model limit.' })
+              void (async () => {
+                const retryController = new AbortController()
+                retryPreparing = retryController
+                try {
+                  if (ownDispatch !== workDispatchGeneration || policy() !== usedPolicy || JSON.stringify(settings.engine) !== JSON.stringify(savedEngine) || usedCommand !== resolveEngineCommand(usedEngine.id)) throw Error('Task settings changed after the provider overflow. The automatic retry was canceled.')
+                  const retryProfile = observedCapacity ? { ...retryContext.contextProfile!, source: 'observed' as const, capacityTokens: observedCapacity, outputReserveTokens: Math.min(10_000_000, retryContext.contextProfile!.outputReserveTokens + envelopeReserve) } : retryContext.contextProfile!
+                  const retryPrepared = await nativeContext.prepare({ ...retryContext, contextProfile: retryProfile }, usedEngine.workspace || vaultRoot(), text, nativeSession.state !== 'fresh', retryController.signal, !observedCapacity)
+                  retryPrepared.validate()
+                  const retry = finishContext(retryPrepared, retryContext.contextProfile)
+                  retry.receipt.omitted = retry.receipt.omitted?.map(item => ({ ...item, reason: 'provider-overflow' as const }))
+                  retry.receipt.overflowRecovery = { attempt: 2, retryLimitTokens: observedCapacity, retryInputTokens: estimateModelTokens(retry.prompt), observedCapacityTokens: observedCapacity, providerMessage }
+                  retry.receipt.revision = createHash('sha256').update(JSON.stringify([retry.receipt.revision, retry.receipt.overflowRecovery, retry.receipt.omitted || []])).digest('hex')
+                  receive({ kind: 'status', text: `Retry context prepared: ${retry.receipt.omitted?.length || 0} lower-priority item(s) omitted; stored originals were not changed.`, context: retry.receipt })
+                  const answer = dispatchAttempt(retry.prompt)
+                  if (!answer.ok) receive({ kind: 'error', text: `${answer.answer} The one overflow retry was not started; nothing will be resubmitted automatically.` })
+                } catch (error) { receive({ kind: 'error', text: `${(error as Error).message} Nothing was resubmitted automatically.` }) }
+                finally { if (retryPreparing === retryController) retryPreparing = undefined; overflowRetryPending = false; dispatchingWork = false }
+              })()
+              return
+            }
+            if (['delta', 'text', 'thinking', 'tool', 'permission'].includes(output.kind)) generationBegan = true
+            if (output.kind === 'done') {
+              try {
+                const observed = collectNativeArtifacts(join(app.getPath('userData'), 'artifacts'), usedEngine.workspace || vaultRoot(), artifactBefore, context?.chatId)
+                for (const notice of observed.notices) receive({ kind: 'status', text: notice })
+                output = { ...output, ...(observed.links.length ? { artifacts: observed.links } : {}) }
+              } catch { receive({ kind: 'status', text: 'Artifact inspection could not finish. Original outputs remain in the working folder.' }) }
+            }
+            receive(output)
+          },
+        })
+        return dispatchAttempt(dispatchedText)
+      }, () => engine?.stop(), (event: EngineEvent) => {
         if (event.kind === 'permission') {
           try { event = { ...event, requestId: permissionTickets.issue(event.requestId) } }
           catch { engine?.stop(); event = { kind: 'error', text: 'The permission could not be bound to the active engine. Stop requested; no approval was sent.', chatId: context?.chatId } }
@@ -913,7 +962,7 @@ function registerBridges(): void {
       if (sent.transcriptId) activeTranscript = { transcriptId: sent.transcriptId, chatId: context?.chatId, prompt: text }
       if (!sent.ok) automation?.rejectWork()
       return sent
-      } catch (error) { automation?.rejectWork(); return { ok: false, answer: (error as Error).message } } finally { preparing = undefined; dispatchingWork = false }
+      } catch (error) { automation?.rejectWork(); return { ok: false, answer: (error as Error).message } } finally { preparing = undefined; dispatchingWork = overflowRetryPending }
     }
   handle('queue:read', event => workQueue.view(track(event.sender)))
   handle('queue:enqueue', (event, prompt: string, conversation?: unknown) => workQueue.enqueue(track(event.sender), prompt, checkNativeConversation(conversation)))
@@ -1301,7 +1350,7 @@ function registerBridges(): void {
 
   handle('engine:stop', () => {
     workflows.cancel(); commandRunner.cancel()
-    preparing?.controller.abort(); permissionTickets.clear()
+    preparing?.controller.abort(); retryPreparing?.abort(); retryPreparing = undefined; overflowRetryPending = false; dispatchingWork = false; permissionTickets.clear()
     workDispatchGeneration++
     automation?.stopWork()
     engine?.stop()

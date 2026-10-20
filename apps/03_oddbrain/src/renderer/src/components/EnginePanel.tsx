@@ -11,11 +11,13 @@ import { Mascot } from '../motion/Mascot'
 import { BRIEF_ORDER } from '@shared/lib/compact'
 import { modelLabel } from '@shared/lib/engine'
 import { THINKING_OPEN_EVENT, setThinkingOpen, thinkingOpenNow } from '@shared/lib/thinkingOpen'
-import { bridge } from '@/platform/bridge'
+import { bridge, getEngineApi } from '@/platform/bridge'
 import { useEngine, type EngineItem } from '@/state/engine'
 import { cancelBrief, clearCompactNotice, finishCompact, useCompact, writeBrief } from '@/state/compact'
 import { formatTotals, turnCopyText } from '@shared/lib/turnCopy'
 import { clearReviewError, runReview, useReview } from '@/state/review'
+import { mayRememberRead, readTrustRules, revokeReadTrust } from '@/state/readTrust'
+import { parseWorkingNotesProposal } from '@shared/lib/workingNotesProposal'
 
 /**
  * The engine's work order, drawn where the conversation can see it.
@@ -32,12 +34,21 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
   const turn = engine.turn
   const unapprovedChanges = turn?.permissions.filter(permission => permission.detail && permission.detail.split('\n').filter(line => /^(---|\+\+\+|@@|[+-])\s?/.test(line)).length >= 2) || []
   const [handed, setHanded] = useState('')
+  const [recoveryNotice, setRecoveryNotice] = useState('')
+  const [proposalNotice, setProposalNotice] = useState('')
   // What the app kept before allowed writes this session, and what a restore said.
   const [kept, setKept] = useState<Kept[]>([])
   const [restored, setRestored] = useState('')
   const [restoreTarget, setRestoreTarget] = useState<Kept | null>(null), [showAllKept, setShowAllKept] = useState(false)
+  const [readRules, setReadRules] = useState(() => readTrustRules())
+  useEffect(() => {
+    const refresh = (): void => setReadRules(readTrustRules())
+    window.addEventListener('oddbrain:read-trust', refresh); window.addEventListener('storage', refresh)
+    return () => { window.removeEventListener('oddbrain:read-trust', refresh); window.removeEventListener('storage', refresh) }
+  }, [])
   const restorePort = useMemo(() => restoreTarget ? { preview: () => bridge.engine.checkpoints.preview(restoreTarget.copy, restoreTarget.original), decide: (token: string, decision: 'allow' | 'deny') => bridge.engine.checkpoints.decide(token, decision) } : undefined, [restoreTarget])
   const finished = turn?.state === 'done' || turn?.state === 'error'
+  const notesProposal = turn?.state === 'done' ? parseWorkingNotesProposal(turn.items.filter((item): item is Extract<EngineItem, { text: string }> => item.kind === 'text').map(item => item.text).join('\n')) : null
   useEffect(() => {
     if (!finished) return
     void bridge.engine.checkpoints.list().then((answer) => {
@@ -60,6 +71,7 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
       return true
     }
   })
+  const readRuleList = readRules.length ? <details className="mt-2 text-[11.5px] text-muted"><summary>Saved read-only approvals ({readRules.length})</summary><p>Each rule matches one exact engine, workspace and complete Read file path. Commands, patterns, writes, deletion, publishing, provider changes and wider paths always need a fresh decision.</p><ul>{readRules.map(rule => <li key={rule.id} className="flex items-center gap-2"><code className="min-w-0 flex-1 truncate" title={`${rule.workspace} · ${rule.scope}`}>Read · {rule.scope}</code><button type="button" onClick={() => revokeReadTrust(rule.id)}>Revoke</button></li>)}</ul></details> : null
   const setPanel = (open: boolean): void => {
     setPanelOpen(open)
     try {
@@ -78,6 +90,7 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
         {/* Live work seen from ANOTHER window: this window owns no turn, so it
             shows the machine's activity read-only — cards stay with the window
             that can answer them. */}
+        {readRuleList}
         {engine.ambient.busy ? (
           <section
             aria-label="Engine working in another window"
@@ -122,8 +135,8 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
       state: turn.state,
       sessionId: turn.sessionId,
       usage: turn.usage,
-      engine: engine.settings.id,
-      model: engine.settings.model,
+      engine: turn.engine || engine.settings.id,
+      model: turn.model ?? engine.settings.model,
       workspace: engine.settings.workspace,
       date: new Date().toISOString(),
     })
@@ -156,7 +169,7 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
           {panelOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </button>
         <details className="ob-task-meta"><summary>Task details</summary><p>
-          Engine · {engine.settings.id} · {modelLabel(engine.settings.model)}
+          Engine · {turn.engine || engine.settings.id} · {modelLabel(turn.model ?? engine.settings.model)}
           {' · ' + (engine.settings.workspace ? engine.settings.workspace.split(/[\\/]/).filter(Boolean).at(-1) : 'vault')}
           {turn.state === 'running' ? ` · ${PHASE_LABEL[phase]}…` : turn.state === 'error' ? ' · stopped' : ' · done'}
           {` · ${formatTotals(engine.totals)}`}
@@ -259,6 +272,8 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
           return <EngineItemRow key={`${index}-${live ? 'live' : 'kept'}`} item={item} live={live} pending={turn.state === 'running'} />
         })}
       </ul>
+      {notesProposal ? <div className="ob-control-scope mt-2"><strong>Working Notes proposal</strong><p>The model added a visible structured draft. Review it in the chat’s Working Notes editor before saving; it is not confirmed memory or permission.</p><button type="button" onClick={() => { window.dispatchEvent(new CustomEvent('oddbrain:working-notes-proposal', { detail: { chatId: turn.chatId, proposal: notesProposal, sourceIds: turn.context?.sources.map(source => source.id) || [] } })); setProposalNotice('Loaded into the Working Notes editor for review. Nothing is saved until you choose Save Working Notes.') }}>Review proposed update</button>{proposalNotice ? <p role="status">{proposalNotice}</p> : null}</div> : null}
+      {turn.state === 'error' ? <div className="ob-control-scope mt-2" role="status"><strong>Safe next routes</strong><p>OddBrain will not resend this request automatically. Check the installed engine, restart only the idle connection, or return the original request to the composer and edit it.</p><div className="ob-inline-actions"><button type="button" onClick={() => void engine.checkEngines(true).then(() => setRecoveryNotice('Engine health refreshed. Review the detected status before sending anything.')).catch(() => setRecoveryNotice('The health check could not be completed. Nothing was resent.'))}>Check engine health</button><button type="button" onClick={() => void getEngineApi().restart().then(answer => setRecoveryNotice(answer.answer)).catch(() => setRecoveryNotice('Restart could not be confirmed. Nothing was resent.'))}>Restart connection</button><button type="button" onClick={() => window.dispatchEvent(new CustomEvent('app:draft', { detail: turn.prompt }))}>Edit original request</button></div>{recoveryNotice ? <p>{recoveryNotice}</p> : null}</div> : null}
 
       {handed ? <p className="mt-1 text-[11px] text-muted">{handed}</p> : null}
       {finished && kept.length > 0 ? (
@@ -299,6 +314,7 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
       ) : null}
 
       {unapprovedChanges.length ? <details className="ob-permission-request mt-2.5 rounded-lg border border-line bg-bg p-2.5" open><summary className="cursor-pointer text-[12.5px] font-medium text-ink">Not approved ({unapprovedChanges.length})</summary><p className="mt-1 text-[11.5px] text-muted">These exact file changes are waiting for you. Only changes that still need a decision appear here, and the count reaches zero as you allow or deny them.</p>{unapprovedChanges.map(change => <section key={change.requestId} aria-label={`Unapproved ${change.tool} change`}><p className="mt-2 font-mono text-[11.5px] text-muted">{change.tool} · {change.summary}</p><DiffBlock detail={change.detail!} /></section>)}</details> : null}
+      {readRuleList}
       {turn.permissions.length > 0 ? (
         <div className="ob-permission-request mt-2.5 rounded-lg border border-line bg-bg p-2.5" tabIndex={-1} role="region" aria-label="Permission request">
           <p className="flex items-center gap-2 text-[12.5px] text-ink">
@@ -326,6 +342,14 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
             >
               Allow
             </button>
+            {mayRememberRead(turn.permissions[0]) ? <button
+              type="button"
+              onClick={() => void engine.rememberAndAnswerRead()}
+              title="Allows this request now and remembers only the exact engine, workspace, read-only tool and scope shown here. Revoke it below at any time."
+              className="rounded-lg border border-ok/50 px-2.5 py-1 text-[12px] text-ink hover:border-ok"
+            >
+              Always allow this exact read
+            </button> : null}
             <button
               type="button"
               onClick={() => void engine.answer(false)}
