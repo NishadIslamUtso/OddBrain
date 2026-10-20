@@ -14,7 +14,9 @@ const sameNamedFile = (path: string, opened: Stats): boolean => {
  */
 export function readRegularFileSync(path: string, limit: number): OpenedFile {
   if (!Number.isSafeInteger(limit) || limit < 0) throw Error('Invalid file read limit.')
-  const descriptor = openSync(path, 'r')
+  // The mode is ignored for read-only opens; keeping it owner-only also makes
+  // this call safe if its flags are ever extended to permit creation.
+  const descriptor = openSync(path, 'r', 0o600)
   try {
     const before = fstatSync(descriptor)
     if (!sameNamedFile(path, before) || !before.isFile() || before.size > limit) throw Error(`File is not a regular file within the ${limit}-byte read limit.`)
@@ -45,7 +47,9 @@ export function readRegularFileSync(path: string, limit: number): OpenedFile {
 /** Read a bounded prefix from one already-validated regular-file handle. */
 export function readRegularHeadSync(path: string, limit: number): OpenedFile {
   if (!Number.isSafeInteger(limit) || limit < 1) throw Error('Invalid file read limit.')
-  const descriptor = openSync(path, 'r')
+  // The read-only descriptor cannot create a file; if that ever changes, its
+  // explicit mode still prevents access by other users.
+  const descriptor = openSync(path, 'r', 0o600)
   try {
     const before = fstatSync(descriptor)
     if (!sameNamedFile(path, before) || !before.isFile()) throw Error('Path is not a regular file.')
