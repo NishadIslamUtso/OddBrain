@@ -4,6 +4,11 @@
 # A red X here fails the push now. It earned that.
 name: checks
 on: [push, pull_request]
+concurrency:
+  # A branch push and its pull_request event run the same matrix. Keep only
+  # the newest copy so slow Windows integration tests do not compete twice.
+  group: checks-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  cancel-in-progress: true
 jobs:
   linux:
     runs-on: ubuntu-24.04

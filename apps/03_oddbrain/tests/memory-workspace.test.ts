@@ -107,7 +107,7 @@ describe('source → interpretation → confirmation boundary', () => {
     for (let n=2;n<=70;n++) { h.message.id = 'message-' + n; h.save() }
     expect(h.store.discover().jobs).toHaveLength(64); expect(h.store.read().scanCapped).toBe(true)
     expect(h.store.discover().jobs).toHaveLength(70); expect(h.store.read().scanCapped).toBe(false)
-  })
+  }, 15_000)
   it('new in-app captures have immutable structured observations without promoting thinking/context', () => {
     const h = setup(); h.vault.capture({ type: 'conversation', provider: 'OddBrain', conversation_id: 'app-1', title: 'App conversation', messages: [{ id: 'u-1', role: 'user', text: 'I went to school.', timestamp: now, context: 'context is not a claim', thinking: 'thinking is not a claim' }, { id: 'a-1', role: 'assistant', text: 'You might enjoy music.', timestamp: now }] })
     const jobs = h.store.discover().jobs.filter(j => j.source.provider === 'OddBrain')

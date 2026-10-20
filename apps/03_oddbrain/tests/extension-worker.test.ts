@@ -541,7 +541,7 @@ describe("extension worker against the real paired vault API", () => {
     } finally {
       await h.dispose();
     }
-  });
+  }, 15_000);
   it("never retries excluded captures, and keeps an offline exclusion edit", async () => {
     const h = await harness();
     try {
