@@ -4,31 +4,45 @@ import { appendFileSync, closeSync, lstatSync, mkdirSync, openSync, readFileSync
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
 import type { EngineEvent, EngineId } from '../shared/lib/engine'
-import type { Transcript, TranscriptHeader, TranscriptPage } from '../shared/lib/transcripts'
+import type { EngineImage } from '../shared/lib/media'
+import { TRANSCRIPT_ID as ID, validTranscriptMedia, type Transcript, type TranscriptHeader, type TranscriptPage } from '../shared/lib/transcripts'
 import { noLinkedPath } from './engine/configTransaction'
+import { createTurnMedia } from './turnMedia'
 
-const headerValid = (h: any, id: string): h is TranscriptHeader => h?.id === id && (h.chatId === undefined || (typeof h.chatId === 'string' && /^[a-zA-Z0-9_.:-]{1,256}$/.test(h.chatId))) && (h.context === undefined || validContextReceipt(h.context)) && ['claude-code', 'agy'].includes(h.engine) && ['at', 'model', 'workspace', 'title'].every(k => typeof h[k] === 'string') && Number.isSafeInteger(h.pictures) && h.pictures >= 0
+const headerValid = (h: any, id: string): h is TranscriptHeader => h?.id === id && (h.chatId === undefined || (typeof h.chatId === 'string' && /^[a-zA-Z0-9_.:-]{1,256}$/.test(h.chatId))) && (h.context === undefined || validContextReceipt(h.context)) && (h.media === undefined || (validTranscriptMedia(h.media) && h.media.files.length === h.pictures)) && ['claude-code', 'agy'].includes(h.engine) && ['at', 'model', 'workspace', 'title'].every(k => typeof h[k] === 'string') && Number.isSafeInteger(h.pictures) && h.pictures >= 0
 const eventValid = (e: any): e is EngineEvent => e && (e.kind === 'closed' || (['delta', 'text', 'status', 'thinking', 'done', 'error'].includes(e.kind) && typeof e.text === 'string' && (e.kind !== 'done' || e.alreadyDisplayed === undefined || typeof e.alreadyDisplayed === 'boolean')) || (e.kind === 'session' && typeof e.id === 'string') || (e.kind === 'tool' && typeof e.name === 'string' && typeof e.summary === 'string') || (e.kind === 'permission' && typeof e.requestId === 'string' && typeof e.tool === 'string' && typeof e.summary === 'string' && (e.detail === undefined || typeof e.detail === 'string') && (e.file === undefined || typeof e.file === 'string')))
-const ID = /^\d{13}-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 export const TRANSCRIPT_LIMIT = 32_000_000
 /** Append-only per-turn records. Never trims old turns, overwrites a damaged file,
  * executes imported text, or invents successful recovery after a process crash. */
-export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
+export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT, mediaRoot = join(root, 'media')) {
   const active = new Map<string, number>()
+  const media = createTurnMedia(mediaRoot)
   const path = (id: string) => {
     if (!ID.test(id)) throw Error('Invalid transcript identifier.')
     const file = join(root, id + '.ndjson'); noLinkedPath(file); return file
   }
   const line = (value: unknown) => JSON.stringify(value) + '\n'
   return {
-    begin(input: { userPrompt?: string; chatId?: string; context?: import('../shared/lib/nativeConversation').ContextReceipt; prompt: string; engine: EngineId; model: string; workspace: string; pictures: number }): string {
+    begin(input: { userPrompt?: string; chatId?: string; context?: import('../shared/lib/nativeConversation').ContextReceipt; prompt: string; engine: EngineId; model: string; workspace: string; pictures: number; images?: EngineImage[] }): string {
       noLinkedPath(root); mkdirSync(root, { recursive: true, mode: 0o700 })
       const id = `${Date.now()}-${randomUUID()}`
-      const header: TranscriptHeader = { id, at: new Date().toISOString(), engine: input.engine, model: input.model, workspace: input.workspace, title: input.prompt.replace(/\s+/g, ' ').slice(0, 120), pictures: input.pictures, ...(input.chatId ? { chatId: input.chatId } : {}), ...(input.context ? { context: input.context } : {}) }
+      if (input.images && input.images.length !== input.pictures) throw Error('The recorded picture count does not match the pictures supplied. Nothing was sent.')
+      // Pictures are written before the text header and before any dispatch, so a
+      // turn that is recorded as carrying pictures either has their exact bytes or
+      // refuses to start. A failure removes only this attempt's own folder.
+      const stored = input.images?.length ? media.save(id, input.images) : undefined
+      const header: TranscriptHeader = { id, at: new Date().toISOString(), engine: input.engine, model: input.model, workspace: input.workspace, title: input.prompt.replace(/\s+/g, ' ').slice(0, 120), pictures: input.pictures, ...(input.chatId ? { chatId: input.chatId } : {}), ...(input.context ? { context: input.context } : {}), ...(stored ? { media: stored } : {}) }
       const bytes = line({ header }) + line({ prompt: input.prompt, ...(input.userPrompt !== undefined ? { userPrompt: input.userPrompt } : {}) })
-      if (Buffer.byteLength(bytes) > limit) throw Error('The transcript exceeds the storage limit. Nothing was sent.')
-      writeFileSync(path(id), bytes, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
-      active.set(id, Buffer.byteLength(bytes)); return id
+      try {
+        const size = Buffer.byteLength(bytes)
+        if (size > limit) throw Error('The transcript exceeds the storage limit. Nothing was sent.')
+        writeFileSync(path(id), bytes, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+        active.set(id, size); return id
+      } catch (error) {
+        // Only this attempt's own media folder can be removed here.
+        if (stored) { try { media.discard(id) } catch { /* the original failure is what is reported */ } }
+        throw error
+      }
     },
     append(id: string, event: EngineEvent): void {
       const size = active.get(id)
@@ -86,5 +100,7 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
       const state = incomplete ? 'interrupted' : last?.kind === 'done' ? 'done' : last?.kind === 'error' ? 'error' : active.has(id) ? 'running' : 'interrupted'
       return { header, prompt, events, state, incomplete, ...(typeof request.userPrompt === 'string' ? { userPrompt: request.userPrompt } : {}) }
     },
+    /** The preserved pictures for this archive. Reads are checked against the record's manifest. */
+    media,
   }
 }

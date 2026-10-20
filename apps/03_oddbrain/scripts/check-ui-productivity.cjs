@@ -1,6 +1,7 @@
 // Real renderer interactions; transcript IPC below is explicitly a fixture,
 // not a signed-in engine or native file-picker acceptance claim.
 const { chromium } = require('playwright-core')
+const { createHash } = require('node:crypto')
 const { openSettingsSection } = require('./settings-navigation.cjs')
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict')
 const QA = path.resolve(process.env.ODDBRAIN_QA_DIR || 'qa-ui'), BASE = process.env.ODDBRAIN_UI_URL || 'http://127.0.0.1:5174/'
@@ -60,24 +61,36 @@ fs.mkdirSync(QA, { recursive: true })
   const download = await downloadWait, exported = fs.readFileSync(await download.path(),'utf8')
   assert(exported.includes('MESSAGE 0\n'+'x'.repeat(2300))); assert(exported.includes('END 34'))
   report.checks.push('Markdown download retains all 35 saved messages and text beyond the old 2,000-character clipping point')
-  await page.evaluate(async () => {
+  const pictureBytes = Buffer.from('PRESERVED PICTURE BYTES'), pictureDigest = createHash('sha256').update(pictureBytes).digest('hex')
+  // Mocked transcript IPC: proves the review/save wiring, not native engine storage.
+  await page.evaluate(async (fixture) => {
    const url = performance.getEntriesByType('resource').map(e => e.name).filter(s => s.includes('/src/platform/bridge.ts')).at(-1) || '/src/platform/bridge.ts'
    const {bridge} = await import(url)
    const header = {id:'fixture-turn',title:'Recorded native task',at:'2026-10-19T00:00:00Z',engine:'agy',model:'fixture',workspace:'/fixture',pictures:1}
-   bridge.transcripts.list = async () => ({ok:true,value:{entries:[header],next:'',notice:''}})
-   bridge.transcripts.read = async () => ({ok:true,value:{header,prompt:'Full original request',events:[{kind:'text',text:'Complete recorded text.\n'+'detail\n'.repeat(1000)+'LAST RECORDED LINE'}],state:'interrupted',incomplete:true}})
-  })
+   const media = {files:[{index:0,mime:'image/png',bytes:fixture.bytes,sha256:fixture.digest}],bytes:fixture.bytes}
+   const withPicture = {...header, id:'fixture-picture', title:'Recorded picture task', media}
+   bridge.transcripts.list = async () => ({ok:true,value:{entries:[header,withPicture],next:'',notice:''}})
+   bridge.transcripts.read = async id => ({ok:true,value:{header:id==='fixture-picture'?withPicture:header,prompt:'Full original request',events:[{kind:'text',text:'Complete recorded text.\n'+'detail\n'.repeat(1000)+'LAST RECORDED LINE'}],state:'interrupted',incomplete:true}})
+   bridge.transcripts.media = async (id,index) => ({ok:true,value:{base64:fixture.base64,mime:'image/png',name:'fixture-picture.png',bytes:fixture.bytes,sha256:fixture.digest}})
+  }, { bytes: pictureBytes.length, digest: pictureDigest, base64: pictureBytes.toString('base64') })
   await more(); await page.getByRole('button',{name:'Turn journal',exact:true}).click(); await page.getByRole('button',{name:'Full transcripts',exact:true}).click()
   await page.getByRole('button',{name:'Recorded native task',exact:true}).click()
   const transcript = page.getByRole('region',{name:'Full engine transcripts'})
   assert((await transcript.locator('pre').innerText()).includes('LAST RECORDED LINE'))
   const turnWait = page.waitForEvent('download'); await transcript.getByRole('button',{name:'Export Markdown',exact:true}).click()
   const turnDownload = await turnWait, turnText = fs.readFileSync(await turnDownload.path(),'utf8')
-  assert(turnText.includes('Full original request')); assert(turnText.includes('LAST RECORDED LINE')); assert(turnText.includes('State: interrupted')); assert(turnText.includes('Image bytes are not stored'))
-  assert.equal(await transcript.getByRole('button',{name:/resume|run task/i}).count(),0)
+  assert(turnText.includes('Full original request')); assert(turnText.includes('LAST RECORDED LINE')); assert(turnText.includes('State: interrupted')); assert(turnText.includes('Their bytes were not saved with this record.'))
+  assert.equal(await transcript.getByRole('button',{name:/resume|run task/i}).count(),0); assert.equal(await transcript.getByRole('button',{name:/save picture/i}).count(),0)
+  await transcript.getByRole('button',{name:'Refresh transcripts',exact:true}).click()
+  await page.getByRole('button',{name:'Recorded picture task',exact:true}).click()
+  const picture = page.getByRole('region',{name:'Preserved pictures'})
+  assert((await picture.innerText()).includes('sha256'))
+  const pictureWait = page.waitForEvent('download'); await picture.getByRole('button',{name:'Save picture 1',exact:true}).click()
+  const pictureDownload = await pictureWait; assert.equal(fs.readFileSync(await pictureDownload.path()).toString('utf8'),'PRESERVED PICTURE BYTES')
+  await page.getByText('Saved picture 1 after checking').waitFor()
   await page.screenshot({path:path.join(QA,'full-transcripts.png')})
   await page.setViewportSize({width:940,height:620}); assert(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1))
-  report.checks.push('Transcript history displays and downloads complete recorded text, labels interrupted work and missing image bytes, and never implies native resume; narrow layout fits')
+  report.checks.push('Transcript history displays and downloads complete recorded text, labels interrupted work, distinguishes records without saved bytes from one with verified preserved pictures, and never implies native resume; narrow layout fits')
   await page.keyboard.press('Escape'); await page.keyboard.press('Control+,'); await openSettingsSection(page,'Engine')
   await page.getByText('Setup summary (redacted)',{exact:true}).click()
   await page.getByRole('button',{name:'Copy redacted setup summary',exact:true}).waitFor()

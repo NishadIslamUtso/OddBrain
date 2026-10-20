@@ -652,3 +652,21 @@ Fresh Node 24.22.0 typecheck and **1,503 tests / 207 files / zero skips** passed
 Electron/main/preload/renderer, offline preview and web builds passed (existing highlight/chunk warnings only). All **13 serial app browser suites** passed. The maintained command browser harness now exercises workflow exact review, failed/skipped step display and separate recurring consent without running anything on save; its IPC is explicitly mocked, not native scheduling proof. Evidence: `.cache/recovery/workflows-full.{log,xml}`, `workflows-build.log`, `workflows-web.log`, `workflows-ui-all.log`, `workflow-ui/`. These caches are expendable; source/tests are being committed and pushed to the fixed session branch. No main-branch changes.
 
 **Not complete yet:** true resource-safe parallel execution/Git-worktree write isolation, sourced research, broader native-history and original-media/interrupted-view recovery, and signed-in target-laptop acceptance. Workflows currently serialize approved OS commands; a separate checkout is not being advertised as an OS sandbox. Scheduling requires the approved working folder to remain selected and OS-protected key storage to be available. The account-wide archive importer and VS Code extension remain held/deferred. No other agent handoff is needed.
+
+## Preserved picture bytes in turn records — 2026-10-20
+
+Continued the interrupted conversation-recovery work: a turn record kept only a picture *count*, so a picture could never be recovered from the app's own record. The archive now keeps the exact bytes that were handed to the engine.
+
+### Implemented
+
+- `src/main/turnMedia.ts` writes the decoded image bytes into app storage (`turn-transcripts/media/<record id>/<position>.<ext>`) **before** the text header is written and before any dispatch. Each file gets a SHA-256 digest and byte count; the manifest (`TranscriptMedia`) is stored in the record header. At most four pictures, each at most 2 MB, are accepted — the same bounds the engine boundary already enforces.
+- A failed media write refuses the turn and leaves no record; a failed header write or an over-limit record removes only the folder that attempt created. Older records keep `pictures` with no `media` and are reported as "bytes were not saved", never as recoverable.
+- Reads go through identifier-only IPC (`transcripts:media`). The expected size and digest are taken from the stored header, never from the window; a missing, resized or altered file refuses the download and the original bytes on disk are left untouched. The renderer compares the returned digest/size/mime with the record again before offering the file.
+- `Transcript history` lists preserved pictures with their size and truncated digest and offers "Save picture N"; the saved file is the app's own copy, explicitly not proof that a model accepted or understood it. Chat rows note that a preserved copy exists without rendering it inline. Exported Markdown lists each picture's digest and says the bytes are not embedded.
+- The manifest is validated on every read and in saved chats; an invalid manifest is refused like any other damaged record.
+
+### Verification and limits
+
+Node 24.22.0: typecheck passed; **1,516 tests / 208 files / zero skips**, including 11 new `tests/turn-media.test.ts` cases (order, digests, tampering, missing files, unsafe identifiers, count mismatch, failed write cleanup, damaged manifests, chat validation) and the updated transcript UI cases. Electron/web/offline builds passed (existing CSS-highlight and chunk warnings). All **13 serial app browser suites** passed with a real Chromium; `check-ui-productivity.cjs` now also saves a preserved picture and checks the downloaded bytes, with the transcript IPC explicitly mocked.
+
+Limits: this is app-owned media, not the engine's own attachment store, not an import of native history and not evidence of model acceptance. Pictures are bounded by the existing 4 × 2 MB engine limit; there is no video/audio/document archive here, no deduplication, no export of the bytes inside the Markdown/JSON download, and no retention policy beyond "the record keeps them". Power-loss and Windows permission behaviour still need real-machine acceptance. Electron smoke was not run in this sandbox (its binary download is blocked); the browser harnesses and unit suites are the evidence above.

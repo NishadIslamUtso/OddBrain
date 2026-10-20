@@ -5,7 +5,8 @@ import { beforeEach, afterEach, expect, test, vi } from 'vitest'
 import SavedDrafts from '../src/renderer/src/ui/SavedDrafts'
 import TranscriptHistory from '../src/renderer/src/ui/TranscriptHistory'
 import { draftStash } from '../src/shared/lib/draftStash'
-const fixture = vi.hoisted(() => ({ list: vi.fn(), read: vi.fn() }))
+import { createHash } from 'node:crypto'
+const fixture = vi.hoisted(() => ({ list: vi.fn(), read: vi.fn(), media: vi.fn() }))
 vi.mock('../src/renderer/src/platform/bridge', () => ({ bridge: { transcripts: fixture } }))
 let root: Root, host: HTMLDivElement
 beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); localStorage.clear(); vi.clearAllMocks(); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
@@ -29,8 +30,36 @@ test('full transcript view shows complete text and never offers a misleading res
   fixture.read.mockResolvedValue({ ok: true, value: { header, prompt: 'Original request', events: [{ kind: 'text', text: 'x'.repeat(5000) + 'UNCLIPPED END' }], state: 'interrupted', incomplete: true } })
   await act(async () => root.render(<TranscriptHistory />)); await click('Recorded task')
   expect(host.querySelector('pre')?.textContent).toContain('UNCLIPPED END')
-  expect(host.textContent).toContain('interrupted'); expect(host.textContent).toContain('Image bytes are not stored')
+  expect(host.textContent).toContain('interrupted'); expect(host.textContent).toContain('their bytes were not preserved')
+  expect(host.textContent).not.toContain('Save picture 1')
   expect([...host.querySelectorAll('button')].some(b => /resume|run task/i.test(b.textContent || ''))).toBe(false)
+})
+test('preserved pictures are offered for download only after the record and the returned bytes agree', async () => {
+  const bytes = Buffer.from('exact preserved bytes')
+  const sha256 = createHash('sha256').update(bytes).digest('hex')
+  const media = { files: [{ index: 0, mime: 'image/png' as const, bytes: bytes.length, sha256 }], bytes: bytes.length }
+  const header = { id: 'fixture', at: '2026-10-19T00:00:00Z', title: 'Picture turn', engine: 'agy' as const, model: '', workspace: '/work', pictures: 1, media }
+  fixture.list.mockResolvedValue({ ok: true, value: { entries: [header], next: '', notice: '' } })
+  fixture.read.mockResolvedValue({ ok: true, value: { header, prompt: 'Look', events: [], state: 'done', incomplete: false } })
+  fixture.media.mockResolvedValue({ ok: true, value: { base64: bytes.toString('base64'), mime: 'image/png', name: 'turn-fixture-picture-1.png', bytes: bytes.length, sha256 } })
+  await act(async () => root.render(<TranscriptHistory />)); await click('Picture turn')
+  expect(host.textContent).toContain('Preserved pictures'); expect(host.textContent).toContain('sha256 ' + sha256.slice(0, 16))
+  await click('Save picture 1')
+  expect(fixture.media).toHaveBeenCalledWith('fixture', 0)
+  expect(host.textContent).toContain('exact copy the app kept')
+  fixture.media.mockResolvedValue({ ok: true, value: { base64: bytes.toString('base64'), mime: 'image/png', name: 'turn-fixture-picture-1.png', bytes: bytes.length, sha256: 'f'.repeat(64) } })
+  await click('Save picture 1')
+  expect(host.textContent).toContain('does not match this record')
+})
+test('a refused preserved-picture read leaves the record visible and reports why', async () => {
+  const header = { id: 'fixture', at: '2026-10-19T00:00:00Z', title: 'Missing picture', engine: 'agy' as const, model: '', workspace: '/work', pictures: 1, media: { files: [{ index: 0, mime: 'image/png' as const, bytes: 3, sha256: 'a'.repeat(64) }], bytes: 3 } }
+  fixture.list.mockResolvedValue({ ok: true, value: { entries: [header], next: '', notice: '' } })
+  fixture.read.mockResolvedValue({ ok: true, value: { header, prompt: 'Look', events: [], state: 'done', incomplete: false } })
+  fixture.media.mockResolvedValue({ ok: false, error: 'The saved picture is missing. The record is unchanged.' })
+  await act(async () => root.render(<TranscriptHistory />)); await click('Missing picture'); await click('Save picture 1')
+  expect(host.textContent).toContain('The saved picture is missing')
+  expect(host.textContent).toContain('Missing picture')
+  expect([...host.querySelectorAll('button')].filter(b => b.textContent === 'Save picture 1')).toHaveLength(1)
 })
 test('late transcript reads cannot update an unmounted history view', async () => {
   let finish!: (value: unknown) => void

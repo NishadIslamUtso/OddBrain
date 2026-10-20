@@ -1,5 +1,6 @@
 import { validContextReceipt } from './nativeConversation'
 import { validNativeArtifacts } from './nativeArtifacts'
+import { validTranscriptMedia } from './transcripts'
 import type { Chat, Message, Settings } from '../types'
 
 export const DEFAULT_MODEL = 'qwen2.5:3b'
@@ -52,7 +53,7 @@ export function normalizeChats(value: unknown): Chat[] {
         typeof message.id !== 'string' ||
         !['user', 'assistant'].includes(message.role) ||
         typeof message.content !== 'string' ||
-        (message.nativeRecord !== undefined && (!message.nativeRecord || typeof message.nativeRecord.transcriptId !== 'string' || typeof message.nativeRecord.chatId !== 'string' || !['claude-code', 'agy'].includes(message.nativeRecord.engine) || !(message.nativeRecord.sessionId === null || typeof message.nativeRecord.sessionId === 'string') || (message.nativeRecord.context !== undefined && !validContextReceipt(message.nativeRecord.context)) || (message.nativeRecord.artifacts !== undefined && !validNativeArtifacts(message.nativeRecord.artifacts)) || (message.nativeRecord.pictures !== undefined && (!Number.isSafeInteger(message.nativeRecord.pictures) || message.nativeRecord.pictures < 0)))) ||
+        (message.nativeRecord !== undefined && (!message.nativeRecord || typeof message.nativeRecord.transcriptId !== 'string' || typeof message.nativeRecord.chatId !== 'string' || !['claude-code', 'agy'].includes(message.nativeRecord.engine) || !(message.nativeRecord.sessionId === null || typeof message.nativeRecord.sessionId === 'string') || (message.nativeRecord.context !== undefined && !validContextReceipt(message.nativeRecord.context)) || (message.nativeRecord.artifacts !== undefined && !validNativeArtifacts(message.nativeRecord.artifacts)) || (message.nativeRecord.pictures !== undefined && (!Number.isSafeInteger(message.nativeRecord.pictures) || message.nativeRecord.pictures < 0)) || (message.nativeRecord.media !== undefined && (!validTranscriptMedia(message.nativeRecord.media) || message.nativeRecord.media.files.length !== message.nativeRecord.pictures)))) ||
         (message.artifacts &&
           (!Array.isArray(message.artifacts) ||
             message.artifacts.some(
