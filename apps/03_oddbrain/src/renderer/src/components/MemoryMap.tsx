@@ -1,8 +1,9 @@
 import { sampleEnabled } from '@shared/lib/sampleWorkspace'
+import { researchUrlProblem, type ResearchReply } from '@shared/lib/research'
 import { useEffect, useMemo, useState } from 'react'
 import { vaultGet } from '@shared/lib/vault'
 import CopyText from '../ui/CopyText'
-import { isDemo } from '../platform/bridge'
+import { bridge, isDemo } from '../platform/bridge'
 
 /**
  * Capture sources — what was read and when.
@@ -110,6 +111,14 @@ export default function MemoryMap({ open, onClose, embedded = false }: { open: b
   const [days, setDays] = useState<number>(30)
   const [host, setHost] = useState('')
   const [opened, setOpened] = useState('')
+  // Fetching a page is a source action, not a chat action: the address is shown,
+  // the reason it would be refused is shown before the request, and the answer
+  // says where the bytes went. Nothing is summarized here.
+  const [address, setAddress] = useState('')
+  const [fetching, setFetching] = useState(false)
+  const [fetched, setFetched] = useState<ResearchReply | null>(null)
+  const [refresh, setRefresh] = useState(0)
+  const complaint = address.trim() ? researchUrlProblem(address) : ''
 
   // One request per change of the filters, one state per answer. The vault is
   // asked for what is on screen rather than filtered here, so the counts above
@@ -147,7 +156,7 @@ export default function MemoryMap({ open, onClose, embedded = false }: { open: b
       cancelled = true
       controller.abort()
     }
-  }, [open, query, kind, days, host])
+  }, [open, query, kind, days, host, refresh])
 
   useEffect(() => {
     if (!open) return
@@ -254,6 +263,56 @@ export default function MemoryMap({ open, onClose, embedded = false }: { open: b
                   {range.label}
                 </button>
               ))}
+            </div>
+
+            <div className="rounded-lg border border-line bg-card p-2">
+              <label className="block text-[11px] text-muted" htmlFor="research-address">
+                Add a page from the web
+              </label>
+              <input
+                id="research-address"
+                className="mt-1 w-full rounded-md border border-line bg-bg px-2 py-1.5 text-[12px] outline-none focus:border-accent"
+                value={address}
+                placeholder="https://example.com/article"
+                aria-label="Page address to fetch"
+                spellCheck={false}
+                onChange={event => { setAddress(event.target.value); setFetched(null) }}
+              />
+              {complaint ? <p className="mt-1 text-[11px] text-warn">{complaint}</p> : null}
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  className="rounded-md border border-line px-2 py-1 text-[11.5px] text-ink disabled:opacity-50"
+                  disabled={fetching || Boolean(complaint) || !address.trim()}
+                  onClick={() => {
+                    const target = address.trim()
+                    setFetching(true); setFetched(null)
+                    const request = bridge.research?.fetch(target)
+                    if (!request) { setFetched({ ok: false, answer: 'Fetching a page needs the desktop app. Nothing was written.' }); setFetching(false); return }
+                    void request
+                      .then((reply: ResearchReply) => { setFetched(reply); if (reply.ok) { setAddress(''); setRefresh(value => value + 1) } })
+                      .catch(() => setFetched({ ok: false, answer: 'The page could not be fetched. Nothing was written.' }))
+                      .finally(() => setFetching(false))
+                  }}
+                >
+                  {fetching ? 'Fetching…' : 'Fetch page'}
+                </button>
+                {fetching ? (
+                  <button type="button" className="text-[11.5px] text-muted hover:text-ink" onClick={() => { void bridge.research?.cancel() }}>
+                    Stop
+                  </button>
+                ) : null}
+              </div>
+              <p className="mt-1 text-[11px] leading-snug text-muted">
+                The page’s readable text is saved to the vault with its fingerprint. No summary is written, and a private
+                or non-https address is refused.
+              </p>
+              {fetched ? (
+                <p role="status" className={`mt-1 break-words text-[11px] ${fetched.ok ? 'text-muted' : 'text-warn'}`}>
+                  {fetched.answer}
+                  {fetched.ok && fetched.sha256 ? <span className="block break-all">sha256 {fetched.sha256}</span> : null}
+                </p>
+              ) : null}
             </div>
 
             <div className="min-h-0">

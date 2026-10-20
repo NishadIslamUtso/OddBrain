@@ -232,6 +232,11 @@ export type DesktopBridge = {
     /** The open conversation, captured into the vault as a capsule. */
     captureChat: (title: string, markdown: string) => Promise<{ ok: boolean; answer: string }>
   }
+  /** Fetch one page the owner names and keep it as a sourced vault page. */
+  research?: {
+    fetch: (url: string) => Promise<import('@shared/lib/research').ResearchReply>
+    cancel: () => Promise<void>
+  }
   /** Whether the browser extension can reach this app, and where. */
   extension: {
     export: (destination: 'downloads' | 'choose') => Promise<{ ok: boolean; answer: string; path?: string }>
@@ -383,6 +388,7 @@ const demoBridge: DesktopBridge = {
     resolve: async () => ({ ok: false, error: 'Settling a conflict needs the desktop app.' }),
     linkCheck: async () => ({ files: 0, checked: 0, dead: [], ambiguous: [], edges: [], error: 'The link check needs the desktop app.' }),
   },
+  research: { fetch: async () => ({ ok: false, answer: 'Fetching a page needs the desktop app. Nothing was written.' }), cancel: async () => {} },
   vault: { backup: async () => ({ ok: false, answer: 'Backup and restore require the desktop app. No files were copied.' }), chooseFolder: async () => null, useDefault: async () => ({ ok: false, error: 'Choosing the default vault needs the desktop app.' }), saveHandoff: async () => ({ ok: false, answer: 'Writing a handoff needs the desktop app.' }), exportCopy: async () => ({ ok: false, answer: 'Exporting needs the desktop app.' }), captureChat: async () => ({ ok: false, answer: 'Capturing needs the desktop app.' }) },
   // No socket is open here, and none can be: this is a page, not the app.
   extension: { export: async () => ({ ok: false, answer: 'Open the desktop app to export the bundled extension. No files were created.' }),

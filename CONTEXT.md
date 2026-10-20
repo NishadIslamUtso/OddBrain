@@ -677,3 +677,28 @@ Continuing the owner's "complete it all" instruction from published `2e0828d`. T
 
 - Pictures are kept per turn in app storage beside the transcript; there is no UI to delete a single picture, and nothing is re-sent or re-attached. Saved pictures are not an image library.
 - This is evidence of what the app sent, not proof the model saw or used a picture.
+
+
+## Solo continuation: one fetched page as a sourced vault page — 2026-10-20
+
+Continuing from `4e7ab82`. "Sourced research" up to now meant citation chips extracted from a model's own text; the app had no way to bring a page in. It does now, and it still writes no summary.
+
+### Implemented
+
+- `src/shared/lib/research.ts`: the address rule shown on screen — https anywhere public, http only for this machine, no credentials, no fragment, nothing over 2,048 characters — plus `privateHost()` (loopback, RFC1918, link-local, CGNAT, unique-local and link-local IPv6, `.local`/`.internal` and dotless names) and a one-sentence summary.
+- `src/main/research/sourceFetch.ts`: resolves the host **before** connecting and refuses any private address; follows at most three redirects, each re-checked by the same rule; reads at most 2 MB of bytes and keeps at most 300,000 characters of text; refuses non-text content types and non-2xx answers; no cookies, no referrer, `redirect: 'manual'`, no retries.
+- HTML becomes readable text with scripts, styles, templates, SVG, comments and tags removed and named entities decoded from a fixed table (an unknown entity is left as written rather than dropped). The record states its own provenance: fetch time, final URL, HTTP status, content type, byte count, sha256, whether text was cut, and "not proof that its claims are true".
+- The page is written through the existing vault capture path as `02 Sources/Web Pages/<year>/web-<hash>.md` with `provider: 'web'` and `completeness: full|partial`, so it appears in Capture sources like an extension capture. The vault's never-check list is honoured and a skipped capture is reported as skipped.
+- IPC `research:fetch` / `research:cancel` with a per-window abort controller that is also aborted when the window closes; preload and bridge ports; the browser preview answers that fetching needs the desktop app. The Sources screen gains "Add a page from the web", showing the refusal reason before a request and the saved path plus fingerprint afterwards.
+
+### Verification
+
+- Typecheck clean; **1,519 passed / 2 skipped / 1,521 total** across 209 files (both skips are the named Windows-only artifact-recovery exceptions); `npm run build` passed (offline preview 618,635 bytes).
+- New `tests/research-fetch.test.ts` (9) covers the address rule and private-address table, HTML-to-text, exact write + provenance, truncation, redirect refusal (http/private/too many), DNS-to-private refusal before any request, non-text/404/empty/oversize refusals, never-check list, missing report and cancellation. `tests/research-ui.test.tsx` (4) covers the on-screen refusal, request-on-click-only, fingerprint display, failure keeping the address, and a build without the handler.
+- Live end-to-end check on this host: a real GitHub page was fetched (293,958 response bytes) and written as a vault page with its digest; the same run passed against the real `createVaultService`. The sandbox's TLS-inspecting proxy needs `NODE_TLS_REJECT_UNAUTHORIZED=0` **for that local check only**; nothing in the app disables certificate verification, so this is not a shipped behaviour.
+
+### Limits
+
+- No search engine and no crawling: the owner supplies the address. If the app cannot reach it (certificate, proxy, offline), the answer says so and writes nothing.
+- A fetched page is text only; images, scripts and layout are not kept, and a JavaScript-rendered page may contribute little text.
+- The page joins the vault as a source; it is not automatically attached to a chat. Citing it still means referencing the file.

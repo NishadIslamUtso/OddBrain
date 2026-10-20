@@ -411,6 +411,10 @@ const api = {
     captureChat: (title: string, markdown: string): Promise<{ ok: boolean; answer: string }> =>
       ipcRenderer.invoke('vault:capture-chat', { title, markdown }),
   },
+  research: {
+    fetch: (url: string): Promise<import('../shared/lib/research').ResearchReply> => ipcRenderer.invoke('research:fetch', url),
+    cancel: (): Promise<void> => ipcRenderer.invoke('research:cancel'),
+  },
   extension: {
     export: (destination: 'downloads' | 'choose'): Promise<{ ok: boolean; answer: string; path?: string }> => ipcRenderer.invoke('extension:export', destination),
     publishAppearance: (value: import('../shared/lib/extensionAppearance').ExtensionAppearance): Promise<{ ok: boolean }> => ipcRenderer.invoke('extension:appearance', value),

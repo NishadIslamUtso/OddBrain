@@ -103,6 +103,8 @@ import { deployBuiltInSkills } from './engine/vaultSkills'
 import { applyConflictAction, brainFileContents, classifyBrainRoot, defaultVaultPath, planBrainApply, planBrainRefresh } from '../shared/lib/brainStructure'
 import { backupVault, restoreVault } from './vault/backup'
 import { exportVaultCopy } from './vault/exportCopy'
+import { fetchWebSource } from './research/sourceFetch'
+import type { ResearchReply } from '../shared/lib/research'
 import { createProjectRuleReview, houseRulesFile as nativeHouseRulesFile } from './engine/houseRulesDeploy'
 import { DEFAULT_HOUSE_RULES, instructionBlock, type HouseRules } from '../shared/lib/houseRules'
 import { newProject, type Project } from '../shared/lib/projects'
@@ -307,6 +309,7 @@ function registerBridges(): void {
   const permissionTickets = createPermissionTickets(() => engine?.current() || null)
   let nativeWork = 0
   let activeTranscript: { transcriptId: string; chatId?: string; prompt: string } | undefined
+  const researchJobs = new Map<number, AbortController>()
   let preparing: { owner: number; controller: AbortController } | undefined
   const catalogReviews = new Map<number, ReturnType<typeof createCatalogInstallReview>>()
   const mcpReviews = new Map<number, ReturnType<typeof createMcpReview>>()
@@ -368,7 +371,7 @@ function registerBridges(): void {
   app.on('before-quit', () => { scheduler.dispose(); workflows.cancel(); commandRunner.cancel() })
   const owners = new Set<number>()
   const track = (sender: Electron.WebContents): number => {
-    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { scheduler.forget(sender.id); workflows.forget(sender.id); commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
+    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { scheduler.forget(sender.id); workflows.forget(sender.id); commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); researchJobs.get(sender.id)?.abort(); researchJobs.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
     return sender.id
   }
   handle('schedules:list', () => scheduler.list())
@@ -1319,6 +1322,22 @@ function registerBridges(): void {
       return { ok: false, answer: 'the brain door (Ollama) is not answering, start it, then try again' }
     }
   })
+
+  // One page the owner names, fetched once and kept as a source. This writes
+  // no summary and asks no model; a private or non-https destination is refused
+  // by the shared rule and again after resolving the host.
+  handle('research:fetch', async (event, url: unknown): Promise<ResearchReply> => {
+    const service = createVaultService({ vaultPath: vaultRoot() })
+    if (!service.available()) return { ok: false, answer: 'No vault is selected, so a fetched page has nowhere to go. Choose the vault in Settings first.' }
+    const controller = new AbortController()
+    researchJobs.set(event.sender.id, controller)
+    try {
+      return await fetchWebSource(url, { capture: data => service.capture(data) }, controller.signal)
+    } finally {
+      if (researchJobs.get(event.sender.id) === controller) researchJobs.delete(event.sender.id)
+    }
+  })
+  handle('research:cancel', event => { researchJobs.get(event.sender.id)?.abort() })
 
   // Capture the current conversation as a capsule: the digest lands in the
   // vault's Captures/ folder — the same shape the browser extension queues
