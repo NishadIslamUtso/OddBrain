@@ -12,6 +12,7 @@ import { noLinkedPath } from './engine/configTransaction'
 
 const headerValid = (h: any, id: string): h is TranscriptHeader => h?.id === id && (h.chatId === undefined || (typeof h.chatId === 'string' && /^[a-zA-Z0-9_.:-]{1,256}$/.test(h.chatId))) && (h.context === undefined || validContextReceipt(h.context)) && ['claude-code', 'agy'].includes(h.engine) && ['at', 'model', 'workspace', 'title'].every(k => typeof h[k] === 'string') && Number.isSafeInteger(h.pictures) && h.pictures >= 0 && (h.pictureRecords === undefined || validPictureRecords(h.pictureRecords, h.pictures))
 const eventValid = (e: any): e is EngineEvent => e && (e.kind === 'closed' || (['delta', 'text', 'status', 'thinking', 'done', 'error'].includes(e.kind) && typeof e.text === 'string' && (e.kind !== 'done' || e.alreadyDisplayed === undefined || typeof e.alreadyDisplayed === 'boolean')) || (e.kind === 'session' && typeof e.id === 'string') || (e.kind === 'tool' && typeof e.name === 'string' && typeof e.summary === 'string') || (e.kind === 'permission' && typeof e.requestId === 'string' && typeof e.tool === 'string' && typeof e.summary === 'string' && (e.detail === undefined || typeof e.detail === 'string') && (e.file === undefined || typeof e.file === 'string')))
+const CHAT = /^[a-zA-Z0-9_.:-]{1,256}$/
 const ID = /^\d{13}-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/
 export const TRANSCRIPT_LIMIT = 32_000_000
 /** Append-only per-turn records. Never trims old turns, overwrites a damaged file,
@@ -66,9 +67,11 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
       if (['done', 'error', 'closed'].includes(event.kind)) active.delete(id)
       else active.set(id, next)
     },
-    list(before = ''): TranscriptPage {
+    /** Newest first. `chatId` narrows the page to one conversation's own turns. */
+    list(before = '', chatId = ''): TranscriptPage {
       noLinkedPath(root)
       if (before && !ID.test(before)) throw Error('Invalid transcript page.')
+      if (chatId && !CHAT.test(chatId)) throw Error('Invalid conversation identifier.')
       let files: string[]
       try { files = readdirSync(root).filter(f => f.endsWith('.ndjson') && ID.test(f.slice(0, -7))).map(f => f.slice(0, -7)).sort().reverse().filter(id => !before || id < before) }
       catch (e) { if ((e as NodeJS.ErrnoException).code === 'ENOENT') return { entries: [], next: '', notice: '' }; throw e }
@@ -81,7 +84,7 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
           const raw = buffer.subarray(0, n).toString('utf8'); const end = raw.indexOf('\n'); if (end < 0) throw Error()
           const header = JSON.parse(raw.slice(0, end)).header as TranscriptHeader
           if (!headerValid(header, id)) throw Error()
-          entries.push(header)
+          if (!chatId || header.chatId === chatId) entries.push(header)
         } catch { damaged = true } finally { if (fd !== undefined) closeSync(fd) }
       }
       return { entries, next: files.length > 50 ? files[49] : '', notice: damaged ? 'Some records could not be read. Their original files have not been changed.' : '' }

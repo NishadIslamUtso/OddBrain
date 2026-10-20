@@ -1,6 +1,7 @@
 import { newId } from '@shared/lib/storage'
 import { branchChat, chatNotesStore, emptyChatNotes } from '@shared/lib/chatContext'
-import { recordNativeTranscript } from '@shared/lib/nativeChat'
+import { recordNativeTranscript, recoverableTranscripts, recoveryNotice } from '@shared/lib/nativeChat'
+import type { Transcript } from '@shared/lib/transcripts'
 import type { NativeConversation } from '@shared/lib/nativeConversation'
 import { publishExtensionAppearance } from './lib/extensionAppearance'
 import { sampleEnabled, workspaceKey } from '@shared/lib/sampleWorkspace'
@@ -311,6 +312,44 @@ export default function App() {
       if (!saved) setNotice('The native turn is in Full transcripts, but this chat copy could not be saved. Export the transcript before closing.')
     }).catch(() => { nativeRecorded.current.delete(id); setNotice('This turn could not be copied into saved chat history. Its original record is kept in Full transcripts.') })
   }, [engine.turn?.transcriptId, engine.turn?.state])
+
+  /**
+   * A turn that ended while the app was closing (or whose copy failed) exists in
+   * Full transcripts but not in its conversation. Put the recorded text back,
+   * once, without running or sending anything; partial answers keep the
+   * interrupted state they were recorded with.
+   */
+  const recovered = useRef(false)
+  useEffect(() => {
+    if (recovered.current || !chats.chats.length) return
+    recovered.current = true
+    let live = true
+    void (async () => {
+      try {
+        const page = await bridge.transcripts.list('', '')
+        if (!live || !page.ok) return
+        const wanted = recoverableTranscripts(page.value.entries, chats.chats)
+        const records: Transcript[] = []
+        for (const entry of wanted) {
+          const reply = await bridge.transcripts.read(entry.id)
+          if (reply.ok && reply.value.state !== 'running') records.push(reply.value)
+        }
+        if (!live || !records.length) return
+        const saved = commitNativeChat.current(previous => {
+          let next = previous
+          for (const record of records) {
+            const chat = next.find(entry => entry.id === record.header.chatId)
+            if (!chat) continue
+            try { next = next.map(entry => entry.id === chat.id ? recordNativeTranscript(entry, record) : entry) }
+            catch { /* a record for another conversation is never applied */ }
+          }
+          return next
+        })
+        setNotice(saved ? recoveryNotice(records.length) : 'Recorded turns could not be written back into their conversations. Their originals are kept in Full transcripts.')
+      } catch { /* the archive is optional at startup; nothing is invented when it cannot be read */ }
+    })()
+    return () => { live = false }
+  }, [chats.chats.length])
 
   const chatApi = useChat({
     chats: chats.chats,
@@ -785,7 +824,7 @@ export default function App() {
           onInferenceChange={setInference}
           />
       </div></div> : null}
-      <TurnJournal />
+      <TurnJournal chatId={chats.currentChat} />
     </div>
     <LaunchOverlay enabled={appearance.startupAnimation} />
   </LookActions></LookContext>

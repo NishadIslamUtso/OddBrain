@@ -1,5 +1,28 @@
 import type { Chat, Message } from '../types'
-import type { Transcript } from './transcripts'
+import type { Transcript, TranscriptHeader } from './transcripts'
+/** At most this many turns are written back into conversations at startup. */
+export const RECOVERY_LIMIT = 8
+/**
+ * Recorded turns this app can put back into a conversation: the transcript names
+ * a chat that still exists, and that chat has no assistant message for it (the
+ * app closed mid-turn, or the copy failed). Nothing is re-run, re-sent or
+ * invented; a partial answer keeps its recorded text and stays marked stopped.
+ */
+export function recoverableTranscripts(entries: TranscriptHeader[], chats: Array<Pick<Chat, 'id' | 'messages'>>, limit = RECOVERY_LIMIT): TranscriptHeader[] {
+  const byId = new Map(chats.map(chat => [chat.id, chat]))
+  const found: TranscriptHeader[] = []
+  for (const entry of entries) {
+    if (!entry.chatId || typeof entry.id !== 'string') continue
+    const chat = byId.get(entry.chatId)
+    if (!chat || chat.messages.some(message => message.id === entry.id + ':assistant')) continue
+    if (!found.some(other => other.id === entry.id)) found.push(entry)
+    if (found.length >= limit) break
+  }
+  return found
+}
+export function recoveryNotice(count: number): string {
+  return `Restored ${count} recorded turn${count === 1 ? '' : 's'} into ${count === 1 ? 'its conversation' : 'their conversations'} because the app had not copied ${count === 1 ? 'it' : 'them'} there. Partial answers stay marked interrupted; nothing was re-run, re-sent or completed.`
+}
 /** Idempotent presentation of the complete recorded answer. Tool traces and actual
  * context receipts stay linked to the full archive, never relabelled as chat text. */
 export function recordNativeTranscript(chat: Chat, record: Transcript): Chat {

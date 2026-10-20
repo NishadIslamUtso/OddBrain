@@ -321,7 +321,7 @@ function registerBridges(): void {
   const sessionMemory = createSessionMemory(join(app.getPath('userData'), 'engine-sessions.json'))
   const turnArchive = createTurnArchive(join(app.getPath('userData'), 'turn-transcripts'))
   const transcriptAnswer = <T,>(read: () => T) => { try { return { ok: true as const, value: read() } } catch { return { ok: false as const, error: 'The transcript could not be read. Its original file has not been changed.' } } }
-  handle('transcripts:list', (_event, before: string = '') => transcriptAnswer(() => turnArchive.list(before)))
+  handle('transcripts:list', (_event, before: string = '', chatId: string = '') => transcriptAnswer(() => turnArchive.list(before, chatId)))
   handle('transcripts:read', (_event, id: string) => transcriptAnswer(() => turnArchive.read(id)))
   handle('transcripts:raw', (_event, id: string) => transcriptAnswer(() => turnArchive.raw(id)))
   // The exact picture bytes saved with a turn, re-verified against the digest

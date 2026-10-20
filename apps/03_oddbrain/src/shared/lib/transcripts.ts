@@ -41,7 +41,8 @@ export type TranscriptPage = { entries: TranscriptHeader[]; next: string; notice
 export type TranscriptResult<T> = { ok: true; value: T } | { ok: false; error: string }
 export type TranscriptBridge = {
   raw?(id: string): Promise<TranscriptResult<{ content: string; bytes: number; format: 'ndjson' }>>
-  list(before?: string): Promise<TranscriptResult<TranscriptPage>>
+  /** Newest first; `chatId` narrows it to one conversation's recorded turns. */
+  list(before?: string, chatId?: string): Promise<TranscriptResult<TranscriptPage>>
   read(id: string): Promise<TranscriptResult<Transcript>>
   /** The exact saved bytes for one picture, re-verified against its digest. */
   picture?(id: string, index: number): Promise<TranscriptResult<{ mime: string; bytes: number; sha256: string; data: string }>>

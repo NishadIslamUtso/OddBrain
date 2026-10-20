@@ -727,3 +727,25 @@ Continuing from `9ec7052`. Reviewed OS commands used to run exactly one at a tim
 - The checkout is at one commit with no branch: work done there is not merged, reviewed or pushed back. Keeping changes means copying files out before removal; removing with the discard choice deletes them.
 - Two is the cap. Background work (engine turns, workflows, memory organizing) stays blocked while any app command runs, so this makes a second *reviewed command* possible, not parallel engine tasks.
 - Shallow/partial clones, submodules and Git LFS may produce a checkout that cannot build; the app does not fetch missing objects.
+
+## Solo continuation: a conversation’s own history, and turns that survived a close — 2026-10-20
+
+Continuing from `bc2f2c8`. Two gaps were left after the turn archive landed: a recorded turn was only copied into its conversation while the app was still open with that turn live, so a close mid-turn left the text in Full transcripts and an empty hole in the chat; and Full transcripts was one flat list of every turn, with no way to see a single conversation’s own records.
+
+### Implemented
+
+- `turnArchive.list(before, chatId)` narrows a page to one conversation’s turns (identifiers validated; a page still reads bounded headers and keeps its cursor, so “load older” still works). IPC `transcripts:list` passes the optional `chatId`, preload and bridge typings follow, and the archive is still never scanned line by line for a filter.
+- `src/shared/lib/nativeChat.ts` gains `recoverableTranscripts(entries, chats, limit = 8)` — a recorded turn whose `chatId` still exists and whose conversation has no `<record>:assistant` message — and `recoveryNotice(count)` with the honest sentence: restored, partial answers stay interrupted, nothing re-run, re-sent or completed.
+- `App.tsx` runs that recovery once after conversations load (`bridge.transcripts.list('', '')` → filter → `transcripts.read` → one `commit` of `recordNativeTranscript`), skipping any record still `running`, refusing records for another conversation, and reporting when the chat copy could not be saved. No engine call, no prompt, no auto-send; a failure or unreadable archive leaves the conversations untouched.
+- The turn journal now knows the open conversation: “Full transcripts” starts scoped to that chat, says so on screen, and “Show every transcript” widens it deliberately. The reworded scope notice replaces the stale blanket “image bytes are not included” line: pictures saved with a record can be downloaded, and an older record that kept only a count says so itself.
+
+### Verification
+
+- Typecheck clean; `npx vitest run` = **1,537 passed / 2 skipped / 1,539 tests** across 212 files (the same two file-level skips); `npm run build` passed (offline preview 620,591 bytes).
+- `tests/native-history-recovery.test.ts` (3) covers the offer-once rule, the limit, missing conversations, records without a chat id, a partial trailing write read back as interrupted, the written-back message keeping `stopped` status and its transcript id, a finished turn restored as complete, idempotence, and refusal to apply another conversation’s record. `tests/turn-archive.test.ts` gained the chat-filter case. `tests/transcript-and-drafts-ui.test.tsx` gained the scoped list, the explicit widening, and the reworded picture notice.
+
+### Limits
+
+- Recovery reads the newest 50 transcript headers only, writes back at most 8 turns, and runs once per app start: a turn recorded but older than that page needs “Load older transcripts” in Full transcripts and a manual export.
+- A restored answer is the recorded text with its recorded status. It is not a resumable native session and the app does not ask the engine to continue it; `sessionId` stays an observation on the message.
+- Chat history is still this app’s record. Native history from before recording began, or from another client, is not imported.
