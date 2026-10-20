@@ -8,6 +8,7 @@ import type { ShellRequest } from '../shared/lib/commands'
 import { createWorkQueue } from './engine/workQueue'
 import { snapshotNativeArtifacts, collectNativeArtifacts } from './engine/nativeArtifacts'
 import { createMcpReview, inspectNativeMcp } from './engine/mcpReview'
+import { inspectNativeLaunch, nativeLaunchSummary } from './engine/nativeLaunchInventory'
 import { createSkillAuthoring, readInstalledSkills, inspectInstalledSkill, type SkillRoot } from './engine/installedSkills'
 import type { SkillDraft } from '../shared/lib/installedSkills'
 import { createPermissionTickets } from './engine/permissionTickets'
@@ -106,6 +107,7 @@ import { exportVaultCopy } from './vault/exportCopy'
 import { createProjectRuleReview, houseRulesFile as nativeHouseRulesFile } from './engine/houseRulesDeploy'
 import { DEFAULT_HOUSE_RULES, instructionBlock, type HouseRules } from '../shared/lib/houseRules'
 import { newProject, type Project } from '../shared/lib/projects'
+import { scanTextHazards } from '../shared/lib/textHazards'
 
 /**
  * The main process. Everything that touches the machine lives on this side:
@@ -314,6 +316,9 @@ function registerBridges(): void {
   const skillReviews = new Map<number, ReturnType<typeof createSkillAuthoring>>()
   const checkpointReviews = new Map<number, ReturnType<typeof createCheckpointReviewGate>>()
   const nativeContext = createNativeContext(join(app.getPath('userData'), 'projects.json'), join(app.getPath('userData'), 'project-context-grants.json'))
+  // Deliberately memory-only: each app start requires fresh folder trust. A
+  // changed declaration fingerprint invalidates trust within the same process.
+  const nativeLaunchTrust = new Map<string, { digest: string; fullSpeed: boolean }>()
   const sessionMemory = createSessionMemory(join(app.getPath('userData'), 'engine-sessions.json'))
   const turnArchive = createTurnArchive(join(app.getPath('userData'), 'turn-transcripts'))
   const transcriptAnswer = <T,>(read: () => T) => { try { return { ok: true as const, value: read() } } catch { return { ok: false as const, error: 'The transcript could not be read. Its original file has not been changed.' } } }
@@ -800,6 +805,29 @@ function registerBridges(): void {
       if (!access.ok || usedPolicy !== policy() || usedCommand !== resolveEngineCommand(usedEngine.id) || ownDispatch !== workDispatchGeneration || JSON.stringify(savedEngine) !== JSON.stringify(settings.engine)) {
         automation?.rejectWork(); return { ok: false, answer: access.answer || 'The task was canceled or its model changed before dispatch. Send again when ready.' }
       }
+      let launchInventory = inspectNativeLaunch(usedEngine.id, usedEngine.workspace || vaultRoot(), app.getPath('home'))
+      const trustKey = JSON.stringify([usedEngine.id, resolve(usedEngine.workspace || vaultRoot())]), trusted = nativeLaunchTrust.get(trustKey)
+      const needsLaunchReview = trusted?.digest !== launchInventory.digest || (usedEngine.approval === 'full' && !trusted?.fullSpeed)
+      if (needsLaunchReview) {
+        if (usedEngine.approval === 'full' && !launchInventory.complete) {
+          automation?.rejectWork()
+          return { ok: false, answer: `Full speed was not started because native connector, rule, hook or task configuration could not be completely inventoried without following links or exceeding bounds. Fix the listed configuration paths or choose Ask, Plan or Allow edits.\n\n${nativeLaunchSummary(launchInventory)}` }
+        }
+        const full = usedEngine.approval === 'full'
+        const options: Electron.MessageBoxOptions = {
+          type: 'warning', title: full ? 'Trust this folder for Full speed' : 'Review native folder activation',
+          message: full ? `Start ${usedEngine.id} in Full speed for this folder?` : `Start ${usedEngine.id} with this folder’s native configuration?`,
+          detail: `${full ? 'Full speed skips native tool prompts. Connector declarations may start programs or network connections before a tool call. This trust lasts only for this app run and this exact configuration fingerprint.\n\n' : 'Native engines can load connector, rule, hook and task declarations outside OddBrain’s approval cards. Review this bounded inventory before activation.\n\n'}${nativeLaunchSummary(launchInventory)}`,
+          buttons: ['Cancel', full ? 'Trust folder & start Full speed' : 'Review & start'], defaultId: 0, cancelId: 0, noLink: true,
+        }
+        const owner = BrowserWindow.fromWebContents(event.sender)
+        const approval = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options)
+        if (approval.response !== 1 || ownDispatch !== workDispatchGeneration) { automation?.rejectWork(); return { ok: false, answer: 'Native folder activation was canceled. Nothing was sent.' } }
+        const confirmedInventory = inspectNativeLaunch(usedEngine.id, usedEngine.workspace || vaultRoot(), app.getPath('home'))
+        if (confirmedInventory.digest !== launchInventory.digest || (full && !confirmedInventory.complete)) { automation?.rejectWork(); return { ok: false, answer: 'Native connector, rule, hook or task configuration changed during review. Nothing was sent; review the current inventory again.' } }
+        launchInventory = confirmedInventory
+        nativeLaunchTrust.set(trustKey, { digest: launchInventory.digest, fullSpeed: full })
+      }
       automation?.retargetWork(usedEngine)
       // A provider brain rides the ENGINE: the key from Models goes into the
       // engine's own environment for this launch. The app itself never calls
@@ -815,19 +843,33 @@ function registerBridges(): void {
         }
         auth = { provider: 'anthropic', apiKey: key }
       }
+      let nativeSession = engine.nextSession({ settings: usedEngine, cwd: usedEngine.workspace || vaultRoot(), chatId: context?.chatId, auth })
       const prepared = context ? await nativeContext.prepare(context, usedEngine.workspace || vaultRoot(), text,
-        sessionMemory.load(sessionKey(usedEngine.id, usedEngine.workspace || vaultRoot(), context.chatId)), preparing.controller.signal) : undefined
+        nativeSession.state !== 'fresh', preparing.controller.signal) : undefined
       if (ownDispatch !== workDispatchGeneration || policy() !== usedPolicy || JSON.stringify(settings.engine) !== JSON.stringify(savedEngine) || usedCommand !== resolveEngineCommand(usedEngine.id)) throw Error('Task settings changed while reading context. Nothing was sent.')
       if (preparing.controller.signal.aborted) throw Error('Task preparation canceled. Nothing was sent.')
       if (auth && (keyStore?.get('anthropic') !== auth.apiKey || !cloudEnabled(inferencePermissions(), 'anthropic', keyStore?.has('anthropic') === true))) throw Error('Provider access changed while reading context. Nothing was sent.')
       prepared?.validate()
+      // Context preparation can decode retained files asynchronously. Do not call
+      // a dispatch "live/resumed/fresh" or omit stored history based on stale
+      // process state if that native process changed while preparation yielded.
+      const confirmedNativeSession = engine.nextSession({ settings: usedEngine, cwd: usedEngine.workspace || vaultRoot(), chatId: context?.chatId, auth })
+      if ((nativeSession.state === 'fresh') !== (confirmedNativeSession.state === 'fresh')) throw Error('Native session availability changed while context was prepared. Nothing was sent; send again so the exact fresh or continuing context can be reviewed and recorded.')
+      nativeSession = confirmedNativeSession
+      const finalLaunchInventory = inspectNativeLaunch(usedEngine.id, usedEngine.workspace || vaultRoot(), app.getPath('home'))
+      if (finalLaunchInventory.digest !== launchInventory.digest || (usedEngine.approval === 'full' && !finalLaunchInventory.complete)) throw Error('Native connector, rule, hook or task configuration changed before launch. Nothing was sent; review the folder again.')
+      launchInventory = finalLaunchInventory
       const appInstructions = instructionBlock(usedEngine.id, usedEngine.model, effectiveRules(), settings.memoryFolder || '')
       const dispatchedText = `OddBrain app instructions (not additional tool permissions):\n${appInstructions}\n\n${prepared?.prompt || text}`
       if (dispatchedText.length > 100_000) throw Error('App instructions plus selected context exceed 100,000 characters. Nothing was shortened or sent.')
       const receipt = prepared?.receipt || { projectId: null, revision: '', workspace: usedEngine.workspace || vaultRoot(), sources: [], historyMessages: 0, characters: 0 }
-      receipt.sources.unshift({ id: 'app-instructions', title: 'Saved app instructions', chars: appInstructions.length, digest: createHash('sha256').update(appInstructions).digest('hex'), coverage: 'Complete app-owned instruction block; not a permission grant' })
+      const appHazards = scanTextHazards(appInstructions), requestHazards = scanTextHazards(text)
+      receipt.sources.unshift({ id: 'app-instructions', title: 'OddBrain app instruction envelope', chars: appInstructions.length, digest: createHash('sha256').update(appInstructions).digest('hex'), coverage: 'Complete app-authored instruction block; descriptive guidance, not an additional permission grant', role: 'app-instruction', ...(appHazards.total ? { hazards: appHazards } : {}) })
+      receipt.sources.push({ id: 'owner-request', title: 'Current owner request', chars: text.length, digest: createHash('sha256').update(text).digest('hex'), coverage: 'Complete owner-entered request before the app envelope was added', role: 'owner-request', ...(requestHazards.total ? { hazards: requestHazards } : {}) })
       receipt.characters = dispatchedText.length
-      receipt.revision = createHash('sha256').update(JSON.stringify([receipt.revision, appInstructions])).digest('hex')
+      receipt.session = nativeSession
+      receipt.launch = { digest: launchInventory.digest, complete: launchInventory.complete, files: launchInventory.files.length, connectorFiles: launchInventory.connectorFiles, ruleFiles: launchInventory.ruleFiles, hookFiles: launchInventory.hookFiles, warnings: launchInventory.warnings }
+      receipt.revision = createHash('sha256').update(JSON.stringify([receipt.revision, appInstructions, text, receipt.session, receipt.launch])).digest('hex')
       const artifactBefore = snapshotNativeArtifacts(usedEngine.workspace || vaultRoot())
       const sent = dispatchRecordedTurn(turnArchive, { prompt: dispatchedText, userPrompt: text, chatId: context?.chatId, context: receipt, engine: usedEngine.id, model: usedEngine.model, workspace: usedEngine.workspace || vaultRoot(), pictures: images.length, images, ...(retainedFiles.length ? { attachments: retainedFiles } : {}) }, receive => engine!.send(dispatchedText, {
         chatId: context?.chatId,

@@ -12,6 +12,7 @@
  */
 import type { EngineEvent } from '../../shared/lib/engine'
 import { toolDetail, toolSummary, type EngineUsage } from '../../shared/lib/engine'
+import { executionConfigRisk } from '../../shared/lib/executionConfig'
 
 export type EngineParser = {
   /** Feed raw output; returns every complete event found in it. */
@@ -179,6 +180,7 @@ export function createEngineParser(): EngineParser {
           summary: toolSummary(request.tool_name, request.input),
           detail: toolDetail(request.tool_name, request.input),
           ...(file ? { file } : {}),
+          ...(file && executionConfigRisk(file) ? { risk: executionConfigRisk(file) } : {}),
         },
       ]
     }

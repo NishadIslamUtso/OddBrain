@@ -10,13 +10,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
       - name: Install
         working-directory: apps/03_oddbrain
-        run: npm ci --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install the pinned Electron runtime explicitly
+        working-directory: apps/03_oddbrain
+        run: node node_modules/electron/install.js
       - name: Install Chromium for reader and durable-restart tests
         working-directory: apps/03_oddbrain
         run: npx playwright-core install --with-deps chromium
@@ -26,6 +29,9 @@ jobs:
       - name: Types
         working-directory: apps/03_oddbrain
         run: npx tsc --noEmit -p tsconfig.json
+      - name: Security policy invariants
+        working-directory: apps/03_oddbrain
+        run: npm run security:policy
       - name: Tests
         working-directory: apps/03_oddbrain
         run: npx vitest run --maxWorkers=2 --reporter=default --reporter=junit --outputFile=junit-linux.xml
@@ -34,14 +40,14 @@ jobs:
         run: node scripts/check-ci-tests.cjs junit-linux.xml
       - name: Upload test evidence
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: junit-linux
           path: apps/03_oddbrain/junit-linux.xml
           if-no-files-found: error
       - name: Linux speaks
         if: always()
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           script: |
             const fs = require('fs');
@@ -81,6 +87,9 @@ jobs:
       - name: Browser preview build
         working-directory: apps/03_oddbrain
         run: npm run build:web
+      - name: Inspect release build output
+        working-directory: apps/03_oddbrain
+        run: npm run security:release
       - name: Smoke — the window opens and the console is clean
         id: native-smoke
         working-directory: apps/03_oddbrain
@@ -93,7 +102,7 @@ jobs:
           xvfb-run -a npx electron . --smoke 2>&1 | tee native-smoke.log
       - name: Linux smoke speaks
         if: failure() && steps.native-smoke.outcome == 'failure'
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           script: |
             const fs = require('fs');
@@ -106,7 +115,7 @@ jobs:
             });
       - name: Upload native smoke evidence
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: native-smoke-linux
           path: apps/03_oddbrain/native-smoke.log
@@ -118,13 +127,16 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
       - name: Install
         working-directory: apps/03_oddbrain
-        run: npm ci --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install the pinned Electron runtime explicitly
+        working-directory: apps/03_oddbrain
+        run: node node_modules/electron/install.js
       - name: Install Chromium for reader and durable-restart tests
         working-directory: apps/03_oddbrain
         run: npx playwright-core install chromium
@@ -134,6 +146,9 @@ jobs:
       - name: Types
         working-directory: apps/03_oddbrain
         run: npx tsc --noEmit -p tsconfig.json
+      - name: Security policy invariants
+        working-directory: apps/03_oddbrain
+        run: npm run security:policy
       - name: Tests
         working-directory: apps/03_oddbrain
         run: npx vitest run --maxWorkers=2 --reporter=default --reporter=junit --outputFile=junit-windows.xml
@@ -142,14 +157,14 @@ jobs:
         run: node scripts/check-ci-tests.cjs junit-windows.xml
       - name: Upload test evidence
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: junit-windows
           path: apps/03_oddbrain/junit-windows.xml
           if-no-files-found: error
       - name: Windows speaks
         if: always()
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd
         with:
           script: |
             const fs = require('fs');
@@ -187,7 +202,7 @@ jobs:
           exit $LASTEXITCODE
       - name: Upload native smoke evidence
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: native-smoke-windows
           path: apps/03_oddbrain/native-smoke.log

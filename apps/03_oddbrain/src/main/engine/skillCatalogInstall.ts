@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto'
+import { createHash, randomUUID } from 'node:crypto'
 /**
  * Installing a catalog skill, in one testable piece.
  *
@@ -11,6 +11,7 @@ import { randomUUID } from 'node:crypto'
 import { catalogEntry, type CatalogSkill } from '../../shared/lib/skillCatalog'
 import type { VaultSkill } from './deploy'
 import { deploySkillBundle, downloadSkillBundle, type SkillBundle } from './skillBundle'
+import { scanTextHazards } from '../../shared/lib/textHazards'
 
 export type CatalogInstallResult =
   | { ok: true; skill: VaultSkill; written: string[]; revision: string }
@@ -68,15 +69,25 @@ export function createCatalogInstallReview(scope: () => { targets: { claudeSkill
         if (signal.aborted || scope().authority !== snapshot.authority) throw Error('Skill inspection canceled or the destination changed. Nothing was installed.')
         const manifest = new TextDecoder('utf-8', { fatal: true }).decode(bundle.files.get('SKILL.md') || new Uint8Array())
         const requirements: Array<{ path: string; text: string }> = [], unread: string[] = []
+        const hazards: Array<{ path: string; report: ReturnType<typeof scanTextHazards> }> = []
+        const fileDigests = [...bundle.files].map(([path, bytes]) => ({ path, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }))
         let inspectedBytes = 0
-        for (const [path, bytes] of bundle.files) if (/(^|\/)(package\.json|requirements(?:[-.]\w+)?\.txt|pyproject\.toml)$/.test(path)) {
-          if (bytes.length > 128_000 || inspectedBytes + bytes.length > 256_000) { unread.push(`${path}: not read because of the declaration preview limit`); continue }
-          requirements.push({ path, text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) }); inspectedBytes += bytes.length
+        for (const [path, bytes] of bundle.files) {
+          if (/(^|\/)(?:SKILL\.md|README(?:\.\w+)?|[^/]+\.(?:md|mdx|txt|json|ya?ml|toml|js|mjs|cjs|ts|py|sh|ps1))$/i.test(path)) {
+            try {
+              const report = scanTextHazards(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+              if (report.total) hazards.push({ path, report })
+            } catch { unread.push(`${path}: not scanned for invisible text because it is not valid UTF-8`) }
+          }
+          if (/(^|\/)(package\.json|requirements(?:[-.]\w+)?\.txt|pyproject\.toml)$/.test(path)) {
+            if (bytes.length > 128_000 || inspectedBytes + bytes.length > 256_000) { unread.push(`${path}: not read because of the declaration preview limit`); continue }
+            requirements.push({ path, text: new TextDecoder('utf-8', { fatal: true }).decode(bytes) }); inspectedBytes += bytes.length
+          }
         }
         const token = randomUUID(), expiresAt = Date.now() + 120_000
         pending.set(token, { entry, bundle, authority: snapshot.authority, targets: { ...snapshot.targets }, expiresAt })
-        return { token, expiresAt, requirements, unread, name: entry.name, revision: bundle.revision, files: [...bundle.files.keys()], manifest, destinations: [snapshot.targets.claudeSkillsDir, snapshot.targets.agySkillsDir],
-          notice: 'Read the complete manifest and file inventory before installing. Support files and licenses are preserved. No scripts run here, but future native tasks may invoke them. File presence does not prove dependencies, portability, loading, authentication or successful use.' + (Buffer.byteLength(manifest) > 24_000 ? ' This manifest exceeds agy’s documented 24 KB skill size; native coverage may be limited even though the original file is preserved.' : '') }
+        return { token, expiresAt, requirements, unread, hazards, fileDigests, name: entry.name, revision: bundle.revision, files: [...bundle.files.keys()], manifest, destinations: [snapshot.targets.claudeSkillsDir, snapshot.targets.agySkillsDir],
+          notice: 'Read the complete manifest, exact-byte SHA-256 inventory, and any invisible-text warnings before installing. Support files and licenses are preserved. Warnings do not alter the retained files. No scripts run here, but future native tasks may invoke them. File presence does not prove dependencies, portability, loading, authentication or successful use.' + (Buffer.byteLength(manifest) > 24_000 ? ' This manifest exceeds agy’s documented 24 KB skill size; native coverage may be limited even though the original file is preserved.' : '') }
       } finally { loading = false }
     },
     decide(token: string, decision: 'allow' | 'deny'): { ok: boolean; answer: string } {

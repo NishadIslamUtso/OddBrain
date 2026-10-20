@@ -79,7 +79,8 @@ npmRebuild: false
 # build must not be sandboxed away from loopback.
 asar: true
 # Fuses are flipped on the packaged binary by @electron/fuses (scripts/apply-fuses.cjs):
-# no ELECTRON_RUN_AS_NODE, no NODE_OPTIONS, no --inspect in production.
+# no ELECTRON_RUN_AS_NODE, NODE_OPTIONS or --inspect in production; only app.asar
+# can load, with embedded ASAR integrity enabled on platforms that support it.
 afterPack: scripts/apply-fuses.cjs
 
 win:

@@ -28,7 +28,7 @@ describe('owner-selected project context', () => {
   test('instruction and goals reach the composed request with a source receipt', async () => {
     const f = fixture(), result = await f.prepare()
     expect(result.prompt).toContain('Use plain language.'); expect(result.prompt).toContain('Understand the evidence')
-    expect(result.receipt.sources.map(s => s.id)).toEqual(['instruction', 'goal'])
+    expect(result.receipt.sources.map(s => s.id)).toEqual(['instruction', 'goal', 'conversation-history'])
     expect(result.receipt.revision).toMatch(/^[a-f0-9]{64}$/)
   })
   test('fresh sessions receive copied history; resumed ones do not repeat it', async () => {
@@ -59,7 +59,7 @@ describe('owner-selected project context', () => {
     f.service.write(projects.map(p => ({ ...p, references: p.references.map(r => ({ ...r, includeInContext: true })) })), projects)
     const result = await f.prepare()
     expect(result.prompt).toContain('বাংলা reference\\nEND')
-    expect(result.receipt.sources.at(-1)).toMatchObject({ chars: 'বাংলা reference\nEND'.length, coverage: 'Complete UTF-8 text', digest: expect.stringMatching(/^[a-f0-9]{64}$/) })
+    expect(result.receipt.sources.at(-1)).toMatchObject({ chars: 'বাংলা reference\nEND'.length, coverage: expect.stringContaining('Complete UTF-8 text'), digest: expect.stringMatching(/^[a-f0-9]{64}$/) })
   })
   test('a grant is project-bound, not portable to a sibling project', async () => {
     const f = fixture(), file = join(f.dir, 'source.txt'); writeFileSync(file, 'PRIVATE')

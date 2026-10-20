@@ -1,5 +1,6 @@
 import type { EngineEvent, EngineId } from './engine'
 import type { Chat } from '../types'
+import { scanTextHazards } from './textHazards'
 
 export type TranscriptImage = {
   /** Stable identifier inside one transcript; never a general file path. */
@@ -42,10 +43,39 @@ export function validTranscriptImages(value: unknown, pictures: number): value i
   return value.every((image, index) => image && typeof image === 'object' && image.id === `image-${index + 1}` && ['image/png', 'image/jpeg', 'image/webp'].includes(image.mime) && Number.isSafeInteger(image.bytes) && image.bytes > 0 && image.bytes <= 2 * 1024 * 1024 && typeof image.sha256 === 'string' && /^[a-f0-9]{64}$/.test(image.sha256))
 }
 
+function addHazardAppendix(lines: string[]): void {
+  const report = scanTextHazards(lines.join('\n'))
+  if (!report.total) return
+  lines.push('', '## Invisible-text review (labelled derivative)', '', report.notice, 'The exact export text above was not rewritten. These labelled excerpts are additional review aids.', '')
+  for (const finding of report.findings) {
+    lines.push(`- ${finding.label}: ${finding.count}; ${finding.codePoints.join(', ')}; UTF-16 positions ${finding.positions.join(', ')}`)
+    for (const example of finding.excerpts) lines.push(`  - ${example}`)
+  }
+}
+
 /** Export exactly what was recorded; status/tool/thinking output is not a model answer. */
 export function transcriptMarkdown(turn: Transcript): string {
   const h = turn.header
-  const lines = [`# ${h.title}`, '', `Recorded: ${h.at}`, `Engine: ${h.engine}`, `Model: ${h.model || 'Engine default'}`, `State: ${turn.state}`, '', '## You', '', turn.prompt, '']
+  const ownerPrompt = turn.userPrompt ?? turn.prompt
+  const lines = [`# ${h.title}`, '', `Recorded: ${h.at}`, `Engine: ${h.engine}`, `Model: ${h.model || 'Engine default'}`, `State: ${turn.state}`, '', '## You', '', ownerPrompt, '']
+  if (turn.userPrompt !== undefined) lines.push('## Exact text dispatched to the native engine', '', 'This app envelope can contain OddBrain-authored instructions, owner-selected project preferences, untrusted quoted references or stored conversation text, followed by the current owner request. It is preserved here exactly and is not all attributed to “You”.', '', turn.prompt, '')
+  if (h.context) {
+    lines.push('## Dispatch provenance receipt', '', `Working folder: ${h.context.workspace}`, `Text dispatch characters: ${h.context.characters}`, `Stored history messages explicitly carried: ${h.context.historyMessages}`, `Receipt SHA-256: ${h.context.revision}`, '')
+    if (h.context.session) lines.push(`Native session state: ${h.context.session.state}`, h.context.session.detail, '')
+    else lines.push('Native session state: not recorded by this older receipt.', '')
+    if (h.context.launch) {
+      lines.push('### Native folder activation inventory', '', `Complete within bounds: ${h.context.launch.complete}`, `Configuration files: ${h.context.launch.files} (${h.context.launch.connectorFiles} connector, ${h.context.launch.ruleFiles} rule/instruction, ${h.context.launch.hookFiles} hook/config)`, `Inventory SHA-256: ${h.context.launch.digest}`, ...h.context.launch.warnings.map(item => `Warning: ${item}`), '')
+    }
+    lines.push('### Context sources', '')
+    for (const source of h.context.sources) {
+      lines.push(`- ${source.title} [${source.role || 'legacy attribution'}]: ${source.chars} characters; ${source.coverage}${source.digest ? `; SHA-256 ${source.digest}` : ''}`)
+      if (source.hazards?.total) {
+        lines.push(`  Invisible-text warning: ${source.hazards.notice}`)
+        for (const finding of source.hazards.findings) lines.push(`  - ${finding.label}: ${finding.count}; ${finding.codePoints.join(', ')}; UTF-16 positions ${finding.positions.join(', ')}`)
+      }
+    }
+    lines.push('')
+  }
   if (h.pictures && h.images === undefined) lines.push(`Attachment notice: ${h.pictures} image(s) accompanied this request, but this older record kept only their count. Their original bytes cannot be recovered or downloaded from this transcript.`, '')
   else if (h.images?.length) {
     lines.push(`Attachment notice: ${h.images.length} image(s) accompanied this request. Their bytes are retained as separate digest-checked transcript files; they are not embedded in this text export.`, '')
@@ -66,13 +96,14 @@ export function transcriptMarkdown(turn: Transcript): string {
     flush()
     if (e.kind === 'thinking') lines.push('## Engine-supplied thinking', '', e.text, '')
     else if (e.kind === 'tool') lines.push(`## Tool: ${e.name}`, '', e.summary, '')
-    else if (e.kind === 'permission') lines.push(`## Approval requested: ${e.tool}`, '', e.summary, e.detail || '', '')
+    else if (e.kind === 'permission') lines.push(`## Approval requested: ${e.tool}`, '', e.summary, ...(e.risk ? [`Risk: ${e.risk}`] : []), e.detail || '', '')
     else if (e.kind === 'error' || e.kind === 'status') lines.push(`## ${e.kind === 'error' ? 'Error' : 'Activity'}`, '', e.text, '')
     else if (e.kind === 'session') lines.push(`Native session: ${e.id}`, '')
   }
   flush()
   if (turn.incomplete || turn.state === 'interrupted') lines.push('Recording notice: this record has no confirmed complete ending or has an incomplete final entry. It must not be treated as a successful task.', '')
-  lines.push('This is an app-recorded text transcript, not a native-session import or proof that a tool succeeded. It can contain private prompts, paths and tool output.')
+  lines.push('Export exposure notice: this app-recorded transcript can contain the owner’s exact request, OddBrain’s dispatch envelope, project preferences, quoted source/reference text, attachment names and digests, working-folder paths, native session identifiers, engine output, thinking, tool details and approval diffs. It is not a native-session import, a permission grant, or proof that a tool succeeded.')
+  addHazardAppendix(lines)
   return lines.join('\n')
 }
 
@@ -108,5 +139,6 @@ export function chatMarkdown(chat: Chat): string {
       lines.push(`### Artifact: ${a.title} — version ${i + 1}`, '', `${fence}${a.type}`, v.content, fence, '')
     }
   }
+  addHazardAppendix(lines)
   return lines.join('\n')
 }

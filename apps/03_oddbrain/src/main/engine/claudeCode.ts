@@ -125,15 +125,20 @@ export function enginePathPrepend(platform = process.platform, env = process.env
     .join(';')
 }
 
-/** The machine's own Anthropic credentials — never the app's business. */
-const ANTHROPIC_ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL']
+/** Raw machine credentials and process-injection controls are never ambient
+ * authority for a native engine. Explicit app-selected provider credentials are
+ * added back by brainEnvironment after this filter. Native file/login stores
+ * remain the engine's own concern. */
+const UNSAFE_ENV_KEYS = new Set(['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHROPIC_BASE_URL', 'NODE_OPTIONS', 'NODE_PATH', 'ELECTRON_RUN_AS_NODE', 'LD_PRELOAD', 'DYLD_INSERT_LIBRARIES', 'BASH_ENV', 'ENV', 'PROMPT_COMMAND', 'GIT_ASKPASS', 'SSH_ASKPASS', 'SSH_ASKPASS_REQUIRE'])
+const CREDENTIAL_ENV_KEY = /(?:^|_)(?:API_?KEY|ACCESS_?KEY(?:_ID)?|SECRET(?:_ACCESS_KEY)?|AUTH_?TOKEN|TOKEN|PASSWORD|PASSWD|PRIVATE_?KEY|CREDENTIALS?)(?:$|_)/i
 
 /**
  * The free gate, kept honest: the engine thinks with the brain the owner
  * chose in this app, never with whatever credentials happen to sit in the
- * machine's environment. The Anthropic variables are stripped from the
- * inherited environment on every launch; the chosen brain is then applied on
- * top. An empty brain choice means the engine starts with none of these —
+ * machine's environment. Credential-shaped variables and common process-
+ * injection controls are stripped from the inherited environment on every
+ * launch; the chosen brain is then applied on top. An empty brain choice means
+ * the engine starts with none of these —
  * no silent borrowing of a machine account. (A login the owner made directly
  * with the CLI on their own machine is their own affair; this app neither
  * forwards it through settings nor plants it there.)
@@ -141,7 +146,8 @@ const ANTHROPIC_ENV_KEYS = ['ANTHROPIC_API_KEY', 'ANTHROPIC_AUTH_TOKEN', 'ANTHRO
 export function sanitizeEnvironment(env: NodeJS.ProcessEnv = process.env): Record<string, string> {
   const clean: Record<string, string> = {}
   for (const [key, value] of Object.entries(env)) {
-    if (value !== undefined && !ANTHROPIC_ENV_KEYS.includes(key.toUpperCase())) clean[key] = value
+    const upper = key.toUpperCase()
+    if (value !== undefined && !UNSAFE_ENV_KEYS.has(upper) && !CREDENTIAL_ENV_KEY.test(upper)) clean[key] = value
   }
   return clean
 }

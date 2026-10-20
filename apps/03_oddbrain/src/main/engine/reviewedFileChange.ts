@@ -3,6 +3,7 @@ import { openSync, closeSync, fstatSync, readSync, writeFileSync, renameSync, li
 import { resolve } from 'node:path'
 import { noLinkedPath } from './configTransaction'
 import { unifiedDiff, type FileReview, type FileDecision } from '../../shared/lib/changeReview'
+import { scanTextHazards, textHazardDetails } from '../../shared/lib/textHazards'
 
 const fingerprint = (bytes: Buffer | null) => bytes === null ? 'missing' : createHash('sha256').update(bytes).digest('hex')
 function read(path: string): Buffer | null {
@@ -34,7 +35,8 @@ export function createFileReviewService(now = Date.now) {
       path = resolve(path); const before = read(path)
       const decode = (bytes: Buffer | null) => { if (bytes?.includes(0)) throw Error('Binary changes require a separate byte-aware review. Nothing was changed.'); return new TextDecoder('utf-8', { fatal: true }).decode(bytes || new Uint8Array()) }
       if (after && after.length > 2_000_000) throw Error('Replacement exceeds 2 MB. Nothing was changed.')
-      const review: FileReview = { token: randomUUID(), path, purpose, expiresAt: now() + 300_000, before: decode(before), after: decode(after), diff: unifiedDiff(decode(before), decode(after), path), checks: ['Local file bytes inspected', 'UTF-8 text and size checked', 'No tests or commands executed', 'No filesystem permissions granted'] }
+      const beforeText = decode(before), afterText = decode(after), hazards = scanTextHazards(afterText)
+      const review: FileReview = { token: randomUUID(), path, purpose, expiresAt: now() + 300_000, before: beforeText, after: afterText, diff: unifiedDiff(beforeText, afterText, path), checks: ['Local file bytes inspected', 'UTF-8 text and size checked', ...(hazards.total ? textHazardDetails(hazards) : ['No suspicious invisible or direction-changing characters detected']), 'No tests or commands executed', 'No filesystem permissions granted'], ...(hazards.total ? { hazards } : {}) }
       pending.set(review.token, { review: { ...review }, expected: fingerprint(before), after: after === null ? null : Buffer.from(after) })
       return review
     },

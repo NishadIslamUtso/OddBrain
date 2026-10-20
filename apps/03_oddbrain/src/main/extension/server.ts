@@ -412,6 +412,7 @@ export function startExtensionApi(options: {
       method: request.method || 'GET',
       query: url.searchParams,
       body,
+      captureSource: 'browser-extension',
     })
     send(response, reply.status, reply.body, decision.allow)
   }

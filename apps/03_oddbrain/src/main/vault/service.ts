@@ -303,7 +303,7 @@ export function createVaultService({
     }))
   }
 
-  function capture(data: Payload) {
+  function capture(data: Payload, captureSource: 'browser-extension' | 'oddbrain-app' | 'unknown' = 'unknown') {
     const store = vault()
     if (data?.type === 'browser_visit') throw new InputError('Browser-history capture has been retired. Update the extension; existing saved visits are preserved.')
     const types = ['conversation', 'web_page', 'a11y_tree', 'capsule', 'artifact', 'journal', 'wasnt_accessible', 'blacklist_update']
@@ -330,6 +330,8 @@ export function createVaultService({
 
     const now = clock()
     const captured = timestamp(data.captured_at, now.toISOString())
+    const acquisition = captureSource === 'browser-extension' ? 'paired-browser-extension' : captureSource === 'oddbrain-app' ? 'oddbrain-app' : 'legacy-or-imported-capture'
+    const url_authorship = !data.url ? 'none' : captureSource === 'browser-extension' ? 'browser-location-observed' : captureSource === 'oddbrain-app' ? 'app-recorded-not-owner-authored' : 'unknown-imported-metadata'
     const { year, month } = dhakaParts(now)
     let relative = ''
     let duplicate = false
@@ -364,6 +366,8 @@ export function createVaultService({
         url: data.url || '',
         title: data.title || 'Conversation',
         captured_at: captured,
+        acquisition,
+        url_authorship,
         completeness: data.completeness || 'full',
       }
       const transcript = prepared
@@ -395,7 +399,7 @@ export function createVaultService({
           store.writeOnce(`${base}/revisions/${sha(m.id)}-${checksum}.json`, record)
           store.writeAtomic(`${base}/messages/${sha(m.id)}.json`, record)
         }
-        store.writeAtomic(`${base}/conversation.json`, JSON.stringify({ key: id, provider, adapter: 'oddbrain', title: metadata.title, url: metadata.url, original: relative }))
+        store.writeAtomic(`${base}/conversation.json`, JSON.stringify({ key: id, provider, adapter: 'oddbrain', title: metadata.title, url: metadata.url, original: relative, acquisition, url_authorship }))
       }
       // Source snapshots are immutable. Capturing a conversation title is NOT
       // confirmation of a personal fact, so no entity is created here.
@@ -411,6 +415,8 @@ export function createVaultService({
             url: data.url,
             title: data.title || '',
             captured_at: captured,
+            acquisition,
+            url_authorship,
             completeness: data.completeness || 'partial',
             provider: 'web',
           },
@@ -426,6 +432,8 @@ export function createVaultService({
             captured_at: captured,
             visited_at: data.visited_at || null,
             capture_status: 'content-captured',
+            acquisition,
+            url_authorship,
             source_id: relative,
           })}\n`
         )
@@ -453,6 +461,8 @@ export function createVaultService({
             url: data.url,
             title: data.title || '',
             captured_at: captured,
+            acquisition,
+            url_authorship,
             nodes: data.nodes,
             depth: data.depth,
             completeness: data.completeness || 'full',
@@ -470,6 +480,8 @@ export function createVaultService({
             captured_at: captured,
             visited_at: data.visited_at || null,
             capture_status: 'structure-captured',
+            acquisition,
+            url_authorship,
             source_id: relative,
             nodes: data.nodes,
             depth: data.depth,
@@ -479,7 +491,7 @@ export function createVaultService({
     } else if (data.type === 'wasnt_accessible') {
       if (typeof data.reason !== 'string' || !data.reason.trim()) throw new InputError('Failure reason is required.')
       relative = `01 Inbox/Processing Errors/${year}-${month}.md`
-      const message = `wasn't accessible - ${data.reason}; URL: ${data.url || '(unavailable)'}; title: ${data.title || ''}; provider: ${data.provider || 'web'}`
+      const message = `wasn't accessible - ${data.reason}; URL: ${data.url || '(unavailable)'}; title: ${data.title || ''}; provider: ${data.provider || 'web'}; acquisition: ${acquisition}; URL authorship: ${url_authorship}`
       store.append(relative, `- [${captured}] ${message.replace(/\r?\n/g, ' ')}\n`)
       store.activity(message)
       return { ok: true, source: relative }
@@ -498,7 +510,7 @@ export function createVaultService({
       if (!Number.isSafeInteger(version) || version < 1) throw new InputError('Invalid capsule version.')
       const fileId = id.startsWith('capsule-') ? id : `capsule-${id}`
       relative = `03 Memory/Entities/${fileId}-v${version}-${digest(JSON.stringify(capsule))}.md`
-      const metadata = { ...capsule, id, version, type: 'capsule', status: capsule.status || 'active', captured_at: captured }
+      const metadata = { ...capsule, id, version, type: 'capsule', status: capsule.status || 'active', captured_at: captured, acquisition, url_authorship }
       const body = `# Capsule: ${capsule.title}\n\n## Goals\n${(capsule.goals || []).map((item: string) => `- ${item}`).join('\n')}\n\n## Constraints\n${(capsule.constraints || [])
         .map((item: string) => `- ${item}`)
         .join('\n')}\n\n## Background\n${capsule.background || ''}\n\n## Decisions\n${(capsule.decisions || [])
@@ -532,6 +544,8 @@ export function createVaultService({
             file: fileName,
             version,
             captured_at: captured,
+            acquisition,
+            url_authorship,
             source_url: data.url || '',
           },
           `# ${title}\n\nFile: [[${fileName}]]\n\nVersion ${version}. The runnable file is stored beside this note and is never overwritten by a later version.`
@@ -541,7 +555,7 @@ export function createVaultService({
       if (typeof data.content !== 'string' || !data.content.trim()) throw new InputError('Journal content is required.')
       const day = /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(data.date || '') ? data.date : dhakaParts(now).date
       relative = `08 Journal/${day.slice(0, 4)}/${day}.md`
-      duplicate = store.writeOnce(relative, yamlDocument({ id: `journal-${day}`, type: 'journal', date: day, captured_at: captured }, data.content))
+      duplicate = store.writeOnce(relative, yamlDocument({ id: `journal-${day}`, type: 'journal', date: day, captured_at: captured, acquisition, url_authorship }, data.content))
     }
 
     store.activity(`${duplicate ? 'duplicate kept' : 'captured'}: ${data.type}; source: [[${relative}]]`)
@@ -809,10 +823,10 @@ export function createVaultService({
     blacklist,
     updateBlacklist,
     capture,
-    conversationSync(data: Payload) {
+    conversationSync(data: Payload, captureSource: 'browser-extension' | 'oddbrain-app' | 'unknown' = 'unknown') {
       if (!data || typeof data.url !== 'string') throw new InputError('Conversation URL is required.')
       if (excluded(data.url, blacklist())) return { ok: false, skipped: true, reason: 'blacklist' }
-      return syncConversation(vault(), data, clock().toISOString())
+      return syncConversation(vault(), data, clock().toISOString(), captureSource)
     },
     links,
     onui,

@@ -1,4 +1,5 @@
-export type FileReview = { token: string; path: string; diff: string; expiresAt: number; purpose: 'restore' | 'project-rules' | 'skill'; checks: string[]; before: string; after: string }
+import type { TextHazardReport } from './textHazards'
+export type FileReview = { token: string; path: string; diff: string; expiresAt: number; purpose: 'restore' | 'project-rules' | 'skill'; checks: string[]; before: string; after: string; hazards?: TextHazardReport }
 export type FileDecision = { ok: boolean; answer: string; recoveryPath?: string }
 export type FileReviewPort = { preview(): Promise<FileReview>; decide(token: string, decision: 'allow' | 'deny'): Promise<FileDecision>; reveal?(token: string): Promise<{ ok: boolean; answer: string }> }
 

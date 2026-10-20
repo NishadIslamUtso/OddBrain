@@ -362,6 +362,7 @@ export function startLocalApi(options: LocalApiOptions): Promise<LocalApi> {
       method: request.method || 'GET',
       query: url.searchParams,
       body,
+      captureSource: 'oddbrain-app',
     })
     response.writeHead(reply.status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
     response.end(JSON.stringify(reply.body))

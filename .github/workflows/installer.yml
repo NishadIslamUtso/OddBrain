@@ -17,18 +17,30 @@ jobs:
     runs-on: windows-latest
     permissions:
       contents: write
+      id-token: write
+      attestations: write
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v5
-      - uses: actions/setup-node@v5
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
           node-version: 24
       - name: Install
         working-directory: apps/03_oddbrain
-        run: npm ci --no-audit --no-fund
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install the pinned Electron runtime explicitly
+        working-directory: apps/03_oddbrain
+        run: node node_modules/electron/install.js
+      - name: Security policy invariants
+        working-directory: apps/03_oddbrain
+        run: npm run security:policy
       - name: Build and package the installer
         working-directory: apps/03_oddbrain
         run: npm run dist:win
+      - name: Generate dependency SBOM
+        working-directory: apps/03_oddbrain
+        shell: pwsh
+        run: npm sbom --sbom-format cyclonedx | Out-File -Encoding utf8 dist/oddbrain-sbom.cdx.json
       - name: Prove it - sha256 into the summary
         working-directory: apps/03_oddbrain
         shell: pwsh
@@ -39,13 +51,24 @@ jobs:
           Add-Content $env:GITHUB_STEP_SUMMARY '```'
           Add-Content $env:GITHUB_STEP_SUMMARY "sha256: $h"
           Add-Content $env:GITHUB_STEP_SUMMARY '```'
+      - name: Verify packaged Electron fuses
+        working-directory: apps/03_oddbrain
+        run: npm run security:fuses
+      - name: Inspect final packaged release output
+        working-directory: apps/03_oddbrain
+        run: npm run security:installer
+      - name: Attest installer build provenance
+        uses: actions/attest-build-provenance@43d14bc2b83dec42d39ecae14e916627a18bb661
+        with:
+          subject-path: apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe
       - name: Upload the artifact (30 days)
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: OddBrain-Setup-${{ github.sha }}
           path: |
             apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe
             apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe.sha256
+            apps/03_oddbrain/dist/oddbrain-sbom.cdx.json
           retention-days: 30
           if-no-files-found: error
       - name: Attach to the release (on a version tag only)
@@ -54,4 +77,4 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          gh release create "$env:GITHUB_REF_NAME" --generate-notes --title "OddBrain $env:GITHUB_REF_NAME" dist/OddBrain-Setup-0.9.0.exe dist/OddBrain-Setup-0.9.0.exe.sha256
+          gh release create "$env:GITHUB_REF_NAME" --generate-notes --title "OddBrain $env:GITHUB_REF_NAME" dist/OddBrain-Setup-0.9.0.exe dist/OddBrain-Setup-0.9.0.exe.sha256 dist/oddbrain-sbom.cdx.json

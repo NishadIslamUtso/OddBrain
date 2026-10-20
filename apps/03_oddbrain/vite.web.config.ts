@@ -41,7 +41,8 @@ export default defineConfig({
     // Relative-safe absolute path: this is served from the host root.
     outDir: fileURLToPath(new URL('./dist-web', import.meta.url)),
     emptyOutDir: true,
-    sourcemap: true,
+    // Public previews ship executable bundles, not original source or embedded source maps.
+    sourcemap: false,
     target: 'es2022',
   },
 })

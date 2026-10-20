@@ -7,6 +7,7 @@ import { configBytes, commitConfigs, noLinkedPath } from '../engine/configTransa
 import { createChatShellReview } from '../chatShellReview'
 import { cleanupEmptyWorktreeBatch, createDetachedWorktree, detachedWorktreePath, finishDetachedWorktree, inspectWorktreeRepository, recheckWorktreeRepository, type WorktreeReceipt } from '../workflows/worktrees'
 import type { CommandRecord, ShellExecution, ShellRequest, ShellResult } from '../../shared/lib/commands'
+import { censusWorkspaceSymlinks, symlinkCensusDetails } from './symlinkCensus'
 const ID = /^\d{13}-[a-f0-9-]{36}$/
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex')
 export const COMMAND_DISCLOSURE = 'App-owned OS command, not an AI task or a native engine tool. Runs as your OS user outside the engine’s sandbox; the starting folder does not confine file or network access. No elevation or saved app API keys are supplied. Commands are not automatically checkpointed. Review covers this command and folder, not the contents of referenced scripts. Stop requests do not prove all escaped/background descendants exited.'
@@ -73,10 +74,10 @@ export function createCommandRunner(options: {
     const execution = commandSpec(request.command), program = realpathSync(execution.program), executable = statSync(program)
     if (!executable.isFile()) throw Error('The OS shell is not a regular executable.')
     execution.program = program
-    const environment = commandEnvironment(process.env)
-    const stamp = sha(JSON.stringify([scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs]))
-    const stableStamp = sha(JSON.stringify([scope.stableAuthority || scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs]))
-    return { scope, execution, stamp, stableStamp }
+    const environment = commandEnvironment(process.env), symlinks = censusWorkspaceSymlinks(request.cwd)
+    const stamp = sha(JSON.stringify([scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs, symlinks.digest]))
+    const stableStamp = sha(JSON.stringify([scope.stableAuthority || scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs, symlinks.digest]))
+    return { scope, execution, stamp, stableStamp, symlinks }
   }
   type Checked = ReturnType<typeof inspect>
   const inspectIsolated = (request: ShellRequest, reviewed: Checked): Checked => {
@@ -86,10 +87,10 @@ export function createCommandRunner(options: {
     const execution = commandSpec(request.command), program = realpathSync(execution.program), executable = statSync(program)
     execution.program = program
     if (!executable.isFile() || JSON.stringify(execution) !== JSON.stringify(reviewed.execution)) throw Error('The reviewed OS shell or exact command changed before isolated execution.')
-    const environment = commandEnvironment(process.env)
-    const stamp = sha(JSON.stringify([reviewed.scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs]))
-    const stableStamp = sha(JSON.stringify([reviewed.scope.stableAuthority || reviewed.scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs]))
-    return { scope: reviewed.scope, execution, stamp, stableStamp }
+    const environment = commandEnvironment(process.env), symlinks = censusWorkspaceSymlinks(request.cwd)
+    const stamp = sha(JSON.stringify([reviewed.scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs, symlinks.digest]))
+    const stableStamp = sha(JSON.stringify([reviewed.scope.stableAuthority || reviewed.scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs, symlinks.digest]))
+    return { scope: reviewed.scope, execution, stamp, stableStamp, symlinks }
   }
   type Active = { owner: number; controller: AbortController; id: string | null; ids: Set<string> }
   const runOne = async (request: ShellRequest, checked: Checked, own: Active, lease: Lease, outputLimit = limit, recorded?: (id: string) => void): Promise<ShellResult> => {
@@ -97,8 +98,8 @@ export function createCommandRunner(options: {
       controller.signal.throwIfAborted(); lease.recheck()
       // Repeat filesystem/environment checks without treating our own reservation as another run.
       const folder = statSync(request.cwd); noLinkedPath(request.cwd)
-      const executable = statSync(checked.execution.program)
-      const stamp = sha(JSON.stringify([checked.scope.authority, resolve(request.cwd), folder.dev, folder.ino, checked.execution, commandEnvironment(process.env), executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs]))
+      const executable = statSync(checked.execution.program), symlinks = censusWorkspaceSymlinks(request.cwd)
+      const stamp = sha(JSON.stringify([checked.scope.authority, resolve(request.cwd), folder.dev, folder.ino, checked.execution, commandEnvironment(process.env), executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs, symlinks.digest]))
       if (stamp !== expected || realpathSync(commandSpec(request.command).program) !== checked.execution.program) throw Error('Command target changed before launch. Nothing was run.')
       const id = `${Date.now()}-${randomUUID()}`; own.id = id; own.ids.add(id)
       mkdirSync(directory(id), { recursive: true, mode: 0o700 })
@@ -276,7 +277,7 @@ export function createCommandRunner(options: {
   const service = (owner: number) => {
     let review = reviews.get(owner)
     if (!review) {
-      review = createChatShellReview({ inspect: async request => { const result = inspect(request); return { supported: true, authorityFingerprint: result.stamp, execution: result.execution, explanation: `${COMMAND_DISCLOSURE} A stop is requested after ${deadline / 1000} seconds or ${limit.toLocaleString()} combined output bytes; termination is not guaranteed. No automatic retries.` } }, execute: (request, stamp) => execute(owner, request, stamp) })
+      review = createChatShellReview({ inspect: async request => { const result = inspect(request); return { supported: true, authorityFingerprint: result.stamp, execution: result.execution, explanation: `${COMMAND_DISCLOSURE} A stop is requested after ${deadline / 1000} seconds or ${limit.toLocaleString()} combined output bytes; termination is not guaranteed. No automatic retries.\n${symlinkCensusDetails(result.symlinks)}` } }, execute: (request, stamp) => execute(owner, request, stamp) })
       reviews.set(owner, review)
     }
     return review

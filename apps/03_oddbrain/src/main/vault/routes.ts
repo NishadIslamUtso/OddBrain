@@ -24,7 +24,8 @@ export type VaultRouteRequest = {
   route: string
   method: string
   query: URLSearchParams
-  body: unknown
+  body?: unknown
+  captureSource?: 'browser-extension' | 'oddbrain-app'
 }
 
 export type VaultRouteReply = { status: number; body: Record<string, any> }
@@ -146,8 +147,8 @@ export function handleVaultRequest(service: VaultService, request: VaultRouteReq
       return fallback(route, request.method)
     }
     if (request.method === 'POST') {
-      if (route === '/conversation-sync') return { status: 200, body: service.conversationSync(request.body as Record<string, any>) }
-      if (route === '/capture') return { status: 200, body: service.capture(request.body as Record<string, any>) }
+      if (route === '/conversation-sync') return { status: 200, body: service.conversationSync(request.body as Record<string, any>, request.captureSource || 'unknown') }
+      if (route === '/capture') return { status: 200, body: service.capture(request.body as Record<string, any>, request.captureSource || 'unknown') }
       if (route === '/blacklist') return { status: 200, body: service.updateBlacklist(request.body as Record<string, any>) }
       if (route === '/export-zip') return { status: 200, body: service.exportZip(request.body as Record<string, any>) }
       return fallback(route, request.method)

@@ -1,4 +1,5 @@
 import { resolveEngineCommand } from './enginePath'
+import { createHash } from 'node:crypto'
 import { selectedEffort } from '../../shared/lib/engineCapabilities'
 /**
  * The socket: the one plug between the app and whatever engine is chosen.
@@ -17,6 +18,8 @@ import { startClaudeCodeSession, type EngineSession, type EngineStartInput } fro
 import { startAgySession } from './agy'
 
 export type EngineAnswer = { ok: boolean; answer: string; transcriptId?: string }
+export type NativeSessionState = { state: 'live' | 'resumed' | 'fresh'; detail: string }
+type SessionTarget = Pick<EngineStartInput, 'settings' | 'cwd' | 'chatId' | 'auth'>
 
 export type EngineSocket = {
   /** Which provider's key the LIVE process was launched with, if any. */
@@ -27,6 +30,8 @@ export type EngineSocket = {
     /** Overridable for tests — which process starts. Production leaves this out. */
     spawnProcess?: typeof import('node:child_process').spawn
   }): EngineAnswer
+  /** Receipt for how the next turn will reach native conversation state. */
+  nextSession(input: SessionTarget): NativeSessionState
   current(): EngineSession | null
   currentTarget(): { engine: EngineId; workspace: string; chatId?: string } | null
   /** True only while a TASK is in flight, not merely while the process lives. */
@@ -80,13 +85,14 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
   // changed under it would only apply on the next start, silently.
   let sessionThinking: string | null = null
   let sessionBaseUrl: string | null = null
-  // The key's VALUE, not just its presence: rotating a cloud key must reach
-  // the next turn — a living process launched with the old key would otherwise
+  // A one-way fingerprint of the key, not the credential or just its presence:
+  // rotating a cloud key must reach the next turn — a living process launched with the old key would otherwise
   // keep billing and speaking as the old credential until it happened to stop.
   let sessionKeyFingerprint: string | null = null
   // And WHICH provider's key it was: clearing one provider's key must not
   // stop a session that was launched with another's.
   let sessionAuthProvider: string | null = null
+  const authFingerprint = (value: string | undefined) => value ? createHash('sha256').update(value).digest('hex') : null
 
   const onEvent = (input: EngineStartInput, event: EngineEvent): void => {
     // The socket owns the busy flag: a finished or failed task frees the
@@ -105,6 +111,23 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       }
     }
     input.onEvent(event)
+  }
+
+  const gearChanged = (input: SessionTarget): boolean =>
+    sessionCommand !== resolveEngineCommand(input.settings.id) ||
+    sessionModel !== input.settings.model ||
+    sessionProvider !== input.settings.cloudProvider ||
+    sessionApproval !== input.settings.approval ||
+    sessionThinking !== selectedEffort(input.settings) ||
+    sessionBaseUrl !== input.settings.baseUrl ||
+    sessionKeyFingerprint !== authFingerprint(input.auth?.apiKey) ||
+    currentCwd !== input.cwd || currentChatId !== input.chatId || sessionEngine !== input.settings.id
+  const nextSession = (input: SessionTarget): NativeSessionState => {
+    if (session?.isRunning() && !gearChanged(input)) return { state: 'live', detail: 'Reused the already-running native process with the same engine, folder, model and permission gear.' }
+    const resumeId = memory.load(sessionKey(input.settings.id, input.cwd, input.chatId))
+    return resumeId
+      ? { state: 'resumed', detail: 'Started a native process with this chat’s saved engine session link; earlier native context may be present but is not imported into this receipt.' }
+      : { state: 'fresh', detail: 'Started without a saved native session link; any listed stored chat messages were explicitly included in this request.' }
   }
 
   const start = (input: EngineStartInput & { spawnProcess?: typeof import('node:child_process').spawn }): EngineSession => {
@@ -146,16 +169,8 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       // an honest relaunch (the conversation itself survives via the resume
       // id where the engine supports one).
       const command = resolveEngineCommand(input.settings.id)
-      const gearChanged =
-        sessionCommand !== command ||
-        sessionModel !== input.settings.model ||
-        sessionProvider !== input.settings.cloudProvider ||
-        sessionApproval !== input.settings.approval ||
-        sessionThinking !== selectedEffort(input.settings) ||
-        sessionBaseUrl !== input.settings.baseUrl ||
-        sessionKeyFingerprint !== (input.auth?.apiKey ?? null) ||
-        currentCwd !== input.cwd || currentChatId !== input.chatId
-      if (session?.isRunning() && !gearChanged) {
+      const changed = gearChanged(input)
+      if (session?.isRunning() && !changed) {
         if (busy) {
           return { ok: false, answer: 'An engine is already working. Stop it first, or wait for it to finish.' }
         }
@@ -190,7 +205,7 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       sessionApproval = input.settings.approval
       sessionThinking = selectedEffort(input.settings)
       sessionBaseUrl = input.settings.baseUrl
-      sessionKeyFingerprint = input.auth?.apiKey ?? null
+      sessionKeyFingerprint = authFingerprint(input.auth?.apiKey)
       sessionAuthProvider = input.auth?.provider ?? null
       if (!session.isRunning()) {
         return { ok: false, answer: 'The engine could not be started on this machine.' }
@@ -205,6 +220,7 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       }
       return { ok: true, answer: 'started' }
     },
+    nextSession,
     current: () => session,
     currentTarget: () => sessionEngine && currentCwd ? { engine: sessionEngine, workspace: currentCwd, ...(currentChatId ? { chatId: currentChatId } : {}) } : null,
     usedAuthProvider: () => sessionAuthProvider,

@@ -14,12 +14,14 @@ export default defineConfig({
   main: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      sourcemap: false,
       rollupOptions: { input: { index: resolve(__dirname, 'src/main/index.ts'), 'media-worker': resolve(__dirname, 'src/main/media/worker.ts') } },
     },
   },
   preload: {
     plugins: [externalizeDepsPlugin()],
     build: {
+      sourcemap: false,
       rollupOptions: { input: { index: resolve(__dirname, 'src/preload/index.ts') } },
     },
   },
@@ -33,6 +35,7 @@ export default defineConfig({
     },
     plugins: [react(), tailwindcss()],
     build: {
+      sourcemap: false,
       rollupOptions: { input: resolve(__dirname, 'src/renderer/index.html') },
     },
     server: {

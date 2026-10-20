@@ -1,0 +1,7 @@
+{
+  "note": "Portable manifest. Tests create these links in a temporary copy and never execute them.",
+  "links": [
+    { "path": "outside-link", "target": "../outside-secret" },
+    { "path": "engine-config-link", "target": ".claude/settings.json" }
+  ]
+}

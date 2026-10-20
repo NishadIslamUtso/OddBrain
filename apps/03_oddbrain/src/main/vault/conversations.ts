@@ -162,6 +162,7 @@ export function syncConversation(
   store: VaultFiles,
   data: Obj,
   now: string,
+  captureSource: 'browser-extension' | 'oddbrain-app' | 'unknown' = 'unknown',
 ): Obj {
   if (
     !data ||
@@ -204,6 +205,8 @@ export function syncConversation(
     key,
     title,
     url: canonical,
+    acquisition: captureSource === 'browser-extension' ? 'paired-browser-extension' : captureSource === 'oddbrain-app' ? 'oddbrain-app' : 'legacy-or-imported-capture',
+    url_authorship: captureSource === 'browser-extension' ? 'browser-location-observed' : captureSource === 'oddbrain-app' ? 'app-recorded-not-owner-authored' : 'unknown-imported-metadata',
     title_source: text(c.title_source || "unknown", "title source", 100),
   };
   const metaPath = `${base}/conversation.json`;

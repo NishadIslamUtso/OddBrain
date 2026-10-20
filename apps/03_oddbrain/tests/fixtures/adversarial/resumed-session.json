@@ -1,0 +1,5 @@
+{
+  "sessionId": "fixture-native-session-never-use",
+  "expectedReceipt": "resumed",
+  "warning": "A saved ID is observed provenance, not proof that prior native context was imported or trusted."
+}
