@@ -9,7 +9,9 @@ import { createCommandRunner } from '../src/main/commands/runner'
 const SLOW = process.platform === 'win32' ? 'Start-Sleep -Seconds 30' : 'sleep 30'
 const roots: string[] = []
 const dir = () => { const path = mkdtempSync(join(tmpdir(), 'oddbrain-parallel-')); roots.push(path); return path }
-afterEach(() => { roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })); vi.restoreAllMocks() })
+// Windows may still hold a handle on a just-closed file; retry instead of
+// failing teardown, and never let cleanup hide the test's own result.
+afterEach(() => { for (const root of roots.splice(0)) { try { rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) } catch { /* left in %TEMP% */ } } vi.restoreAllMocks() })
 
 /**
  * Two isolated checkouts beside the selected folder. `acquire` holds each run

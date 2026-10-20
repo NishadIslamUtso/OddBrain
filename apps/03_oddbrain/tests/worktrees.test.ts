@@ -10,7 +10,9 @@ import { createWorktreeService } from '../src/main/worktrees/service'
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 const roots: string[] = []
 const dir = () => { const path = mkdtempSync(join(tmpdir(), 'oddbrain-worktree-')); roots.push(path); return path }
-afterEach(() => { roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })) })
+// Windows may still hold a handle on a just-closed git file; retry instead of
+// failing teardown, and never let cleanup hide the test's own result.
+afterEach(() => { for (const root of roots.splice(0)) { try { rmSync(root, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 }) } catch { /* left in %TEMP% */ } } })
 
 const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, encoding: 'utf8', env: { ...process.env, GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid', GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' } }).trim()
 /** A real repository with one commit, and an app-owned record folder beside it. */

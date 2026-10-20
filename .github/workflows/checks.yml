@@ -126,6 +126,10 @@ jobs:
       - name: Enforce browser coverage and explicit skip policy
         working-directory: apps/03_oddbrain
         run: node scripts/check-ci-tests.cjs junit-windows.xml
+      - name: Name the failing tests in the check output
+        if: always()
+        working-directory: apps/03_oddbrain
+        run: node scripts/name-windows-failures.cjs junit-windows.xml
       - name: Upload test evidence
         if: always()
         uses: actions/upload-artifact@v6
