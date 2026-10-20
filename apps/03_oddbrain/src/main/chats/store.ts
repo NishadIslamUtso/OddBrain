@@ -24,24 +24,49 @@ import { readRegularFileSync } from '../safeFile'
 import { mergeChatRecovery, type ChatRecoveryDocument, type ChatRecoveryMerge } from './recovery'
 
 const FORMAT = 'oddbrain-chats'
-const VERSION = 1
+const VERSION = 2
+const LEGACY_VERSION = 1
+const DELTA_FORMAT = 'oddbrain-chat-text-delta'
+const DELTA_VERSION = 1
 const INDEX_LIMIT = 8_000_000
 export const CHAT_LIMIT = 64_000_000
 export const CHAT_TOTAL_LIMIT = 512_000_000
 export const CHAT_COUNT_LIMIT = 20_000
+const CHAT_STORED_TOTAL_LIMIT = CHAT_TOTAL_LIMIT * 2
+const DELTA_DEPTH_LIMIT = 64
+const DELTA_EXTRA_LIMIT = 16_000_000
 const ID_LIMIT = 1_024
-const ITEM_FILE = /^[a-f0-9]{64}-[a-f0-9]{64}\.json$/
+const SNAPSHOT_FILE = /^([a-f0-9]{64})-([a-f0-9]{64})\.json$/
+const DELTA_FILE = /^([a-f0-9]{64})-([a-f0-9]{64})\.delta\.json$/
+const ITEM_FILE = /^(?:[a-f0-9]{64}-[a-f0-9]{64}\.json|[a-f0-9]{64}-[a-f0-9]{64}\.delta\.json)$/
 
-type IndexItem = { id: string; file: string; sha256: string; bytes: number }
+type RecordRef = {
+  file: string
+  fileSha256: string
+  fileBytes: number
+  depth: number
+  sha256: string
+  bytes: number
+}
+type IndexItem = RecordRef & { id: string }
 type ChatIndex = {
   format: typeof FORMAT
-  version: typeof VERSION
+  version: typeof LEGACY_VERSION | typeof VERSION
   revision: number
   currentChat: string
   items: IndexItem[]
 }
-
-type Loaded = { snapshot: ChatStoreSnapshot; index: ChatIndex | null; recovered: boolean }
+type DeltaDocument = {
+  format: typeof DELTA_FORMAT
+  version: typeof DELTA_VERSION
+  previous: RecordRef
+  result: { sha256: string; bytes: number }
+  prefix: number
+  remove: number
+  insert: string
+}
+type StoredChat = { text?: string; files: Set<string>; storedBytes: number }
+type Loaded = { snapshot: ChatStoreSnapshot; index: ChatIndex | null; recovered: boolean; records: Map<string, StoredChat> }
 type Prepared = { chats: Chat[]; currentChat: string; serialized: Array<{ chat: Chat; text: string; bytes: number }> }
 export type ChatRecoveryImportPlan = {
   prepared: Prepared
@@ -57,43 +82,117 @@ const digest = (value: string | Buffer): string => createHash('sha256').update(v
 const validId = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= ID_LIMIT && !/[\u0000-\u001f]/.test(value)
 
+function syncDirectory(file: string): void {
+  let descriptor: number | undefined
+  try { descriptor = openSync(dirname(file), 'r'); fsyncSync(descriptor) }
+  catch { /* Windows cannot always fsync directory handles; file fsync still completed. */ }
+  finally { if (descriptor !== undefined) try { closeSync(descriptor) } catch { /* best effort */ } }
+}
+
 function atomicWrite(file: string, value: string): void {
   noLinkedPath(file)
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 })
   const temporary = `${file}.${randomUUID()}.tmp`
-  const descriptor = openSync(temporary, 'wx', 0o600)
   try {
-    writeFileSync(descriptor, value, 'utf8')
-    fsyncSync(descriptor)
-  } finally {
-    closeSync(descriptor)
-  }
-  try {
+    const descriptor = openSync(temporary, 'wx', 0o600)
+    try {
+      writeFileSync(descriptor, value, 'utf8')
+      fsyncSync(descriptor)
+    } finally {
+      closeSync(descriptor)
+    }
     renameSync(temporary, file)
+    syncDirectory(file)
   } catch (error) {
     try { rmSync(temporary, { force: true }) } catch { /* the untouched temporary is not the record */ }
     throw error
   }
 }
 
+const validHash = (value: unknown): value is string => typeof value === 'string' && /^[a-f0-9]{64}$/.test(value)
+const validStoredNumber = (value: unknown, maximum: number): value is number => Number.isSafeInteger(value) && (value as number) >= 0 && (value as number) <= maximum
+
+function validRecordRef(value: unknown): value is RecordRef {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<RecordRef>
+  if (typeof candidate.file !== 'string' || !ITEM_FILE.test(candidate.file) || !validHash(candidate.fileSha256) || !validStoredNumber(candidate.fileBytes, CHAT_LIMIT) || !validStoredNumber(candidate.depth, DELTA_DEPTH_LIMIT) || !validHash(candidate.sha256) || !validStoredNumber(candidate.bytes, CHAT_LIMIT)) return false
+  const match = candidate.depth === 0 ? SNAPSHOT_FILE.exec(candidate.file) : DELTA_FILE.exec(candidate.file)
+  return !!match && match[2] === candidate.fileSha256 && (candidate.depth !== 0 || (candidate.fileSha256 === candidate.sha256 && candidate.fileBytes === candidate.bytes))
+}
+
 function parseIndex(bytes: Buffer): ChatIndex {
-  const raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as Partial<ChatIndex>
-  if (raw.format !== FORMAT || raw.version !== VERSION || !Number.isSafeInteger(raw.revision) || (raw.revision as number) < 1) {
+  const raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as { format?: unknown; version?: unknown; revision?: unknown; currentChat?: unknown; items?: unknown }
+  if (raw.format !== FORMAT || (raw.version !== LEGACY_VERSION && raw.version !== VERSION) || !Number.isSafeInteger(raw.revision) || (raw.revision as number) < 1) {
     throw Error('The conversation index has an unsupported or damaged header.')
   }
   if (typeof raw.currentChat !== 'string' || raw.currentChat.length > ID_LIMIT) throw Error('The conversation index has an invalid current chat.')
   if (!Array.isArray(raw.items) || raw.items.length > CHAT_COUNT_LIMIT) throw Error('The conversation index exceeds its safe item limit.')
   const items: IndexItem[] = []
   const ids = new Set<string>(), files = new Set<string>()
-  for (const candidate of raw.items) {
-    if (!candidate || !validId(candidate.id) || typeof candidate.file !== 'string' || !ITEM_FILE.test(candidate.file) || typeof candidate.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(candidate.sha256) || !Number.isSafeInteger(candidate.bytes) || candidate.bytes < 0 || candidate.bytes > CHAT_LIMIT) {
+  for (const rawItem of raw.items) {
+    const candidate = rawItem as Partial<IndexItem>
+    if (!candidate || !validId(candidate.id) || typeof candidate.file !== 'string' || !validHash(candidate.sha256) || !validStoredNumber(candidate.bytes, CHAT_LIMIT)) {
       throw Error('The conversation index contains an invalid item.')
     }
-    if (ids.has(candidate.id) || files.has(candidate.file)) throw Error('The conversation index contains a duplicate item.')
-    ids.add(candidate.id); files.add(candidate.file)
-    items.push({ id: candidate.id, file: candidate.file, sha256: candidate.sha256, bytes: candidate.bytes })
+    const item: IndexItem = raw.version === LEGACY_VERSION
+      ? { id: candidate.id, file: candidate.file, fileSha256: candidate.sha256, fileBytes: candidate.bytes, depth: 0, sha256: candidate.sha256, bytes: candidate.bytes }
+      : { id: candidate.id, file: candidate.file, fileSha256: candidate.fileSha256 as string, fileBytes: candidate.fileBytes as number, depth: candidate.depth as number, sha256: candidate.sha256, bytes: candidate.bytes }
+    if (!validRecordRef(item) || !item.file.startsWith(`${digest(item.id)}-`)) throw Error('The conversation index contains an invalid item record.')
+    if (ids.has(item.id) || files.has(item.file)) throw Error('The conversation index contains a duplicate item.')
+    ids.add(item.id); files.add(item.file); items.push(item)
   }
-  return { format: FORMAT, version: VERSION, revision: raw.revision as number, currentChat: raw.currentChat, items }
+  return { format: FORMAT, version: raw.version, revision: raw.revision as number, currentChat: raw.currentChat, items }
+}
+
+const recordRef = (item: IndexItem): RecordRef => ({
+  file: item.file,
+  fileSha256: item.fileSha256,
+  fileBytes: item.fileBytes,
+  depth: item.depth,
+  sha256: item.sha256,
+  bytes: item.bytes,
+})
+
+function deltaDocument(previous: IndexItem, before: string, after: string, afterHash: string, afterBytes: number): string {
+  let prefix = 0
+  const shared = Math.min(before.length, after.length)
+  while (prefix < shared && before.charCodeAt(prefix) === after.charCodeAt(prefix)) prefix++
+  let suffix = 0
+  while (suffix < shared - prefix && before.charCodeAt(before.length - suffix - 1) === after.charCodeAt(after.length - suffix - 1)) suffix++
+  const document: DeltaDocument = {
+    format: DELTA_FORMAT,
+    version: DELTA_VERSION,
+    previous: recordRef(previous),
+    result: { sha256: afterHash, bytes: afterBytes },
+    prefix,
+    remove: before.length - prefix - suffix,
+    insert: after.slice(prefix, after.length - suffix),
+  }
+  return JSON.stringify(document)
+}
+
+function parseDelta(bytes: Buffer, current: RecordRef, id: string): DeltaDocument {
+  const raw = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as Partial<DeltaDocument>
+  if (raw.format !== DELTA_FORMAT || raw.version !== DELTA_VERSION || !validRecordRef(raw.previous) || raw.previous.depth !== current.depth - 1 || !raw.previous.file.startsWith(`${digest(id)}-`)) {
+    throw Error('A conversation delta has an invalid predecessor.')
+  }
+  if (!raw.result || raw.result.sha256 !== current.sha256 || raw.result.bytes !== current.bytes || !validHash(raw.result.sha256) || !validStoredNumber(raw.result.bytes, CHAT_LIMIT)) {
+    throw Error('A conversation delta has an invalid result identity.')
+  }
+  if (!Number.isSafeInteger(raw.prefix) || (raw.prefix as number) < 0 || !Number.isSafeInteger(raw.remove) || (raw.remove as number) < 0 || typeof raw.insert !== 'string') {
+    throw Error('A conversation delta has invalid text bounds.')
+  }
+  return raw as DeltaDocument
+}
+
+function applyDelta(before: string, delta: DeltaDocument): string {
+  if (delta.prefix > before.length || delta.remove > before.length - delta.prefix) throw Error('A conversation delta does not fit its immutable predecessor.')
+  const after = `${before.slice(0, delta.prefix)}${delta.insert}${before.slice(delta.prefix + delta.remove)}`
+  // Character length is an allocation guard; the exact UTF-8 length and SHA-256
+  // are verified once on the final reconstruction below. The authenticated
+  // predecessor links make re-hashing every large intermediate unnecessary.
+  if (after.length > CHAT_LIMIT) throw Error('A conversation delta exceeds its reconstruction limit.')
+  return after
 }
 
 function prepare(chatsInput: unknown, currentInput: unknown): Prepared {
@@ -158,22 +257,47 @@ export function createChatStore(root: string) {
     for (const entry of [...moved].reverse()) renameSync(entry.recovery, entry.source)
   }
 
-  const readFrom = (file: string): { snapshot: ChatStoreSnapshot; index: ChatIndex } => {
+  const readItem = (item: IndexItem): { chat: Chat; record: StoredChat } => {
+    let current = recordRef(item), storedBytes = 0
+    const files = new Set<string>(), deltas: DeltaDocument[] = []
+    let text = ''
+    for (;;) {
+      if (files.has(current.file)) throw Error('A conversation record chain contains a cycle.')
+      const bytes = readRegularFileSync(itemPath(current.file), CHAT_LIMIT).bytes
+      if (bytes.length !== current.fileBytes || digest(bytes) !== current.fileSha256) throw Error('A saved conversation record no longer matches its immutable reference.')
+      files.add(current.file); storedBytes += bytes.length
+      if (storedBytes > CHAT_LIMIT + DELTA_EXTRA_LIMIT) throw Error('A conversation record chain exceeds its bounded read budget.')
+      if (current.depth === 0) {
+        text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
+        if (Buffer.byteLength(text) !== current.bytes || digest(text) !== current.sha256) throw Error('A saved conversation snapshot does not match its recorded content.')
+        break
+      }
+      const delta = parseDelta(bytes, current, item.id)
+      deltas.push(delta); current = delta.previous
+    }
+    for (let index = deltas.length - 1; index >= 0; index--) text = applyDelta(text, deltas[index])
+    if (Buffer.byteLength(text) !== item.bytes || digest(text) !== item.sha256) throw Error('A saved conversation chain does not match its index.')
+    const [chat] = normalizeChats([JSON.parse(text)])
+    if (!chat || chat.id !== item.id) throw Error('A saved conversation has the wrong identity. Original files are unchanged.')
+    return { chat, record: { text, files, storedBytes } }
+  }
+
+  const readFrom = (file: string): { snapshot: ChatStoreSnapshot; index: ChatIndex; records: Map<string, StoredChat> } => {
     noLinkedPath(root)
     const index = parseIndex(readRegularFileSync(file, INDEX_LIMIT).bytes)
-    const chats: Chat[] = []
-    let total = 0
+    const chats: Chat[] = [], records = new Map<string, StoredChat>()
+    let total = 0, storedTotal = 0
     for (const item of index.items) {
-      const bytes = readRegularFileSync(itemPath(item.file), CHAT_LIMIT).bytes
-      total += bytes.length
+      const loaded = readItem(item)
+      total += item.bytes; storedTotal += loaded.record.storedBytes
       if (total > CHAT_TOTAL_LIMIT) throw Error('Conversation history exceeds the 512 MB read limit. Original files are unchanged.')
-      if (bytes.length !== item.bytes || digest(bytes) !== item.sha256) throw Error('A saved conversation no longer matches its index. Original files are unchanged.')
-      const [chat] = normalizeChats([JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))])
-      if (!chat || chat.id !== item.id) throw Error('A saved conversation has the wrong identity. Original files are unchanged.')
-      chats.push(chat)
+      if (storedTotal > CHAT_STORED_TOTAL_LIMIT) throw Error('Conversation record chains exceed their bounded read budget. Original files are unchanged.')
+      chats.push(loaded.chat)
+      records.set(item.id, item.id === index.currentChat ? loaded.record : { files: loaded.record.files, storedBytes: loaded.record.storedBytes })
     }
     return {
       index,
+      records,
       snapshot: {
         initialized: true,
         revision: index.revision,
@@ -186,7 +310,7 @@ export function createChatStore(root: string) {
   const load = (): Loaded => {
     noLinkedPath(root)
     if (!existsSync(indexFile) && !existsSync(previousFile)) {
-      return { index: null, recovered: false, snapshot: { initialized: false, revision: 0, chats: [], currentChat: '' } }
+      return { index: null, recovered: false, records: new Map(), snapshot: { initialized: false, revision: 0, chats: [], currentChat: '' } }
     }
     try {
       const current = readFrom(indexFile)
@@ -255,28 +379,68 @@ export function createChatStore(root: string) {
   const commit = (prepared: Prepared, before: Loaded): Loaded => {
     noLinkedPath(root)
     mkdirSync(itemsRoot, { recursive: true, mode: 0o700 })
-    const items: IndexItem[] = []
+    const items: IndexItem[] = [], records = new Map<string, StoredChat>()
     const previousItems = new Map((before.index?.items || []).map(item => [item.id, item]))
+    const previousChats = new Map(before.snapshot.chats.map(chat => [chat.id, chat]))
     const changes = new Map(prepared.serialized.map(entry => [entry.chat.id, entry]))
+    let plannedStoredTotal = prepared.chats.reduce((sum, chat) => sum + (before.records.get(chat.id)?.storedBytes || 0), 0)
+    const retainedRecord = (chat: Chat, item: IndexItem, saved: StoredChat): StoredChat => {
+      if (chat.id !== prepared.currentChat) return { files: saved.files, storedBytes: saved.storedBytes }
+      if (saved.text) return saved
+      const text = JSON.stringify(chat)
+      return Buffer.byteLength(text) === item.bytes && digest(text) === item.sha256 ? { ...saved, text } : saved
+    }
     for (const chat of prepared.chats) {
-      const entry = changes.get(chat.id), previous = previousItems.get(chat.id)
-      // An unchanged chat keeps its already-verified immutable file. Streaming
-      // one answer therefore does not serialize, reread or rewrite every other conversation.
+      const entry = changes.get(chat.id), previous = previousItems.get(chat.id), previousRecord = before.records.get(chat.id)
+      // An unchanged chat keeps its already-verified immutable record chain.
       if (!entry) {
-        if (!previous) throw Error('The conversation index lost an unchanged chat. Nothing was replaced.')
-        items.push(previous); continue
+        if (!previous || !previousRecord) throw Error('The conversation index lost an unchanged chat. Nothing was replaced.')
+        items.push(previous); records.set(chat.id, retainedRecord(chat, previous, previousRecord)); continue
       }
       const contentHash = digest(entry.text)
-      if (previous?.sha256 === contentHash) { items.push(previous); continue }
-      const file = `${digest(entry.chat.id)}-${contentHash}.json`
-      const path = itemPath(file)
-      // The content-addressed item is immutable. Stage and rename it before the
-      // index can mention it, so a power loss can leave only an unreferenced temp
-      // file, never a half-written chat at its final name.
-      if (!existsSync(path)) atomicWrite(path, entry.text)
-      const saved = readRegularFileSync(path, CHAT_LIMIT).bytes
-      if (saved.length !== entry.bytes || digest(saved) !== contentHash) throw Error('A conversation file could not be verified. The active index was not replaced.')
-      items.push({ id: entry.chat.id, file, sha256: contentHash, bytes: entry.bytes })
+      if (previous?.sha256 === contentHash) {
+        if (!previousRecord) throw Error('The conversation index lost an unchanged chat record. Nothing was replaced.')
+        items.push(previous); records.set(chat.id, retainedRecord(chat, previous, previousRecord)); continue
+      }
+
+      let item: IndexItem | null = null, record: StoredChat | null = null
+      if (previous && previousRecord && previous.depth < DELTA_DEPTH_LIMIT) {
+        const previousChat = previousChats.get(chat.id)
+        const previousText = previousRecord.text || (previousChat ? JSON.stringify(previousChat) : '')
+        // A legacy snapshot that normalizes differently is compacted once rather
+        // than using a delta against bytes the renderer never saw.
+        if (Buffer.byteLength(previousText) === previous.bytes && digest(previousText) === previous.sha256) {
+          const delta = deltaDocument(previous, previousText, entry.text, contentHash, entry.bytes)
+          const deltaBytes = Buffer.byteLength(delta)
+          const candidateStored = previousRecord.storedBytes + deltaBytes
+          const extraBudget = Math.min(DELTA_EXTRA_LIMIT, Math.max(1_000_000, entry.bytes))
+          const chainBudget = Math.min(CHAT_LIMIT + DELTA_EXTRA_LIMIT, entry.bytes + extraBudget)
+          const candidateTotal = plannedStoredTotal - previousRecord.storedBytes + candidateStored
+          // Small immutable deltas are worthwhile; large rewrites and bounded-chain
+          // compaction become one fresh full snapshot instead.
+          if (deltaBytes < entry.bytes && candidateStored <= chainBudget && candidateTotal <= CHAT_STORED_TOTAL_LIMIT) {
+            const fileHash = digest(delta), file = `${digest(entry.chat.id)}-${fileHash}.delta.json`, path = itemPath(file)
+            if (!existsSync(path)) atomicWrite(path, delta)
+            const saved = readRegularFileSync(path, CHAT_LIMIT).bytes
+            if (saved.length !== deltaBytes || digest(saved) !== fileHash) throw Error('A conversation delta could not be verified. The active index was not replaced.')
+            item = { id: entry.chat.id, file, fileSha256: fileHash, fileBytes: deltaBytes, depth: previous.depth + 1, sha256: contentHash, bytes: entry.bytes }
+            record = { ...(chat.id === prepared.currentChat ? { text: entry.text } : {}), files: new Set([...previousRecord.files, file]), storedBytes: candidateStored }
+          }
+        }
+      }
+      if (!item || !record) {
+        const file = `${digest(entry.chat.id)}-${contentHash}.json`, path = itemPath(file)
+        // A full snapshot is still content-addressed and immutable. It is used for
+        // new chats, large edits, and bounded compaction—not each streaming tick.
+        if (!existsSync(path)) atomicWrite(path, entry.text)
+        const saved = readRegularFileSync(path, CHAT_LIMIT).bytes
+        if (saved.length !== entry.bytes || digest(saved) !== contentHash) throw Error('A conversation snapshot could not be verified. The active index was not replaced.')
+        item = { id: entry.chat.id, file, fileSha256: contentHash, fileBytes: entry.bytes, depth: 0, sha256: contentHash, bytes: entry.bytes }
+        record = { ...(chat.id === prepared.currentChat ? { text: entry.text } : {}), files: new Set([file]), storedBytes: entry.bytes }
+      }
+      if (previousRecord) plannedStoredTotal -= previousRecord.storedBytes
+      plannedStoredTotal += record.storedBytes
+      items.push(item); records.set(chat.id, record)
     }
     const index: ChatIndex = {
       format: FORMAT,
@@ -285,7 +449,9 @@ export function createChatStore(root: string) {
       currentChat: prepared.currentChat,
       items,
     }
-    const text = `${JSON.stringify(index, null, 2)}\n`
+    // The private index is compact so the 20,000-chat bound remains real even
+    // with authenticated delta-head metadata.
+    const text = `${JSON.stringify(index)}\n`
     if (Buffer.byteLength(text) > INDEX_LIMIT) throw Error('The conversation index exceeds its safe size. The active index was not replaced.')
 
     if (before.recovered) preserveDamagedIndex()
@@ -307,23 +473,21 @@ export function createChatStore(root: string) {
       currentChat: prepared.currentChat,
     }
 
-    // Keep every file named by either atomic index. Other immutable generations
-    // are incomplete staging or superseded streaming snapshots, not chat history.
+    // Keep every immutable record reachable from either complete atomic index.
+    // A crash during cleanup can therefore remove only already-unreferenced data.
     if (!before.recovered && before.index) {
-      const keep = new Set(index.items.map(item => item.file))
-      try {
-        const previous = parseIndex(readRegularFileSync(previousFile, INDEX_LIMIT).bytes)
-        for (const item of previous.items) keep.add(item.file)
-      } catch { /* a first write has no previous index */ }
+      const keep = new Set<string>()
+      for (const saved of records.values()) for (const file of saved.files) keep.add(file)
+      for (const saved of before.records.values()) for (const file of saved.files) keep.add(file)
       try {
         for (const name of readdirSync(itemsRoot)) {
           if (!ITEM_FILE.test(name) || keep.has(name)) continue
-          const path = itemPath(name)
-          if (lstatSync(path).isFile() && !lstatSync(path).isSymbolicLink()) rmSync(path)
+          const path = itemPath(name), stat = lstatSync(path)
+          if (stat.isFile() && !stat.isSymbolicLink()) rmSync(path)
         }
       } catch { /* cleanup cannot turn a verified save into a reported failure */ }
     }
-    return { snapshot: verified, index, recovered: false }
+    return { snapshot: verified, index, recovered: false, records }
   }
 
   const backupMigration = (input: ChatStoreMigration): void => {
@@ -355,7 +519,7 @@ export function createChatStore(root: string) {
         before = load(); cached = before
       } catch (error) {
         repair = true; cached = null; storageProblem = (error as Error).message
-        before = { index: null, recovered: false, snapshot: { initialized: false, revision: 0, chats: [], currentChat: '' } }
+        before = { index: null, recovered: false, records: new Map(), snapshot: { initialized: false, revision: 0, chats: [], currentChat: '' } }
       }
       const merge = mergeChatRecovery(before.snapshot.chats, before.snapshot.currentChat, before.snapshot.initialized, document)
       const prepared = prepare(merge.chats, merge.currentChat)
@@ -384,7 +548,7 @@ export function createChatStore(root: string) {
       try { load(); becameReadable = true } catch { /* the reviewed repair path remains necessary */ }
       if (becameReadable) throw Error('Conversation storage became readable while the recovery import was being reviewed. Nothing was imported; review it again.')
       const moved = quarantineIndexes()
-      const before: Loaded = { index: null, recovered: false, snapshot: { initialized: false, revision: 0, chats: [], currentChat: '' } }
+      const before: Loaded = { index: null, recovered: false, records: new Map(), snapshot: { initialized: false, revision: 0, chats: [], currentChat: '' } }
       try {
         cached = commit(plan.prepared, before)
         return cached.snapshot

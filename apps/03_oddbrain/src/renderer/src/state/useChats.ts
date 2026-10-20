@@ -7,9 +7,11 @@ import { bridge, isDemo } from '@/platform/bridge'
 /**
  * The conversation list, and which one is open.
  *
- * Desktop conversations live in the main process as an atomic index plus one
- * immutable file per changed chat. The browser-only preview keeps its sample
- * state in localStorage because it has no main process. On the first desktop
+ * Desktop conversations live in the main process behind an atomic index. Full
+ * snapshots and bounded text-delta records are immutable and content-addressed;
+ * long streams compact without weakening the previous complete revision. The
+ * browser-only preview keeps sample state in localStorage because it has no main
+ * process. On the first desktop
  * launch after this change, valid legacy localStorage is copied once; the exact
  * raw strings remain in the main-process recovery folder.
  */
@@ -20,8 +22,9 @@ const WRITE_INTERVAL_MS = 500
 const streamingWriteInterval = (chats: Chat[], current: string): number => {
   const active = chats.find(chat => chat.id === current)
   if (!active) return WRITE_INTERVAL_MS
-  // Large active chats are expensive immutable generations. Keep frequent small
-  // checkpoints, but stop rewriting multi-megabyte chats twice every second.
+  // Disk writes are incremental, but validating and transferring a very large
+  // active chat still costs CPU and memory. Keep frequent small checkpoints
+  // without serializing multi-megabyte state twice every second.
   const characters = JSON.stringify(active).length
   return characters > 1_000_000 ? 2_000 : characters > 250_000 ? 1_000 : WRITE_INTERVAL_MS
 }
