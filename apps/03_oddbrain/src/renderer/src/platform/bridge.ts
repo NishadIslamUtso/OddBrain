@@ -8,6 +8,7 @@ import type { NativeConversation, NativeSessionLink, NativeContextTarget } from 
 import type { FileReview, FileDecision } from '@shared/lib/changeReview'
 import type { TranscriptBridge } from '@shared/lib/transcripts'
 import type { ChatStoreBridge } from '@shared/lib/chatStore'
+import type { ReadTrustBridge } from '@shared/lib/readTrust'
 import type { EngineSourceFile } from '@shared/lib/media'
 import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
 import type { ThinkingMode } from '@shared/lib/engine'
@@ -595,6 +596,7 @@ export type EngineBridge = {
     get: () => Promise<{ token: string }>
     rotate: () => Promise<{ ok: boolean; token: string }>
   }
+  readTrust: ReadTrustBridge
   answer: (requestId: string, allow: boolean) => Promise<{ ok: boolean }>
   stop: () => Promise<{ ok: boolean }>
   onEvent: (listener: (event: EngineEvent) => void) => () => void
@@ -634,6 +636,13 @@ const demoEngineBridge: EngineBridge = {
     ok: false,
     answer: 'The engine works in the desktop app: this window is the interface only.',
   }),
+  readTrust: {
+    list: async () => ({ ok: false, error: 'Read approvals are enforced by the installed app.' }),
+    approve: async () => ({ ok: false, answer: 'Read approvals require the installed app.' }),
+    revoke: async () => ({ ok: false, answer: 'Read approvals require the installed app.' }),
+    migrateLegacy: async () => ({ ok: false, answer: 'Read approvals require the installed app.' }),
+    onChanged: () => () => undefined,
+  },
   answer: async () => ({ ok: false }),
   capabilities: async () => unverifiedCapabilities(DEFAULT_ENGINE, 'Model capabilities need the desktop app. No engine is connected in this preview.'),
   setThinking: async () => ({ ok: false, answer: 'Thinking lives in the desktop app.' }),

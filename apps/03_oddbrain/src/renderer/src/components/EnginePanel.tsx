@@ -16,7 +16,8 @@ import { useEngine, type EngineItem } from '@/state/engine'
 import { cancelBrief, clearCompactNotice, finishCompact, useCompact, writeBrief } from '@/state/compact'
 import { formatTotals, turnCopyText } from '@shared/lib/turnCopy'
 import { clearReviewError, runReview, useReview } from '@/state/review'
-import { mayRememberRead, readTrustRules, revokeReadTrust } from '@/state/readTrust'
+import { loadReadTrust } from '@/state/readTrust'
+import type { ReadTrustRule } from '@shared/lib/readTrust'
 import { parseWorkingNotesProposal } from '@shared/lib/workingNotesProposal'
 import { parseVaultSearchProposal, vaultFollowupDraft } from '@shared/lib/retrievalProposal'
 
@@ -41,12 +42,15 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
   const [kept, setKept] = useState<Kept[]>([])
   const [restored, setRestored] = useState('')
   const [restoreTarget, setRestoreTarget] = useState<Kept | null>(null), [showAllKept, setShowAllKept] = useState(false)
-  const [readRules, setReadRules] = useState(() => readTrustRules())
+  const [readRules, setReadRules] = useState<ReadTrustRule[]>([]), [readTrustNotice, setReadTrustNotice] = useState('')
   useEffect(() => {
-    const refresh = (): void => setReadRules(readTrustRules())
-    window.addEventListener('oddbrain:read-trust', refresh); window.addEventListener('storage', refresh)
-    return () => { window.removeEventListener('oddbrain:read-trust', refresh); window.removeEventListener('storage', refresh) }
+    let live = true
+    const api = getEngineApi().readTrust
+    const refresh = (): void => { if (!api) return; void loadReadTrust(api).then(result => { if (live) { setReadRules(result.view.rules); setReadTrustNotice(result.notice || result.view.notice || '') } }).catch(error => { if (live) setReadTrustNotice((error as Error).message) }) }
+    refresh(); window.addEventListener('oddbrain:read-trust', refresh); const stop = api?.onChanged?.(refresh)
+    return () => { live = false; stop?.(); window.removeEventListener('oddbrain:read-trust', refresh) }
   }, [])
+  const revokeRead = (id: string): void => { const api = getEngineApi().readTrust; if (!api) return; void api.revoke(id).then(answer => { if (answer.view) setReadRules(answer.view.rules); setReadTrustNotice(answer.answer) }).catch(() => setReadTrustNotice('The read approval could not be revoked. It remains visible until its state can be confirmed.')) }
   const restorePort = useMemo(() => restoreTarget ? { preview: () => bridge.engine.checkpoints.preview(restoreTarget.copy, restoreTarget.original), decide: (token: string, decision: 'allow' | 'deny') => bridge.engine.checkpoints.decide(token, decision) } : undefined, [restoreTarget])
   const finished = turn?.state === 'done' || turn?.state === 'error'
   const finalText = turn?.state === 'done' ? turn.items.filter((item): item is Extract<EngineItem, { text: string }> => item.kind === 'text').map(item => item.text).join('\n') : ''
@@ -73,7 +77,7 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
       return true
     }
   })
-  const readRuleList = readRules.length ? <details className="mt-2 text-[11.5px] text-muted"><summary>Saved read-only approvals ({readRules.length})</summary><p>Each rule matches one exact engine, workspace and complete Read file path. Commands, patterns, writes, deletion, publishing, provider changes and wider paths always need a fresh decision.</p><ul>{readRules.map(rule => <li key={rule.id} className="flex items-center gap-2"><code className="min-w-0 flex-1 truncate" title={`${rule.workspace} · ${rule.scope}`}>Read · {rule.scope}</code><button type="button" onClick={() => revokeReadTrust(rule.id)}>Revoke</button></li>)}</ul></details> : null
+  const readRuleList = readRules.length || readTrustNotice ? <details className="mt-2 text-[11.5px] text-muted"><summary>Read-only approvals ({readRules.filter(rule => rule.active !== false).length} active{readRules.some(rule => rule.active === false) ? ` · ${readRules.filter(rule => rule.active === false).length} recovery` : ''})</summary><p>These rules can approve only the native <strong>Read</strong> tool, for this exact engine and working folder. They never approve commands, search patterns, writes, deletion, publishing, providers, linked paths outside the workspace, or executable configuration.</p>{readRules.length ? <ul>{readRules.map(rule => <li key={rule.id} className="flex items-center gap-2"><code className="min-w-0 flex-1 truncate" title={`${rule.workspace} · ${rule.scope}`}>{rule.active === false ? 'Inactive recovery' : rule.mode === 'turn' ? 'This turn' : rule.mode === 'project' ? 'This project' : rule.mode === 'folder' ? 'All chats in folder' : 'Exact file'} · {rule.scope}</code>{rule.active === false ? null : <button type="button" onClick={() => revokeRead(rule.id)}>Revoke</button>}</li>)}</ul> : <p>No active approvals.</p>}{readTrustNotice ? <p role="status">{readTrustNotice}</p> : null}</details> : null
   const setPanel = (open: boolean): void => {
     setPanelOpen(open)
     try {
@@ -345,14 +349,7 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
             >
               Allow
             </button>
-            {mayRememberRead(turn.permissions[0]) ? <button
-              type="button"
-              onClick={() => void engine.rememberAndAnswerRead()}
-              title="Allows this request now and remembers only the exact engine, workspace, read-only tool and scope shown here. Revoke it below at any time."
-              className="rounded-lg border border-ok/50 px-2.5 py-1 text-[12px] text-ink hover:border-ok"
-            >
-              Always allow this exact read
-            </button> : null}
+            {turn.permissions[0].readScopes ? <details className="min-w-0 text-[11.5px] text-muted"><summary className="rounded-lg border border-ok/50 px-2.5 py-1 text-[12px] text-ink hover:border-ok">Allow more reads…</summary><p className="mt-1 max-w-md">Only native Read requests under <code>{turn.permissions[0].readScopes.folder}</code>. The selected scope stays bound to this exact engine and working folder and can be revoked below.</p><div className="mt-1 flex flex-wrap gap-1.5"><button type="button" onClick={() => void engine.rememberAndAnswerRead('file')}>Always this file</button><button type="button" onClick={() => void engine.rememberAndAnswerRead('turn')}>This folder · this turn</button>{turn.permissions[0].readScopes.project ? <button type="button" onClick={() => void engine.rememberAndAnswerRead('project')}>This folder · this project</button> : null}<button type="button" onClick={() => void engine.rememberAndAnswerRead('folder')}>This folder · all chats</button></div><p>Commands, writes, search tools, risky configuration and linked paths outside the working folder are never included.</p></details> : null}
             <button
               type="button"
               onClick={() => void engine.answer(false)}

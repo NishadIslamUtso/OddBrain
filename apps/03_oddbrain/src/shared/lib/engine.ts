@@ -184,7 +184,7 @@ export type EngineEvent = { sequence?: number; artifacts?: import('./nativeArtif
   | { kind: 'status'; text: string }
   | { kind: 'text'; text: string }
   | { kind: 'tool'; name: string; summary: string }
-  | { kind: 'permission'; requestId: string; tool: string; summary: string; detail?: string; file?: string; risk?: string }
+  | { kind: 'permission'; requestId: string; tool: string; summary: string; detail?: string; file?: string; risk?: string; readScopes?: import('./readTrust').ReadApprovalScopes }
   /** The engine opened a resumable session (its init sentence carries the id). */
   | { kind: 'session'; id: string }
   /** A piece of the engine's words as they form — the stream, not the summary. */

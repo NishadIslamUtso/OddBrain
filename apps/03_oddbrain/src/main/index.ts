@@ -13,6 +13,8 @@ import { strippedEnvironmentNames } from './engine/claudeCode'
 import { createSkillAuthoring, readInstalledSkills, inspectInstalledSkill, type SkillRoot } from './engine/installedSkills'
 import type { SkillDraft } from '../shared/lib/installedSkills'
 import { createPermissionTickets } from './engine/permissionTickets'
+import { createReadTrustStore, type ReadTrustCandidate } from './engine/readTrust'
+import { READ_TRUST_MODES, type ReadTrustMode } from '../shared/lib/readTrust'
 import { createNativeContext } from './nativeContext'
 import { checkNativeConversation } from '../shared/lib/nativeConversation'
 import { sessionKey } from './engine/socket'
@@ -327,6 +329,36 @@ function registerBridges(): void {
 
   const workQueue = createWorkQueue(join(app.getPath('userData'), 'work-queue'), () => JSON.stringify(settings.engine), () => createHash('sha256').update(JSON.stringify([settings.engine, settings.permissions, automation?.preferences().allowCloudInference !== false, resolveEngineCommand(settings.engine.id), settings.engine.cloudProvider === 'anthropic' ? keyStore?.get('anthropic') || '' : ''])).digest('hex'))
   const permissionTickets = createPermissionTickets(() => engine?.current() || null)
+  const readTrust = createReadTrustStore(join(app.getPath('userData'), 'read-trust-v2'))
+  const pendingReads = new Map<string, { candidate: ReadTrustCandidate; owner: number; file: string; folder: string }>()
+  const announceReadTrust = (): void => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('engine:read-trust-changed') }
+  const readTrustAnswer = <T,>(run: () => T) => { try { return { ok: true as const, ...run() } } catch (error) { return { ok: false as const, error: (error as Error).message || 'Read approvals could not be changed.' } } }
+  handle('engine:read-trust:list', () => readTrustAnswer(() => ({ view: readTrust.view() })))
+  handle('engine:read-trust:migrate', (_event, raw: string | null) => {
+    const result = readTrustAnswer(() => readTrust.migrateLegacy(raw, vaultRoot()))
+    if (!result.ok) return { ok: false as const, answer: result.error }
+    return { ok: true as const, view: result.view, answer: result.skipped ? `Migrated ${result.migrated} legacy exact-file approval(s); ${result.skipped} invalid or unavailable rule(s) were not activated. Exact recovery data was retained.` : `Migrated ${result.migrated} legacy exact-file approval(s) into main-process storage.` }
+  })
+  handle('engine:read-trust:revoke', (_event, id: string) => {
+    const result = readTrustAnswer(() => ({ view: readTrust.revoke(id) }))
+    if (result.ok) announceReadTrust()
+    return result.ok ? { ...result, answer: 'Read approval revoked.' } : { ok: false as const, answer: result.error }
+  })
+  handle('engine:read-trust:approve', (event, requestId: string, mode: ReadTrustMode) => {
+    if (!(READ_TRUST_MODES as readonly unknown[]).includes(mode)) return { ok: false as const, answer: 'Unknown read-approval scope. Nothing was approved.' }
+    const pending = pendingReads.get(requestId), checked = pending ? readTrust.eligible(pending.candidate) : null
+    if (!pending || pending.owner !== event.sender.id || !checked || checked.file !== pending.file || checked.folder !== pending.folder) return { ok: false as const, answer: 'That read request expired, belongs to another window, changed path, or is not eligible for broader approval. Nothing was approved.' }
+    let added: ReturnType<typeof readTrust.add>
+    try { readTrust.view(); added = readTrust.add(pending.candidate, mode) }
+    catch (error) { return { ok: false as const, answer: `No read was approved because the requested scope could not be saved visibly: ${(error as Error).message}` } }
+    if (!permissionTickets.answer(requestId, true)) {
+      if (added.created) try { readTrust.revoke(added.rule.id) } catch { /* remains visible and revocable if rollback could not be confirmed */ }
+      announceReadTrust()
+      return { ok: false as const, answer: 'The engine did not accept that read response. The new rule was rolled back when possible; inspect the visible approval list before retrying.' }
+    }
+    pendingReads.delete(requestId); announceReadTrust()
+    return { ok: true as const, answer: mode === 'turn' ? 'Allowed this read and enabled a revocable read-only folder approval for the rest of this turn.' : `Allowed this read and saved a revocable ${mode === 'file' ? 'exact-file' : mode === 'project' ? 'project-folder' : 'folder'} Read approval.`, view: readTrust.view(), rule: added.rule }
+  })
   let nativeWork = 0
   let activeTranscript: { transcriptId: string; chatId?: string; prompt: string } | undefined
   let preparing: { owner: number; controller: AbortController } | undefined
@@ -776,6 +808,7 @@ function registerBridges(): void {
   })
 
   const sendNative = async (event: Electron.IpcMainInvokeEvent, prompt: string, cwd: string, pictures: unknown = [], conversation?: unknown, originalFiles: unknown = []): Promise<{ ok: boolean; answer: string }> => {
+      const requestOwner = event.sender.id
       let context: ReturnType<typeof checkNativeConversation>
       try { context = checkNativeConversation(conversation) } catch (error) { return { ok: false, answer: (error as Error).message } }
       const text = typeof prompt === 'string' ? prompt : ''
@@ -800,7 +833,7 @@ function registerBridges(): void {
       if (dispatchingWork || engine.turnBusy()) return { ok: false, answer: 'An engine is already working. Stop it first, or wait for it to finish.' }
       dispatchingWork = true
       const ownWork = ++nativeWork
-      permissionTickets.clear()
+      permissionTickets.clear(); pendingReads.clear(); if (readTrust.clearTurns()) announceReadTrust()
       preparing = { owner: track(event.sender), controller: new AbortController() }
       try {
       const ownDispatch = workDispatchGeneration
@@ -964,10 +997,30 @@ function registerBridges(): void {
         return dispatchAttempt(dispatchedText)
       }, () => engine?.stop(), (event: EngineEvent) => {
         if (event.kind === 'permission') {
-          try { event = { ...event, requestId: permissionTickets.issue(event.requestId) } }
-          catch { engine?.stop(); event = { kind: 'error', text: 'The permission could not be bound to the active engine. Stop requested; no approval was sent.', chatId: context?.chatId } }
+          try {
+            const requestId = permissionTickets.issue(event.requestId)
+            const candidate: ReadTrustCandidate = { engine: usedEngine.id, workspace: usedEngine.workspace || vaultRoot(), tool: event.tool, file: event.file, risk: event.risk, projectId: context?.projectId || undefined, turnId: event.transcriptId || '' }
+            const eligible = readTrust.eligible(candidate)
+            let remembered: ReturnType<typeof readTrust.match>
+            try { remembered = eligible ? readTrust.match(candidate) : undefined } catch { remembered = undefined }
+            if (remembered) {
+              if (!permissionTickets.answer(requestId, true)) { engine?.stop(); event = { kind: 'error', text: 'A saved read-only approval matched, but the response could not be delivered. Stop requested; no approval is assumed.', chatId: context?.chatId, transcriptId: event.transcriptId } }
+              else {
+                const applied: EngineEvent = { kind: 'status', text: `Applied saved ${remembered.mode === 'turn' ? 'turn-folder' : remembered.mode === 'project' ? 'project-folder' : remembered.mode} Read approval: ${remembered.scope}`, chatId: context?.chatId, transcriptId: event.transcriptId }
+                automation?.ingest(applied); pushEngineEvent(applied)
+                void hookRunner.run('permission').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
+                return
+              }
+            } else {
+              if (eligible) pendingReads.set(requestId, { candidate, owner: requestOwner, file: eligible.file, folder: eligible.folder })
+              event = { ...event, requestId, ...(eligible ? { readScopes: { file: eligible.file, folder: eligible.folder, project: !!context?.projectId } } : {}) }
+            }
+          } catch { engine?.stop(); event = { kind: 'error', text: 'The permission could not be bound to the active engine. Stop requested; no approval was sent.', chatId: context?.chatId, transcriptId: event.transcriptId } }
         }
-        if (event.kind === 'done' || event.kind === 'error' || event.kind === 'closed') permissionTickets.clear()
+        if (event.kind === 'done' || event.kind === 'error' || event.kind === 'closed') {
+          permissionTickets.clear()
+          if (event.transcriptId) { if (readTrust.clearTurn(event.transcriptId)) announceReadTrust(); for (const [id, pending] of pendingReads) if (pending.candidate.turnId === event.transcriptId) pendingReads.delete(id) }
+        }
         automation?.ingest(event)
         pushEngineEvent(event)
         if (event.kind === 'done') void hookRunner.run('turn-done').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
@@ -1157,7 +1210,7 @@ function registerBridges(): void {
   handle('compact:save', (_event, input: { brief?: string; workspace?: string; at?: string }) => briefs.save(input ?? {}))
   handle('engine:fresh', (): { ok: boolean; answer: string } => {
     if (commandRunner.running()) return { ok: false, answer: 'An app command is active. Stop it or wait for its result before resetting the engine session.' }
-    preparing?.controller.abort(); permissionTickets.clear()
+    preparing?.controller.abort(); permissionTickets.clear(); pendingReads.clear(); if (readTrust.clearTurns()) announceReadTrust()
     workDispatchGeneration++; automation?.stopWork()
     if (!engine) return { ok: false, answer: 'The engine door is not open on this machine yet.' }
     try { engine.fresh(); return { ok: true, answer: 'Stop requested and the saved resume ID forgotten. The next task starts fresh; inspect any in-flight tool activity before retrying.' } }
@@ -1239,7 +1292,9 @@ function registerBridges(): void {
 
   handle('engine:answer', (_event, requestId: string, allow: boolean): { ok: boolean } => {
     if (typeof requestId !== 'string' || typeof allow !== 'boolean') return { ok: false }
-    return { ok: permissionTickets.answer(requestId, allow) }
+    const ok = permissionTickets.answer(requestId, allow)
+    if (ok) pendingReads.delete(requestId)
+    return { ok }
   })
 
   // The two folders skills deploy into: Claude Code reads its skills from
@@ -1365,7 +1420,7 @@ function registerBridges(): void {
 
   handle('engine:stop', () => {
     workflows.cancel(); commandRunner.cancel()
-    preparing?.controller.abort(); retryPreparing?.abort(); retryPreparing = undefined; overflowRetryPending = false; dispatchingWork = false; permissionTickets.clear()
+    preparing?.controller.abort(); retryPreparing?.abort(); retryPreparing = undefined; overflowRetryPending = false; dispatchingWork = false; permissionTickets.clear(); pendingReads.clear(); if (readTrust.clearTurns()) announceReadTrust()
     workDispatchGeneration++
     automation?.stopWork()
     engine?.stop()

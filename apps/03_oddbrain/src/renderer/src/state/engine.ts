@@ -26,7 +26,7 @@ import type {
 } from '@shared/lib/engine'
 import { DEFAULT_ENGINE } from '@shared/lib/engine'
 import { getEngineApi, bridge } from '@/platform/bridge'
-import { matchingReadTrust, rememberReadTrust } from './readTrust'
+import type { ReadApprovalScopes, ReadTrustMode } from '@shared/lib/readTrust'
 
 /** One finished thing the engine said, already shaped for drawing. */
 export type EngineItem =
@@ -38,7 +38,7 @@ export type EngineItem =
 
 /** A question from the engine that a person must answer. */
 const answering = new WeakSet<object>()
-export type EnginePermission = { requestId: string; tool: string; summary: string; detail?: string; file?: string; risk?: string }
+export type EnginePermission = { requestId: string; tool: string; summary: string; detail?: string; file?: string; risk?: string; readScopes?: ReadApprovalScopes }
 
 /** The engine's brains, as its own door reports them. */
 export type EngineModels = { loading: boolean; entries: EngineModelEntry[]; error: string }
@@ -132,7 +132,7 @@ type EngineStore = EngineState & {
   setOn(value: boolean): void
   send(prompt: string, pictures?: Array<{ mime: string; data: string }>, conversation?: NativeConversation, queuedId?: string, originalFiles?: EngineSourceFile[]): Promise<{ ok: boolean; answer: string; transcriptId?: string }>
   answer(allow: boolean): Promise<void>
-  rememberAndAnswerRead(): Promise<void>
+  rememberAndAnswerRead(mode: ReadTrustMode): Promise<void>
   stop(): Promise<void>
   /** Fold one wire event into the turn. Public so tests can drive it directly. */
   ingest(event: EngineEvent): void
@@ -355,13 +355,9 @@ const ingest = (event: EngineEvent): void => {
       detail: event.detail,
       file: event.file,
       risk: event.risk,
+      readScopes: event.readScopes,
     }
     turn.permissions.push(permission)
-    const remembered = matchingReadTrust(state.settings, permission)
-    if (remembered) {
-      turn.items.push({ kind: 'status', text: `Applied saved read-only approval for this exact ${permission.tool} scope: ${permission.summary}` })
-      queueMicrotask(() => { if (state.turn === turn && turn.permissions[0] === permission) void store.answer(true) })
-    }
   } else if (event.kind === 'done') {
     // The wire says the same goodbye twice (once as the engine's last words,
     // once as the result) — show it once.
@@ -385,6 +381,7 @@ const ingest = (event: EngineEvent): void => {
     }
     turn.state = 'done'
     turn.permissions = []
+    window.dispatchEvent(new Event('oddbrain:read-trust'))
     afterTurnClosed(turn)
   } else if (event.kind === 'closed') {
     // The engine process ended. After a finished task this changes nothing;
@@ -394,6 +391,7 @@ const ingest = (event: EngineEvent): void => {
       turn.items.push({ kind: 'status', text: 'engine stopped' })
       turn.state = 'done'
       turn.permissions = []
+      window.dispatchEvent(new Event('oddbrain:read-trust'))
       afterTurnClosed(turn)
     }
   } else {
@@ -409,6 +407,7 @@ const ingest = (event: EngineEvent): void => {
     }
     turn.state = 'error'
     turn.permissions = []
+    window.dispatchEvent(new Event('oddbrain:read-trust'))
     afterTurnClosed(turn)
   }
   emit()
@@ -574,30 +573,25 @@ const store: EngineStore = {
     try {
       const reply = await getEngineApi().answer(permission.requestId, allow)
       if (state.turn !== turn) return
-      if (reply.ok) {
-        turn.permissions = turn.permissions.filter(p => p !== permission)
-        const next = turn.permissions[0]
-        if (next && matchingReadTrust(state.settings, next)) queueMicrotask(() => void store.answer(true))
-      } else turn.items.push({ kind: 'status', text: 'The engine did not accept that permission response. It may have expired; no approval is assumed.' })
+      if (reply.ok) turn.permissions = turn.permissions.filter(p => p !== permission)
+      else turn.items.push({ kind: 'status', text: 'The engine did not accept that permission response. It may have expired; no approval is assumed.' })
     } catch { if (state.turn === turn) turn.items.push({ kind: 'status', text: 'The permission response could not be delivered. No approval is assumed.' }) }
     finally { answering.delete(permission); emit() }
   },
 
-  async rememberAndAnswerRead(): Promise<void> {
+  async rememberAndAnswerRead(mode: ReadTrustMode): Promise<void> {
     const turn = state.turn, permission = turn?.permissions[0]
-    if (!turn || !permission || answering.has(permission)) return
+    if (!turn || !permission?.readScopes || answering.has(permission)) return
     answering.add(permission)
     try {
-      const reply = await getEngineApi().answer(permission.requestId, true)
+      const reply = await getEngineApi().readTrust.approve(permission.requestId, mode)
       if (state.turn !== turn) return
+      turn.items.push({ kind: 'status', text: reply.answer })
       if (reply.ok) {
-        const saved = rememberReadTrust(state.settings, permission)
         turn.permissions = turn.permissions.filter(item => item !== permission)
-        turn.items.push({ kind: 'status', text: saved ? `Saved a revocable read-only approval for this exact ${permission.tool} scope.` : 'Allowed once; this operation is not eligible for a saved read-only approval.' })
-        const next = turn.permissions[0]
-        if (next && matchingReadTrust(state.settings, next)) queueMicrotask(() => void store.answer(true))
-      } else turn.items.push({ kind: 'status', text: 'The engine did not accept that permission response. No trust rule was saved.' })
-    } catch { if (state.turn === turn) turn.items.push({ kind: 'status', text: 'The permission response could not be delivered. No trust rule was saved.' }) }
+        window.dispatchEvent(new CustomEvent('oddbrain:read-trust', { detail: reply.view }))
+      }
+    } catch { if (state.turn === turn) turn.items.push({ kind: 'status', text: 'The read approval could not be delivered. No broader approval is assumed or saved.' }) }
     finally { answering.delete(permission); emit() }
   },
 

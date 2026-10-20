@@ -21,6 +21,7 @@ import type { ApprovalMode, EngineAvailability, EngineEvent, EngineId, EngineMod
 import type { HouseRules } from '../shared/lib/houseRules'
 import type { Project } from '../shared/lib/projects'
 import type { ChatStoreBridge, ChatStoreMigration, ChatStoreWrite } from '../shared/lib/chatStore'
+import type { ReadTrustBridge } from '../shared/lib/readTrust'
 import type {
   AdoptInput,
   ItemAnswer,
@@ -183,6 +184,13 @@ const engineApi = {
     get: (): Promise<{ token: string }> => ipcRenderer.invoke('extension-pair:get'),
     rotate: (): Promise<{ ok: boolean; token: string }> => ipcRenderer.invoke('extension-pair:rotate'),
   },
+  readTrust: {
+    list: () => ipcRenderer.invoke('engine:read-trust:list'),
+    approve: (requestId, mode) => ipcRenderer.invoke('engine:read-trust:approve', requestId, mode),
+    revoke: id => ipcRenderer.invoke('engine:read-trust:revoke', id),
+    migrateLegacy: raw => ipcRenderer.invoke('engine:read-trust:migrate', raw),
+    onChanged: listener => { const hear = (): void => listener(); ipcRenderer.on('engine:read-trust-changed', hear); return () => ipcRenderer.removeListener('engine:read-trust-changed', hear) },
+  } satisfies ReadTrustBridge,
   /** Answer one of the engine's permission cards. */
   answer: (requestId: string, allow: boolean): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('engine:answer', requestId, allow),

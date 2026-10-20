@@ -1,38 +1,22 @@
-import type { EnginePermission } from './engine'
-import type { EngineSettings } from '@shared/lib/engine'
+import type { ReadTrustBridge, ReadTrustView } from '@shared/lib/readTrust'
 
-const KEY = 'oddbrain:read-trust:v1'
-export type ReadTrustRule = { id: string; engine: string; workspace: string; tool: 'Read'; scope: string; summary: string; createdAt: string }
+const LEGACY_KEY = 'oddbrain:read-trust:v1'
 
-const read = (): ReadTrustRule[] => {
-  try {
-    const value = JSON.parse(localStorage.getItem(KEY) || '[]') as unknown
-    if (!Array.isArray(value)) return []
-    return value.filter((item): item is ReadTrustRule => !!item && typeof item === 'object' &&
-      typeof (item as ReadTrustRule).id === 'string' && typeof (item as ReadTrustRule).engine === 'string' &&
-      typeof (item as ReadTrustRule).workspace === 'string' && (item as ReadTrustRule).tool === 'Read' &&
-      typeof (item as ReadTrustRule).scope === 'string' && (item as ReadTrustRule).scope.length > 0 && (item as ReadTrustRule).scope.length <= 32_000 &&
-      typeof (item as ReadTrustRule).summary === 'string' && (item as ReadTrustRule).summary.length > 0 && (item as ReadTrustRule).summary.length <= 500 &&
-      typeof (item as ReadTrustRule).createdAt === 'string').slice(0, 100)
-  } catch { return [] }
-}
-const write = (rules: ReadTrustRule[]): void => localStorage.setItem(KEY, JSON.stringify(rules.slice(-100)))
-const identity = (settings: EngineSettings, permission: EnginePermission): string =>
-  JSON.stringify([settings.id, settings.workspace, permission.tool, permission.file])
-
-export const readTrustRules = (): ReadTrustRule[] => read()
-/** Only a complete Read file path is stable enough to remember. Truncated summaries, commands and patterns never qualify. */
-export const mayRememberRead = (permission: EnginePermission): boolean => permission.tool === 'Read' && !!permission.file && !permission.risk
-export const matchingReadTrust = (settings: EngineSettings, permission: EnginePermission): ReadTrustRule | undefined =>
-  mayRememberRead(permission) ? read().find(rule => rule.id === identity(settings, permission)) : undefined
-export const rememberReadTrust = (settings: EngineSettings, permission: EnginePermission): ReadTrustRule | null => {
-  if (!mayRememberRead(permission)) return null
-  const rule: ReadTrustRule = { id: identity(settings, permission), engine: settings.id, workspace: settings.workspace, tool: 'Read', scope: permission.file!, summary: permission.summary, createdAt: new Date().toISOString() }
-  write([...read().filter(item => item.id !== rule.id), rule])
-  window.dispatchEvent(new Event('oddbrain:read-trust'))
-  return rule
-}
-export const revokeReadTrust = (id: string): void => {
-  write(read().filter(rule => rule.id !== id))
-  window.dispatchEvent(new Event('oddbrain:read-trust'))
+/**
+ * The old renderer rules are handed to the main process verbatim. They are
+ * removed only after the main process has retained recovery data and reported
+ * a complete migration; malformed or over-limit originals stay untouched.
+ */
+export async function loadReadTrust(api: ReadTrustBridge): Promise<{ view: ReadTrustView; notice: string }> {
+  let raw: string | null = null
+  try { raw = localStorage.getItem(LEGACY_KEY) } catch { /* desktop rules remain readable without legacy renderer storage */ }
+  if (raw !== null) {
+    const migrated = await api.migrateLegacy(raw)
+    if (!migrated.ok || !migrated.view) throw Error(migrated.answer || 'Legacy read approvals could not be migrated. Their renderer copy was kept.')
+    try { localStorage.removeItem(LEGACY_KEY) } catch { /* exact recovery is already in the main process */ }
+    return { view: migrated.view, notice: migrated.answer }
+  }
+  const answer = await api.list()
+  if (!answer.ok || !answer.view) throw Error(answer.error || 'Saved read approvals could not be read. None were changed.')
+  return { view: answer.view, notice: answer.view.notice || '' }
 }

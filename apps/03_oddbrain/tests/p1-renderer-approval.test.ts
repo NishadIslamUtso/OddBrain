@@ -2,12 +2,13 @@
 import { beforeEach, afterEach, expect, test, vi } from 'vitest'
 import { engineStore, resetEngineForTests } from '../src/renderer/src/state/engine'
 import { DEFAULT_ENGINE } from '../src/shared/lib/engine'
-let answer: ReturnType<typeof vi.fn>
+let answer: ReturnType<typeof vi.fn>, approve: ReturnType<typeof vi.fn>
 beforeEach(async () => {
-  resetEngineForTests(); answer = vi.fn().mockResolvedValue({ ok: true })
+  resetEngineForTests(); answer = vi.fn().mockResolvedValue({ ok: true }); approve = vi.fn().mockResolvedValue({ ok: true, answer: 'Saved project-folder Read approval.', view: { rules: [] } })
   Object.assign(window, { api: {}, engineApi: {
     read: async () => ({ engine: DEFAULT_ENGINE, running: false, history: [] }),
     send: async () => ({ ok: true, answer: 'started' }), answer,
+    readTrust: { approve, list: async () => ({ ok: true, view: { rules: [] } }), revoke: async () => ({ ok: true, answer: '', view: { rules: [] } }), migrateLegacy: async () => ({ ok: true, answer: '', view: { rules: [] } }) },
     onEvent: () => () => {}, onPullEvent: () => () => {},
   } })
   await engineStore().init(); await engineStore().send('Task requiring a permission')
@@ -41,4 +42,13 @@ test('a late acknowledgement cannot consume a new turn’s same-named request', 
   finish({ ok: true }); await old
   expect(engineStore().turn!.permissions).toHaveLength(1)
   expect(engineStore().turn!.permissions[0].summary).toBe('another tool')
+})
+test('broader read approval uses the main-process ticket and named scope', async () => {
+  engineStore().turn!.permissions = []
+  engineStore().ingest({ kind: 'permission', requestId: 'read-ticket', tool: 'Read', summary: 'notes.txt', file: 'notes.txt', readScopes: { file: 'C:\\work\\notes.txt', folder: 'C:\\work', project: true } })
+  await engineStore().rememberAndAnswerRead('project')
+  expect(approve).toHaveBeenCalledExactlyOnceWith('read-ticket', 'project')
+  expect(answer).not.toHaveBeenCalled()
+  expect(engineStore().turn!.permissions).toEqual([])
+  expect(engineStore().turn!.items).toContainEqual({ kind: 'status', text: 'Saved project-folder Read approval.' })
 })

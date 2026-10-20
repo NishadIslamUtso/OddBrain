@@ -705,4 +705,17 @@ PR checks no longer run both `push` and `pull_request` for the same feature-bran
 
 Focused storage tests cover exact migration recovery, immutable per-chat generations, unchanged-file reuse, deletion/order updates, stale revision refusal, damaged-index fallback and preservation, malformed-legacy refusal, renderer throttling, changed-only IPC and awaited commits. The complete local suite passes **1,569 tests across 215 files**, with the same two environment-gated real-browser suites skipped because this sandbox has no configured Chromium runtime. TypeScript, security policy and the Electron/offline production build also pass under an explicitly invoked **Node 24.10.0**; the focused storage/hook tests pass there too. The full suite used the sandbox shell’s default Node 22, so CI remains the authoritative complete Node 24 run. The production dependency audit reports zero known vulnerabilities. Existing CSS `::highlight` optimizer notices remain. Real Windows migration, abrupt-power-loss and target-laptop acceptance remain required.
 
-Next implementation priority is persistent, visible and revocable folder/turn/project read scope; it must not silently evict older trust rules or expand engine/tool authority.
+The next priority at this checkpoint was persistent, visible and revocable folder/turn/project read scope without silent eviction or wider authority; its completion is recorded below.
+
+
+## Main-process read scope — 2026-10-20
+
+Native Read approvals are now decided and enforced in the main process instead of by a renderer `localStorage` match. A live permission ticket can be allowed once or expanded explicitly to one exact file, that file’s folder for the current turn, that folder for the current project, or that folder for all chats using the exact same engine and working folder. Turn rules disappear when the recorded turn closes or work is stopped/reset. Persistent rules are visible across app windows and individually revocable.
+
+Every match re-resolves the existing file and active workspace. Only the exact native `Read` tool qualifies; risky executable-configuration reads, writes, commands, Glob/Grep, another engine/workspace/project/turn, and linked targets outside the active workspace receive no inherited authority. Broader approval is bound to the sender window and the live one-use native permission ticket. The old renderer rules migrate as exact-file rules; exact raw migration input is retained privately, including rules for the default vault workspace.
+
+Persistent rules use bounded atomic current/previous files under `userData/read-trust-v2`. The 1,000-rule bound refuses additions instead of evicting older choices. A damaged newest file never activates its previous rules: previous entries are shown only as inactive recovery evidence, and a later explicit addition preserves damaged bytes before starting a safe active set. Revoked rules therefore cannot become active through fallback.
+
+Fresh Node **24.10.0** typecheck, security policy, focused trust/migration/renderer contract tests and Electron/offline builds pass. A clean consolidated Node 24 run passes **1,575 tests across 216 files**, with the same two Chromium-gated suites skipped. Production audit remains at zero known vulnerabilities. The first four-worker run overloaded the compiler-contract suite’s 30-second setup hook; that suite passed alone and the complete two-worker run then passed cleanly. No dependency or lockfile changed.
+
+Real signed-in Claude Code permission behavior and hands-on Windows 11 path/reparse acceptance remain external target-machine checks; agy still exposes no interactive permission channel, so this work does not invent one.
