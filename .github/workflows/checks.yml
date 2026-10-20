@@ -4,9 +4,6 @@
 # A red X here fails the push now. It earned that.
 name: checks
 on: [push, pull_request]
-concurrency:
-  group: checks-${{ github.event.pull_request.head.sha || github.sha }}
-  cancel-in-progress: true
 jobs:
   linux:
     runs-on: ubuntu-24.04
