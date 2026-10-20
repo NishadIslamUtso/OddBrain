@@ -64,6 +64,30 @@ test('Markdown retains all saved messages, long text, artifact revisions and att
   const text = chatMarkdown({ id: 'chat', title: 'Full chat', messages: [...messages, { id: 'last', role: 'user', content: 'LAST', attachments: [{ id: 'a', name: 'note.txt', text: 'Full attachment', extraction: 'All text' }], artifacts: [{ id: 'art', title: 'page', type: 'html', versions: [{ content: '<p>one</p>' }, { content: '<p>two</p>' }] }] }] })
   expect(text).toContain(messages[0].content); expect(text).toContain(messages[40].content); expect(text).toContain('LAST'); expect(text).toContain('<p>one</p>'); expect(text).toContain('<p>two</p>'); expect(text).toContain('Full attachment')
 })
+test('validated image bytes are retained before dispatch and digest-checked on download', () => {
+  const root = folder(), archive = createTurnArchive(root)
+  const data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII='
+  const id = archive.begin({ ...input, engine: 'claude-code', pictures: 1, images: [{ mime: 'image/png', data }] })
+  const record = archive.read(id)
+  expect(record.header.images).toEqual([{ id: 'image-1', mime: 'image/png', bytes: Buffer.from(data, 'base64').length, sha256: expect.stringMatching(/^[a-f0-9]{64}$/) }])
+  const download = archive.image(id, 'image-1')
+  expect(download).toMatchObject({ id: 'image-1', mime: 'image/png', data, verified: true })
+  if (process.platform !== 'win32') expect(statSync(join(root, `${id}.images`, 'image-1.png')).mode & 0o777).toBe(0o600)
+  writeFileSync(join(root, `${id}.images`, 'image-1.png'), Buffer.from('changed'))
+  expect(() => archive.image(id, 'image-1')).toThrow(/size|integrity/)
+})
+test('older count-only image records stay honest about unavailable bytes', () => {
+  const archive = createTurnArchive(folder()), id = archive.begin({ ...input, pictures: 1 })
+  const record = archive.read(id)
+  expect(record.header.images).toBeUndefined()
+  expect(transcriptMarkdown(record)).toContain('older record kept only their count')
+  expect(() => archive.image(id, 'image-1')).toThrow('did not retain')
+})
+test('image/archive count mismatches and disguised formats refuse before a transcript starts', () => {
+  const archive = createTurnArchive(folder())
+  expect(() => archive.begin({ ...input, pictures: 0, images: [{ mime: 'image/png', data: 'iVBORw0KGgo=' }] })).toThrow('count does not match')
+  expect(() => archive.begin({ ...input, pictures: 1, images: [{ mime: 'image/png', data: Buffer.from('not png').toString('base64') }] })).toThrow('does not match its declared format')
+})
 test('native result copies are not repeated after streamed text and notices', () => {
   const archive = createTurnArchive(folder()), id = archive.begin(input)
   archive.append(id, { kind: 'delta', text: 'Unique reply' }); archive.append(id, { kind: 'status', text: 'tool ended' }); archive.append(id, { kind: 'done', text: 'Unique reply', alreadyDisplayed: true })

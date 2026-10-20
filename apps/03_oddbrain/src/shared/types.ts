@@ -46,8 +46,9 @@ export type Attachment = {
   /** MIME type as the browser reported it. */
   mime?: string
   kind?: AttachmentKind
-  /** Base64 image bytes, with no `data:` prefix. Images only, and not kept in
-   *  the transcript — it lives in IndexedDB and is loaded when it is needed. */
+  /** Base64 image bytes, with no `data:` prefix. Images live in IndexedDB for
+   *  chat reuse; a native send also retains and hashes the exact dispatched bytes
+   *  in the private main-process turn archive. */
   data?: string
   /** What will actually read this picture: 'direct', or the bridge model's name. */
   seenBy?: string
@@ -73,7 +74,7 @@ export type Citation = { id: string; url: string; label: string }
 export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error'
 
 export type Message = {
-  nativeRecord?: { pictures?: number; artifacts?: import('./lib/nativeArtifacts').NativeArtifactLink[]; transcriptId: string; chatId: string; engine: 'claude-code' | 'agy'; sessionId: string | null; context?: import('./lib/nativeConversation').ContextReceipt }
+  nativeRecord?: { pictures?: number; images?: import('./lib/transcripts').TranscriptImage[]; artifacts?: import('./lib/nativeArtifacts').NativeArtifactLink[]; transcriptId: string; chatId: string; engine: 'claude-code' | 'agy'; sessionId: string | null; context?: import('./lib/nativeConversation').ContextReceipt }
   id: string
   role: Role
   content: string

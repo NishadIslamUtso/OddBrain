@@ -320,6 +320,7 @@ function registerBridges(): void {
   handle('transcripts:list', (_event, before: string = '') => transcriptAnswer(() => turnArchive.list(before)))
   handle('transcripts:read', (_event, id: string) => transcriptAnswer(() => turnArchive.read(id)))
   handle('transcripts:raw', (_event, id: string) => transcriptAnswer(() => turnArchive.raw(id)))
+  handle('transcripts:image', (_event, id: string, imageId: string) => transcriptAnswer(() => turnArchive.image(id, imageId)))
   mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
   marketplaceService = createMarketplaceService({ file: join(app.getPath('userData'), 'marketplaces.json') })
   agyMarketplaceService = createAgyMarketplaceService({ cacheFile: join(app.getPath('home'), '.gemini', 'antigravity', 'cache', 'marketplaces', 'antigravity-plugins-official', 'marketplace.json') })
@@ -823,7 +824,7 @@ function registerBridges(): void {
       receipt.characters = dispatchedText.length
       receipt.revision = createHash('sha256').update(JSON.stringify([receipt.revision, appInstructions])).digest('hex')
       const artifactBefore = snapshotNativeArtifacts(usedEngine.workspace || vaultRoot())
-      const sent = dispatchRecordedTurn(turnArchive, { prompt: dispatchedText, userPrompt: text, chatId: context?.chatId, context: receipt, engine: usedEngine.id, model: usedEngine.model, workspace: usedEngine.workspace || vaultRoot(), pictures: images.length }, receive => engine!.send(dispatchedText, {
+      const sent = dispatchRecordedTurn(turnArchive, { prompt: dispatchedText, userPrompt: text, chatId: context?.chatId, context: receipt, engine: usedEngine.id, model: usedEngine.model, workspace: usedEngine.workspace || vaultRoot(), pictures: images.length, images }, receive => engine!.send(dispatchedText, {
         chatId: context?.chatId,
         cwd: usedEngine.workspace || vaultRoot(),
         settings: usedEngine,

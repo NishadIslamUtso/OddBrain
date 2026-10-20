@@ -23,7 +23,7 @@ export function recordNativeTranscript(chat: Chat, record: Transcript): Chat {
 
   const errors = record.events.filter(e => e.kind === 'error').map(e => e.text).join('\n')
   const session = record.events.filter(e => e.kind === 'session').at(-1)
-  const nativeRecord = { pictures: record.header.pictures, artifacts: record.events.flatMap(event => event.artifacts || []), transcriptId: record.header.id, chatId: chat.id, engine: record.header.engine, sessionId: session?.kind === 'session' ? session.id : null, context: record.header.context }
+  const nativeRecord = { pictures: record.header.pictures, ...(record.header.images !== undefined ? { images: record.header.images } : {}), artifacts: record.events.flatMap(event => event.artifacts || []), transcriptId: record.header.id, chatId: chat.id, engine: record.header.engine, sessionId: session?.kind === 'session' ? session.id : null, context: record.header.context }
   const at = record.header.at
   const messages: Message[] = [
     { id: record.header.id + ':user', role: 'user', content: record.userPrompt ?? record.prompt, timestamp: at, nativeRecord, status: 'complete' },

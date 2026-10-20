@@ -57,7 +57,7 @@ export default function MessageRow({
         <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-[14px_14px_4px_14px] bg-card px-3.5 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
           {message.content}
           <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div>
-          {!!message.nativeRecord?.pictures && <p className="mt-1 text-[11px] text-muted">{message.nativeRecord.pictures} image(s) accompanied this request. This text record does not contain the image bytes.</p>}
+          {!!message.nativeRecord?.pictures && (message.nativeRecord.images === undefined ? <p className="mt-1 text-[11px] text-muted">{message.nativeRecord.pictures} image(s) accompanied this request. This older record did not retain their bytes.</p> : <p className="mt-1 text-[11px] text-muted">{message.nativeRecord.images.length} image(s) are retained separately in the original transcript. <button type="button" className="ob-text-button" onClick={() => window.dispatchEvent(new CustomEvent('app:show-transcript', { detail: message.nativeRecord?.transcriptId }))}>Review or download originals</button></p>)}
           {message.editedAt && <span className="mt-1 block text-[11px] text-muted">edited</span>}
           {(message.attachments || []).length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5">

@@ -315,7 +315,7 @@ const demoBridge: DesktopBridge = {
     decode: async input => ({ ok: false, name: input.name, error: 'Native decoding and provider uploads require the desktop app. No file was sent.' }),
     dictate: async () => ({ ok: false, name: 'Dictation', error: 'Offline Windows dictation requires the desktop app.' }), cancel: async () => {},
   },
-  transcripts: { raw: async () => ({ ok: false as const, error: 'Original transcripts require the desktop app.' }), list: async () => ({ ok: false, error: 'Native transcripts require the desktop app. Sample chats remain separate.' }), read: async () => ({ ok: false, error: 'Native transcripts require the desktop app.' }) },
+  transcripts: { raw: async () => ({ ok: false as const, error: 'Original transcripts require the desktop app.' }), image: async () => ({ ok: false as const, error: 'Retained transcript images require the desktop app.' }), list: async () => ({ ok: false, error: 'Native transcripts require the desktop app. Sample chats remain separate.' }), read: async () => ({ ok: false, error: 'Native transcripts require the desktop app.' }) },
   marketplace: { inspect: unavailableMarket, sources: async () => [], browse: unavailableMarket, probe: unavailableMarket, installed: unavailableMarket, plan: unavailableMarket, confirm: unavailableMarket, cancel: async () => {} },
   automation: demoAutomation,
   memoryWorkspace: demoMemoryWorkspace,

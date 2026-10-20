@@ -5,7 +5,7 @@ import { beforeEach, afterEach, expect, test, vi } from 'vitest'
 import SavedDrafts from '../src/renderer/src/ui/SavedDrafts'
 import TranscriptHistory from '../src/renderer/src/ui/TranscriptHistory'
 import { draftStash } from '../src/shared/lib/draftStash'
-const fixture = vi.hoisted(() => ({ list: vi.fn(), read: vi.fn() }))
+const fixture = vi.hoisted(() => ({ list: vi.fn(), read: vi.fn(), image: vi.fn() }))
 vi.mock('../src/renderer/src/platform/bridge', () => ({ bridge: { transcripts: fixture } }))
 let root: Root, host: HTMLDivElement
 beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); localStorage.clear(); vi.clearAllMocks(); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
@@ -29,8 +29,20 @@ test('full transcript view shows complete text and never offers a misleading res
   fixture.read.mockResolvedValue({ ok: true, value: { header, prompt: 'Original request', events: [{ kind: 'text', text: 'x'.repeat(5000) + 'UNCLIPPED END' }], state: 'interrupted', incomplete: true } })
   await act(async () => root.render(<TranscriptHistory />)); await click('Recorded task')
   expect(host.querySelector('pre')?.textContent).toContain('UNCLIPPED END')
-  expect(host.textContent).toContain('interrupted'); expect(host.textContent).toContain('Image bytes are not stored')
+  expect(host.textContent).toContain('interrupted'); expect(host.textContent).toContain('bytes were never retained')
   expect([...host.querySelectorAll('button')].some(b => /resume|run task/i.test(b.textContent || ''))).toBe(false)
+})
+test('retained transcript images require a matching main-process verification before download', async () => {
+  const image = { id: 'image-1', mime: 'image/png' as const, bytes: 8, sha256: 'a'.repeat(64) }
+  const header = { id: 'retained', at: '2026-10-19T00:00:00Z', title: 'Image task', engine: 'claude-code', model: '', workspace: '/work', pictures: 1, images: [image] }
+  fixture.list.mockResolvedValue({ ok: true, value: { entries: [header], next: '', notice: '' } })
+  fixture.read.mockResolvedValue({ ok: true, value: { header, prompt: 'Look', events: [{ kind: 'done', text: 'Seen' }], state: 'done', incomplete: false } })
+  fixture.image.mockResolvedValue({ ok: true, value: { ...image, data: 'iVBORw0KGgo=', name: 'image.png', verified: true } })
+  Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:verified'), revokeObjectURL: vi.fn() })
+  const downloaded = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
+  await act(async () => root.render(<TranscriptHistory />)); await click('Image task'); await click('Download verified image-1')
+  expect(fixture.image).toHaveBeenCalledWith('retained', 'image-1'); expect(downloaded).toHaveBeenCalledOnce(); downloaded.mockRestore()
+  expect(host.textContent).toContain('passed its recorded SHA-256 and size checks')
 })
 test('late transcript reads cannot update an unmounted history view', async () => {
   let finish!: (value: unknown) => void

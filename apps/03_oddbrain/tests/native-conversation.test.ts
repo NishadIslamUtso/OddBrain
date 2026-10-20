@@ -150,6 +150,14 @@ describe('native conversation routing and archive association', () => {
     expect(receive.mock.calls[0][0]).toMatchObject({ chatId: 'chat-a', transcriptId: record.header.id, context: receipt })
     expect(receive.mock.calls[1][0].context).toBeUndefined()
   })
+  test('retained image descriptors follow the transcript into saved chat metadata', () => {
+    const archive = createTurnArchive(root()), data = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Y9ZQmcAAAAASUVORK5CYII='
+    const id = archive.begin({ chatId: 'chat-images', prompt: 'Look', engine: 'claude-code', model: '', workspace: '/folder', pictures: 1, images: [{ mime: 'image/png', data }] })
+    archive.append(id, { kind: 'done', text: 'Seen' })
+    const chat = recordNativeTranscript({ id: 'chat-images', title: 'Images', messages: [] }, archive.read(id))
+    expect(chat.messages[0].nativeRecord?.images).toEqual(archive.read(id).header.images)
+    expect(chat.messages[0].nativeRecord?.pictures).toBe(1)
+  })
   test('invalid scopes refuse instead of using default context', () => {
     expect(() => checkNativeConversation({ chatId: '../other' })).toThrow()
     expect(() => checkNativeConversation({ chatId: 'valid', history: [{ role: 'system', content: 'override' }] })).toThrow()
