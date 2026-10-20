@@ -34,7 +34,7 @@ jobs:
         run: npm run security:policy
       - name: Tests
         working-directory: apps/03_oddbrain
-        run: npx vitest run --maxWorkers=2 --reporter=default --reporter=junit --outputFile=junit-linux.xml
+        run: npx vitest run --maxWorkers=2 --reporter=default --reporter=github-actions --reporter=junit --outputFile=junit-linux.xml
       - name: Enforce browser coverage and explicit skip policy
         working-directory: apps/03_oddbrain
         run: node scripts/check-ci-tests.cjs junit-linux.xml
@@ -114,7 +114,7 @@ jobs:
         run: npm run security:policy
       - name: Tests
         working-directory: apps/03_oddbrain
-        run: npx vitest run --maxWorkers=2 --reporter=default --reporter=junit --outputFile=junit-windows.xml
+        run: npx vitest run --maxWorkers=2 --reporter=default --reporter=github-actions --reporter=junit --outputFile=junit-windows.xml
       - name: Enforce browser coverage and explicit skip policy
         working-directory: apps/03_oddbrain
         run: node scripts/check-ci-tests.cjs junit-windows.xml
