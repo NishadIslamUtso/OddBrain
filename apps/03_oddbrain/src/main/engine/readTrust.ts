@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { closeSync, existsSync, fsyncSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, mkdirSync, openSync, readSync, realpathSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname, isAbsolute, relative, resolve } from 'node:path'
 import type { EngineId } from '../../shared/lib/engine'
 import { READ_TRUST_MODES, type ReadTrustMode, type ReadTrustRule, type ReadTrustView } from '../../shared/lib/readTrust'
@@ -61,9 +61,16 @@ function validateRule(value: unknown, ephemeral = false): ReadTrustRule {
 }
 
 function readBounded(file: string): string {
-  const stats = lstatSync(file)
-  if (!stats.isFile() || stats.isSymbolicLink() || stats.size > MAX_FILE_BYTES) throw Error('The saved read-approval file is not a bounded ordinary file.')
-  return readFileSync(file, 'utf8')
+  const fd = openSync(file, constants.O_RDONLY | (constants.O_NOFOLLOW || 0))
+  try {
+    const stats = fstatSync(fd)
+    if (!stats.isFile() || stats.size > MAX_FILE_BYTES) throw Error('The saved read-approval file is not a bounded ordinary file.')
+    const body = Buffer.allocUnsafe(stats.size)
+    let offset = 0
+    while (offset < body.length) { const count = readSync(fd, body, offset, body.length - offset, null); if (count === 0) throw Error('The saved read-approval file changed while it was read.'); offset += count }
+    if (readSync(fd, Buffer.allocUnsafe(1), 0, 1, null) !== 0) throw Error('The saved read-approval file changed while it was read.')
+    return body.toString('utf8')
+  } finally { closeSync(fd) }
 }
 
 function atomicWrite(file: string, text: string): void {
