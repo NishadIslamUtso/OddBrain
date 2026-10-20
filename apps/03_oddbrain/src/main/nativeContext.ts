@@ -12,7 +12,7 @@ import type { MediaResult } from '../shared/lib/mediaBridge'
 import { scanTextHazards } from '../shared/lib/textHazards'
 import { recallTerms, type RecallReply } from '../shared/lib/recall'
 import { estimateModelTokens } from '../shared/lib/modelContext'
-import { ownerConfirmedVaultQueries } from '../shared/lib/retrievalProposal'
+import { ownerConfirmedVaultRequest } from '../shared/lib/retrievalProposal'
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
 const validId = (id: string) => /^[a-zA-Z0-9_.:-]{1,256}$/.test(id)
 function readReference(file: string): Buffer {
@@ -30,7 +30,7 @@ function readReference(file: string): Buffer {
 }
 /** Main-only authority. Reading references requires a durable grant created by an
  * actual file-picker result, not a renderer-supplied path. No network/commands. */
-export function createNativeContext(projectFile: string, grantFile: string, decode: (name: string, bytes: Uint8Array, signal: AbortSignal) => Promise<MediaResult> = decodeInWorker, recall?: (query: string) => RecallReply) {
+export function createNativeContext(projectFile: string, grantFile: string, decode: (name: string, bytes: Uint8Array, signal: AbortSignal) => Promise<MediaResult> = decodeInWorker, recall?: (query: string, options?: { localSemantic?: boolean }) => RecallReply) {
   const readJson = (file: string, fallback: unknown): unknown => {
     const bytes = configBytes(file)
     return bytes === null ? fallback : JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
@@ -136,7 +136,7 @@ export function createNativeContext(projectFile: string, grantFile: string, deco
         facts[ref.path] = { readable: true, linked: false, sizeBytes: bytes.length, extractedText: text }
         references.push({ id: `reference:${ref.id}`, name: ref.label, text, kind: 'project' }); source(`reference:${ref.id}`, ref.label, text, `${coverage}; owner selected the file, but its content is untrusted quoted data`, 'untrusted-reference', hash(bytes))
       }
-      const vaultNotices: string[] = [], followupQueries = ownerConfirmedVaultQueries(prompt)
+      const vaultNotices: string[] = [], followup = ownerConfirmedVaultRequest(prompt), followupQueries = followup.queries
       let retrieval: ContextReceipt['retrieval']
       if (followupQueries.length && !input.vaultSearch) throw Error('This visible follow-up asks for vault retrieval, but read-only vault search is not approved for this chat. Nothing was sent; enable it in Conversation notes and context, then review and send again.')
       if (input.vaultSearch) {
@@ -146,7 +146,7 @@ export function createNativeContext(projectFile: string, grantFile: string, deco
         const replies: RecallReply[] = []
         for (const query of queries) {
           if (signal.aborted) throw Error('Vault search canceled. Nothing was sent.')
-          const reply = recall(query)
+          const reply = recall(query, { localSemantic: input.localSemantic === true })
           replies.push(reply); vaultNotices.push(...reply.notices)
           if (!reply.ok) throw Error(`Approved vault search could not run for ${JSON.stringify(query)}: ${reply.notices.join(' ') || 'unknown search failure'} Nothing was sent.`)
         }
@@ -160,12 +160,13 @@ export function createNativeContext(projectFile: string, grantFile: string, deco
           if (hit.text.length > 4_000) { vaultNotices.push(`${hit.title} was omitted because its search excerpt exceeded 4,000 characters; the original remains unchanged.`); continue }
           const id = `vault:${hash(hit.id).slice(0, 24)}`
           references.push({ id, name: `${hit.title} (${hit.path})`, text: hit.text, kind: 'vault' })
-          source(id, hit.title, hit.text, `Read-only lexical-search excerpt from ${hit.path}; ranked from the owner-approved non-excluded vault scope, but its content is untrusted evidence`, 'untrusted-reference')
+          source(id, hit.title, hit.text, `Read-only ${hit.match === 'local-semantic' ? 'local distributional semantic' : 'metadata/full-text lexical'} search excerpt from ${hit.path}; ranked from the owner-approved non-excluded vault scope, but its content is untrusted evidence`, 'untrusted-reference')
         }
         if (!queries.length) vaultNotices.push('The request contained no usable lexical vault-search terms.')
         const catalogue = new Map<string, number>()
         for (const reply of replies) for (const group of reply.catalogue?.groups || []) catalogue.set(group.path, (catalogue.get(group.path) || 0) + group.entries)
-        retrieval = { mode: followupQueries.length ? 'owner-confirmed-follow-up' : 'app-first', strategy: 'metadata-and-full-text-lexical', localSemantic: 'off', queries, catalogue: [...catalogue].slice(0, 100).map(([path, matchingEntries]) => ({ path, matchingEntries })), excerptsFound: references.filter(item => item.kind === 'vault').length, excerptsIncluded: references.filter(item => item.kind === 'vault').length, incomplete: replies.some(reply => reply.incomplete) || vaultNotices.length > 0, notices: [...new Set(vaultNotices)].slice(0, 100) }
+        const semanticMatches = [...selected.values()].filter(hit => hit.match === 'local-semantic').length
+        retrieval = { mode: followupQueries.length ? 'owner-confirmed-follow-up' : 'app-first', strategy: input.localSemantic ? 'hybrid-lexical-local-distributional' : 'metadata-and-full-text-lexical', localSemantic: input.localSemantic ? 'local-distributional-v1' : 'off', semanticMatches, queries, catalogue: [...catalogue].slice(0, 100).map(([path, matchingEntries]) => ({ path, matchingEntries })), excerptsFound: references.filter(item => item.kind === 'vault').length, excerptsIncluded: references.filter(item => item.kind === 'vault').length, incomplete: replies.some(reply => reply.incomplete) || vaultNotices.length > 0, notices: [...new Set(vaultNotices)].slice(0, 100), ...(followup.stage ? { stage: { ...followup.stage, state: 'completed-bounded-stage' as const } } : {}) }
       }
       if (project) {
         const bundle = resolveProjectContext({ ...project, goals: preferences.goal ? [preferences.goal] : [] }, facts)

@@ -3,10 +3,10 @@ import type { VaultFiles } from './files'
 import { createMemoryWorkspace } from '../memory/workspace'
 import { excluded, readPatterns } from './blacklist'
 import { staleBasis } from '../../shared/lib/memoryWorkspace'
-import { recallMatches, recallScore, recallSnippet, recallTerms, type RecallHit, type RecallReply } from '../../shared/lib/recall'
+import { localSemanticScores, recallMatches, recallScore, recallSnippet, recallTerms, type RecallHit, type RecallReply } from '../../shared/lib/recall'
 
-/** Read-only lexical recall. No model, index, credentials, network or approvals. */
-export function searchVault(files: VaultFiles, query: string): RecallReply {
+/** Read-only local recall. Semantic expansion is opt-in and uses only this bounded validated corpus. */
+export function searchVault(files: VaultFiles, query: string, options: { localSemantic?: boolean } = {}): RecallReply {
   const terms = recallTerms(query), hits: RecallHit[] = [], notices = new Set<string>()
   if (!terms.length || query.trim().split(/\s+/).length > 16 || query.length > 500) return { ok: false, hits, incomplete: false, notices: ['Use 1–16 search words, up to 500 characters.'] }
   const patterns = [...readPatterns(files.read('00 System/Privacy & Access.md')), ...readPatterns(files.read('00 System/Connectors/Source Scope.md'))]
@@ -18,6 +18,8 @@ export function searchVault(files: VaultFiles, query: string): RecallReply {
     return files.read(path)
   }
   const ranked: Array<{ hit: RecallHit; score: number }> = []
+  const semanticRows: Array<{ hit: RecallHit; text: string }> = []
+  let semanticCharacters = 0, semanticCapped = false
   const catalogueGroups = new Map<string, number>()
   let catalogueEntries = 0, catalogueCapped = false
   const catalogue = (path: string): void => {
@@ -30,20 +32,19 @@ export function searchVault(files: VaultFiles, query: string): RecallReply {
       else catalogueCapped = true
     }
   }
-  const add = (hit: RecallHit) => {
-    if (!recallMatches(`${hit.title} ${hit.text} ${hit.speaker} ${hit.date}`, terms)) return
+  const rank = (hit: RecallHit, score: number, match: 'lexical' | 'local-semantic') => {
     catalogue(hit.path)
-    ranked.push({ score: recallScore(hit.title, hit.text, terms), hit: { ...hit, text: recallSnippet(hit.text, terms) } })
-    ranked.sort((a, b) => b.score - a.score)
-    const groups = new Map<string, number>()
-    for (let i = 0; i < ranked.length; i++) {
-      const row = ranked[i].hit
-      if (row.kind !== 'conversation') continue
-      const group = row.id.split('/messages/')[0], count = (groups.get(group) || 0) + 1
-      groups.set(group, count)
-      if (count > 3) { ranked.splice(i--, 1); notices.add('Showing at most three matching messages per conversation. Open its source or narrow the query for more.') }
+    ranked.push({ score, hit: { ...hit, match, text: recallSnippet(hit.text, terms) } })
+  }
+  const add = (hit: RecallHit) => {
+    const searchable = `${hit.title} ${hit.text} ${hit.speaker} ${hit.date}`
+    if (options.localSemantic) {
+      const semanticLength = Math.min(searchable.length, 12_000)
+      if (semanticRows.length < 2_000 && semanticCharacters + semanticLength <= 8_000_000) {
+        semanticRows.push({ hit, text: searchable.slice(0, 12_000) }); semanticCharacters += semanticLength
+      } else semanticCapped = true
     }
-    if (ranked.length > 60) { ranked.length = 60; notices.add('More matches exist. Showing the highest-ranked matches; narrow your search.') }
+    if (recallMatches(searchable, terms)) rank(hit, 100 + recallScore(hit.title, hit.text, terms), 'lexical')
   }
   const store = createMemoryWorkspace(files), aliases = new Map<string, string>()
   const conversations = new Map<string, any>()
@@ -52,7 +53,7 @@ export function searchVault(files: VaultFiles, query: string): RecallReply {
     const state = store.read()
     for (const account of state.accounts) { const person = state.people.find(p => p.id === account.person); if (person) aliases.set(account.id, person.name) }
     for (const p of state.proposals.filter(p => p.state === 'approved' && !staleBasis(p.source, state))) {
-      if (!recallMatches(`${p.title} ${p.text} ${p.uncertainty} ${p.date} ${aliases.get(p.subject) || ''}`, terms)) continue
+      if (!options.localSemantic && !recallMatches(`${p.title} ${p.text} ${p.uncertainty} ${p.date} ${aliases.get(p.subject) || ''}`, terms)) continue
       try { store.evidence(p.source) } catch { notices.add('Some confirmed records have unavailable, excluded or changed evidence and were omitted.'); continue }
       add({ id: 'memory:' + p.id, kind: 'confirmed', title: p.title, text: p.text + (p.uncertainty ? '\nQualification: ' + p.uncertainty : ''), path: p.source.path, date: p.date, speaker: (aliases.get(p.subject) ? aliases.get(p.subject) + ' · ' : '') + 'Confirmed by you; ' + (p.authored === 'ai' ? 'AI wording' : 'your correction') })
     }
@@ -92,5 +93,22 @@ export function searchVault(files: VaultFiles, query: string): RecallReply {
       add({ id: path, kind: 'file', title: path.split('/').at(-1)!, text, path, date: '', speaker: 'Saved file; not automatically verified' })
     } catch { notices.add('Some saved files could not be read.') }
   }
-  return { ok: true, hits: ranked.map(row => row.hit), incomplete: notices.size > 0, notices: [...notices], catalogue: { entriesSeen: catalogueEntries, groups: [...catalogueGroups].map(([path, entries]) => ({ path, entries })).sort((a, b) => a.path.localeCompare(b.path)), capped: catalogueCapped } }
+  if (options.localSemantic) {
+    const semantic = localSemanticScores(semanticRows.map(row => ({ id: row.hit.id, text: row.text })), query)
+    const lexical = new Set(ranked.map(row => row.hit.id))
+    for (const row of semanticRows) if (!lexical.has(row.hit.id) && semantic.has(row.hit.id)) rank(row.hit, semantic.get(row.hit.id)!, 'local-semantic')
+    if (semanticCapped) notices.add('Local semantic expansion reached its 2,000-entry or 8 MB corpus budget. Narrow the query for a more complete pass.')
+  }
+  ranked.sort((a, b) => b.score - a.score)
+  const groups = new Map<string, number>(), diverse: typeof ranked = []
+  for (const row of ranked) {
+    if (row.hit.kind === 'conversation') {
+      const group = row.hit.id.split('/messages/')[0], count = (groups.get(group) || 0) + 1
+      groups.set(group, count)
+      if (count > 3) { notices.add('Showing at most three matching messages per conversation. Open its source or narrow the query for more.'); continue }
+    }
+    if (diverse.length < 60) diverse.push(row)
+    else notices.add('More matches exist. Showing the highest-ranked matches; narrow your search.')
+  }
+  return { ok: true, hits: diverse.map(row => row.hit), incomplete: notices.size > 0, notices: [...notices], catalogue: { entriesSeen: catalogueEntries, groups: [...catalogueGroups].map(([path, entries]) => ({ path, entries })).sort((a, b) => a.path.localeCompare(b.path)), capped: catalogueCapped }, semantic: { mode: options.localSemantic ? 'local-distributional-v1' : 'off', candidates: semanticRows.length, capped: semanticCapped } }
 }

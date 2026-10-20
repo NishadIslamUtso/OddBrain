@@ -44,6 +44,15 @@ describe('read-only cross-source recall and recovery', () => {
     h.store.act({ type: 'review', id: p.id, decision: 'retract', expectedRevision: h.store.read().revision })
     expect(searchVault(h.vault.files(), 'orange toolbox').hits.some(h => h.kind === 'confirmed')).toBe(false)
   })
+  it('optionally expands concepts from a bounded local corpus without changing the approved source scope', () => {
+    const h = setup()
+    h.vault.files().writeAtomic('Notes/Glossary.md', 'In this vault, car means automobile and invoice means billing.')
+    h.vault.files().writeAtomic('Notes/Related.md', 'Automobile billing archive for the quarter.')
+    expect(searchVault(h.vault.files(), 'car invoice').hits.some(hit => hit.path === 'Notes/Related.md')).toBe(false)
+    const result = searchVault(h.vault.files(), 'car invoice', { localSemantic: true })
+    expect(result.semantic).toMatchObject({ mode: 'local-distributional-v1', capped: false })
+    expect(result.hits).toContainEqual(expect.objectContaining({ path: 'Notes/Related.md', match: 'local-semantic' }))
+  })
   it('honors source revocation for originals and confirmed records; never searches settings or pending state', () => {
     const h = setup(), p = h.complete()
     h.store.act({ type: 'review', id: p.id, decision: 'approve', expectedRevision: h.store.read().revision })

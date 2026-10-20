@@ -49,6 +49,8 @@ Use the search button or **Ctrl K** to find app chats, captured conversation tex
 
 **Vault → Build cited packet** rereads up to four matching saved originals and prepares exact bounded excerpts with `[S1]` identifiers, retained URL/path, character ranges and SHA-256 values. Matching interpretations from confirmed memory are omitted because they are not direct quotations. The packet stays under the composer handoff limit, reports omitted or unreadable coverage, and is added only after review. This is local lexical retrieval over material already in the vault—not live browsing, semantic search, or independent fact verification. Treat captured text as untrusted evidence and open the named originals before relying on material outside an excerpt.
 
+A chat can separately approve app-mediated vault search under **Conversation notes and context**. An optional second switch adds bounded, on-device distributional expansion derived only from relationships in that search’s approved corpus; it uses no cloud, downloaded embedding model or hidden permanent index. Receipts distinguish lexical and semantic matches. Large investigations advance as visible stages of at most three owner-reviewed queries and four cited excerpts; preparing the next stage runs nothing until the owner sends it.
+
 In **Memory inbox**, select related suggestions, inspect their wording and quotations, then confirm the group. Nothing is preselected. **People**, **Journal** and **Life Story** offer readable timelines and in-view search; unknown event dates stay unknown. Open **Evidence and revisions → Copy with sources** to copy a record with its quotation, qualification and review status. This does not approve it or send it to a model.
 
 ### Backup and recovery

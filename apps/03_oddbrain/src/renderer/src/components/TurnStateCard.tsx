@@ -27,7 +27,7 @@ export default function TurnStateCard({ chat }: { chat?: Chat | null }) {
       <dl className="grid grid-cols-[90px_1fr] gap-x-3 gap-y-1 text-[12px]">
         <dt className="text-muted">Goal</dt><dd>{clip(turn.prompt)}</dd>
         <dt className="text-muted">Using</dt><dd>{turn.engine || engine.settings.id} · {modelLabel(turn.model ?? engine.settings.model)}</dd>
-        <dt className="text-muted">Context</dt><dd>{context ? `${context.sources.length} recorded source(s), ${evidence} evidence excerpt(s)${context.retrieval ? `, ${context.retrieval.mode === 'app-first' ? 'app-first retrieval' : 'owner-sent follow-up retrieval'}` : ''}${context.omitted?.length ? `, ${context.omitted.length} lower-priority item(s) omitted` : ''}` : 'Preparing or not yet recorded'}</dd>
+        <dt className="text-muted">Context</dt><dd>{context ? `${context.sources.length} recorded source(s), ${evidence} evidence excerpt(s)${context.retrieval ? `, ${context.retrieval.mode === 'app-first' ? 'app-first retrieval' : 'owner-sent follow-up retrieval'}${context.retrieval.stage ? ` stage ${context.retrieval.stage.number}/${context.retrieval.stage.total}` : ''}${context.retrieval.localSemantic === 'local-distributional-v1' ? ', local semantic expansion on' : ''}` : ''}${context.omitted?.length ? `, ${context.omitted.length} lower-priority item(s) omitted` : ''}` : 'Preparing or not yet recorded'}</dd>
         <dt className="text-muted">Doing</dt><dd>{doing}</dd>
         <dt className="text-muted">Waiting for</dt><dd>{turn.permissions.length ? `${turn.permissions.length} approval decision${turn.permissions.length === 1 ? '' : 's'}` : 'Nothing from you'}</dd>
         <dt className="text-muted">Result</dt><dd>{turn.state === 'running' ? 'Not finished yet' : turn.state}</dd>

@@ -48,16 +48,24 @@ describe('owner-selected project context', () => {
     expect(result.prompt).toContain('The vehicle invoice was paid.')
     expect(result.receipt.sources).toContainEqual(expect.objectContaining({ title: 'Vehicle invoice', role: 'untrusted-reference', coverage: expect.stringContaining('owner-approved non-excluded vault scope') }))
   })
+  test('uses optional local semantic expansion only when the owner enabled it and receipts semantic evidence', async () => {
+    const recall = vi.fn((_query: string, options?: { localSemantic?: boolean }) => ({ ok: true as const, incomplete: false, notices: [], semantic: { mode: 'local-distributional-v1' as const, candidates: 2, capped: false }, hits: [{ id: 'file:semantic', kind: 'file' as const, title: 'Related terms', text: 'Distributionally related evidence.', path: 'Notes/Related.md', date: '', speaker: 'Saved file', match: 'local-semantic' as const }] }))
+    const f = fixture(recall)
+    const result = await f.service.prepare({ ...f.input, vaultSearch: true, localSemantic: true }, f.dir, 'Find related payment records', '', new AbortController().signal)
+    expect(recall).toHaveBeenCalledWith('find related payment records', { localSemantic: true })
+    expect(result.receipt.retrieval).toMatchObject({ strategy: 'hybrid-lexical-local-distributional', localSemantic: 'local-distributional-v1', semanticMatches: 1 })
+    expect(result.receipt.sources).toContainEqual(expect.objectContaining({ coverage: expect.stringContaining('local distributional semantic') }))
+  })
   test('runs a bounded owner-sent second-pass search and receipts each exact query', async () => {
     const recall = vi.fn((query: string) => ({ ok: true as const, incomplete: false, notices: [], hits: [
       { id: `${query}:one`, kind: 'file' as const, title: `${query} first`, text: `${query} evidence one`, path: `Notes/${query}-1.md`, date: '', speaker: 'Saved file' },
       { id: `${query}:two`, kind: 'file' as const, title: `${query} second`, text: `${query} evidence two`, path: `Notes/${query}-2.md`, date: '', speaker: 'Saved file' },
       { id: `${query}:three`, kind: 'file' as const, title: `${query} third`, text: `${query} evidence three`, path: `Notes/${query}-3.md`, date: '', speaker: 'Saved file' },
     ] }))
-    const f = fixture(recall), prompt = vaultFollowupDraft({ queries: ['launch notes', 'provider outage'], reason: 'Need exact dates' })
+    const f = fixture(recall), prompt = vaultFollowupDraft({ queries: ['launch notes', 'provider outage'], reason: 'Need exact dates', stage: { number: 2, total: 4, goal: 'Verify dates' } })
     const result = await f.service.prepare({ ...f.input, vaultSearch: true }, f.dir, prompt, '', new AbortController().signal)
     expect(recall.mock.calls.map(call => call[0])).toEqual(['launch notes', 'provider outage'])
-    expect(result.receipt.retrieval).toEqual(expect.objectContaining({ mode: 'owner-confirmed-follow-up', queries: ['launch notes', 'provider outage'], excerptsFound: 4, excerptsIncluded: 4 }))
+    expect(result.receipt.retrieval).toEqual(expect.objectContaining({ mode: 'owner-confirmed-follow-up', queries: ['launch notes', 'provider outage'], excerptsFound: 4, excerptsIncluded: 4, stage: { number: 2, total: 4, goal: 'Verify dates', state: 'completed-bounded-stage' } }))
     expect(result.receipt.sources.filter(source => source.id.startsWith('vault:'))).toHaveLength(4)
   })
   test('a model-proposed follow-up cannot expand vault authority', async () => {

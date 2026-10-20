@@ -599,9 +599,9 @@ export default function App() {
     const nativeContextKey = modelContextKey(`engine:${engine.settings.id}:${engine.settings.cloudProvider || 'local'}`, engine.settings.model || 'provider default')
     const nativeProfile = resolveModelContext({ key: nativeContextKey, label: engine.settings.model || 'provider default', override: contextProfiles[nativeContextKey] })
     const contextProfile = { key: nativeContextKey, mode: nativeProfile.mode, source: nativeProfile.source, capacityTokens: nativeProfile.capacityTokens, outputReserveTokens: nativeProfile.outputReserveTokens }
-    const target = await bridge.engine.contextTarget({ chatId, projectId, overrides, workingNotes: savedNotes.working, vaultSearch: savedNotes.vaultSearch, contextProfile })
+    const target = await bridge.engine.contextTarget({ chatId, projectId, overrides, workingNotes: savedNotes.working, vaultSearch: savedNotes.vaultSearch, localSemantic: savedNotes.localSemantic, contextProfile })
     const resume = target.resume
-    const conversation: NativeConversation = { chatId, projectId, overrides, workingNotes: savedNotes.working, vaultSearch: savedNotes.vaultSearch, contextProfile, expectedRoute: target.route || undefined, continuationExpected: resume,
+    const conversation: NativeConversation = { chatId, projectId, overrides, workingNotes: savedNotes.working, vaultSearch: savedNotes.vaultSearch, localSemantic: savedNotes.localSemantic, contextProfile, expectedRoute: target.route || undefined, continuationExpected: resume,
       ...(!resume ? { history: pendingBrief ? [] : (chat?.messages || []).filter(m => m.origin !== 'import' && (!m.status || m.status === 'complete')).map(m => ({ id: m.id, role: m.role, content: m.content })) } : {}) }
     if (!chats.commit(previous => previous.some(entry => entry.id === chatId)
       ? previous.map(entry => entry.id === chatId ? { ...entry, projectId } : entry)

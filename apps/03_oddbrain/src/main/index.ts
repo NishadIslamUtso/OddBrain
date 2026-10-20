@@ -326,7 +326,7 @@ function registerBridges(): void {
     join(app.getPath('userData'), 'projects.json'),
     join(app.getPath('userData'), 'project-context-grants.json'),
     undefined,
-    query => searchVault(createVaultService({ vaultPath: vaultRoot() }).files(), query),
+    (query, options) => searchVault(createVaultService({ vaultPath: vaultRoot() }).files(), query, options),
   )
   // Deliberately memory-only: each app start requires fresh folder trust. A
   // changed declaration fingerprint invalidates trust within the same process.

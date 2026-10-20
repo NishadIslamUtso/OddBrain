@@ -69,10 +69,10 @@ export type WorkingNotes = {
   updatedAt: string
   author: 'user' | 'ai'
 }
-export type ChatNotes = { pins: string[]; recaps: Array<{ id: string; text: string; author: 'user' | 'ai'; basedOn: string[]; at: string }>; overrides: ChatOverrides; working: WorkingNotes; vaultSearch: boolean }
+export type ChatNotes = { pins: string[]; recaps: Array<{ id: string; text: string; author: 'user' | 'ai'; basedOn: string[]; at: string }>; overrides: ChatOverrides; working: WorkingNotes; vaultSearch: boolean; localSemantic: boolean }
 export type NotesVersion = { id: string; parent: string | null; value: ChatNotes }
 export const emptyWorkingNotes = (): WorkingNotes => ({ objective: '', plan: [], decisions: [], constraints: [], openQuestions: [], uncertainties: [], findings: [], nextActions: [], updatedAt: '', author: 'user' })
-export const emptyChatNotes = (): ChatNotes => ({ pins: [], recaps: [], overrides: {}, working: emptyWorkingNotes(), vaultSearch: false })
+export const emptyChatNotes = (): ChatNotes => ({ pins: [], recaps: [], overrides: {}, working: emptyWorkingNotes(), vaultSearch: false, localSemantic: false })
 
 export function normalizeWorkingNotes(value: unknown): WorkingNotes {
   const raw = value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -101,7 +101,8 @@ export function chatNotesStore(storage: Storage, prefix: string, chatId: string)
       const working = normalizeWorkingNotes(row.value.working)
       if (row.value.working !== undefined && JSON.stringify(working) !== JSON.stringify(row.value.working)) throw Error('Working notes are damaged or exceed their limits. Original versions were kept.')
       if (row.value.vaultSearch !== undefined && typeof row.value.vaultSearch !== 'boolean') throw Error('Vault-search choice is damaged. Original versions were kept.')
-      result.push({ ...row, value: { ...row.value, working, vaultSearch: row.value.vaultSearch === true } })
+      if (row.value.localSemantic !== undefined && typeof row.value.localSemantic !== 'boolean') throw Error('Local semantic-search choice is damaged. Original versions were kept.')
+      result.push({ ...row, value: { ...row.value, working, vaultSearch: row.value.vaultSearch === true, localSemantic: row.value.localSemantic === true } })
     }
     return result
   }
@@ -118,6 +119,7 @@ export function chatNotesStore(storage: Storage, prefix: string, chatId: string)
     if (!/^[a-zA-Z0-9-]{1,100}$/.test(id)) throw Error('Invalid note revision.')
     if (JSON.stringify(normalizeWorkingNotes(value.working)) !== JSON.stringify(value.working)) throw Error('Working notes exceed their supported limits. Nothing was shortened.')
     if (typeof value.vaultSearch !== 'boolean') throw Error('Choose whether this chat may search approved vault sources.')
+    if (typeof value.localSemantic !== 'boolean' || (value.localSemantic && !value.vaultSearch)) throw Error('Local semantic matching requires this chat’s read-only vault search approval.')
     if ((read()?.id ?? null) !== expected) throw Error('Chat notes changed in another window. Reload before saving.')
     if (versions().length >= 500) throw Error('500 note revisions retained. Export them before starting a new notes history; nothing was deleted.')
     const next = { id, parent: expected, value }, bytes = JSON.stringify(next)

@@ -18,6 +18,13 @@ test('notes keep every original recap version and reject stale saves without alt
   expect(first.read()?.value.working).toMatchObject({ objective: 'Keep context across models', decisions: ['Use cited evidence'], author: 'user' })
   expect(() => first.save(notes, 'v1', 'v3')).toThrow('another window'); expect(second.read()).toBeNull(); expect(sample.read()).toBeNull()
 })
+test('local semantic retrieval is a separate opt-in that cannot outlive vault-search approval', () => {
+  const store = chatNotesStore(storage(), 'x', 'semantic'), notes = emptyChatNotes()
+  expect(() => store.save({ ...notes, localSemantic: true }, null, 'bad')).toThrow(/requires.*vault search/i)
+  const enabled = { ...notes, vaultSearch: true, localSemantic: true }
+  store.save(enabled, null, 'v1')
+  expect(store.read()?.value).toMatchObject({ vaultSearch: true, localSemantic: true })
+})
 test('concurrent immutable revision forks are detected and retained', () => {
   const disk = storage(), notes = emptyChatNotes(), store = chatNotesStore(disk, 'x', 'chat')
   store.save(notes, null, 'v1')
