@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
 import ReadAloudButton from '../ui/ReadAloudButton'
+import { bridge } from '@/platform/bridge'
+import { downloadBytes } from '@shared/lib/zip'
 import type { Artifact, Message } from '@shared/types'
 import type { ElementPick } from '@shared/lib/artifacts'
 import { THINKING_OPEN_EVENT, setThinkingOpen, thinkingOpenNow } from '@shared/lib/thinkingOpen'
@@ -18,6 +20,49 @@ import { useLook } from '../ui/LookContext'
  * app's mark beside it. Thinking, when the model reports it separately, is folded
  * away rather than mixed into the answer.
  */
+
+/**
+ * The pictures that rode with one request.
+ *
+ * New records kept the exact bytes before dispatch; this button asks the app
+ * for one, which re-checks size and digest before handing it over. An older
+ * record answers honestly that its bytes were never stored — nothing is
+ * reconstructed from a count.
+ */
+function SavedPictures({ transcriptId, count }: { transcriptId?: string; count: number }) {
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(-1)
+  if (!count || !transcriptId) return null
+  const save = async (index: number): Promise<void> => {
+    setBusy(index); setNote('')
+    try {
+      const reply = await bridge.transcripts.picture?.(transcriptId, index)
+      if (!reply) { setNote('Saving pictures requires the desktop app.'); return }
+      if (!reply.ok) { setNote(reply.error); return }
+      const binary = atob(reply.value.data)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+      const extension = reply.value.mime === 'image/png' ? 'png' : reply.value.mime === 'image/jpeg' ? 'jpg' : 'webp'
+      const saved = downloadBytes(bytes, `picture-${index + 1}.${extension}`, reply.value.mime, setNote)
+      if (!saved) setNote('The browser refused the download. Nothing was changed.')
+    } catch {
+      setNote('The saved picture could not be read.')
+    } finally { setBusy(-1) }
+  }
+  return (
+    <div className="mt-1 text-[11px] text-muted">
+      <span>{count} image{count === 1 ? '' : 's'} accompanied this request.</span>
+      <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+        {Array.from({ length: count }, (_, index) => (
+          <button type="button" key={index} className="ob-text-button" disabled={busy >= 0} onClick={() => void save(index)}>
+            {busy === index ? 'Checking…' : `Save picture ${index + 1}`}
+          </button>
+        ))}
+      </div>
+      {note ? <p role="status" className="text-warn">{note}</p> : null}
+    </div>
+  )
+}
 
 export default function MessageRow({
   message,
@@ -57,7 +102,7 @@ export default function MessageRow({
         <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-[14px_14px_4px_14px] bg-card px-3.5 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
           {message.content}
           <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div>
-          {!!message.nativeRecord?.pictures && <p className="mt-1 text-[11px] text-muted">{message.nativeRecord.pictures} image(s) accompanied this request. This text record does not contain the image bytes.</p>}
+          {message.nativeRecord?.pictures ? <SavedPictures transcriptId={message.nativeRecord.transcriptId} count={message.nativeRecord.pictures} /> : null}
           {message.editedAt && <span className="mt-1 block text-[11px] text-muted">edited</span>}
           {(message.attachments || []).length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5">

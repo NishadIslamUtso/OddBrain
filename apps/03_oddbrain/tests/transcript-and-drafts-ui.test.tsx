@@ -29,7 +29,10 @@ test('full transcript view shows complete text and never offers a misleading res
   fixture.read.mockResolvedValue({ ok: true, value: { header, prompt: 'Original request', events: [{ kind: 'text', text: 'x'.repeat(5000) + 'UNCLIPPED END' }], state: 'interrupted', incomplete: true } })
   await act(async () => root.render(<TranscriptHistory />)); await click('Recorded task')
   expect(host.querySelector('pre')?.textContent).toContain('UNCLIPPED END')
-  expect(host.textContent).toContain('interrupted'); expect(host.textContent).toContain('Image bytes are not stored')
+  expect(host.textContent).toContain('interrupted')
+  // This header carries a count but no saved bytes: the record must say the
+  // bytes were never stored rather than implying they can be recovered.
+  expect(host.textContent).toContain('kept only the count; its image bytes were never stored')
   expect([...host.querySelectorAll('button')].some(b => /resume|run task/i.test(b.textContent || ''))).toBe(false)
 })
 test('late transcript reads cannot update an unmounted history view', async () => {

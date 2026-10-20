@@ -1,10 +1,10 @@
 import { afterEach, expect, test } from 'vitest'
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { EventEmitter } from 'node:events'
 import { createTurnArchive } from '../src/main/turnArchive'
-import { chatMarkdown, transcriptMarkdown } from '../src/shared/lib/transcripts'
+import { chatMarkdown, picturesSaved, transcriptMarkdown } from '../src/shared/lib/transcripts'
 import { createEngineSocket } from '../src/main/engine/socket'
 import { DEFAULT_ENGINE, type EngineEvent } from '../src/shared/lib/engine'
 const roots: string[] = []
@@ -94,4 +94,54 @@ test('a truncated UTF-8 final write preserves complete Unicode records; invalid 
  expect(archive.read(id)).toMatchObject({incomplete:true,events:[{kind:'text',text:'বাংলা saved prefix'}]})
  writeFileSync(file, Buffer.concat([good, Buffer.from('{"event":{"kind":"text","text":"'),Buffer.from([0xff]),Buffer.from('"}}\n')]))
  expect(()=>archive.read(id)).toThrow()
+})
+
+// A 1x1 PNG, and a second distinct one (same header, different pixel bytes).
+const PNG_ONE = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+const PNG_TWO = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg=='
+const images = [{ mime: 'image/png' as const, data: PNG_ONE }, { mime: 'image/png' as const, data: PNG_TWO }]
+
+test('picture bytes are saved before dispatch and read back only when they still match', () => {
+  const root = folder(), archive = createTurnArchive(root), id = archive.begin({ ...input, pictures: 2, images })
+  const header = archive.read(id).header
+  expect(picturesSaved(header)).toBe(true)
+  expect(header.pictureRecords?.map(record => [record.index, record.mime, record.bytes])).toEqual([[0, 'image/png', 70], [1, 'image/png', 70]])
+  expect(existsSync(join(root, id + '.pictures', '0.png'))).toBe(true)
+  expect(archive.picture(id, 0).data).toBe(PNG_ONE)
+  expect(archive.picture(id, 1).data).toBe(PNG_TWO)
+  expect(archive.picture(id, 0).sha256).toMatch(/^[a-f0-9]{64}$/)
+  if (process.platform !== 'win32') expect(statSync(join(root, id + '.pictures', '0.png')).mode & 0o777).toBe(0o600)
+  expect(transcriptMarkdown(archive.read(id))).toContain('The exact bytes were saved beside this record')
+})
+
+test('a record that kept only a count says so, and nothing is reconstructed', () => {
+  const root = folder(), archive = createTurnArchive(root), id = archive.begin({ ...input, pictures: 2 })
+  expect(picturesSaved(archive.read(id).header)).toBe(false)
+  expect(() => archive.picture(id, 0)).toThrow('image bytes were never stored')
+  expect(transcriptMarkdown(archive.read(id))).toContain('This earlier record kept only the count')
+})
+
+test('a changed or removed picture file refuses instead of being returned', () => {
+  const one = [images[0]]
+  const root = folder(), archive = createTurnArchive(root), id = archive.begin({ ...input, pictures: 1, images: one })
+  writeFileSync(join(root, id + '.pictures', '0.png'), Buffer.from('different bytes'))
+  expect(() => archive.picture(id, 0)).toThrow('does not match its recorded')
+  const second = archive.begin({ ...input, pictures: 1, images: one })
+  rmSync(join(root, second + '.pictures', '0.png'))
+  expect(() => archive.picture(second, 0)).toThrow('is missing')
+})
+
+test('an invalid picture list refuses before the record is written', () => {
+  const root = folder(), archive = createTurnArchive(root)
+  expect(() => archive.begin({ ...input, pictures: 1, images: [{ mime: 'image/gif' as never, data: PNG_ONE }] })).toThrow('not a PNG, JPEG or WebP')
+  expect(() => archive.begin({ ...input, pictures: 1, images: [{ mime: 'image/png', data: 'not base64!' }] })).toThrow()
+  expect(() => archive.begin({ ...input, pictures: 3, images })).toThrow('picture records do not match')
+  expect(archive.list().entries).toHaveLength(0)
+})
+
+test('a header that cannot fit removes the pictures saved for it', () => {
+  const root = folder(), tiny = createTurnArchive(root, 300)
+  expect(() => tiny.begin({ ...input, prompt: 'Small', pictures: 2, images })).toThrow('storage limit')
+  expect(readdirSync(root)).toEqual([])
+  expect(tiny.list().entries).toHaveLength(0)
 })

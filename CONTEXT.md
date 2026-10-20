@@ -652,3 +652,28 @@ Fresh Node 24.22.0 typecheck and **1,503 tests / 207 files / zero skips** passed
 Electron/main/preload/renderer, offline preview and web builds passed (existing highlight/chunk warnings only). All **13 serial app browser suites** passed. The maintained command browser harness now exercises workflow exact review, failed/skipped step display and separate recurring consent without running anything on save; its IPC is explicitly mocked, not native scheduling proof. Evidence: `.cache/recovery/workflows-full.{log,xml}`, `workflows-build.log`, `workflows-web.log`, `workflows-ui-all.log`, `workflow-ui/`. These caches are expendable; source/tests are being committed and pushed to the fixed session branch. No main-branch changes.
 
 **Not complete yet:** true resource-safe parallel execution/Git-worktree write isolation, sourced research, broader native-history and original-media/interrupted-view recovery, and signed-in target-laptop acceptance. Workflows currently serialize approved OS commands; a separate checkout is not being advertised as an OS sandbox. Scheduling requires the approved working folder to remain selected and OS-protected key storage to be available. The account-wide archive importer and VS Code extension remain held/deferred. No other agent handoff is needed.
+
+
+## Solo continuation: exact picture bytes kept with a turn — 2026-10-20
+
+Continuing the owner's "complete it all" instruction from published `2e0828d`. The turn record previously kept only a picture **count** and said the bytes were never stored. Now the bytes are.
+
+### Implemented
+
+- `src/main/transcriptImages.ts` validates pictures with the same `engineImages` boundary the IPC send uses (PNG/JPEG/WebP, at most four, at most 2 MB each, one 8 MB budget per turn), writes each through an exclusive `wx` descriptor at mode 0600, and `fsync`s through the **same writable** descriptor (Windows refuses fsync on a read-only reopen). Links are refused on the folder and every file. A failed write removes only files this attempt created. `removePictures` deletes only its own `\d+.(png|jpg|webp)` names.
+- `turnArchive.begin` saves pictures **before** the header that names them and before any dispatch, records `{index, mime, bytes, sha256}` per picture, and removes the pictures it just saved when the header cannot be written or exceeds the transcript limit. A count that disagrees with the saved records is refused, never partly written.
+- `turnArchive.picture(id, index)` re-checks the file's size and digest and returns the exact bytes; a missing, changed or linked file is an error, not a returned picture. A record that predates this change answers that its bytes were never stored — nothing is reconstructed from a count.
+- Header validation accepts `pictureRecords` only when they agree with the count and stay within bounds; malformed records make the header damaged, so the record is reported as interrupted rather than trusted.
+- IPC `transcripts:picture` (main + preload + bridge types + desktop example), passed through `sendNative`'s `begin` input. Browser preview answers that saved bytes require the desktop app.
+- The user message now offers `Save picture N` for a recorded count; the app re-verifies size and digest before handing the bytes to a download. Older records surface the honest "kept only the count" message. `transcriptMarkdown` prints each saved picture's mime, size and sha256, and distinguishes saved from unsaved records.
+
+### Verification
+
+- Fresh typecheck (Node 24) passed.
+- Full suite: **1,506 passed / 2 skipped / 1,508 total** across 207 files; both skips are the named Windows-only artifact-recovery exceptions. No test was weakened: `transcript-and-drafts-ui` now asserts the new "kept only the count" wording instead of the removed phrase.
+- New tests in `tests/turn-archive.test.ts` (21 cases in that file): saved-before-dispatch, digest mismatch, missing file, invalid mime/base64, count mismatch, header-limit cleanup leaves no folder, count-only record says so, transcript Markdown distinguishes both.
+
+### Limits
+
+- Pictures are kept per turn in app storage beside the transcript; there is no UI to delete a single picture, and nothing is re-sent or re-attached. Saved pictures are not an image library.
+- This is evidence of what the app sent, not proof the model saw or used a picture.

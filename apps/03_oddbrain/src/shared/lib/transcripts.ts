@@ -1,7 +1,41 @@
 import type { EngineEvent, EngineId } from './engine'
 import type { Chat } from '../types'
+import { ENGINE_IMAGE_MIMES, MAX_ENGINE_ATTACHMENTS, MAX_ENGINE_IMAGE_BYTES } from './media'
 
-export type TranscriptHeader = { chatId?: string; context?: import('./nativeConversation').ContextReceipt; id: string; at: string; engine: EngineId; model: string; workspace: string; title: string; pictures: number }
+/**
+ * One picture kept beside a turn record.
+ *
+ * The count in the header says a picture rode with the request; these records
+ * say the exact bytes were written before dispatch, with the digest needed to
+ * prove a download is the same picture. Paths are not exposed: the app resolves
+ * its own storage.
+ */
+export type TranscriptPicture = {
+  /** 0-based, in the order the engine received them. */
+  index: number
+  mime: (typeof ENGINE_IMAGE_MIMES)[number]
+  bytes: number
+  sha256: string
+}
+
+/** A header's picture records must agree with its count and stay in bounds. */
+export function validPictureRecords(value: unknown, pictures: number): value is TranscriptPicture[] {
+  if (!Array.isArray(value) || value.length !== pictures) return false
+  if (value.length > MAX_ENGINE_ATTACHMENTS) return false
+  return value.every((entry, index) => Boolean(entry) && typeof entry === 'object' && !Array.isArray(entry) &&
+    (entry as TranscriptPicture).index === index &&
+    ENGINE_IMAGE_MIMES.includes((entry as TranscriptPicture).mime) &&
+    Number.isSafeInteger((entry as TranscriptPicture).bytes) &&
+    (entry as TranscriptPicture).bytes > 0 && (entry as TranscriptPicture).bytes <= MAX_ENGINE_IMAGE_BYTES &&
+    typeof (entry as TranscriptPicture).sha256 === 'string' && /^[a-f0-9]{64}$/.test((entry as TranscriptPicture).sha256))
+}
+
+/** True when this record kept the exact picture bytes; false for older records. */
+export function picturesSaved(header: TranscriptHeader): boolean {
+  return Boolean(header.pictureRecords?.length)
+}
+
+export type TranscriptHeader = { chatId?: string; context?: import('./nativeConversation').ContextReceipt; id: string; at: string; engine: EngineId; model: string; workspace: string; title: string; pictures: number; pictureRecords?: TranscriptPicture[] }
 export type Transcript = { userPrompt?: string; header: TranscriptHeader; prompt: string; events: EngineEvent[]; state: 'running' | 'done' | 'error' | 'interrupted'; incomplete: boolean }
 export type TranscriptPage = { entries: TranscriptHeader[]; next: string; notice: string }
 export type TranscriptResult<T> = { ok: true; value: T } | { ok: false; error: string }
@@ -9,13 +43,18 @@ export type TranscriptBridge = {
   raw?(id: string): Promise<TranscriptResult<{ content: string; bytes: number; format: 'ndjson' }>>
   list(before?: string): Promise<TranscriptResult<TranscriptPage>>
   read(id: string): Promise<TranscriptResult<Transcript>>
+  /** The exact saved bytes for one picture, re-verified against its digest. */
+  picture?(id: string, index: number): Promise<TranscriptResult<{ mime: string; bytes: number; sha256: string; data: string }>>
 }
 
 /** Export exactly what was recorded; status/tool/thinking output is not a model answer. */
 export function transcriptMarkdown(turn: Transcript): string {
   const h = turn.header
   const lines = [`# ${h.title}`, '', `Recorded: ${h.at}`, `Engine: ${h.engine}`, `Model: ${h.model || 'Engine default'}`, `State: ${turn.state}`, '', '## You', '', turn.prompt, '']
-  if (h.pictures) lines.push(`Attachment notice: ${h.pictures} image(s) accompanied this request. See the result for acceptance or refusal. Image bytes are not stored in this text transcript.`, '')
+  if (picturesSaved(h) && h.pictureRecords) {
+    lines.push(`Attachment notice: ${h.pictures} image(s) accompanied this request. The exact bytes were saved beside this record before it was sent; each one can be downloaded from the app after being checked against its fingerprint.`, '')
+    for (const picture of h.pictureRecords) lines.push(`Picture ${picture.index + 1}: ${picture.mime}, ${picture.bytes.toLocaleString()} bytes, sha256 ${picture.sha256}`, '')
+  } else if (h.pictures) lines.push(`Attachment notice: ${h.pictures} image(s) accompanied this request. See the result for acceptance or refusal. This earlier record kept only the count; its image bytes were never stored.`, '')
   let text = ''
   const flush = () => { if (text) { lines.push('## Engine', '', text, ''); text = '' } }
   for (const e of turn.events) {
