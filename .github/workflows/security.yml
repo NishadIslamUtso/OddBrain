@@ -1,7 +1,10 @@
 name: security
 on:
+  # Feature branches are checked by the pull-request event only. Running this
+  # again on the same head SHA duplicated CodeQL and attached an intentionally
+  # skipped dependency-review job to otherwise healthy commits.
   push:
-    branches: [main, v3, 'arena/**']
+    branches: [main, v3]
   pull_request:
   schedule:
     - cron: '17 3 * * 1'

@@ -1,0 +1,65 @@
+/** @vitest-environment jsdom */
+import { afterEach, beforeEach, expect, test, vi } from 'vitest'
+import { act, createElement } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import type { ChatStoreAnswer, ChatStoreMigration, ChatStoreSnapshot, ChatStoreWrite } from '../src/shared/lib/chatStore'
+import type { Chat } from '../src/shared/types'
+
+let host: HTMLDivElement, root: Root
+const first: Chat = { id: 'one', title: 'Original', date: 'Today', messages: [] }
+
+beforeEach(() => {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+  localStorage.clear(); vi.useFakeTimers(); vi.resetModules()
+  host = document.createElement('div'); document.body.append(host); root = createRoot(host)
+})
+afterEach(async () => {
+  await act(() => root.unmount())
+  host.remove(); delete window.api; vi.useRealTimers(); vi.restoreAllMocks()
+})
+
+test('desktop hook migrates exact legacy strings, sends changed chats only, and verifies commits', async () => {
+  const rawChats = JSON.stringify([first]), rawCurrent = JSON.stringify('one')
+  localStorage.setItem('ai-assistant.chats', rawChats)
+  localStorage.setItem('ai-assistant.current-chat', rawCurrent)
+  let snapshot: ChatStoreSnapshot = { initialized: false, revision: 0, chats: [], currentChat: '' }
+  const migrate = vi.fn(async (input: ChatStoreMigration): Promise<ChatStoreAnswer> => {
+    expect(input.rawChats).toBe(rawChats); expect(input.rawCurrentChat).toBe(rawCurrent)
+    snapshot = { initialized: true, revision: 1, chats: input.chats as Chat[], currentChat: input.currentChat as string }
+    return { ok: true, snapshot, migrated: true }
+  })
+  const write = vi.fn(async (input: ChatStoreWrite): Promise<ChatStoreAnswer> => {
+    expect(input.expectedRevision).toBe(snapshot.revision)
+    const changed = new Map((input.upserts as Chat[]).map(chat => [chat.id, chat]))
+    const existing = new Map(snapshot.chats.map(chat => [chat.id, chat]))
+    snapshot = {
+      initialized: true,
+      revision: snapshot.revision + 1,
+      chats: (input.order as string[]).map(id => changed.get(id) || existing.get(id)!),
+      currentChat: input.currentChat as string,
+    }
+    return { ok: true, snapshot }
+  })
+  window.api = { chats: { read: async () => ({ ok: true, snapshot }), migrate, write } } as NonNullable<Window['api']>
+  const { useChats } = await import('../src/renderer/src/state/useChats')
+  let state!: ReturnType<typeof useChats>
+  const warnings: string[] = []
+  function Harness() { state = useChats(message => warnings.push(message)); return createElement('span', null, state.ready ? state.chats[0]?.title : 'loading') }
+  await act(async () => { root.render(createElement(Harness)); await Promise.resolve(); await Promise.resolve() })
+  expect(migrate).toHaveBeenCalledOnce()
+  expect(state.ready).toBe(true); expect(state.chats[0].title).toBe('Original'); expect(warnings).toEqual([])
+
+  await act(() => state.rename('one', 'Renamed'))
+  await act(async () => { await vi.advanceTimersByTimeAsync(500) })
+  expect(write).toHaveBeenCalledOnce()
+  expect(write.mock.calls[0][0]).toMatchObject({ order: ['one'], currentChat: 'one', upserts: [{ id: 'one', title: 'Renamed' }] })
+
+  let committed = false
+  await act(async () => { committed = await state.commit(chats => [{ ...chats[0], pinned: true }]) })
+  expect(committed).toBe(true)
+  expect(write).toHaveBeenCalledTimes(2)
+  expect((write.mock.calls[1][0].upserts as Chat[])[0]).toMatchObject({ id: 'one', pinned: true })
+  // Main-process storage is now authoritative; the exact legacy source is left
+  // untouched in localStorage as an additional migration fallback.
+  expect(localStorage.getItem('ai-assistant.chats')).toBe(rawChats)
+})

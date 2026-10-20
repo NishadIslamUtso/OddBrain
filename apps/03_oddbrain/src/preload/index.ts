@@ -20,6 +20,7 @@ import type { Permissions } from '../shared/lib/permissions'
 import type { ApprovalMode, EngineAvailability, EngineEvent, EngineId, EngineModelEntry, EngineSettings } from '../shared/lib/engine'
 import type { HouseRules } from '../shared/lib/houseRules'
 import type { Project } from '../shared/lib/projects'
+import type { ChatStoreBridge, ChatStoreMigration, ChatStoreWrite } from '../shared/lib/chatStore'
 import type {
   AdoptInput,
   ItemAnswer,
@@ -220,6 +221,11 @@ const marketplaceApi: MarketplaceBridge = {
   confirm: (token, engine) => ipcRenderer.invoke('market:confirm', token, engine), cancel: engine => ipcRenderer.invoke('market:cancel', engine),
 }
 const api = {
+  chats: {
+    read: () => ipcRenderer.invoke('chats:read'),
+    migrate: (input: ChatStoreMigration) => ipcRenderer.invoke('chats:migrate', input),
+    write: (input: ChatStoreWrite) => ipcRenderer.invoke('chats:write', input),
+  } satisfies ChatStoreBridge,
   transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), image: (id: string, imageId: string) => ipcRenderer.invoke('transcripts:image', id, imageId), attachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:attachment', id, attachmentId), recover: (chatIds: string[], knownTranscriptIds: string[], before?: string) => ipcRenderer.invoke('transcripts:recover', chatIds, knownTranscriptIds, before), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
   media: mediaApi, marketplace: marketplaceApi,
   automation: automationApi,

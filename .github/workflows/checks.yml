@@ -1,13 +1,17 @@
-# The gate, on every push, on both operating systems. Linux always ran it;
-# Windows (the target OS) joined 2026-10-17 as allow-failure until it ran
-# green once — and when it did, the training wheels came off the same day.
-# A red X here fails the push now. It earned that.
+# The gate, once per pull request (and on long-lived branch pushes), on both
+# operating systems. Linux always ran it; Windows (the target OS) joined
+# 2026-10-17 as allow-failure until it ran green once — and when it did, the
+# training wheels came off the same day. A red X fails the gate now.
 name: checks
-on: [push, pull_request]
+on:
+  # Pull requests get one check set. Push runs are only for long-lived branches;
+  # running both events for the same PR head left cancelled duplicate jobs on the
+  # commit and made GitHub's Branches page report a misleading red 6/9.
+  push:
+    branches: [main, v3]
+  pull_request:
 concurrency:
-  # A branch push and its pull_request event run the same matrix. Keep only
-  # the newest copy so slow Windows integration tests do not compete twice.
-  group: checks-${{ github.event.pull_request.head.repo.full_name || github.repository }}-${{ github.event.pull_request.head.ref || github.ref_name }}
+  group: checks-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 jobs:
   linux:

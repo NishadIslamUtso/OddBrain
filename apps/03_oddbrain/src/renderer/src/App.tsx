@@ -349,7 +349,7 @@ export default function App() {
         if (!reply.ok) throw Error(reply.error)
         note = [note, reply.value.notice].filter(Boolean).join(' ')
         if (reply.value.records.length) {
-          const saved = commitNativeChat.current(previous => previous.map(chat => {
+          const saved = await commitNativeChat.current(previous => previous.map(chat => {
             let next = chat
             for (const record of reply.value.records) if (record.header.chatId === chat.id) next = recordNativeTranscript(next, record)
             return next
@@ -369,10 +369,10 @@ export default function App() {
     const turn = engine.turn, id = turn?.transcriptId
     if (!turn?.chatId || !id || turn.state === 'running' || nativeRecorded.current.has(id)) return
     nativeRecorded.current.add(id)
-    void bridge.transcripts.read(id).then(reply => {
+    void bridge.transcripts.read(id).then(async reply => {
       if (!reply.ok) throw Error(reply.error)
       if (reply.value.state === 'running') { nativeRecorded.current.delete(id); return }
-      const saved = commitNativeChat.current(previous => previous.map(chat => chat.id === turn.chatId ? recordNativeTranscript(chat, reply.value) : chat))
+      const saved = await commitNativeChat.current(previous => previous.map(chat => chat.id === turn.chatId ? recordNativeTranscript(chat, reply.value) : chat))
       if (!saved) setNotice('The native turn is in Full transcripts, but this chat copy could not be saved. Export the transcript before closing.')
     }).catch(() => { nativeRecorded.current.delete(id); setNotice('This turn could not be copied into saved chat history. Its original record is kept in Full transcripts.') })
   }, [engine.turn?.transcriptId, engine.turn?.state])
@@ -603,7 +603,7 @@ export default function App() {
     const resume = target.resume
     const conversation: NativeConversation = { chatId, projectId, overrides, workingNotes: savedNotes.working, vaultSearch: savedNotes.vaultSearch, localSemantic: savedNotes.localSemantic, contextProfile, expectedRoute: target.route || undefined, continuationExpected: resume,
       ...(!resume ? { history: pendingBrief ? [] : (chat?.messages || []).filter(m => m.origin !== 'import' && (!m.status || m.status === 'complete')).map(m => ({ id: m.id, role: m.role, content: m.content })) } : {}) }
-    if (!chats.commit(previous => previous.some(entry => entry.id === chatId)
+    if (!await chats.commit(previous => previous.some(entry => entry.id === chatId)
       ? previous.map(entry => entry.id === chatId ? { ...entry, projectId } : entry)
       : [{ id: chatId, title: plain.replace(/\s+/g, ' ').slice(0, 80) || 'New chat', date: 'Today', projectId, messages: [] }, ...previous])) return
     chats.open(chatId)
@@ -778,11 +778,11 @@ export default function App() {
           project={pendingProject ?? chat?.projectId ?? null}
           onProject={id => { setPendingProject(id); if (chat) chats.setProject(chat.id, id) }}
           contextDefaults={{ goal: projects.find(p => p.id === (pendingProject ?? chat?.projectId))?.goals.join('\n') || '', style: '', workspace: projects.find(p => p.id === (pendingProject ?? chat?.projectId))?.folder || '', additionalFolders: [] }}
-          onBranch={messageId => {
+          onBranch={async messageId => {
             if (!chat) return
             try {
               let branchId = ''
-              const saved = chats.commit(previous => {
+              const saved = await chats.commit(previous => {
                 const original = previous.find(c => c.id === chat.id)
                 if (!original) throw Error('The source chat is no longer saved.')
                 const branch = branchChat(original, messageId, newId); branchId = branch.id

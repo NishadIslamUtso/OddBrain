@@ -7,6 +7,7 @@ import type { SkillDraft, SkillInventory, SkillFile, CatalogSkillReview } from '
 import type { NativeConversation, NativeSessionLink, NativeContextTarget } from '@shared/lib/nativeConversation'
 import type { FileReview, FileDecision } from '@shared/lib/changeReview'
 import type { TranscriptBridge } from '@shared/lib/transcripts'
+import type { ChatStoreBridge } from '@shared/lib/chatStore'
 import type { EngineSourceFile } from '@shared/lib/media'
 import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
 import type { ThinkingMode } from '@shared/lib/engine'
@@ -60,6 +61,7 @@ import type {
 
 /** What the preload script exposes today. It grows as the main process does. */
 export type DesktopBridge = {
+  chats: ChatStoreBridge
   transcripts: TranscriptBridge
   media: MediaBridge
   marketplace: MarketplaceBridge
@@ -309,6 +311,11 @@ const demoAutomation: AutomationBridge = {
 let previewMedia = { ...DEFAULT_MEDIA }
 const unavailableMarket = async () => ({ ok: false as const, error: 'Marketplaces require the installed desktop app.' })
 const demoBridge: DesktopBridge = {
+  chats: {
+    read: async () => ({ ok: false, error: 'Main-process conversation storage requires the installed app.' }),
+    migrate: async () => ({ ok: false, error: 'Main-process conversation storage requires the installed app.' }),
+    write: async () => ({ ok: false, error: 'Main-process conversation storage requires the installed app.' }),
+  },
   media: {
     authorizeRecording: async () => ({ ok: false, name: 'Microphone', error: 'Provider recording requires the desktop app.' }), onCancelled: () => () => {},
     read: async () => ({ ...previewMedia }), update: async patch => (previewMedia = { ...previewMedia, ...patch, ffmpeg: '' }),

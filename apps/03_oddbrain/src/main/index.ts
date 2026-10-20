@@ -114,6 +114,8 @@ import { createProjectRuleReview, houseRulesFile as nativeHouseRulesFile } from 
 import { DEFAULT_HOUSE_RULES, instructionBlock, type HouseRules } from '../shared/lib/houseRules'
 import { newProject, type Project } from '../shared/lib/projects'
 import { scanTextHazards } from '../shared/lib/textHazards'
+import { createChatStore } from './chats/store'
+import type { ChatStoreMigration, ChatStoreSnapshot, ChatStoreWrite } from '../shared/lib/chatStore'
 
 /**
  * The main process. Everything that touches the machine lives on this side:
@@ -311,6 +313,18 @@ let mediaService: ReturnType<typeof createMediaService> | undefined
 let marketplaceService: ReturnType<typeof createMarketplaceService> | undefined
 let agyMarketplaceService: ReturnType<typeof createAgyMarketplaceService> | undefined
 function registerBridges(): void {
+  const chatStore = createChatStore(join(app.getPath('userData'), 'chats-v1'))
+  const chatAnswer = <T,>(run: () => T) => {
+    try { return { ok: true as const, ...run() } }
+    catch (error) {
+      const failure = error as Error & { snapshot?: ChatStoreSnapshot }
+      return { ok: false as const, error: failure.message || 'Conversation storage failed. Original files were not replaced.', ...(failure.snapshot ? { snapshot: failure.snapshot } : {}) }
+    }
+  }
+  handle('chats:read', () => chatAnswer(() => ({ snapshot: chatStore.read() })))
+  handle('chats:migrate', (_event, input: ChatStoreMigration) => chatAnswer(() => chatStore.migrate(input)))
+  handle('chats:write', (_event, input: ChatStoreWrite) => chatAnswer(() => ({ snapshot: chatStore.write(input) })))
+
   const workQueue = createWorkQueue(join(app.getPath('userData'), 'work-queue'), () => JSON.stringify(settings.engine), () => createHash('sha256').update(JSON.stringify([settings.engine, settings.permissions, automation?.preferences().allowCloudInference !== false, resolveEngineCommand(settings.engine.id), settings.engine.cloudProvider === 'anthropic' ? keyStore?.get('anthropic') || '' : ''])).digest('hex'))
   const permissionTickets = createPermissionTickets(() => engine?.current() || null)
   let nativeWork = 0
