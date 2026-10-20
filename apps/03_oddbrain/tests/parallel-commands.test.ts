@@ -5,6 +5,8 @@ import { tmpdir } from 'node:os'
 import { join, resolve } from 'node:path'
 import { createCommandRunner } from '../src/main/commands/runner'
 
+/** A command that is still running when the stop arrives, on either platform. */
+const SLOW = process.platform === 'win32' ? 'Start-Sleep -Seconds 30' : 'sleep 30'
 const roots: string[] = []
 const dir = () => { const path = mkdtempSync(join(tmpdir(), 'oddbrain-parallel-')); roots.push(path); return path }
 afterEach(() => { roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })); vi.restoreAllMocks() })
@@ -78,10 +80,10 @@ test('a run in the selected folder keeps that folder closed while a checkout may
 
 test('stopping one window leaves another window’s run alone, and the count is per run', async () => {
   const f = fixture()
-  const first = await f.runner.preview(1, { command: 'one', cwd: f.one })
+  const first = await f.runner.preview(1, { command: SLOW, cwd: f.one })
   const one = f.runner.decide(1, first.token, 'allow')
   await vi.waitFor(() => expect(f.restarts).toHaveLength(1))
-  const second = await f.runner.preview(2, { command: 'two', cwd: f.two })
+  const second = await f.runner.preview(2, { command: SLOW, cwd: f.two })
   const two = f.runner.decide(2, second.token, 'allow')
   await vi.waitFor(() => expect(f.restarts).toHaveLength(2))
   expect(f.runner.cancel(1).requested).toBe(true)

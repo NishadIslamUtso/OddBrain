@@ -1,11 +1,13 @@
 // @vitest-environment node
-import { afterEach, expect, test } from 'vitest'
+import { afterEach, expect, test, vi } from 'vitest'
 import { execFileSync } from 'node:child_process'
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createWorktreeService } from '../src/main/worktrees/service'
 
+// Real `git` on a cold Windows runner is slower than a unit test budget.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 const roots: string[] = []
 const dir = () => { const path = mkdtempSync(join(tmpdir(), 'oddbrain-worktree-')); roots.push(path); return path }
 afterEach(() => { roots.splice(0).forEach(root => rmSync(root, { recursive: true, force: true })) })
