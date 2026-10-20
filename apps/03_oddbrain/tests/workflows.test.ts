@@ -1,8 +1,9 @@
 import { afterEach, expect, test, vi } from 'vitest'
-import { mkdtempSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs'
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { createHmac } from 'node:crypto'
+import { execFileSync } from 'node:child_process'
 import { createCommandRunner } from '../src/main/commands/runner'
 import { createWorkflowService } from '../src/main/workflows/service'
 import { createWorkflowScheduler } from '../src/main/workflows/scheduler'
@@ -29,6 +30,20 @@ const say = (text: string) => process.platform === 'win32' ? `[Console]::Write('
 const fail = process.platform === 'win32' ? 'exit 7' : 'exit 7'
 const slow = process.platform === 'win32' ? 'Start-Sleep -Seconds 30' : 'sleep 30'
 const define = (f: ReturnType<typeof fixture>, commands = [say('one'), say('two')]) => f.workflows.save({ name: 'Checked sequence', cwd: f.root, steps: commands.map((command, i) => ({ name: `Step ${i + 1}`, command })) })
+function parallelFixture() {
+  const base = mkdtempSync(join(tmpdir(), 'oddbrain-parallel-')); roots.push(base)
+  const repo = join(base, 'repo'); mkdirSync(repo)
+  execFileSync('git', ['init', '-q'], { cwd: repo }); execFileSync('git', ['config', 'user.email', 'test@example.invalid'], { cwd: repo }); execFileSync('git', ['config', 'user.name', 'OddBrain test'], { cwd: repo })
+  writeFileSync(join(repo, 'source.txt'), 'source\n'); execFileSync('git', ['add', 'source.txt'], { cwd: repo }); execFileSync('git', ['commit', '-qm', 'fixture'], { cwd: repo })
+  let locked = false, epoch = 0
+  const commands = createCommandRunner({ root: join(base, 'commands'), isolationRoot: join(base, 'worktrees'), deadlineMs: 10_000,
+    scope: () => ({ cwd: repo, authority: `parallel-${epoch}`, stableAuthority: 'parallel', allowed: !locked, busy: locked, explanation: 'Busy' }),
+    acquire: async (_request, authority, signal) => { if (locked || authority !== `parallel-${epoch}`) throw Error('Denied'); locked = true; return { recheck() { if (signal.aborted || authority !== `parallel-${epoch}`) throw Error('Changed') }, release() { locked = false; epoch++ } } },
+  })
+  return { base, repo, commands, workflows: createWorkflowService(join(base, 'workflows'), commands), locked: () => locked }
+}
+const literal = (value: string) => `'${value.replaceAll("'", "''")}'`
+const isolatedWrite = (name: string, value: string) => process.platform === 'win32' ? `[IO.File]::WriteAllText(${literal(name)}, ${literal(value)})` : `printf '%s' ${literal(value)} > ${literal(name)}`
 const approveSchedule = (f: ReturnType<typeof fixture>, workflowId: string) => {
   const review = f.scheduler.preview(1, { workflowId, intervalMinutes: 5, firstAt: f.time() + 10000 })
   const saved = f.scheduler.decide(1, review.token, 'allow'); if ('denied' in saved) throw Error('Unexpected denial'); return saved
@@ -49,6 +64,47 @@ test('one approval runs exact steps sequentially and retains real command result
   expect(f.locked()).toBe(false)
   await expect(f.workflows.decide(1, review.token, 'allow')).rejects.toThrow()
 }, 20000)
+test('parallel workflow commands use separate retained worktrees and actually overlap, never the source checkout', async () => {
+  const f = parallelFixture(), marker = join(f.base, 'second-ready')
+  const waitForSecond = process.platform === 'win32'
+    ? `for($i=0; $i -lt 50 -and -not (Test-Path -LiteralPath ${literal(marker)}); $i++){ Start-Sleep -Milliseconds 100 }; if(-not (Test-Path -LiteralPath ${literal(marker)})){ exit 8 }; ${isolatedWrite('one.txt', 'one')}`
+    : `i=0; while [ ! -f ${literal(marker)} ] && [ "$i" -lt 50 ]; do sleep 0.1; i=$((i+1)); done; test -f ${literal(marker)}; ${isolatedWrite('one.txt', 'one')}`
+  const announceSecond = process.platform === 'win32' ? `${isolatedWrite(marker, 'ready')}; ${isolatedWrite('two.txt', 'two')}` : `${isolatedWrite(marker, 'ready')}; ${isolatedWrite('two.txt', 'two')}`
+  const definition = f.workflows.save({ name: 'Isolated pair', cwd: f.repo, mode: 'parallel-worktrees', steps: [{ name: 'Waits for sibling', command: waitForSecond }, { name: 'Signals sibling', command: announceSecond }] })
+  expect(() => f.workflows.prepare(definition.id, true)).toThrow(/fresh manual review/)
+  const review = f.workflows.preview(1, definition.id)
+  expect(review.isolation).toMatchObject({ repositoryRoot: f.repo, maxConcurrency: 2 }); expect(review.isolation?.baseRevision).toMatch(/^[a-f0-9]{40}$/)
+  const run = await f.workflows.decide(1, review.token, 'allow'); if ('denied' in run) throw Error('Unexpected denial')
+  expect(run.state).toBe('succeeded'); expect(run.steps.map(step => step.state)).toEqual(['succeeded', 'succeeded'])
+  const paths = run.steps.map(step => step.worktree?.path || ''); expect(new Set(paths).size).toBe(2)
+  expect(run.steps.every(step => step.worktree?.retained && step.worktree.changed)).toBe(true)
+  expect(readFileSync(join(paths[0], 'one.txt'), 'utf8')).toBe('one'); expect(readFileSync(join(paths[1], 'two.txt'), 'utf8')).toBe('two')
+  expect(existsSync(join(f.repo, 'one.txt'))).toBe(false); expect(existsSync(join(f.repo, 'two.txt'))).toBe(false)
+  expect(f.commands.history().records).toHaveLength(2); expect(f.locked()).toBe(false)
+}, 30000)
+test('one stop request reaches both active parallel commands and no third task starts', async () => {
+  const f = parallelFixture(), definition = f.workflows.save({ name: 'Stop pair', cwd: f.repo, mode: 'parallel-worktrees', steps: [{ name: 'Slow one', command: slow }, { name: 'Slow two', command: slow }, { name: 'Never starts', command: say('no') }] })
+  const review = f.workflows.preview(1, definition.id), pending = f.workflows.decide(1, review.token, 'allow')
+  await vi.waitFor(() => expect(f.commands.history().records).toHaveLength(2))
+  expect(f.workflows.cancel().requested).toBe(true)
+  const run = await pending; if ('denied' in run) throw Error()
+  expect(run.steps.map(step => step.state)).toEqual(['interrupted', 'interrupted', 'skipped']); expect(f.commands.history().records).toHaveLength(2); expect(f.locked()).toBe(false)
+}, 30000)
+test('source-checkout tampering outside the worktree is detected and never reported as isolated success', async () => {
+  const f = parallelFixture(), source = join(f.repo, 'source.txt')
+  const definition = f.workflows.save({ name: 'Detect escape', cwd: f.repo, mode: 'parallel-worktrees', steps: [{ name: 'Escapes worktree', command: isolatedWrite(source, 'changed') }, { name: 'Clean sibling', command: say('checked') }] })
+  const review = f.workflows.preview(1, definition.id), run = await f.workflows.decide(1, review.token, 'allow'); if ('denied' in run) throw Error()
+  expect(run.state).toBe('interrupted'); expect(run.note).toMatch(/uncommitted or untracked/)
+  expect(readFileSync(source, 'utf8')).toBe('changed')
+}, 30000)
+test('a failed parallel task prevents a third checkout while an already-running sibling records reality', async () => {
+  const f = parallelFixture(), third = join(f.base, 'third-started')
+  const slowSuccess = process.platform === 'win32' ? `Start-Sleep -Milliseconds 300; ${isolatedWrite('sibling.txt', 'done')}` : `sleep 0.3; ${isolatedWrite('sibling.txt', 'done')}`
+  const definition = f.workflows.save({ name: 'Fail fast pair', cwd: f.repo, mode: 'parallel-worktrees', steps: [{ name: 'Fails', command: fail }, { name: 'Already running', command: slowSuccess }, { name: 'Must not start', command: isolatedWrite(third, 'bad') }] })
+  const review = f.workflows.preview(1, definition.id), run = await f.workflows.decide(1, review.token, 'allow'); if ('denied' in run) throw Error()
+  expect(run.steps.map(step => step.state)).toEqual(['failed', 'succeeded', 'skipped']); expect(existsSync(third)).toBe(false)
+  expect(run.steps[2].worktree).toBeUndefined(); expect(f.commands.history().records).toHaveLength(2)
+}, 30000)
 test('a nonzero step prevents every later step, without rolling back earlier work', async () => {
   const f = fixture(), definition = define(f, [say('first'), fail, say('must not run')]), review = f.workflows.preview(1, definition.id)
   const run = await f.workflows.decide(1, review.token, 'allow'); if ('denied' in run) throw Error('Unexpected denial')

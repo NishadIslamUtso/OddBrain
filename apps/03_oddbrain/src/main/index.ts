@@ -2,7 +2,7 @@ import { createApprovalSigner } from './workflows/approvalSigner'
 import { createWorkflowScheduler } from './workflows/scheduler'
 import type { ScheduleInput } from '../shared/lib/schedules'
 import { createWorkflowService } from './workflows/service'
-import type { WorkflowStep } from '../shared/lib/workflows'
+import type { WorkflowMode, WorkflowStep } from '../shared/lib/workflows'
 import { createCommandRunner, COMMAND_DISCLOSURE } from './commands/runner'
 import type { ShellRequest } from '../shared/lib/commands'
 import { createWorkQueue } from './engine/workQueue'
@@ -340,7 +340,7 @@ function registerBridges(): void {
       : engine?.turnBusy() || (dispatchingWork && !reserved) || foregroundApiRequests > 0 ? 'Wait for active work before running an app command.' : COMMAND_DISCLOSURE
     return { cwd, authority, stableAuthority: JSON.stringify([cwd, settings.engine.approval, settings.permissions]), busy: !!engine?.turnBusy() || (dispatchingWork && !reserved) || foregroundApiRequests > 0, allowed: settings.permissions.manualCommands === true && settings.engine.approval !== 'plan' && !engine?.turnBusy() && (!dispatchingWork || reserved) && foregroundApiRequests === 0, explanation }
   }
-  const commandRunner = createCommandRunner({ root: join(app.getPath('userData'), 'command-runs'), scope: () => commandScope(),
+  const commandRunner = createCommandRunner({ root: join(app.getPath('userData'), 'command-runs'), isolationRoot: join(app.getPath('userData'), 'isolated-worktrees'), scope: () => commandScope(),
     acquire: async (request, authority, signal) => {
       const initial = commandScope()
       if (!initial.allowed || initial.authority !== authority || resolve(request.cwd) !== initial.cwd) throw Error('Command authority changed before reservation. Nothing was run.')
@@ -376,7 +376,7 @@ function registerBridges(): void {
   handle('schedules:inbox', (_event, before?: string) => scheduler.inbox(before))
   handle('schedules:acknowledge', (_event, id: string) => scheduler.acknowledge(id))
   handle('workflows:list', (_event, before?: string) => workflows.list(before))
-  handle('workflows:save', (_event, input: { name: string; cwd: string; steps: WorkflowStep[] }) => workflows.save(input))
+  handle('workflows:save', (_event, input: { name: string; cwd: string; steps: WorkflowStep[]; mode?: WorkflowMode }) => workflows.save(input))
   handle('workflows:archive', (_event, id: string, archived: boolean) => workflows.archive(id, archived))
   handle('workflows:preview', (event, id: string) => workflows.preview(track(event.sender), id))
   handle('workflows:decide', (event, token: string, decision: 'allow' | 'deny') => workflows.decide(track(event.sender), token, decision))

@@ -86,7 +86,7 @@ export function createWorkflowScheduler(options: { root: string; workflows: Work
         if (!ready.allowed) { pauseUncertain(schedule, item.bytes, ready.explanation || 'Command access is no longer allowed. Review again before enabling this schedule.'); continue }
         let prepared: ReturnType<WorkflowService['prepare']>
         try {
-          prepared = options.workflows.prepare(schedule.workflowId)
+          prepared = options.workflows.prepare(schedule.workflowId, true)
           if (prepared.definition.digest !== schedule.workflowDigest || prepared.capability.stableFingerprint !== schedule.fingerprint) throw Error('Workflow, folder, OS shell, environment or permissions changed after recurring approval.')
         } catch (error) { pauseUncertain(schedule, item.bytes, (error as Error).message); continue }
         const claimFile = slotPath(schedule.id, schedule.nextAt)
@@ -127,7 +127,7 @@ export function createWorkflowScheduler(options: { root: string; workflows: Work
       const replacement = raw.replaceId ? read(raw.replaceId) : undefined
       if (replacement && (replacement.value.state === 'needs-review' || replacement.value.lastOutcome === 'claimed' || replacement.value.lastOutcome === 'interrupted') && raw.acknowledgeUncertainty !== true) throw Error('Inspect earlier uncertain work and acknowledge it before enabling future slots.')
       if (!raw.replaceId && keys(defs).some(key => { try { const value = read(key).value; return value.workflowId === raw.workflowId && value.state === 'enabled' } catch { return false } })) throw Error('This workflow already has an enabled schedule. Review a change to that schedule instead of creating a duplicate.')
-      const prepared = options.workflows.prepare(raw.workflowId), token = randomUUID(), expiresAt = now() + 120_000, input = structuredClone(raw)
+      const prepared = options.workflows.prepare(raw.workflowId, true), token = randomUUID(), expiresAt = now() + 120_000, input = structuredClone(raw)
       tickets.set(token, { owner, input, fingerprint: prepared.capability.stableFingerprint, digest: prepared.definition.digest, expiresAt, replacement: replacement?.bytes })
       return { token, expiresAt, input, workflow: prepared.definition, executions: prepared.capability.executions, explanation: 'Recurring OS execution, not a one-time command approval. This exact sequence may run automatically while the app process is running, including with windows closed. It does not run while the app is quit. The approved working folder must remain selected. Runs may start up to one minute late; older/missed slots are skipped. Changed definition, shell, environment or access pauses execution. Referenced scripts are not audited or pinned and can change. Nonzero/incomplete results pause future runs. Unfinished claims never replay after restart. No OS sandbox, automatic rollback or guarantee all descendants exited.' }
     },
@@ -138,7 +138,7 @@ export function createWorkflowScheduler(options: { root: string; workflows: Work
       tickets.delete(token)
       if (decision === 'deny') return { denied: true as const }
       if (decision !== 'allow' || ticket.expiresAt <= now() || ticket.input.firstAt <= now()) throw Error('Schedule review expired or its first slot passed. Nothing was enabled.')
-      const prepared = options.workflows.prepare(ticket.input.workflowId)
+      const prepared = options.workflows.prepare(ticket.input.workflowId, true)
       if (prepared.definition.digest !== ticket.digest || prepared.capability.stableFingerprint !== ticket.fingerprint) throw Error('Recurring execution authority changed. Review again.')
       if (!ticket.input.replaceId && keys(defs).length >= 100) throw Error('Schedule capacity reached. Existing schedules were not evicted.')
       const prior = ticket.input.replaceId ? read(ticket.input.replaceId) : undefined

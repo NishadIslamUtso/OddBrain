@@ -5,6 +5,7 @@ import { join, resolve, isAbsolute } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import { configBytes, commitConfigs, noLinkedPath } from '../engine/configTransaction'
 import { createChatShellReview } from '../chatShellReview'
+import { cleanupEmptyWorktreeBatch, createDetachedWorktree, detachedWorktreePath, finishDetachedWorktree, inspectWorktreeRepository, recheckWorktreeRepository, type WorktreeReceipt } from '../workflows/worktrees'
 import type { CommandRecord, ShellExecution, ShellRequest, ShellResult } from '../../shared/lib/commands'
 const ID = /^\d{13}-[a-f0-9-]{36}$/
 const sha = (bytes: Buffer | string) => createHash('sha256').update(bytes).digest('hex')
@@ -37,8 +38,10 @@ export function createCommandRunner(options: {
   spawnProcess?: typeof spawn
   deadlineMs?: number
   maxBytes?: number
+  isolationRoot?: string
 }) {
   const limit = options.maxBytes ?? 2_000_000, deadline = options.deadlineMs ?? 300_000
+  const isolationRoot = options.isolationRoot || join(options.root, 'isolated-worktrees')
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 2_000_000 || !Number.isSafeInteger(deadline) || deadline < 1 || deadline > 300_000) throw Error('Invalid command resource limits.')
   const library = createCommandLibrary(join(options.root, 'saved-commands'))
   const checkSource = (request: ShellRequest) => {
@@ -47,7 +50,7 @@ export function createCommandRunner(options: {
     if (saved.archived || saved.platform !== process.platform || saved.digest !== request.source.digest || saved.name !== request.source.name || saved.command !== request.command || saved.cwd !== request.cwd) throw Error('Saved command was archived, changed or belongs to another OS. Review the current command explicitly; nothing was run.')
   }
   const reviews = new Map<number, ReturnType<typeof createChatShellReview>>()
-  let active: { owner: number; controller: AbortController; id: string | null } | null = null
+  let active: { owner: number; controller: AbortController; id: string | null; ids: Set<string> } | null = null
   const directory = (id: string) => { if (!ID.test(id)) throw Error('Invalid command record ID.'); const dir = join(options.root, id); noLinkedPath(dir); return dir }
   const file = (id: string) => join(directory(id), 'record.json')
   const readRecord = (id: string): CommandRecord => {
@@ -58,7 +61,7 @@ export function createCommandRunner(options: {
     if (value.outputComplete && (value.state !== 'finished' || value.exitCode === null || !/^[a-f0-9]{64}$/.test(value.stdoutHash || '') || !/^[a-f0-9]{64}$/.test(value.stderrHash || ''))) throw Error('Command completion metadata is incomplete. Originals were retained.')
     return value
   }
-  const observed = (record: CommandRecord) => active?.id !== record.id && ['starting', 'running'].includes(record.state) ? { ...record, state: 'interrupted' as const, outputComplete: false, note: 'No final result is recorded and this app has no active handle for this run. It may have been interrupted before or during execution; escaped descendants may have continued. Nothing was automatically retried.' } : record
+  const observed = (record: CommandRecord) => !active?.ids.has(record.id) && ['starting', 'running'].includes(record.state) ? { ...record, state: 'interrupted' as const, outputComplete: false, note: 'No final result is recorded and this app has no active handle for this run. It may have been interrupted before or during execution; escaped descendants may have continued. Nothing was automatically retried.' } : record
   const inspect = (request: ShellRequest) => {
     checkSource(request)
     const scope = options.scope()
@@ -76,7 +79,19 @@ export function createCommandRunner(options: {
     return { scope, execution, stamp, stableStamp }
   }
   type Checked = ReturnType<typeof inspect>
-  type Active = { owner: number; controller: AbortController; id: string | null }
+  const inspectIsolated = (request: ShellRequest, reviewed: Checked): Checked => {
+    noLinkedPath(request.cwd)
+    const folder = statSync(request.cwd)
+    if (!folder.isDirectory()) throw Error('The isolated Git worktree is not a directory. No command was started there.')
+    const execution = commandSpec(request.command), program = realpathSync(execution.program), executable = statSync(program)
+    execution.program = program
+    if (!executable.isFile() || JSON.stringify(execution) !== JSON.stringify(reviewed.execution)) throw Error('The reviewed OS shell or exact command changed before isolated execution.')
+    const environment = commandEnvironment(process.env)
+    const stamp = sha(JSON.stringify([reviewed.scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs]))
+    const stableStamp = sha(JSON.stringify([reviewed.scope.stableAuthority || reviewed.scope.authority, resolve(request.cwd), folder.dev, folder.ino, execution, environment, executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs]))
+    return { scope: reviewed.scope, execution, stamp, stableStamp }
+  }
+  type Active = { owner: number; controller: AbortController; id: string | null; ids: Set<string> }
   const runOne = async (request: ShellRequest, checked: Checked, own: Active, lease: Lease, outputLimit = limit, recorded?: (id: string) => void): Promise<ShellResult> => {
       const controller = own.controller, expected = checked.stamp
       controller.signal.throwIfAborted(); lease.recheck()
@@ -85,7 +100,7 @@ export function createCommandRunner(options: {
       const executable = statSync(checked.execution.program)
       const stamp = sha(JSON.stringify([checked.scope.authority, resolve(request.cwd), folder.dev, folder.ino, checked.execution, commandEnvironment(process.env), executable.dev, executable.ino, executable.size, executable.mtimeMs, executable.ctimeMs]))
       if (stamp !== expected || realpathSync(commandSpec(request.command).program) !== checked.execution.program) throw Error('Command target changed before launch. Nothing was run.')
-      const id = `${Date.now()}-${randomUUID()}`; own.id = id
+      const id = `${Date.now()}-${randomUUID()}`; own.id = id; own.ids.add(id)
       mkdirSync(directory(id), { recursive: true, mode: 0o700 })
       const stdoutFile = join(directory(id), 'stdout.bin'), stderrFile = join(directory(id), 'stderr.bin')
       let out: number | undefined, err: number | undefined, previous: Buffer | null = null
@@ -152,12 +167,12 @@ export function createCommandRunner(options: {
           } catch { saveFault = 'The OS shell could not be launched. No automatic retry.'; finish(null, null) }
         })
         return result
-      } finally { if (out !== undefined) closeSync(out); if (err !== undefined) closeSync(err) }
+      } finally { own.ids.delete(id); if (out !== undefined) closeSync(out); if (err !== undefined) closeSync(err) }
   }
   const execute = async (owner: number, request: ShellRequest, expected: string): Promise<ShellResult> => {
     const checked = inspect(request)
     if (checked.stamp !== expected) throw Error('Command authority, folder or environment changed. Review again; nothing was run.')
-    const own: Active = { owner, controller: new AbortController(), id: null }; active = own
+    const own: Active = { owner, controller: new AbortController(), id: null, ids: new Set() }; active = own
     let lease: Lease | undefined
     try { lease = await options.acquire(request, checked.scope.authority, own.controller.signal); return await runOne(request, checked, own, lease) }
     finally { lease?.release(); if (active === own) active = null }
@@ -175,7 +190,7 @@ export function createCommandRunner(options: {
         consumed = true; signal.throwIfAborted()
         const fresh = requests.map(request => inspect(request))
         if (sha(JSON.stringify(fresh.map(entry => entry.stamp))) !== fingerprint) throw Error('Workflow authority or targets changed. Review again.')
-        const own: Active = { owner, controller: new AbortController(), id: null }; active = own
+        const own: Active = { owner, controller: new AbortController(), id: null, ids: new Set() }; active = own
         const abort = () => own.controller.abort(signal.reason)
         signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort()
         const timer = setTimeout(() => own.controller.abort('Workflow time budget reached'), 900_000)
@@ -192,6 +207,68 @@ export function createCommandRunner(options: {
             if (result.interrupted || !result.outputComplete || result.exitCode !== 0) return
           }
         } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); lease?.release(); if (active === own) active = null }
+      },
+    }
+  }
+
+  /** Main-only capability: at most two exact commands run concurrently, each in a detached checkout of one reviewed clean HEAD. */
+  const planParallelWorktrees = (input: ShellRequest[]) => {
+    if (!Array.isArray(input) || input.length < 2 || input.length > 8) throw Error('An isolated parallel workflow has two to eight exact commands.')
+    const requests = structuredClone(input), checked = requests.map(request => inspect(request))
+    if (new Set(requests.map(request => resolve(request.cwd))).size !== 1) throw Error('Parallel tasks must share one reviewed Git repository root.')
+    const repository = inspectWorktreeRepository(requests[0].cwd, isolationRoot)
+    const fingerprint = sha(JSON.stringify([checked.map(entry => entry.stamp), repository.stamp]))
+    let consumed = false
+    return {
+      fingerprint, stableFingerprint: fingerprint,
+      executions: checked.map(entry => entry.execution),
+      isolation: { repositoryRoot: repository.root, baseRevision: repository.revision, maxConcurrency: 2 as const },
+      async run(owner: number, signal: AbortSignal, batchId: string, callbacks: { starting(index: number): void; recorded(index: number, id: string): void; finished(index: number, result: ShellResult): void; worktree(index: number, receipt: WorktreeReceipt): void }) {
+        if (consumed) throw Error('Parallel workflow execution capability was already consumed.')
+        consumed = true; signal.throwIfAborted()
+        const fresh = requests.map(request => inspect(request))
+        recheckWorktreeRepository(repository, isolationRoot)
+        if (sha(JSON.stringify([fresh.map(entry => entry.stamp), repository.stamp])) !== fingerprint) throw Error('Workflow authority, exact commands, or clean Git revision changed. Review again.')
+        const own: Active = { owner, controller: new AbortController(), id: null, ids: new Set() }; active = own
+        const abort = () => own.controller.abort(signal.reason)
+        signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort()
+        const timer = setTimeout(() => own.controller.abort('Parallel workflow time budget reached'), 900_000)
+        let lease: Lease | undefined, next = 0, halt = false, fatal: unknown
+        const outputLimit = Math.min(limit, Math.floor(8_000_000 / requests.length))
+        const durable = (write: () => void) => { try { write() } catch (error) { fatal ||= error; halt = true; own.controller.abort('Parallel workflow recording failed'); throw error } }
+        try {
+          lease = await options.acquire(requests[0], checked[0].scope.authority, own.controller.signal)
+          recheckWorktreeRepository(repository, isolationRoot); lease.recheck()
+          const worker = async () => {
+            while (!halt && next < requests.length) {
+              const index = next++
+              if (own.controller.signal.aborted) { halt = true; return }
+              let worktree = '', started = false
+              try {
+                durable(() => callbacks.starting(index)); started = true
+                worktree = detachedWorktreePath(isolationRoot, batchId, index)
+                durable(() => callbacks.worktree(index, { path: worktree, baseRevision: repository.revision, retained: true, note: 'Private detached-checkout destination reserved. No merge or push is authorized.' }))
+                lease!.recheck()
+                createDetachedWorktree(repository, isolationRoot, batchId, index)
+                durable(() => callbacks.worktree(index, { path: worktree, baseRevision: repository.revision, retained: true, note: 'Detached checkout created at the reviewed revision. No merge or push is authorized.' }))
+                const request = { ...requests[index], cwd: worktree }, isolated = inspectIsolated(request, checked[index])
+                const result = await runOne(request, isolated, own, lease!, outputLimit, id => durable(() => callbacks.recorded(index, id)))
+                durable(() => callbacks.finished(index, result))
+                if (result.interrupted || !result.outputComplete || result.exitCode !== 0) halt = true
+              } catch (error) {
+                halt = true
+                if (!started) { fatal ||= error; own.controller.abort('Parallel workflow could not record a task start') }
+                try { durable(() => callbacks.finished(index, { exitCode: null, stdout: '', stderr: '', interrupted: true, outputComplete: false, note: (error as Error)?.message || 'Isolated task setup failed. No automatic retry.' })) } catch { /* fatal persistence error retained below */ }
+              } finally {
+                if (worktree) try { durable(() => callbacks.worktree(index, finishDetachedWorktree(repository, isolationRoot, worktree))) } catch { /* fatal persistence error retained below */ }
+              }
+            }
+          }
+          await Promise.all([worker(), worker()])
+          if (fatal) throw fatal
+          own.controller.signal.throwIfAborted()
+          recheckWorktreeRepository(repository, isolationRoot)
+        } finally { cleanupEmptyWorktreeBatch(isolationRoot, batchId); clearTimeout(timer); signal.removeEventListener('abort', abort); lease?.release(); if (active === own) active = null }
       },
     }
   }
@@ -213,7 +290,7 @@ export function createCommandRunner(options: {
     return bytes
   }
   return {
-    plan,
+    plan, planParallelWorktrees,
     readiness: () => ({ ...options.scope(), busy: !!active || options.scope().busy === true }),
     running: () => active !== null,
     context() { const scope = options.scope(); return { cwd: scope.cwd, allowed: scope.allowed && !active, explanation: active ? 'An app command is preparing or running.' : scope.explanation || COMMAND_DISCLOSURE, activeId: active?.id || null } },

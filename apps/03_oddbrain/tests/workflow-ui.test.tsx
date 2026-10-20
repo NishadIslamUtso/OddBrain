@@ -39,6 +39,16 @@ test('recurring approval is separate and requires its explicit consent control',
   await click('Allow recurring execution'); expect(fixture.schedules.decide).toHaveBeenCalledExactlyOnceWith('recurring', 'allow')
   expect(fixture.workflows.decide).not.toHaveBeenCalled()
 })
+test('isolated parallel review shows its immutable base and cannot be scheduled', async () => {
+  const parallel = { ...definition, id: 'parallel', mode: 'parallel-worktrees' as const }
+  fixture.workflows.list.mockResolvedValue({ items: [parallel], next: '', notice: '' })
+  fixture.workflows.preview.mockResolvedValue({ token: 'isolated', workflow: parallel, executions, expiresAt: Date.now() + 120000, explanation: 'Separate detached checkouts. No merge.', isolation: { repositoryRoot: '/selected', baseRevision: 'b'.repeat(40), maxConcurrency: 2 } })
+  await mount()
+  expect(button('Set up schedule').disabled).toBe(true)
+  await click('Review workflow Build fixture')
+  expect(host.textContent).toContain('Detached worktree base'); expect(host.textContent).toContain('b'.repeat(40)); expect(host.textContent).toContain('Maximum concurrency: 2')
+  expect(fixture.workflows.decide).not.toHaveBeenCalled()
+})
 test('a double-click during execution cannot launch the plan twice', async () => {
   let finish!: (value: any) => void
   fixture.workflows.decide.mockImplementation(() => new Promise(resolve => { finish = resolve }))
