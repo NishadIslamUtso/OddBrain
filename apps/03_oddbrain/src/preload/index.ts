@@ -220,6 +220,7 @@ const marketplaceApi: MarketplaceBridge = {
 }
 const api = {
   transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id), media: (id: string, index: number) => ipcRenderer.invoke('transcripts:media', id, index) },
+  research: { preview: (input: { transcriptId: string; chatId: string; questionStart: string; urls: string[] }) => ipcRenderer.invoke('research:preview', input), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('research:decide', token, decision), read: (transcriptId: string) => ipcRenderer.invoke('research:read', transcriptId) },
   media: mediaApi, marketplace: marketplaceApi,
   automation: automationApi,
   memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,

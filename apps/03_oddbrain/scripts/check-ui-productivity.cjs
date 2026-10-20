@@ -61,6 +61,27 @@ fs.mkdirSync(QA, { recursive: true })
   const download = await downloadWait, exported = fs.readFileSync(await download.path(),'utf8')
   assert(exported.includes('MESSAGE 0\n'+'x'.repeat(2300))); assert(exported.includes('END 34'))
   report.checks.push('Markdown download retains all 35 saved messages and text beyond the old 2,000-character clipping point')
+  // Mocked research IPC: the panel, review and receipt are real renderer work;
+  // no page is fetched and no network acceptance is claimed.
+  await page.evaluate(async () => {
+   const url = performance.getEntriesByType('resource').map(e => e.name).filter(s => s.includes('/src/platform/bridge.ts')).at(-1) || '/src/platform/bridge.ts'
+   const {bridge} = await import(url)
+   bridge.research.read = async () => ({records: [], notice: ''})
+   bridge.research.preview = async input => ({token:'fixture-token', urls:input.urls, refused:[{url:'http://plain.example.com/', reason:'Only https links are checked. Nothing was requested.'}], expiresAt:Date.now()+120000, explanation:'OddBrain will open these exact https addresses once from this machine.'})
+   bridge.research.decide = async (token, decision) => decision === 'deny' ? {denied:true, answer:'Source check denied. No address was requested.'} : {denied:false, record:{id:'1792473121334-75e9839d-0eea-4af7-a812-d62d7a8357c0', transcriptId:'fixture-turn', chatId:'fixture', at:new Date().toISOString(), questionStart:'Who said it', entries:[{url:'https://example.com/a', checkedAt:new Date().toISOString(), state:'retrieved', status:200, finalUrl:'https://example.com/a', mime:'text/html', bytes:42, sha256:'f'.repeat(64), title:'Example page'}]}}
+   window.dispatchEvent(new CustomEvent('app:check-sources', {detail:{transcriptId:'fixture-turn', chatId:'fixture', questionStart:'Who said it', urls:['https://example.com/a']}}))
+  })
+  const sources = page.getByRole('dialog',{name:'Source checks'})
+  await sources.waitFor()
+  assert((await sources.innerText()).includes('not proof the model read the page'))
+  await sources.getByRole('button',{name:'Prepare source check',exact:true}).click()
+  assert((await sources.innerText()).includes('http://plain.example.com/'))
+  await sources.getByRole('button',{name:'Allow these checks once',exact:true}).click()
+  await sources.getByText('HTTP 200').first().waitFor()
+  assert((await sources.innerText()).includes('f'.repeat(64)))
+  await sources.getByRole('button',{name:'Close source checks',exact:true}).click()
+  assert.equal(await page.getByRole('dialog',{name:'Source checks'}).count(),0)
+  report.checks.push('Source-check panel shows the exact links, requires a one-use review before any request, and reports the recorded status and digest')
   const pictureBytes = Buffer.from('PRESERVED PICTURE BYTES'), pictureDigest = createHash('sha256').update(pictureBytes).digest('hex')
   // Mocked transcript IPC: proves the review/save wiring, not native engine storage.
   await page.evaluate(async (fixture) => {

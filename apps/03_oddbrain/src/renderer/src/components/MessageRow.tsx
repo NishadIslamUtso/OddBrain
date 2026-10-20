@@ -30,6 +30,7 @@ export default function MessageRow({
   rewriteStage = '',
   rewriteError = '',
   rewriteErrorFor = '',
+  questionStart = '',
 }: {
   message: Message
   /** Already resolved for this message: live draft while streaming, saved after. */
@@ -49,6 +50,8 @@ export default function MessageRow({
   rewriteError?: string
   /** The artifact the error belongs to, so it is not printed on every card. */
   rewriteErrorFor?: string
+  /** Opening words of the question this reply answers, used only to label source receipts. */
+  questionStart?: string
 }) {
   const look = useLook()
   if (message.role === 'user') {
@@ -143,18 +146,32 @@ export default function MessageRow({
         ) : null}
 
         {message.citations && message.citations.length > 0 ? (
-          <ul className="mt-3 flex flex-wrap gap-1.5">
-            {message.citations.map(citation => (
-              <li key={citation.id}>
-                <a
-                  href={citation.url}
-                  className="rounded-md border border-line px-2 py-1 text-[11px] text-muted hover:border-accent/50 hover:text-ink"
-                >
-                  {citation.label}
-                </a>
-              </li>
-            ))}
-          </ul>
+          <>
+            <ul className="mt-3 flex flex-wrap gap-1.5">
+              {message.citations.map(citation => (
+                <li key={citation.id}>
+                  <a
+                    href={citation.url}
+                    className="rounded-md border border-line px-2 py-1 text-[11px] text-muted hover:border-accent/50 hover:text-ink"
+                  >
+                    {citation.label}
+                  </a>
+                </li>
+              ))}
+            </ul>
+            {message.nativeRecord?.transcriptId ? <button
+              type="button"
+              className="ob-text-button mt-1.5 text-[11px]"
+              onClick={() => window.dispatchEvent(new CustomEvent('app:check-sources', { detail: {
+                transcriptId: message.nativeRecord!.transcriptId,
+                chatId: message.nativeRecord!.chatId,
+                questionStart,
+                urls: (message.citations || []).map(citation => citation.url),
+              } }))}
+            >
+              Check these sources
+            </button> : null}
+          </>
         ) : null}
 
         {!!message.nativeRecord?.artifacts?.length && <section aria-label="Observed artifact files"><p className="text-[12px] text-muted">These standalone files changed during the turn. File observation is not a test result or proof of authorship.</p>{message.nativeRecord.artifacts.map(item => <button type="button" key={item.id} className="ob-text-button" onClick={() => window.dispatchEvent(new CustomEvent('app:open-artifact', { detail: { id: item.id, version: item.version } }))}>Open {item.title} · v{item.version}</button>)}</section>}

@@ -17,6 +17,7 @@ import SplitSection from './SplitSection'
 import MessageRow from './MessageRow'
 import { ChatHome, HomeStarters } from '../ui/ChatHome'
 import EngineActivity from '../ui/EngineActivity'
+import SourceCheckPanel from '../ui/SourceCheckPanel'
 import { useEngine } from '../state/engine'
 import type { Project } from '@shared/lib/projects'
 import { bridge } from '@/platform/bridge'
@@ -142,11 +143,17 @@ export default function ChatView({
         <HomeStarters onPick={setDraft} />
         <EnginePanel chatId={chat?.id || ''} />
       </div> : <div className="ob-transcript mx-auto w-full max-w-[var(--chat-width)] px-6 py-6">
-        <div className="flex flex-col gap-7">{messages.map(message => <MessageRow key={message.id} message={message} artifacts={viewsForMessage(message.id, message.artifacts, liveArtifacts)} tokens={tokens} highlightId={highlightId} onRewrite={onRewrite} onRestore={onRestore} busyArtifactId={busyArtifactId} rewriteStage={rewriteStage} rewriteError={rewriteError} rewriteErrorFor={rewriteErrorFor} />)}</div>
+        <div className="flex flex-col gap-7">{messages.map((message, index) => {
+          // Only the opening words of the nearest earlier question label a source
+          // receipt; an answer is never stored as if it were the question.
+          const question = message.role === 'assistant' ? [...messages.slice(0, index)].reverse().find(previous => previous.role === 'user')?.content || '' : ''
+          return <MessageRow key={message.id} message={message} questionStart={question.replace(/\s+/g, ' ').trim().slice(0, 300)} artifacts={viewsForMessage(message.id, message.artifacts, liveArtifacts)} tokens={tokens} highlightId={highlightId} onRewrite={onRewrite} onRestore={onRestore} busyArtifactId={busyArtifactId} rewriteStage={rewriteStage} rewriteError={rewriteError} rewriteErrorFor={rewriteErrorFor} />
+        })}</div>
         <div className="ob-engine-transcript">{engine.turn?.state !== 'running' && chat?.messages.some(m => m.nativeRecord?.transcriptId === engine.turn?.transcriptId) ? <details><summary>Last run details and kept files</summary><EnginePanel chatId={chat?.id || ''} /></details> : <EnginePanel chatId={chat?.id || ''} />}</div>
       </div>}
     </div>
     <WorkQueue />
+    <SourceCheckPanel />
     {!home ? <><BattleSection /><SplitSection /><EngineActivity words={mascotWords} />{composer}</> : null}
     {chat && chat.messages.length > 0 ? <><ChatContextPanel key={chat.id} chat={chat} draft={draft} branch={onBranch} defaults={contextDefaults} /><CaptureCapsule chat={chat} /></> : null}
   </main>

@@ -22,6 +22,7 @@ import { AGY_PICTURES_ANSWER } from './engine/agy'
 import { restartIdleConnection } from './engine/restart'
 import { createTurnArchive } from './turnArchive'
 import { dispatchRecordedTurn } from './recordedDispatch'
+import { createSourceChecks } from './research/service'
 import { effortTarget, selectedEffort, type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
 import { checkEffortSelection, createCapabilityInspector } from './engine/nativeCapabilities'
 import type { ThinkingMode } from '../shared/lib/engine'
@@ -392,6 +393,12 @@ function registerBridges(): void {
   handle('commands:saved', (_event, before?: string) => commandRunner.saved(before))
   handle('commands:save', (_event, input: { name: string; command: string; cwd: string }) => commandRunner.save(input))
   handle('commands:archive-saved', (_event, id: string, archived: boolean) => commandRunner.archiveSaved(id, archived))
+  // Source checks: the review is one-use, window-bound and expires; the exact
+  // addresses are fetched only after an explicit allow.
+  const sourceChecks = createSourceChecks({ root: join(app.getPath('userData'), 'source-checks') })
+  handle('research:preview', (event, input: { transcriptId: string; chatId: string; questionStart: string; urls: string[] }) => sourceChecks.preview(track(event.sender), input))
+  handle('research:decide', (event, token: string, decision: 'allow' | 'deny') => sourceChecks.decide(track(event.sender), token, decision))
+  handle('research:read', (_event, transcriptId: string) => sourceChecks.read(transcriptId))
   handle('commands:preview-saved', (event, id: string) => commandRunner.previewSaved(track(event.sender), id))
   handle('commands:context', () => commandRunner.context())
   handle('commands:preview', (event, request: ShellRequest) => commandRunner.preview(track(event.sender), request))

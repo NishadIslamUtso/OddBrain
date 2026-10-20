@@ -7,6 +7,7 @@ import type { SkillDraft, SkillInventory, SkillFile, CatalogSkillReview } from '
 import type { NativeConversation, NativeSessionLink, NativeContextTarget } from '@shared/lib/nativeConversation'
 import type { FileReview, FileDecision } from '@shared/lib/changeReview'
 import type { TranscriptBridge } from '@shared/lib/transcripts'
+import type { SourceCheckBridge } from '@shared/lib/sourceCheck'
 import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
 import type { ThinkingMode } from '@shared/lib/engine'
 import type { MemoryBridge } from '@shared/lib/memoryWorkspace'
@@ -60,6 +61,7 @@ import type {
 /** What the preload script exposes today. It grows as the main process does. */
 export type DesktopBridge = {
   transcripts: TranscriptBridge
+  research: SourceCheckBridge
   media: MediaBridge
   marketplace: MarketplaceBridge
   memoryWorkspace: MemoryBridge
@@ -316,6 +318,7 @@ const demoBridge: DesktopBridge = {
     dictate: async () => ({ ok: false, name: 'Dictation', error: 'Offline Windows dictation requires the desktop app.' }), cancel: async () => {},
   },
   transcripts: { raw: async () => ({ ok: false as const, error: 'Original transcripts require the desktop app.' }), list: async () => ({ ok: false, error: 'Native transcripts require the desktop app. Sample chats remain separate.' }), read: async () => ({ ok: false, error: 'Native transcripts require the desktop app.' }), media: async () => ({ ok: false as const, error: 'Preserved pictures live in the desktop app. This preview has no machine storage to read.' }) },
+  research: { preview: async () => { throw Error('Checking sources requires the desktop app. No address was requested.') }, decide: async () => { throw Error('Checking sources requires the desktop app.') }, read: async () => ({ records: [], notice: 'Source-check receipts require the desktop app.' }) },
   marketplace: { inspect: unavailableMarket, sources: async () => [], browse: unavailableMarket, probe: unavailableMarket, installed: unavailableMarket, plan: unavailableMarket, confirm: unavailableMarket, cancel: async () => {} },
   automation: demoAutomation,
   memoryWorkspace: demoMemoryWorkspace,
