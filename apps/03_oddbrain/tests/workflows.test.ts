@@ -1,4 +1,6 @@
 import { afterEach, expect, test, vi } from 'vitest'
+// A cold PowerShell start on a busy Windows runner is seconds, not milliseconds.
+vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })
 import { mkdtempSync, readFileSync, writeFileSync, rmSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -13,7 +15,7 @@ afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'oddbrain-workflows-')); roots.push(root)
   let locked = false, allowed = true, epoch = 0, busy = false, time = Date.now()
-  const commands = createCommandRunner({ root: join(root, 'commands'), deadlineMs: 5000,
+  const commands = createCommandRunner({ root: join(root, 'commands'), deadlineMs: 60_000,
     scope: () => ({ cwd: root, authority: `live-${epoch}`, stableAuthority: 'stable', allowed: allowed && !locked && !busy, busy: locked || busy, explanation: 'Unavailable or busy' }),
     acquire: async (_request, authority, signal) => { if (locked || !allowed || authority !== `live-${epoch}`) throw Error('Denied'); locked = true; return { recheck() { if (!allowed || signal.aborted || authority !== `live-${epoch}`) throw Error('Changed') }, release() { locked = false; epoch++ } } },
   })
