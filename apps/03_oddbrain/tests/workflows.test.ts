@@ -14,7 +14,10 @@ afterEach(() => roots.splice(0).forEach(root => rmSync(root, { recursive: true, 
 function fixture() {
   const root = mkdtempSync(join(tmpdir(), 'oddbrain-workflows-')); roots.push(root)
   let locked = false, allowed = true, epoch = 0, busy = false, time = Date.now()
-  const commands = createCommandRunner({ root: join(root, 'commands'), deadlineMs: 5000,
+  // Windows CI can spend more than five seconds starting PowerShell under Defender.
+  // Keep this below the five-minute product budget while leaving test-level
+  // deadlines to catch hangs; command startup speed is not the behavior here.
+  const commands = createCommandRunner({ root: join(root, 'commands'), deadlineMs: 120_000,
     scope: () => ({ cwd: root, authority: `live-${epoch}`, stableAuthority: 'stable', allowed: allowed && !locked && !busy, busy: locked || busy, explanation: 'Unavailable or busy' }),
     acquire: async (_request, authority, signal) => { if (locked || !allowed || authority !== `live-${epoch}`) throw Error('Denied'); locked = true; return { recheck() { if (!allowed || signal.aborted || authority !== `live-${epoch}`) throw Error('Changed') }, release() { locked = false; epoch++ } } },
   })
@@ -65,7 +68,7 @@ test('one approval runs exact steps sequentially and retains real command result
   expect(f.commands.read(run.steps[1].runId!).result.stdout).toBe('two')
   expect(f.locked()).toBe(false)
   await expect(f.workflows.decide(1, review.token, 'allow')).rejects.toThrow()
-}, 20000)
+}, 60000)
 test('parallel workflow commands use separate retained worktrees and actually overlap, never the source checkout', async () => {
   const f = parallelFixture(), marker = join(f.base, 'second-ready')
   const waitForSecond = process.platform === 'win32'
