@@ -284,6 +284,7 @@ const api = {
       ipcRenderer.invoke('engine:checkpoint:restore', copy, original),
     },
   },
+  promptLayers: (historyMessages: number) => ipcRenderer.invoke('prompt:layers', { historyMessages }),
   houseRules: {
     previewGlobal: (engine: 'claude-code' | 'agy') => ipcRenderer.invoke('rules:preview-global', engine),
     previewProject: (projectId: string, engine: 'claude-code' | 'agy') => ipcRenderer.invoke('rules:preview-project', projectId, engine),

@@ -783,3 +783,24 @@ Continuing from `5ef0a82`. The owner supplied a consolidated list of AI source l
 - The hidden-element pass is a text extraction heuristic, not a renderer: CSS files, `@media` tricks, `<div style>` set from an external stylesheet, or text merely coloured like its background are not detected. It reduces a known class; it does not certify a page is harmless.
 - The character pass removes the whole zero-width set including ZWJ, so some emoji sequences lose their joining in saved text. Saved pages are evidence, not display copies.
 - The execution-config warning names paths; it does not inspect what the changed lines would actually run, and it cannot see writes the native engine performs inside its own permission mode.
+
+## Solo continuation: what the model can see, said plainly — 2026-10-20
+
+Continuing from `1519cd4`. After the leak/incident review the owner asked a sharper question: when a model in this app is asked "what is above or under you", why does it recite system prompts rather than the session context — and what can be done about it. Nothing in this app can decide that; a model repeats whatever instruction-like text it holds. What the app can do is stop pretending its own instruction layers are secret, and show the owner exactly which layers exist.
+
+### Implemented
+
+- `src/shared/lib/promptLayers.ts`: `describePromptLayers()` names seven layers — engine system prompt (engine-owned, **not stored by this app**, therefore not showable), house-rules block (app-written, with the real path and the sha256 of what is on disk right now), project context, conversation, chat overrides, vault excerpts, attachments — each with who owns it and what it contributes. `PROMPT_RECITAL_ANSWER` says the honest thing about recital, and `PROMPT_EXTRACTION_NOTE` states the limit and the rule that no provider key is ever placed in a prompt.
+- IPC `prompt:layers` reads those facts in the main process: house-rules files for both engines (path, presence, digest), the current engine target and workspace, whether a vault is selected, and the message count the renderer reports. A file that cannot be read is reported absent, not guessed.
+- Settings → House & rules → **"What reaches the model"** (`PromptLayersSection`) lists the layers, marks the engine's own prompt as not shown because the app does not hold it, and repeats the two honest paragraphs. The browser preview gets an empty, clearly-labelled fixture; a failed read shows the error instead of inventing layers.
+
+### Verification
+
+- Typecheck clean; `npx vitest run` = **1,545 passed / 2 skipped / 1,547 tests** across 214 files; `npm run build` passed (offline preview 623,085 bytes).
+- `tests/prompt-layers.test.tsx` (3) covers every layer's id and ownership, the unshowable engine prompt, real digest rendering, the "not written yet" and "no vault" cases, the panel reading facts from the port with the renderer's message count, the two honest paragraphs, and a failed read leaving nothing invented.
+
+### Limits
+
+- The panel describes layers; it cannot enumerate the vendor's system prompt, and it does not claim to. A vendor may change its prompt at any time without this app noticing.
+- The house-rules digest is of the file on disk, which the owner and the engine can both change; it proves what was there when the panel was read, not what was there during an earlier turn.
+- This is transparency, not a defence against extraction. The actual defence remains: no secret ever enters a layer, and a transcript is treated as readable by anyone who gets it.

@@ -2,6 +2,7 @@ import type { WorkflowBridge } from '@shared/lib/workflows'
 import type { ScheduleBridge } from '@shared/lib/schedules'
 import type { CommandBridge } from '@shared/lib/commands'
 import type { WorktreeBridge } from '@shared/lib/worktrees'
+import type { PromptLayerFacts } from '@shared/lib/promptLayers'
 import type { WorkQueueBridge } from '@shared/lib/workQueue'
 import type { McpReview, NativeMcpInventory } from '@shared/lib/mcpReview'
 import type { SkillDraft, SkillInventory, SkillFile, CatalogSkillReview } from '@shared/lib/installedSkills'
@@ -91,6 +92,7 @@ export type DesktopBridge = {
     /** Desktop only: the native menu's events (File > New chat, Go > screens). */
     onMenu?: (channel: string, callback: () => void) => () => void
   }
+  promptLayers: (historyMessages: number) => Promise<PromptLayerFacts>
   houseRules: {
     previewGlobal: (engine: 'claude-code' | 'agy') => Promise<FileReview>
     previewProject: (projectId: string, engine: 'claude-code' | 'agy') => Promise<FileReview>
@@ -315,6 +317,7 @@ const demoAutomation: AutomationBridge = {
 let previewMedia = { ...DEFAULT_MEDIA }
 const unavailableMarket = async () => ({ ok: false as const, error: 'Marketplaces require the installed desktop app.' })
 const demoBridge: DesktopBridge = {
+  promptLayers: async (historyMessages: number) => ({ engine: 'claude-code' as const, workspace: '', houseRules: [], vaultSelected: false, historyMessages }),
   media: {
     authorizeRecording: async () => ({ ok: false, name: 'Microphone', error: 'Provider recording requires the desktop app.' }), onCancelled: () => () => {},
     read: async () => ({ ...previewMedia }), update: async patch => (previewMedia = { ...previewMedia, ...patch, ffmpeg: '' }),

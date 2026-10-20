@@ -7,6 +7,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { bridge, isDemo } from '../platform/bridge'
 import HouseRulesSection from './HouseRulesSection'
+import PromptLayersSection from './PromptLayersSection'
 import BrainStructureSection from './BrainStructureSection'
 import SkillsCatalogSection from './SkillsCatalogSection'
 import BrowserControlSection from './BrowserControlSection'
@@ -1057,6 +1058,11 @@ export default function SettingsView({
         label: 'Instructions',
         terms: 'house rules instructions identity artifacts approvals memory style ask unsure CLAUDE.md AGENTS.md',
         body: <HouseRulesSection />,
+      },
+      {
+        label: 'What reaches the model',
+        terms: 'system prompt context layers what is sent extraction repeat instructions secrets',
+        body: <PromptLayersSection />,
       },
     ],
     engine: [

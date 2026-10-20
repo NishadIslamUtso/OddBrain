@@ -1777,6 +1777,26 @@ function registerBridges(): void {
 
   // The rulebook itself: read for the edit screen, write to persist and
   // deploy immediately to every engine's global file.
+  handle('prompt:layers', (_event, input?: { historyMessages?: number }): import('../shared/lib/promptLayers').PromptLayerFacts => {
+    const home = app.getPath('home')
+    // Digests of what is on disk right now, never a remembered copy.
+    const houseRules = (['claude-code', 'agy'] as const).map(engineId => {
+      const file = nativeHouseRulesFile(engineId, home)
+      let bytes: Buffer | null = null
+      try { bytes = configBytes(file) } catch { bytes = null }
+      return { engine: engineId, file, present: bytes !== null, digest: bytes ? createHash('sha256').update(bytes).digest('hex') : '' }
+    })
+    const target = engine?.currentTarget()
+    const messages = input?.historyMessages
+    return {
+      engine: target?.engine === 'agy' ? 'agy' : 'claude-code',
+      workspace: target?.workspace || settings.engine.workspace || '',
+      houseRules,
+      vaultSelected: Boolean(vaultRoot()),
+      // The chat itself lives in the renderer; it reports the count it holds.
+      historyMessages: Number.isSafeInteger(messages) && (messages as number) >= 0 ? (messages as number) : 0,
+    }
+  })
   handle('houserules:read', () => {
     const rules = readHouseRules()
     return {
