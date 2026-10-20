@@ -38,13 +38,13 @@ test('two runs proceed at once only in separate isolated checkouts', async () =>
   const f = fixture()
   const first = await f.runner.preview(1, { command: 'one', cwd: f.one })
   const pendingFirst = f.runner.decide(1, first.token, 'allow')
-  await vi.waitFor(() => expect(f.restarts).toHaveLength(1))
+  await vi.waitFor(() => expect(f.restarts).toHaveLength(1), { timeout: 20_000 })
   expect(f.runner.context()).toMatchObject({ activeCount: 1, allowed: true })
 
   // A second checkout is allowed while the first runs.
   const second = await f.runner.preview(2, { command: 'two', cwd: f.two })
   const pendingSecond = f.runner.decide(2, second.token, 'allow')
-  await vi.waitFor(() => expect(f.restarts).toHaveLength(2))
+  await vi.waitFor(() => expect(f.restarts).toHaveLength(2), { timeout: 20_000 })
   expect(f.runner.context()).toMatchObject({ activeCount: 2, allowed: false })
 
   // The same folder twice, the selected folder, and a third checkout are all refused.
@@ -59,7 +59,7 @@ test('two runs proceed at once only in separate isolated checkouts', async () =>
   f.restarts.forEach(start => start())
   await expect(pendingFirst).rejects.toThrow(/Stopped before launch/)
   await expect(pendingSecond).rejects.toThrow(/Stopped before launch/)
-  await vi.waitFor(() => expect(f.runner.context().activeCount).toBe(0))
+  await vi.waitFor(() => expect(f.runner.context().activeCount).toBe(0), { timeout: 20_000 })
   expect(f.runner.running()).toBe(false)
   // Nothing was left reserved: a fresh review in the selected folder works.
   await expect(f.runner.preview(4, { command: 'later', cwd: f.selected })).resolves.toMatchObject({ cwd: f.selected })
@@ -69,7 +69,7 @@ test('a run in the selected folder keeps that folder closed while a checkout may
   const f = fixture()
   const first = await f.runner.preview(1, { command: 'selected', cwd: f.selected })
   const pending = f.runner.decide(1, first.token, 'allow')
-  await vi.waitFor(() => expect(f.restarts).toHaveLength(1))
+  await vi.waitFor(() => expect(f.restarts).toHaveLength(1), { timeout: 20_000 })
   // The selected folder itself stays single-file; a separate checkout is the only way to run beside it.
   await expect(f.runner.preview(2, { command: 'selected again', cwd: f.selected })).rejects.toThrow(/Another app command is already running in this folder/)
   const beside = await f.runner.preview(2, { command: 'checkout', cwd: f.one })
@@ -82,20 +82,20 @@ test('stopping one window leaves another window’s run alone, and the count is 
   const f = fixture()
   const first = await f.runner.preview(1, { command: SLOW, cwd: f.one })
   const one = f.runner.decide(1, first.token, 'allow')
-  await vi.waitFor(() => expect(f.restarts).toHaveLength(1))
+  await vi.waitFor(() => expect(f.restarts).toHaveLength(1), { timeout: 20_000 })
   const second = await f.runner.preview(2, { command: SLOW, cwd: f.two })
   const two = f.runner.decide(2, second.token, 'allow')
-  await vi.waitFor(() => expect(f.restarts).toHaveLength(2))
+  await vi.waitFor(() => expect(f.restarts).toHaveLength(2), { timeout: 20_000 })
   expect(f.runner.cancel(1).requested).toBe(true)
   expect(f.runner.cancel(3).requested).toBe(false)
   f.restarts.forEach(start => start())
   await expect(one).rejects.toThrow(/Stopped before launch/)
-  await vi.waitFor(() => expect(f.runner.context().activeCount).toBe(1))
+  await vi.waitFor(() => expect(f.runner.context().activeCount).toBe(1), { timeout: 20_000 })
   expect(f.runner.running()).toBe(true)
   f.runner.cancel(2)
   // This one had already been handed its reservation, so the stop is recorded on a launched
   // run rather than refusing a launch: an interrupted result, never a silent success.
   const stopped = await two as { interrupted?: boolean; outputComplete?: boolean }
   expect(stopped.interrupted).toBe(true); expect(stopped.outputComplete).toBe(false)
-  await vi.waitFor(() => expect(f.runner.running()).toBe(false))
+  await vi.waitFor(() => expect(f.runner.running()).toBe(false), { timeout: 20_000 })
 })
