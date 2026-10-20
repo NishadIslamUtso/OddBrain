@@ -95,11 +95,11 @@ test('normalizePack refuses the shapes that would matter', () => {
 
 test('describePermissions says everything in plain words', () => {
   const { pack } = normalizePack(goodManifest)
-  const said = describePermissions(pack).join('\n')
+  const lines = describePermissions(pack)
+  const said = lines.join('\n')
   assert.match(said, /Runs no commands\./)
   assert.match(said, /permission card asks you first/i)
-  // Prose assertion, not a hostname allowlist or URL security decision.
-  assert.ok(said.includes('example.com')) // lgtm[js/incomplete-url-substring-sanitization]
+  assert.equal(lines[2], 'Names example.com as what it is about. Phase 1 packs get no network access from this app; this is a label, shown so you know what you are installing.')
   assert.match(said, /folder you can read and delete/)
 })
 
