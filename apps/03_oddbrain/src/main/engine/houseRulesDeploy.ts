@@ -49,7 +49,7 @@ export function upsertBlock(existing: string, block: string): string {
   if (start !== -1 && end !== -1 && end > start) {
     const before = text.slice(0, start)
     const after = text.slice(end + BLOCK_END.length)
-    return `${before}${block}${after.replace(/^\n/, '\n')}`
+    return `${before}${block}${after}`
   }
   const glue = text.trim().length === 0 ? '' : text.endsWith('\n') || text.endsWith('\n\n') ? '\n' : '\n\n'
   return `${text}${glue}${block}\n`

@@ -1,5 +1,5 @@
 import { resolveEngineCommand } from './enginePath'
-import { createHash } from 'node:crypto'
+import { createHmac, randomBytes } from 'node:crypto'
 import { selectedEffort } from '../../shared/lib/engineCapabilities'
 /**
  * The socket: the one plug between the app and whatever engine is chosen.
@@ -92,7 +92,10 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
   // And WHICH provider's key it was: clearing one provider's key must not
   // stop a session that was launched with another's.
   let sessionAuthProvider: string | null = null
-  const authFingerprint = (value: string | undefined) => value ? createHash('sha256').update(value).digest('hex') : null
+  // Keyed and process-local: enough to notice credential rotation without
+  // retaining a second plaintext copy or exposing an offline password hash.
+  const authFingerprintKey = randomBytes(32)
+  const authFingerprint = (value: string | undefined) => value ? createHmac('sha256', authFingerprintKey).update(value).digest('hex') : null
 
   const onEvent = (input: EngineStartInput, event: EngineEvent): void => {
     // The socket owns the busy flag: a finished or failed task frees the
