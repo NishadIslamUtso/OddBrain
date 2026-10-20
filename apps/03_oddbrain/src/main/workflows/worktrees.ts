@@ -10,6 +10,13 @@ const commandEnvironment = (source: NodeJS.ProcessEnv): NodeJS.ProcessEnv => Obj
 const REVISION = /^[a-f0-9]{40,64}$/
 const sha = (value: Buffer | string) => createHash('sha256').update(value).digest('hex')
 const inside = (parent: string, child: string) => { const rel = relative(resolve(parent), resolve(child)); return rel === '' || (!rel.startsWith('..' + sep) && rel !== '..' && !isAbsolute(rel)) }
+const sameDirectory = (left: string, right: string) => {
+  const leftPath = realpathSync(left), rightPath = realpathSync(right)
+  const leftInfo = statSync(leftPath), rightInfo = statSync(rightPath)
+  if (!leftInfo.isDirectory() || !rightInfo.isDirectory()) return false
+  if (leftInfo.ino !== 0 && leftInfo.dev === rightInfo.dev && leftInfo.ino === rightInfo.ino) return true
+  return process.platform === 'win32' && leftPath.toLowerCase() === rightPath.toLowerCase()
+}
 
 export type WorktreeRepository = {
   root: string
@@ -78,7 +85,7 @@ export function inspectWorktreeRepository(cwd: string, storageRoot: string): Wor
   const hooks = join(storageRoot, '.disabled-hooks'); mkdirSync(hooks, { recursive: true, mode: 0o700 })
   const gitProgram = gitExecutable(process.env), gitInfo = statSync(gitProgram)
   const reported = text(runGit(gitProgram, hooks, root, ['rev-parse', '--show-toplevel']))
-  if (realpathSync(reported) !== root) throw Error('Parallel worktrees require the selected working folder to be the repository root.')
+  if (!sameDirectory(reported, root)) throw Error('Parallel worktrees require the selected working folder to be the repository root.')
   if (text(runGit(gitProgram, hooks, root, ['rev-parse', '--is-inside-work-tree'])) !== 'true') throw Error('The selected folder is not a checked-out Git work tree.')
   const revision = text(runGit(gitProgram, hooks, root, ['rev-parse', '--verify', 'HEAD'])).toLowerCase()
   if (!REVISION.test(revision)) throw Error('Git did not return an immutable HEAD revision. Nothing was created.')

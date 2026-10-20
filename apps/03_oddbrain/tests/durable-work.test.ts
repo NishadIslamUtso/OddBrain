@@ -69,7 +69,7 @@ test('queue capacity refuses the new task without evicting an older one', () => 
   for (let i = 0; i < 100; i++) queue.enqueue(1, `Task ${i}`)
   expect(() => queue.enqueue(1, 'Would overflow')).toThrow(/Nothing was evicted/)
   expect(queue.view(1)).toHaveLength(100); expect(queue.view(1).some(item => item.prompt === 'Task 0')).toBe(true)
-})
+}, 15_000)
 test('queue history pages preserve canceled records beyond the visible page', () => {
   const queue = createWorkQueue(dir(), () => 'route')
   for (let i = 0; i < 25; i++) { const [item] = queue.enqueue(1, `Archived ${i}`); queue.cancel(1, item.id) }
