@@ -34,15 +34,17 @@ describe('adversarial context fixtures', () => {
     expect(executionConfigRisk('/work/notes.md')).toBe('')
   })
 
-  test.skipIf(process.platform === 'win32')('bounded command review sees outside and engine-config links without following them', () => {
+  test('bounded command review sees outside and engine-config links without following them', () => {
     const root = temp(), outside = temp()
     mkdirSync(join(root, '.claude'), { recursive: true }); writeFileSync(join(root, '.claude', 'settings.json'), '{}')
     const ordinary = censusWorkspaceSymlinks(root).digest
     writeFileSync(join(root, 'ordinary-output.txt'), 'created by a reviewed step')
     mkdirSync(join(root, 'dist'))
     expect(censusWorkspaceSymlinks(root).digest).toBe(ordinary)
-    symlinkSync(outside, join(root, 'outside-link'))
-    symlinkSync(join(root, '.claude', 'settings.json'), join(root, 'engine-config-link'))
+    // Junctions exercise the same lstat/readlink no-follow path and can be
+    // created by an ordinary Windows runner without Developer Mode elevation.
+    symlinkSync(outside, join(root, 'outside-link'), 'junction')
+    symlinkSync(join(root, '.claude'), join(root, 'engine-config-link'), 'junction')
     const census = censusWorkspaceSymlinks(root)
     expect(census.digest).not.toBe(ordinary)
     expect(census.observedLinks).toBe(2)
