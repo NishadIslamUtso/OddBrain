@@ -30,10 +30,11 @@ describe("site-specific passive conversation readers (synthetic DOM, not live si
   });
   it("excludes hidden ancestors, editors and unsent drafts from text and attachments", async () => {
     document.body.innerHTML =
-      '<div style="display:none"><div data-message-author-role="user">SECRET_ANCESTOR</div></div><div data-message-id="ok" data-message-author-role="user">Submitted<form>SECRET_FORM<img src="https://chatgpt.com/secret.png"></form><div contenteditable="true">SECRET_DRAFT</div><span hidden>SECRET_HIDDEN</span><span data-private>SECRET_PRIVATE</span><button>SECRET_BUTTON</button><span style="visibility:hidden">SECRET_CSS</span><span style="opacity:0">SECRET_OPACITY</span><span style="font-size:0">SECRET_TINY</span><span style="color:transparent">SECRET_TRANSPARENT</span><span style="transform:scale(0)">SECRET_SCALE</span></div>';
+      '<div style="display:none"><div data-message-author-role="user">SECRET_ANCESTOR</div></div><div data-message-id="ok" data-message-author-role="user">Submitted<span style="color:rgb(0,0,0)">PUBLIC_BLACK_TEXT</span><form>SECRET_FORM<img src="https://chatgpt.com/secret.png"></form><div contenteditable="true">SECRET_DRAFT</div><span hidden>SECRET_HIDDEN</span><span data-private>SECRET_PRIVATE</span><button>SECRET_BUTTON</button><span style="visibility:hidden">SECRET_CSS</span><span style="opacity:0">SECRET_OPACITY</span><span style="font-size:0">SECRET_TINY</span><span style="color:transparent">SECRET_TRANSPARENT</span><span style="transform:scale(0)">SECRET_SCALE</span></div>';
     const result = await read();
     expect(result.messages).toHaveLength(1);
     expect(JSON.stringify(result.messages)).not.toContain("SECRET");
+    expect(result.messages[0].text).toContain("PUBLIC_BLACK_TEXT");
     expect(result.messages[0].attachments).toEqual([]);
   });
   it("recognizes explicitly submitted images, video, audio and download links without mistaking links for files", async () => {

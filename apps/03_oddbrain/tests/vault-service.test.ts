@@ -141,7 +141,7 @@ test('the blacklist round-trips and is written into both system documents', (t) 
   assert.deepEqual(updated.excluded_patterns, ['bank.com/*', 'https://private.example.com/page'])
   for (const file of ['00 System/Privacy & Access.md', '00 System/Connectors/Source Scope.md']) {
     assert.match(read(file), /## Never-check blacklist|excluded_patterns/)
-    assert.match(read(file), /private\.example\.com/)
+    assert.ok(read(file).includes('private.example.com'))
   }
 
   // The second document did not exist before; it is created with the list, not
@@ -175,7 +175,7 @@ excluded_patterns: [bank.com/*]
   assert.match(document, /provider: browser/)
   assert.match(document, /other_setting: keep/)
   assert.match(document, /Keep this note/)
-  assert.doesNotMatch(document, /bank\.com/)
+  assert.equal(document.includes('bank.com'), false)
 })
 
 test('the previous text is archived before the blacklist changes', (t) => {
@@ -335,8 +335,8 @@ test('new history collection is refused without removing earlier saved visits', 
   const { service } = fixture(t), path = '02 Sources/Browser Activity/2026/10.jsonl'
   service.files().writeAtomic(path, '{"url":"https://example.org/old","capture_status":"visit-only"}\n')
   assert.throws(() => service.capture({ type: 'browser_visit', url: 'https://example.org/new' }), /retired/)
-  assert.match(service.files().read(path), /example.org\/old/)
-  assert.doesNotMatch(service.files().read(path), /example.org\/new/)
+  assert.ok(service.files().read(path).includes('example.org/old'))
+  assert.equal(service.files().read(path).includes('example.org/new'), false)
 })
 
 test('a readable page is recorded as content, with the visit beside it', (t) => {

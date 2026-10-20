@@ -14,6 +14,7 @@
 import { cpSync, existsSync, lstatSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { normalizePack, type Pack } from '../../shared/lib/packs'
+import { readRegularFileSync } from '../safeFile'
 import { deploySkill, parseSkillMd, toAgySkill, toClaudeSkill, type VaultSkill } from './deploy'
 
 const MAX_FILE_BYTES = 200_000
@@ -47,10 +48,8 @@ const pathEntryExists = (path: string): boolean => {
 
 const readCapped = (path: string): { text?: string; problem?: string } => {
   try {
-    const info = lstatSync(path)
-    if (!info.isFile()) return { problem: `${basename(path)} is not a regular pack file.` }
-    if (info.size > MAX_FILE_BYTES) return { problem: `${basename(path)} is too large for a pack file (over ${Math.floor(MAX_FILE_BYTES / 1000)} kB).` }
-    return { text: readFileSync(path, 'utf8') }
+    const { bytes } = readRegularFileSync(path, MAX_FILE_BYTES)
+    return { text: bytes.toString('utf8') }
   } catch {
     return { problem: `${basename(path)} could not be read as a pack file.` }
   }

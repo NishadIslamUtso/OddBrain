@@ -23,7 +23,6 @@ export function exportVaultCopy(root: string, destination: string, files: Return
     for (const relative of walk.files) {
       const source = files.filePath(relative), target = resolve(targetRoot, relative)
       if (!target.startsWith(targetRoot + sep)) throw Error('Invalid export path.')
-      if (!lstatSync(source).isFile()) throw Error('Export only copies regular Markdown files.')
       const input = openSync(source, constants.O_RDONLY | (constants.O_NOFOLLOW || 0))
       try {
         const before = fstatSync(input)

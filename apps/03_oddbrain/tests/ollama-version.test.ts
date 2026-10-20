@@ -1,5 +1,15 @@
 import { test, expect } from 'vitest'
 import { compareVersions, ollamaAnswer, readOllamaVersion, versionParts } from '../src/main/engine/ollamaVersion'
+import { ollamaEndpoint } from '../src/main/engine/ollamaEndpoint'
+
+test('the Ollama door accepts only explicit HTTP routes without URL credentials', () => {
+  expect(ollamaEndpoint('http://127.0.0.1:11434/', 'api/tags')).toBe('http://127.0.0.1:11434/api/tags')
+  expect(ollamaEndpoint('https://brain.example/ollama', 'api/version')).toBe('https://brain.example/ollama/api/version')
+  expect(() => ollamaEndpoint('file:///tmp/socket', 'api/tags')).toThrow('HTTP(S)')
+  expect(() => ollamaEndpoint('https://name:secret@brain.example', 'api/tags')).toThrow('credentials')
+  expect(() => ollamaEndpoint('https://brain.example?redirect=elsewhere', 'api/tags')).toThrow('query')
+  expect(() => ollamaEndpoint('https://brain.example', 'api/unknown')).toThrow('route')
+})
 
 test('versions compare numerically, not lexically', () => {
   expect(versionParts('v0.15.1')).toEqual([0, 15, 1])

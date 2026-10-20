@@ -98,7 +98,7 @@ test('describePermissions says everything in plain words', () => {
   const said = describePermissions(pack).join('\n')
   assert.match(said, /Runs no commands\./)
   assert.match(said, /permission card asks you first/i)
-  assert.match(said, /example\.com/)
+  assert.ok(said.includes('example.com'))
   assert.match(said, /folder you can read and delete/)
 })
 

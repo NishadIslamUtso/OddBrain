@@ -1,6 +1,7 @@
 /** Export only the bundled extension payload; no user profile, token or network. */
 import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
+import { readRegularFileSync } from '../safeFile'
 const PAYLOAD = ['manifest.json', 'background.js', 'content-scripts', 'lib', 'popup', 'icons', 'assets']
 export const EXTENSION_INSTALL_GUIDE = `OddBrain browser companion\n\n1. Keep this folder somewhere permanent. Do not delete it after loading.\n2. In Chrome open chrome://extensions (Edge: edge://extensions).\n3. Turn on Developer mode. Choose Load unpacked, then this folder (the one with manifest.json).\n4. Keep OddBrain open and select a vault. Enable browser capture in Settings > Privacy & access > Agent access. Then copy the pairing token from Settings > AI & connections > Connectors > Agent access.\n5. Open the extension > Settings > Connected app. Paste the pairing token, then Save & test connection. Use the port shown in OddBrain if it differs from 8765.\n6. Grant access to the messaging sites you want, then open a conversation. Watch capture progress: incomplete media still needs the page; fully queued work can retry after restart.\n\nOnly accessible content from visited conversations is captured, not your entire account or browser history. Account restrictions and unloaded history still apply. Nothing is captured simply by copying these files.\n\nUpdates: export the newer version. To keep waiting captures, leave the extension installed, copy the exported files into its existing loaded folder, then click Reload in the browser extension manager. Do not remove the extension or rotate pairing before updating it. Loading a different folder can create a separate extension and leave the old queue behind.\n\nThe browser requires this one-time Load unpacked confirmation. OddBrain cannot silently approve browser permissions for you.\n`
 function noLinks(path: string): string {
@@ -21,9 +22,10 @@ export function exportExtension(source: string, destination: string): { ok: bool
       const full = join(root, path), stat = lstatSync(full)
       if (stat.isSymbolicLink()) throw Error('The bundled extension contains an unexpected linked file.')
       if (stat.isDirectory()) { for (const name of readdirSync(full).sort()) collect(path + '/' + name, depth + 1); return }
-      if (!stat.isFile() || stat.size > 16_000_000 || total + stat.size > 32_000_000) throw Error('Extension payload is invalid or too large.')
-      const bytes = readFileSync(full); total += bytes.length
-      if (bytes.length !== stat.size || total > 32_000_000) throw Error('The extension changed while it was being copied. Try again.')
+      if (!stat.isFile()) throw Error('Extension payload contains an unsupported entry.')
+      const { bytes } = readRegularFileSync(full, Math.min(16_000_000, 32_000_000 - total))
+      total += bytes.length
+      if (total > 32_000_000) throw Error('The extension payload is too large.')
       files.push({ path, bytes })
     }
     for (const path of PAYLOAD) collect(path)

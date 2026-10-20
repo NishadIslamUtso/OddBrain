@@ -38,14 +38,11 @@ export function marketplaceArgs(catalog: Marketplace, action: MarketplaceAction,
 export async function runMarketplace(command: string, args: string[], signal: AbortSignal): Promise<string> {
   const path = await enginePath()
   if (signal.aborted) throw Error('Cancelled.')
-  // .cmd shims require cmd.exe on Windows. Only validated constant/slug argv
-  // reaches this function. Quoted native executable paths use no shell.
-  const batch = process.platform === 'win32' && /\.(cmd|bat)$/i.test(command)
-  if (batch && /["\r\n%!]/.test(command)) throw Error('Select a native claude.exe rather than this shell-sensitive shim path.')
-  const executable = batch ? (process.env.ComSpec || 'cmd.exe') : command
-  const argv = batch ? ['/d', '/s', '/c', `""${command}" ${args.map(arg => `"${arg}"`).join(' ')}"`] : args
+  // Marketplace mutation never crosses a command shell. Windows batch shims
+  // are refused; engine discovery must select the native executable instead.
+  if (/\.(cmd|bat)$/i.test(command)) throw Error('Marketplace changes require the native engine executable, not a command-script shim.')
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, argv, { windowsHide: true, shell: false, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: { ...childEnvironment(), PATH: path, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' } })
+    const child = spawn(command, args, { windowsHide: true, shell: false, detached: process.platform !== 'win32', stdio: ['ignore', 'pipe', 'pipe'], env: { ...childEnvironment(), PATH: path, CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC: '1' } })
     let output = '', error = '', problem = ''
     const kill = (why: string): void => { problem = why; killTree(child) }
     const abort = (): void => kill('Cancelled. Check the engine’s installed list before retrying; cancelling cannot undo an installation already completed.')

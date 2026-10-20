@@ -13,24 +13,23 @@
  *   deduplicates instead of overwriting history.
  */
 import {
-  appendFileSync,
-  lstatSync,
+  closeSync,
+  constants,
   existsSync,
+  fstatSync,
+  lstatSync,
   mkdirSync,
+  mkdtempSync,
   openSync,
   readdirSync,
-  readFileSync,
-  readSync,
-  closeSync,
   realpathSync,
-  statSync,
-  writeFileSync,
   renameSync,
-  unlinkSync,
+  rmSync,
+  writeFileSync,
 } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
 import { InputError } from './errors'
-import { randomUUID } from 'node:crypto'
+import { readRegularFileSync, readRegularHeadSync } from '../safeFile'
 
 /**
  * Vault-relative keys speak the Obsidian dialect: forward slashes, whatever
@@ -82,37 +81,36 @@ export function createVaultFiles(root: string, clock: () => Date) {
    * an empty file shows a blank pane and calls it a note; the two answers are
    * different and the interface needs the true one.
    */
+  const MAX_VAULT_FILE_BYTES = 128_000_000
+
   function exists(relative: string): boolean {
-    const full = filePath(relative)
-    return existsSync(full) && statSync(full).isFile()
+    try { return readRegularHeadSync(filePath(relative), 1).stat.isFile() }
+    catch (error) { if (error instanceof InputError) throw error; return false }
   }
 
   function read(relative: string): string {
-    const full = filePath(relative)
-    if (!existsSync(full)) return ''
-    const real = realpathSync(full)
-    if (!real.startsWith(realRoot + sep)) throw new InputError('Symlink outside vault.')
-    return readFileSync(full, 'utf8')
+    try { return readRegularFileSync(filePath(relative), MAX_VAULT_FILE_BYTES).bytes.toString('utf8') }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''; throw error }
   }
 
   function readBytes(relative: string): Buffer {
-    const full = filePath(relative)
-    if (!existsSync(full)) return Buffer.alloc(0)
-    if (!realpathSync(full).startsWith(realRoot + sep)) throw new InputError('Symlink outside vault.')
-    return readFileSync(full)
+    try { return readRegularFileSync(filePath(relative), MAX_VAULT_FILE_BYTES).bytes }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return Buffer.alloc(0); throw error }
   }
 
   /** Replace projections/checkpoints atomically; immutable source revisions use writeOnce. */
   function writeAtomic(relative: string, content: string): void {
     ensureDirectory(dirname(relative))
     const full = filePath(relative)
-    if (existsSync(full) && !realpathSync(full).startsWith(realRoot + sep)) throw new InputError('Symlink outside vault.')
-    const temporary = `${full}.${randomUUID()}.tmp`
+    // Stage inside a fresh owner-only directory on the destination filesystem,
+    // then atomically replace the leaf. A fixed temp filename is never exposed.
+    const staging = mkdtempSync(resolve(dirname(full), '.oddbrain-write-'))
+    const temporary = resolve(staging, 'content')
     try {
-      writeFileSync(temporary, content, { flag: 'wx' })
+      writeFileSync(temporary, content, { flag: 'wx', mode: 0o600 })
       renameSync(temporary, full)
     } finally {
-      if (existsSync(temporary)) unlinkSync(temporary)
+      rmSync(staging, { recursive: true, force: true })
     }
   }
 
@@ -121,7 +119,8 @@ export function createVaultFiles(root: string, clock: () => Date) {
     ensureDirectory(dirname(relative))
     const full = filePath(relative)
     try {
-      writeFileSync(full, content, { flag: 'wx' })
+      const descriptor = openSync(full, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW || 0), 0o600)
+      try { writeFileSync(descriptor, content) } finally { closeSync(descriptor) }
       return false
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') return true
@@ -132,19 +131,15 @@ export function createVaultFiles(root: string, clock: () => Date) {
   function append(relative: string, text: string): void {
     ensureDirectory(dirname(relative))
     const full = filePath(relative)
-    if (existsSync(full) && !realpathSync(full).startsWith(realRoot + sep)) {
-      throw new InputError('Symlink outside vault.')
-    }
-    appendFileSync(full, text)
+    const descriptor = openSync(full, constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | (constants.O_NOFOLLOW || 0), 0o600)
+    try {
+      if (!fstatSync(descriptor).isFile()) throw new InputError('Vault destination is not a regular file.')
+      writeFileSync(descriptor, text)
+    } finally { closeSync(descriptor) }
   }
 
   function write(relative: string, text: string): void {
-    ensureDirectory(dirname(relative))
-    const full = filePath(relative)
-    if (existsSync(full) && !realpathSync(full).startsWith(realRoot + sep)) {
-      throw new InputError('Symlink outside vault.')
-    }
-    writeFileSync(full, text, 'utf8')
+    writeAtomic(relative, text)
   }
 
   /** The plain-language log of what the app did, in the vault, on the user's side. */
@@ -183,31 +178,14 @@ export function createVaultFiles(root: string, clock: () => Date) {
    * that says what each one is.
    */
   function readHead(relative: string, limit = 8 * 1024): string {
-    const full = filePath(relative)
-    if (!existsSync(full)) return ''
-    const real = realpathSync(full)
-    if (!real.startsWith(realRoot + sep)) throw new InputError('Symlink outside vault.')
-    const descriptor = openSync(real, 'r')
-    try {
-      const size = statSync(real).size
-      const take = Math.max(1, Math.min(limit, size))
-      const buffer = Buffer.alloc(take)
-      const read = readSync(descriptor, buffer, 0, take, 0)
-      return buffer.subarray(0, read).toString('utf8')
-    } finally {
-      closeSync(descriptor)
-    }
+    try { return readRegularHeadSync(filePath(relative), Math.max(1, limit)).bytes.toString('utf8') }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return ''; throw error }
   }
 
   /** How big a file is, for a map that says how much was kept. 0 when absent. */
   function size(relative: string): number {
-    try {
-      const full = filePath(relative)
-      if (!existsSync(full)) return 0
-      return statSync(full).size
-    } catch {
-      return 0
-    }
+    try { return readRegularHeadSync(filePath(relative), 1).stat.size }
+    catch { return 0 }
   }
 
   /**

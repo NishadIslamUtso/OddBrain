@@ -1,4 +1,5 @@
 import { boundedResponse } from '../network/boundedResponse'
+import { ollamaEndpoint } from './ollamaEndpoint'
 /**
  * Which Ollama is answering, and whether it is new enough.
  *
@@ -42,9 +43,11 @@ export type OllamaVersionAnswer = { ok: boolean; version: string; compatible: bo
 export async function readOllamaVersion(
   options: { fetchImpl?: typeof fetch; baseUrl?: string; timeoutMs?: number } = {},
 ): Promise<OllamaVersionAnswer> {
-  const base = (options.baseUrl || 'http://127.0.0.1:11434').replace(/\/+$/, '')
+  const base = options.baseUrl || 'http://127.0.0.1:11434'
   try {
-    const response = await (options.fetchImpl || fetch)(`${base}/api/version`, { redirect: 'error', signal: AbortSignal.timeout(options.timeoutMs ?? 3000) })
+    // Only the version route is requested from the owner-selected Ollama door;
+    // no vault or capture bytes are included.
+    const response = await (options.fetchImpl || fetch)(ollamaEndpoint(base, 'api/version'), { redirect: 'error', signal: AbortSignal.timeout(options.timeoutMs ?? 3000) }) // lgtm[js/file-access-to-http]
     if (!response.ok) return { ok: false, version: '', compatible: false, answer: `${base} answered ${response.status} when asked its version.` }
     const data = (JSON.parse(await boundedResponse(response, 64_000))) as { version?: unknown }
     const version = typeof data.version === 'string' ? data.version : ''

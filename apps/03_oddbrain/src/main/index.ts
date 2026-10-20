@@ -94,6 +94,7 @@ import { pdfSafeName } from '../shared/lib/artifacts'
 import { parsePullLine, validateModelName } from './engine/pull'
 import { openLogin, readAuthStatus } from './engine/authStatus'
 import { readOllamaVersion } from './engine/ollamaVersion'
+import { ollamaEndpoint } from './engine/ollamaEndpoint'
 import { scanClaudeSkills, type McpServer } from './engine/deploy'
 import { createCatalogInstallReview } from './engine/skillCatalogInstall'
 import { readMcpList } from '../shared/lib/mcp'
@@ -1316,7 +1317,9 @@ function registerBridges(): void {
       // already refuses redirects on this exact URL, so pull and delete do
       // too — following one would send a model request somewhere the
       // settings never named.
-      const answer = await fetch(`${door}/api/pull`, {
+      // This sends only the validated selected model name to the explicit
+      // owner-configured Ollama endpoint; no vault content is attached.
+      const answer = await fetch(ollamaEndpoint(door, 'api/pull'), { // lgtm[js/file-access-to-http]
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: name }),
@@ -1359,10 +1362,14 @@ function registerBridges(): void {
     if (!name) return { ok: false, answer: 'That is not a model name this app will ask for.' }
     const door = settings.engine.baseUrl || 'http://localhost:11434'
     try {
-      const answer = await fetch(`${door}/api/delete`, {
+      // This sends only the validated selected model name to the explicit
+      // owner-configured Ollama endpoint; no vault content is attached.
+      const answer = await fetch(ollamaEndpoint(door, 'api/delete'), { // lgtm[js/file-access-to-http]
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: name }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(15_000),
       })
       if (!answer.ok) return { ok: false, answer: `the brain door answered ${answer.status}` }
       return { ok: true, answer: `${name} is gone from this machine` }

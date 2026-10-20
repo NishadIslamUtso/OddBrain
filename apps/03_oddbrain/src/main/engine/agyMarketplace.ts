@@ -1,8 +1,8 @@
 import { packageSource } from '../../shared/lib/packageInspection'
 import { inspectPackage } from './packageInspection'
 import { randomUUID } from 'node:crypto'
-import { lstatSync, readFileSync } from 'node:fs'
 import { AGY_MARKETPLACE, AGY_MARKETPLACE_URL, type Marketplace, type MarketplaceAction, type MarketplacePlan } from '../../shared/lib/marketplace'
+import { readRegularFileSync } from '../safeFile'
 import { boundedResponse } from '../network/boundedResponse'
 import { noLinkedPath } from './configTransaction'
 import { resolveEngineCommand } from './enginePath'
@@ -96,9 +96,8 @@ export function createAgyMarketplaceService(options: { cacheFile?: string; fetch
         if (options.cacheFile) {
           try {
             noLinkedPath(options.cacheFile)
-            const stat = lstatSync(options.cacheFile)
-            if (!stat.isFile() || stat.size > LIMIT) throw Error('Unsupported cache.')
-            const next = readAgyMarketplace(readFileSync(options.cacheFile, 'utf8'))
+            const { bytes, stat } = readRegularFileSync(options.cacheFile, LIMIT)
+            const next = readAgyMarketplace(bytes.toString('utf8'))
             next.notice = `Offline copy from agy’s cache, last written ${stat.mtime.toISOString()}. The online catalog could not be read. Install resolves today’s package, which may differ from this listing.`
             signal.throwIfAborted(); catalog = next; return next
           } catch { signal.throwIfAborted() }

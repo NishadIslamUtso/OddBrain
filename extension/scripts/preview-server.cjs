@@ -39,9 +39,18 @@ http
         return;
       }
       const file = path.resolve(root, "." + pathname);
-      if (!file.startsWith(root + path.sep) || !fs.statSync(file).isFile())
-        throw Error("not found");
-      let content = fs.readFileSync(file);
+      if (!file.startsWith(root + path.sep)) throw Error("not found");
+      const descriptor = fs.openSync(
+        file,
+        fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW || 0),
+      );
+      let content;
+      try {
+        if (!fs.fstatSync(descriptor).isFile()) throw Error("not found");
+        content = fs.readFileSync(descriptor);
+      } finally {
+        fs.closeSync(descriptor);
+      }
       if (pathname === "/popup/popup.html")
         content = content
           .toString()

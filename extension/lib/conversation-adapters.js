@@ -217,7 +217,8 @@
       const style = n.ownerDocument.defaultView.getComputedStyle(n);
       const rect = n.getBoundingClientRect();
       const clipped = style.clipPath === "inset(100%)" || /rect\(0(?:px)?[, ]+0(?:px)?[, ]+0(?:px)?[, ]+0(?:px)?\)/i.test(style.clip || "");
-      const transparentText = style.color === "transparent" || /rgba?\([^)]*,\s*0\s*\)$/i.test(style.color || "") || style.webkitTextFillColor === "transparent";
+      const color = style.color || "";
+      const transparentText = color === "transparent" || /^rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/i.test(color) || /^rgba?\([^)]*\/\s*0(?:\.0+)?%?\s*\)$/i.test(color) || style.webkitTextFillColor === "transparent";
       const collapsedTransform = /(?:scale(?:X|Y)?\(0(?:[),])|matrix\(0,\s*0,\s*0,\s*0,)/i.test(style.transform || "");
       if (
         style.display === "none" ||

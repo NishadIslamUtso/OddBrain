@@ -86,7 +86,8 @@
         if (style) {
           var rect = child.getBoundingClientRect();
           var clipped = style.clipPath === 'inset(100%)' || /rect\(0(?:px)?[, ]+0(?:px)?[, ]+0(?:px)?[, ]+0(?:px)?\)/i.test(style.clip || '');
-          var transparentText = style.color === 'transparent' || /rgba?\([^)]*,\s*0\s*\)$/i.test(style.color || '') || style.webkitTextFillColor === 'transparent';
+          var color = style.color || '';
+          var transparentText = color === 'transparent' || /^rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/i.test(color) || /^rgba?\([^)]*\/\s*0(?:\.0+)?%?\s*\)$/i.test(color) || style.webkitTextFillColor === 'transparent';
           var collapsedTransform = /(?:scale(?:X|Y)?\(0(?:[),])|matrix\(0,\s*0,\s*0,\s*0,)/i.test(style.transform || '');
           if (style.display === 'none' || style.visibility === 'hidden' || style.visibility === 'collapse' || style.contentVisibility === 'hidden' || style.opacity !== '' && Number(style.opacity) === 0 || parseFloat(style.fontSize || '16') < 2 || clipped || transparentText || collapsedTransform || ((rect.width <= 1 || rect.height <= 1) && [style.overflow, style.overflowX, style.overflowY].some(function (value) { return value === 'hidden' || value === 'clip'; }))) continue;
         }

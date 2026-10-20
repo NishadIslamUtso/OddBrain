@@ -4,7 +4,8 @@
  * against tricks before anything opens — and deletes are exactly one file,
  * never a glob.
  */
-import { lstat, readFile, realpath, readdir, rm } from 'node:fs/promises'
+import { constants } from 'node:fs'
+import { open, readFile, realpath, readdir, rm } from 'node:fs/promises'
 import { join, sep } from 'node:path'
 import { MEMORY_DIR, MEMORY_READ_CAP, safeMemoryRelative, type MemoryFile } from '../shared/lib/memory'
 
@@ -30,19 +31,23 @@ export function createMemoryManager(vaultRoot: () => string, customFolder: () =>
     for (const name of names) {
       const full = join(folder(), name)
       try {
-        // A symlink inside the memory folder is NOT memory — it can point
-        // anywhere on the disk, so listing follows only real files (the vault
-        // service makes the same refusal with the same reasoning).
-        const info = await lstat(full)
-        if (info.isSymbolicLink()) continue
-        const raw = await readFile(full, 'utf8')
-        files.push({
-          name,
-          path: `${MEMORY_DIR}/${name}`,
-          updated: info.mtime.toISOString(),
-          content: raw.length > MEMORY_READ_CAP ? raw.slice(0, MEMORY_READ_CAP) : raw,
-          clipped: raw.length > MEMORY_READ_CAP,
-        })
+        // A symlink inside the memory folder is NOT memory. Open the leaf with
+        // no-follow and validate that same handle before reading from it.
+        const descriptor = await open(full, constants.O_RDONLY | (constants.O_NOFOLLOW || 0))
+        try {
+          const before = await descriptor.stat()
+          if (!before.isFile() || before.size > 8_000_000) continue
+          const raw = await descriptor.readFile('utf8')
+          const after = await descriptor.stat()
+          if (before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs) continue
+          files.push({
+            name,
+            path: `${MEMORY_DIR}/${name}`,
+            updated: after.mtime.toISOString(),
+            content: raw.length > MEMORY_READ_CAP ? raw.slice(0, MEMORY_READ_CAP) : raw,
+            clipped: raw.length > MEMORY_READ_CAP,
+          })
+        } finally { await descriptor.close() }
       } catch {
         continue
       }

@@ -1,6 +1,7 @@
 import { boundedResponse } from '../network/boundedResponse'
 import { isRemoteModel } from '../../shared/lib/ollama'
 import type { EngineModelEntry } from '../../shared/lib/engine'
+import { ollamaEndpoint } from './ollamaEndpoint'
 
 /** Independent sources: one unavailable service must not hide another's models. */
 export async function discoverClaudeModels(input: {
@@ -10,7 +11,9 @@ export async function discoverClaudeModels(input: {
   providerModels?: () => Promise<Array<{ name: string }>>
 }): Promise<{ ok: boolean; models: EngineModelEntry[]; error?: string }> {
   const local = async (): Promise<EngineModelEntry[]> => {
-    const response = await (input.fetchImpl ?? fetch)(`${input.baseUrl.replace(/\/$/, '')}/api/tags`, { signal: AbortSignal.timeout(4000), redirect: 'error' })
+    // The address is an explicit owner setting; no vault or captured content is
+    // sent. ollamaEndpoint restricts the scheme, credentials and route.
+    const response = await (input.fetchImpl ?? fetch)(ollamaEndpoint(input.baseUrl, 'api/tags'), { signal: AbortSignal.timeout(4000), redirect: 'error' }) // lgtm[js/file-access-to-http]
     if (!response.ok) throw Error(`Ollama answered ${response.status}.`)
     const data = JSON.parse(await boundedResponse(response)) as { models?: Array<{ name?: unknown; size?: unknown; remote_model?: string; remote_host?: string }> }
     if (!Array.isArray(data.models)) throw Error('Ollama returned an unsupported model list.')

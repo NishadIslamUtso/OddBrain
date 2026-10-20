@@ -20,6 +20,7 @@ import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { installPackFromFolder, type PackTargets } from './packs'
 import { boundedResponse } from '../network/boundedResponse'
+import { readRegularFileSync } from '../safeFile'
 
 const MAX_INDEX_BYTES = 2_000_000
 const FETCH_TIMEOUT_MS = 10_000
@@ -220,13 +221,10 @@ function readIndexRaw(source: IndexSource, loader?: RawLoader): Promise<{ raw?: 
   if (source.kind === 'folder') {
     const file = join(source.path, 'index.json')
     try {
-      if (!existsSync(file)) return Promise.resolve({ problem: 'That folder holds no index.json.' })
-      const info = lstatSync(file)
-      if (!info.isFile()) return Promise.resolve({ problem: 'That index.json is not a regular file.' })
-      if (info.size > MAX_INDEX_BYTES) return Promise.resolve({ problem: 'That index is too large to read in full.' })
-      return Promise.resolve({ raw: readFileSync(file, 'utf8') })
-    } catch {
-      return Promise.resolve({ problem: 'That index.json could not be read.' })
+      const { bytes } = readRegularFileSync(file, MAX_INDEX_BYTES)
+      return Promise.resolve({ raw: bytes.toString('utf8') })
+    } catch (error) {
+      return Promise.resolve({ problem: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'That folder holds no index.json.' : 'That index.json could not be read as a regular file within the size limit.' })
     }
   }
   // Remote indexes are privileged-process requests: HTTPS only, no redirect,
