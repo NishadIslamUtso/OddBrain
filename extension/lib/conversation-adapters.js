@@ -220,6 +220,9 @@
       const color = style.color || "";
       const transparentText = color === "transparent" || /^rgba\([^)]*,\s*0(?:\.0+)?\s*\)$/i.test(color) || /^rgba?\([^)]*\/\s*0(?:\.0+)?%?\s*\)$/i.test(color) || style.webkitTextFillColor === "transparent";
       const collapsedTransform = /(?:scale(?:X|Y)?\(0(?:[),])|matrix\(0,\s*0,\s*0,\s*0,)/i.test(style.transform || "");
+      // An unloaded media element may have a zero layout box in headless and
+      // background tabs; that alone does not make its submitted source hidden.
+      const unloadedMedia = /^(IMG|VIDEO|AUDIO|SOURCE)$/.test(n.tagName) && !n.getAttribute("width") && !n.getAttribute("height") && !n.style.width && !n.style.height;
       if (
         style.display === "none" ||
         style.visibility === "hidden" ||
@@ -230,7 +233,7 @@
         clipped ||
         transparentText ||
         collapsedTransform ||
-        ((rect.width <= 1 || rect.height <= 1) && [style.overflow, style.overflowX, style.overflowY].some(value => ["hidden", "clip"].includes(value)))
+        (!unloadedMedia && (rect.width <= 1 || rect.height <= 1) && [style.overflow, style.overflowX, style.overflowY].some(value => ["hidden", "clip"].includes(value)))
       )
         return false;
     }

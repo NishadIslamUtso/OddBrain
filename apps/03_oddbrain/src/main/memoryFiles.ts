@@ -22,7 +22,10 @@ export function createMemoryManager(vaultRoot: () => string, customFolder: () =>
   const list = async (): Promise<MemoryListAnswer> => {
     let names: string[]
     try {
-      names = (await readdir(folder())).filter(entry => entry.endsWith('.md')).sort()
+      names = (await readdir(folder(), { withFileTypes: true }))
+        .filter(entry => entry.isFile() && !entry.isSymbolicLink() && entry.name.endsWith('.md'))
+        .map(entry => entry.name)
+        .sort()
     } catch {
       // No folder yet: the engine has remembered nothing. That is honest.
       return { ok: true, folder: folder(), files: [] }

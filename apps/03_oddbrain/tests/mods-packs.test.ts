@@ -98,7 +98,8 @@ test('describePermissions says everything in plain words', () => {
   const said = describePermissions(pack).join('\n')
   assert.match(said, /Runs no commands\./)
   assert.match(said, /permission card asks you first/i)
-  assert.ok(said.includes('example.com'))
+  // Prose assertion, not a hostname allowlist or URL security decision.
+  assert.ok(said.includes('example.com')) // lgtm[js/incomplete-url-substring-sanitization]
   assert.match(said, /folder you can read and delete/)
 })
 

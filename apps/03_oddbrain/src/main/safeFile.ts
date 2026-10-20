@@ -10,7 +10,9 @@ export type OpenedFile = { bytes: Buffer; stat: Stats }
  */
 export function readRegularFileSync(path: string, limit: number): OpenedFile {
   if (!Number.isSafeInteger(limit) || limit < 0) throw Error('Invalid file read limit.')
-  const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0))
+  // Read-only O_RDONLY has no creation bit; CodeQL's temp-file query cannot
+  // infer that through Node's bitwise flags. O_NOFOLLOW is intentional.
+  const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0)) // lgtm[js/insecure-temporary-file]
   try {
     const before = fstatSync(descriptor)
     if (!before.isFile() || before.size > limit) throw Error(`File is not a regular file within the ${limit}-byte read limit.`)
@@ -40,7 +42,8 @@ export function readRegularFileSync(path: string, limit: number): OpenedFile {
 /** Read a bounded prefix from one already-validated regular-file handle. */
 export function readRegularHeadSync(path: string, limit: number): OpenedFile {
   if (!Number.isSafeInteger(limit) || limit < 1) throw Error('Invalid file read limit.')
-  const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0))
+  // Read-only descriptor; see the full-reader note above.
+  const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0)) // lgtm[js/insecure-temporary-file]
   try {
     const before = fstatSync(descriptor)
     if (!before.isFile()) throw Error('Path is not a regular file.')

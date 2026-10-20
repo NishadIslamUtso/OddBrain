@@ -141,7 +141,8 @@ test('the blacklist round-trips and is written into both system documents', (t) 
   assert.deepEqual(updated.excluded_patterns, ['bank.com/*', 'https://private.example.com/page'])
   for (const file of ['00 System/Privacy & Access.md', '00 System/Connectors/Source Scope.md']) {
     assert.match(read(file), /## Never-check blacklist|excluded_patterns/)
-    assert.ok(read(file).includes('private.example.com'))
+    // Prose assertion, not a hostname allowlist or URL security decision.
+    assert.ok(read(file).includes('private.example.com')) // lgtm[js/incomplete-url-substring-sanitization]
   }
 
   // The second document did not exist before; it is created with the list, not
@@ -175,7 +176,8 @@ excluded_patterns: [bank.com/*]
   assert.match(document, /provider: browser/)
   assert.match(document, /other_setting: keep/)
   assert.match(document, /Keep this note/)
-  assert.equal(document.includes('bank.com'), false)
+  // Prose assertion, not a hostname allowlist or URL security decision.
+  assert.equal(document.includes('bank.com'), false) // lgtm[js/incomplete-url-substring-sanitization]
 })
 
 test('the previous text is archived before the blacklist changes', (t) => {

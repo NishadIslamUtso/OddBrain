@@ -104,7 +104,9 @@ export function createVaultFiles(root: string, clock: () => Date) {
     const full = filePath(relative)
     // Stage inside a fresh owner-only directory on the destination filesystem,
     // then atomically replace the leaf. A fixed temp filename is never exposed.
-    const staging = mkdtempSync(resolve(dirname(full), '.oddbrain-write-'))
+    // Stage at the vault root to keep Windows paths below MAX_PATH even when
+    // the destination itself is deeply nested. It remains on the same volume.
+    const staging = mkdtempSync(resolve(root, '.oddbrain-write-'))
     const temporary = resolve(staging, 'content')
     try {
       writeFileSync(temporary, content, { flag: 'wx', mode: 0o600 })
