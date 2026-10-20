@@ -214,9 +214,15 @@ export function readModelNames(payload: unknown): string[] {
     : Array.isArray((payload as { models?: unknown[] } | null)?.models)
       ? ((payload as { models: unknown[] }).models as unknown[])
       : []
-  return list
-    .map(row => String((row as { id?: string; name?: string })?.id || (row as { name?: string })?.name || ''))
-    .filter(Boolean)
+  const names: string[] = []
+  const seen = new Set<string>()
+  for (const row of list.slice(0, 2_000)) {
+    const name = String((row as { id?: string; name?: string })?.id || (row as { name?: string })?.name || '').trim()
+    if (!name || name.length > 300 || seen.has(name)) continue
+    seen.add(name)
+    names.push(name)
+  }
+  return names
 }
 
 /** The system message is a message in one wire format and a field in the other. */
@@ -284,7 +290,7 @@ export type SseEvent = { event: string; data: string }
  * A record is terminated by a blank line, which may be split across two reads,
  * so this keeps a buffer rather than parsing per chunk.
  */
-export function createSseParser(): { push: (chunk: string) => SseEvent[] } {
+export function createSseParser(maxEventCharacters = 1_000_000): { push: (chunk: string) => SseEvent[] } {
   let buffer = ''
   return {
     push(chunk: string): SseEvent[] {
@@ -292,6 +298,7 @@ export function createSseParser(): { push: (chunk: string) => SseEvent[] } {
       const events: SseEvent[] = []
       let separator = buffer.match(/\r?\n\r?\n/)
       while (separator && separator.index !== undefined) {
+        if (separator.index > maxEventCharacters) throw new Error('The provider sent an oversized streaming event.')
         const raw = buffer.slice(0, separator.index)
         buffer = buffer.slice(separator.index + separator[0].length)
         let event = ''
@@ -303,6 +310,7 @@ export function createSseParser(): { push: (chunk: string) => SseEvent[] } {
         if (event || data.length) events.push({ event, data: data.join('\n') })
         separator = buffer.match(/\r?\n\r?\n/)
       }
+      if (buffer.length > maxEventCharacters) throw new Error('The provider sent an oversized streaming event.')
       return events
     },
   }

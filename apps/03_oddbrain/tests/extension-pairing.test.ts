@@ -43,7 +43,7 @@ const fetchStub = () => {
   })
 }
 
-const loadWriter = async () => (await import('../../extension/lib/vault-writer.js')) as {
+const loadWriter = async () => (await import('../../../extension/lib/vault-writer.js')) as {
   postCapture(payload: unknown): Promise<{ ok: boolean; unpaired?: boolean }>
   handleCaptureRelay(payload: unknown): Promise<{ ok: boolean; unpaired?: boolean }>
   flushQueue(): Promise<void>

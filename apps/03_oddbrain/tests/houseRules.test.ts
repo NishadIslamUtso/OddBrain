@@ -34,7 +34,8 @@ describe('house rules', () => {
   test('auto-keep is in the rulebook: the engine knows its memory file during normal work', () => {
     const cc = compileFor('claude-code')
     expect(cc).toContain('06 Review/Memory/engine-notes.md')
-    expect(cc).toContain('## 2026-10-16')
+    expect(cc).toContain('YYYY-MM-DD heading for the actual current date')
+    expect(cc).not.toContain('2026-10-16')
     expect(cc).toContain('Never delete or rewrite lines that are already there')
     expect(cc).toContain('if nothing is worth keeping, write nothing')
     expect(cc).toContain('approval channel')

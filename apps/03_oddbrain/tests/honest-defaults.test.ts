@@ -30,7 +30,7 @@ test('an empty model never becomes a --model flag', () => {
 
 test('launch points claude-code at a brain door ONLY when a brain was actually picked', () => {
   const source = readFileSync(new URL('../src/main/engine/claudeCode.ts', import.meta.url), 'utf8')
-  assert.match(source, /input\.settings\.model\s*\n\s*\? brainEnvironment\(input\.settings\.baseUrl\)/)
+  assert.match(source, /input\.settings\.model && input\.settings\.cloudProvider !== 'native'\s*\n\s*\? brainEnvironment\(input\.settings\.baseUrl\)/)
   assert.doesNotMatch(source, /: brainEnvironment\(input\.settings\.baseUrl\)\),\s*\n\s*\.\.\.\(enginePathSync/)
 })
 
@@ -56,9 +56,9 @@ test('the engine picker states installation in words, not a green dot', () => {
   assert.match(composer, /not installed/)
 })
 
-test('the title-bar dot is alive only while a turn is live', () => {
-  const app = readFileSync(new URL('../src/renderer/src/App.tsx', import.meta.url), 'utf8')
-  assert.match(app, /engineAlive=\{engineStore\(\)\.turn\?\.state === 'running'\}/)
+test('the title bar has no decorative status claims', () => {
+  const title = readFileSync(new URL('../src/renderer/src/components/TitleBar.tsx', import.meta.url), 'utf8')
+  assert.doesNotMatch(title.slice(title.indexOf('  return ')), /engineAlive|bg-ok|bg-warn|bg-muted|Live|Local/)
 })
 
 test('the engine strip is collapsible and never hides a permission question', () => {

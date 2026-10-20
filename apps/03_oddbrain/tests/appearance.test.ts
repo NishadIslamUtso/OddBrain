@@ -89,10 +89,11 @@ test('a half-written preference falls back field by field, never to nothing', ()
     width: 'comfortable',
     textSize: 'medium',
     font: 'sans',
-    motion: 'system',
-    mascotWords: true,
-    rowExplanations: true,
-    packCss: '',
+    motion: 'balanced',
+    mascotWords: false,
+    startupAnimation: true,
+    rowExplanations: false,
+  packCss: '',
   designSystem: '',
   })
   assert.deepEqual(normalizeAppearance({ width: 'wide' }), {
@@ -101,10 +102,11 @@ test('a half-written preference falls back field by field, never to nothing', ()
     width: 'wide',
     textSize: 'medium',
     font: 'sans',
-    motion: 'system',
-    mascotWords: true,
-    rowExplanations: true,
-    packCss: '',
+    motion: 'balanced',
+    mascotWords: false,
+    startupAnimation: true,
+    rowExplanations: false,
+  packCss: '',
   designSystem: '',
   })
   assert.deepEqual(normalizeAppearance({ accent: 'blue', width: 'focused', theme: 'light' }), {
@@ -113,10 +115,11 @@ test('a half-written preference falls back field by field, never to nothing', ()
     width: 'focused',
     textSize: 'medium',
     font: 'sans',
-    motion: 'system',
-    mascotWords: true,
-    rowExplanations: true,
-    packCss: '',
+    motion: 'balanced',
+    mascotWords: false,
+    startupAnimation: true,
+    rowExplanations: false,
+  packCss: '',
   designSystem: '',
   })
 })

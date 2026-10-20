@@ -118,23 +118,13 @@ export type ModelSource = {
   models(): Promise<{ ok: boolean; models: Array<{ name: string; cloud: boolean; sizeGB: number | null }>; error?: string }>
 }
 
-export function agyModelSource(installed: boolean): ModelSource {
+export function agyModelSource(installed: boolean, inspect?: () => Promise<import('../../shared/lib/engineCapabilities').EngineCapabilityReport>): ModelSource {
   return {
     async models() {
-      if (!installed) {
-        return {
-          ok: false,
-          models: [],
-          error:
-            'agy is not on this machine yet, its brain list is Google\u2019s own (plan-dependent) and appears once agy is installed and signed in. Your Ollama brains cannot plug into agy: it has no custom door.',
-        }
-      }
-      return {
-        ok: false,
-        models: [],
-        error:
-          'agy is installed. Sign in once by running `agy` in a terminal, then reopen the bay, its own brain list (Gemini family, plan-gated) will be read from the machine. Ollama brains cannot plug into agy.',
-      }
+      if (!installed) return { ok: false, models: [], error: 'agy is not on this machine. Install it and sign in first; there is no custom door for Ollama models.' }
+      if (!inspect) return { ok: false, models: [], error: 'agy model inspection is unavailable in this window. Refresh from the desktop app.' }
+      const report = await inspect()
+      return { ok: report.ok, models: report.models, ...(!report.ok ? { error: report.effort.note } : {}) }
     },
   }
 }

@@ -1,93 +1,122 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs'
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
+import { parse as parseYaml } from 'yaml'
 import { SKILL_CATALOG, catalogEntry } from '../src/shared/lib/skillCatalog'
 import { installCatalogSkill } from '../src/main/engine/skillCatalogInstall'
+import { extractSkillBundle } from '../src/main/engine/skillBundle'
+import { parseSkillMd } from '../src/main/engine/deploy'
 
-/**
- * Track D: skills sourcing. Researched live: anthropics/skills is the
- * canonical open collection; these entries were verified against the repo's
- * real folder list. One click lands a skill in every engine's own folder
- * through the deploy Track A already ships.
- */
+const REVISION = '0123456789abcdef0123456789abcdef01234567'
+const ARCHIVE = Buffer.from(
+  'UEsDBBQAAAAIAGlvUl3BJeh/awAAAH8AAABEAAAAc2tpbGxzLTAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njcvc2tpbGxzL2RvY3gvU0tJTEwubWRNzLsOwjAMRuHdT/ErzAl7V9iRWGDoYtUBIgW71AmXtwfBwvzpnBgjKV/zALHpSZJ9WsrciumAcLBFvuB4lHbBGG7dWpYx4M61ZwergFFNz3A+Zfz1KVD8zGmF7W5zJNp3xQ993cxqml+J3lBLAwQUAAAACABpb1Jdo750LhAAAAAOAAAARwAAAHNraWxscy0wMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3L3NraWxscy9kb2N4L0xJQ0VOU0UudHh0y8lMTs0rTlVIqixJLeYCAFBLAwQUAAAACABpb1JdbOGxtg4AAAAMAAAASwAAAHNraWxscy0wMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3L3NraWxscy9kb2N4L3NjcmlwdHMvdG9vbC5weSsoyswr0VDKz1bS5AIAUEsDBBQAAAAIAGlvUl1wFC66CQAAAAcAAABFAAAAc2tpbGxzLTAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njcvc2tpbGxzL290aGVyL1NLSUxMLm1kU1bwL8lILQIAUEsBAhQDFAAAAAgAaW9SXcEl6H9rAAAAfwAAAEQAAAAAAAAAAAAAAIABAAAAAHNraWxscy0wMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3L3NraWxscy9kb2N4L1NLSUxMLm1kUEsBAhQDFAAAAAgAaW9SXaO+dC4QAAAADgAAAEcAAAAAAAAAAAAAAIABzQAAAHNraWxscy0wMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3L3NraWxscy9kb2N4L0xJQ0VOU0UudHh0UEsBAhQDFAAAAAgAaW9SXWzhsbYOAAAADAAAAEsAAAAAAAAAAAAAAIABQgEAAHNraWxscy0wMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3L3NraWxscy9kb2N4L3NjcmlwdHMvdG9vbC5weVBLAQIUAxQAAAAIAGlvUl1wFC66CQAAAAcAAABFAAAAAAAAAAAAAACAAbkBAABza2lsbHMtMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Ny9za2lsbHMvb3RoZXIvU0tJTEwubWRQSwUGAAAAAAQABADTAQAAJQIAAAAA',
+  'base64',
+)
 
-const SKILL_MD = `---
-name: docx
-description: Word document creation and editing.
----
+const liveFetch = (async (input: string | URL) => {
+  const url = String(input)
+  if (url === 'https://api.github.com/repos/anthropics/skills/commits/main') {
+    return new Response(JSON.stringify({ sha: REVISION }), { status: 200, headers: { 'content-type': 'application/json' } })
+  }
+  if (url === `https://codeload.github.com/anthropics/skills/zip/${REVISION}`) {
+    return new Response(ARCHIVE, { status: 200, headers: { 'content-length': String(ARCHIVE.length), 'content-type': 'application/zip' } })
+  }
+  return new Response('', { status: 404 })
+}) as typeof fetch
 
-# docx
-
-Make the document.
-`
-
-test('the catalog is curated, real, and fetches only from one host', () => {
+test('the catalog is curated and can resolve only Anthropic skill directories', () => {
   assert.ok(SKILL_CATALOG.length >= 8)
-  const names = new Set(SKILL_CATALOG.map((skill) => skill.name))
-  assert.equal(names.size, SKILL_CATALOG.length, 'no duplicates')
+  const names = new Set(SKILL_CATALOG.map(skill => skill.name))
+  assert.equal(names.size, SKILL_CATALOG.length)
   for (const skill of SKILL_CATALOG) {
+    assert.equal(skill.repo, 'anthropics/skills')
     assert.match(skill.source, /^https:\/\/raw\.githubusercontent\.com\/anthropics\/skills\/main\/skills\/[a-z0-9-]+\/SKILL\.md$/)
-    assert.match(skill.what, /[a-z]/)
     assert.equal(catalogEntry(skill.name)?.name, skill.name)
   }
-  assert.equal(catalogEntry('../../etc/passwd'), null, 'a name is only a name')
+  assert.equal(catalogEntry('../../etc/passwd'), null)
   assert.equal(catalogEntry(''), null)
 })
 
-test('an install validates the name, fetches the file, and deploys to both engines', async () => {
+test('archive extraction selects only the requested complete directory', async () => {
+  const bundle = await extractSkillBundle(ARCHIVE, 'docx', REVISION)
+  assert.equal(bundle.revision, REVISION)
+  assert.deepEqual([...bundle.files.keys()].sort(), ['LICENSE.txt', 'SKILL.md', 'scripts/tool.py'])
+  assert.equal(bundle.files.get('scripts/tool.py')?.toString(), 'print("ok")\n')
+})
+
+test('archive extraction rejects a path that would leave the skill directory', async () => {
+  const damaged = Buffer.from(ARCHIVE)
+  const from = Buffer.from('scripts/tool.py')
+  const to = Buffer.from('../evilfile.txt')
+  assert.equal(from.length, to.length)
+  let changed = 0
+  for (let at = damaged.indexOf(from); at >= 0; at = damaged.indexOf(from, at + to.length)) {
+    to.copy(damaged, at)
+    changed += 1
+  }
+  assert.equal(changed, 2, 'both the local and central ZIP paths were changed')
+  await assert.rejects(extractSkillBundle(damaged, 'docx', REVISION), /invalid relative path|outside its own folder/)
+})
+
+test('an install pins a commit and preserves instructions, license and support files for both engines', async () => {
   const root = mkdtempSync(join(tmpdir(), 'oddbrain-catalog-'))
   try {
     const targets = { claudeSkillsDir: join(root, 'claude'), agySkillsDir: join(root, 'agy') }
-    const fetchImpl = (async () =>
-      ({ ok: true, status: 200, text: async () => SKILL_MD })) as unknown as typeof fetch
-    const result = await installCatalogSkill('docx', targets, fetchImpl)
+    const result = await installCatalogSkill('docx', targets, liveFetch)
     assert.equal(result.ok, true)
     if (!result.ok) return
-    assert.equal(result.written.length, 2, 'one file per engine')
-    const claude = readFileSync(join(root, 'claude', 'docx', 'SKILL.md'), 'utf8')
-    const agy = readFileSync(join(root, 'agy', 'docx.md'), 'utf8')
-    assert.match(agy, /^---\nname: docx\n/)
+    assert.equal(result.revision, REVISION)
+    assert.equal(result.written.length, 6, 'each engine gets the three original pinned files, without a rewritten flat command')
+    assert.equal(readFileSync(join(root, 'claude', 'docx', 'scripts', 'tool.py'), 'utf8'), 'print("ok")\n')
+    assert.equal(readFileSync(join(root, 'agy', 'docx', 'LICENSE.txt'), 'utf8'), 'license bytes\n')
+    const agy = readFileSync(join(root, 'agy', 'docx', 'SKILL.md'), 'utf8')
+    const parsed = parseSkillMd(agy)
+    assert.equal(parsed.name, 'docx')
+    assert.match(parsed.description, /quoted/)
+    assert.equal(agy, readFileSync(join(root, 'claude', 'docx', 'SKILL.md'), 'utf8'), 'both native manifests retain the identical pinned original')
+    const header = /^---\n([\s\S]*?)\n---/.exec(agy)?.[1] ?? ''
+    assert.equal(typeof (parseYaml(header) as { description?: unknown }).description, 'string', 'generated frontmatter remains valid YAML')
+
+    const stale = join(root, 'claude', 'docx', 'removed-upstream-file.txt')
+    writeFileSync(stale, 'stale')
+    const refreshed = await installCatalogSkill('docx', targets, liveFetch)
+    assert.equal(refreshed.ok, false)
+    assert.equal(readFileSync(stale, 'utf8'), 'stale', 'a repeated install must not erase existing or hand-written engine files')
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
-test('the door refuses names outside the catalog and says honestly when offline', async () => {
+test('the door refuses names outside the catalog and reports network or archive failures without writing', async () => {
   const root = mkdtempSync(join(tmpdir(), 'oddbrain-catalog2-'))
   try {
     const targets = { claudeSkillsDir: join(root, 'claude'), agySkillsDir: join(root, 'agy') }
-    const rogue = await installCatalogSkill('../machine', targets, (async () => ({ ok: true, status: 200, text: async () => 'x' })) as unknown as typeof fetch)
+    const rogue = await installCatalogSkill('../machine', targets, liveFetch)
     assert.equal(rogue.ok, false)
     if (!rogue.ok) assert.match(rogue.answer, /not in the catalog/)
 
-    const offline = await installCatalogSkill('docx', targets, (async () => {
-      throw new Error('no network')
-    }) as unknown as typeof fetch)
+    const offline = await installCatalogSkill('docx', targets, (async () => { throw new Error('network unavailable') }) as typeof fetch)
     assert.equal(offline.ok, false)
-    if (!offline.ok) assert.match(offline.answer, /online/)
+    if (!offline.ok) assert.match(offline.answer, /network unavailable/)
+    assert.equal(existsSync(join(root, 'claude')), false)
 
-    const failing = await installCatalogSkill('docx', targets, (async () => ({ ok: false, status: 404, text: async () => '' })) as unknown as typeof fetch)
-    assert.equal(failing.ok, false)
+    const damaged = await installCatalogSkill('docx', targets, (async (input: string | URL) =>
+      String(input).includes('/commits/')
+        ? new Response(JSON.stringify({ sha: REVISION }), { status: 200 })
+        : new Response(Buffer.from('not a zip'), { status: 200 })) as typeof fetch)
+    assert.equal(damaged.ok, false)
   } finally {
     rmSync(root, { recursive: true, force: true })
   }
 })
 
-test('the face: a Settings section lists the catalog and installs through the door', () => {
+test('the face lists the catalog and installs through the guarded IPC door', () => {
   const read = (relative: string): string => readFileSync(`${process.cwd()}/${relative}`, 'utf8')
-  const settings = read('src/renderer/src/components/SettingsView.tsx')
-  assert.match(settings, /id: 'skills'/)
-  assert.match(settings, /SkillsCatalogSection/)
-  const section = read('src/renderer/src/components/SkillsCatalogSection.tsx')
-  assert.match(section, /SKILL_CATALOG/)
-  assert.match(section, /installCatalog/)
-  const main = read('src/main/index.ts')
-  assert.match(main, /skills:install-catalog/)
-  assert.match(main, /installCatalogSkill/)
-  const preload = read('src/preload/index.ts')
-  assert.match(preload, /skills:install-catalog/)
-  const bridge = read('src/renderer/src/platform/bridge.ts')
-  assert.match(bridge, /installCatalog/)
+  assert.match(read('src/renderer/src/components/SettingsView.tsx'), /id: 'skills'/)
+  assert.match(read('src/renderer/src/components/SkillsCatalogSection.tsx'), /planCatalog/)
+  assert.match(read('src/main/index.ts'), /skills:plan-catalog/)
+  assert.match(read('src/preload/index.ts'), /skills:plan-catalog/)
+  assert.match(read('src/renderer/src/platform/bridge.ts'), /planCatalog/)
 })

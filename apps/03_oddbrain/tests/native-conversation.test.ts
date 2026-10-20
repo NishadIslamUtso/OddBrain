@@ -1,0 +1,187 @@
+import { afterEach, describe, expect, test, vi } from 'vitest'
+import { mkdtempSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
+import { EventEmitter } from 'node:events'
+import { createNativeContext } from '../src/main/nativeContext'
+import { newProject } from '../src/shared/lib/projects'
+import { createEngineSocket, sessionKey } from '../src/main/engine/socket'
+import { createSessionMemory } from '../src/main/engine/sessionMemory'
+import { DEFAULT_ENGINE } from '../src/shared/lib/engine'
+import { createTurnArchive } from '../src/main/turnArchive'
+import { dispatchRecordedTurn } from '../src/main/recordedDispatch'
+import { recordNativeTranscript } from '../src/shared/lib/nativeChat'
+import { createPermissionTickets } from '../src/main/engine/permissionTickets'
+import { checkNativeConversation } from '../src/shared/lib/nativeConversation'
+const roots: string[] = []
+const root = () => { const p = mkdtempSync(join(tmpdir(), 'oddbrain-native-chat-')); roots.push(p); return p }
+afterEach(() => roots.splice(0).forEach(p => rmSync(p, { recursive: true, force: true })))
+function fixture() {
+  const dir = root(), project = { ...newProject('Research'), instruction: 'Use plain language.', goals: ['Understand the evidence'] }
+  const service = createNativeContext(join(dir, 'projects.json'), join(dir, 'grants.json'))
+  service.write([project], [])
+  const input = { chatId: 'chat-one', projectId: project.id, history: [{ role: 'user' as const, content: 'Earlier question' }] }
+  const prepare = (resume = '') => service.prepare(input, dir, 'Current question', resume, new AbortController().signal)
+  return { dir, project, service, input, prepare }
+}
+describe('owner-selected project context', () => {
+  test('instruction and goals reach the composed request with a source receipt', async () => {
+    const f = fixture(), result = await f.prepare()
+    expect(result.prompt).toContain('Use plain language.'); expect(result.prompt).toContain('Understand the evidence')
+    expect(result.receipt.sources.map(s => s.id)).toEqual(['instruction', 'goal'])
+    expect(result.receipt.revision).toMatch(/^[a-f0-9]{64}$/)
+  })
+  test('fresh sessions receive copied history; resumed ones do not repeat it', async () => {
+    const f = fixture()
+    expect((await f.prepare()).receipt.historyMessages).toBe(1)
+    const resumed = await f.prepare('native-one')
+    expect(resumed.receipt.historyMessages).toBe(0); expect(resumed.prompt).not.toContain('Earlier question')
+  })
+  test('a missing expected resume link refuses rather than silently starting fresh', async () => {
+    const f = fixture()
+    await expect(f.service.prepare({ ...f.input, continuationExpected: true }, f.dir, 'Task', '', new AbortController().signal)).rejects.toThrow(/resume link is missing/)
+  })
+  test('a reference path in project JSON is not permission to read it', async () => {
+    const f = fixture(), file = join(f.dir, 'private.txt'); writeFileSync(file, 'PRIVATE ORIGINAL')
+    f.service.write([{ ...f.project, references: [{ id: 'reference-one', path: file, label: 'private.txt', addedAt: new Date().toISOString(), includeInContext: true }] }])
+    await expect(f.prepare()).rejects.toThrow(/Add reference/)
+    expect(readFileSync(file, 'utf8')).toBe('PRIVATE ORIGINAL')
+  })
+  test('picker authorization alone does not include a reference', async () => {
+    const f = fixture(), file = join(f.dir, 'source.txt'); writeFileSync(file, 'UNIQUE REFERENCE')
+    f.service.attach(f.project.id, [file])
+    const result = await f.prepare(); expect(result.prompt).not.toContain('UNIQUE REFERENCE')
+    expect(result.receipt.sources.some(s => s.id.startsWith('reference:'))).toBe(false)
+  })
+  test('authorized and selected text is sent completely, with digest and coverage', async () => {
+    const f = fixture(), file = join(f.dir, 'source.txt'); writeFileSync(file, 'বাংলা reference\nEND')
+    f.service.attach(f.project.id, [file]); const projects = f.service.projects()
+    f.service.write(projects.map(p => ({ ...p, references: p.references.map(r => ({ ...r, includeInContext: true })) })), projects)
+    const result = await f.prepare()
+    expect(result.prompt).toContain('বাংলা reference\\nEND')
+    expect(result.receipt.sources.at(-1)).toMatchObject({ chars: 'বাংলা reference\nEND'.length, coverage: 'Complete UTF-8 text', digest: expect.stringMatching(/^[a-f0-9]{64}$/) })
+  })
+  test('a grant is project-bound, not portable to a sibling project', async () => {
+    const f = fixture(), file = join(f.dir, 'source.txt'); writeFileSync(file, 'PRIVATE')
+    const refs = f.service.attach(f.project.id, [file]), other = { ...newProject('Other'), references: refs.map(r => ({ ...r, includeInContext: true })) }
+    f.service.write([...f.service.projects(), other])
+    await expect(f.service.prepare({ chatId: 'other-chat', projectId: other.id }, f.dir, 'Task', '', new AbortController().signal)).rejects.toThrow(/Add reference/)
+  })
+  test('changed context invalidates an already-prepared dispatch', async () => {
+    const f = fixture(), prepared = await f.prepare()
+    f.service.write([{ ...f.project, instruction: 'New instruction' }])
+    expect(() => prepared.validate()).toThrow(/changed/)
+  })
+  test('explicit empty override clears inherited goals, not project originals', async () => {
+    const f = fixture()
+    const result = await f.service.prepare({ ...f.input, overrides: { goal: '', style: 'Use a table' } }, f.dir, 'Task', '', new AbortController().signal)
+    expect(result.prompt).not.toContain('Understand the evidence'); expect(result.prompt).toContain('Use a table')
+    expect(f.service.projects()[0].goals).toEqual(['Understand the evidence'])
+  })
+  test('workspace preference and workspace authorization are separate', () => {
+    const f = fixture(), other = root()
+    expect(f.service.workspace({ ...f.input, overrides: { workspace: other } }, f.dir)).toBe(other)
+    expect(f.service.workspaceGranted(f.input.chatId, other)).toBe(false)
+    f.service.grantWorkspace(f.input.chatId, other)
+    expect(f.service.workspaceGranted(f.input.chatId, other)).toBe(true)
+    expect(f.service.workspaceGranted('different-chat', other)).toBe(false)
+  })
+  test('oversized reference refuses the entire send without clipping', async () => {
+    const f = fixture(), file = join(f.dir, 'big.txt'); writeFileSync(file, 'x'.repeat(24_001))
+    f.service.attach(f.project.id, [file]); const list = f.service.projects()
+    f.service.write(list.map(p => ({ ...p, references: p.references.map(r => ({ ...r, includeInContext: true })) })))
+    await expect(f.prepare()).rejects.toThrow(/Nothing was clipped/)
+    expect(readFileSync(file)).toHaveLength(24_001)
+  })
+  test('stale project edits and corrupt storage never replace originals', () => {
+    const f = fixture(), stale = f.service.projects()
+    f.service.write([{ ...f.project, name: 'Changed' }], stale)
+    expect(() => f.service.write(stale, stale)).toThrow(/another view/)
+    const file = join(f.dir, 'projects.json'); writeFileSync(file, '{broken')
+    expect(() => f.service.write([])).toThrow(); expect(readFileSync(file, 'utf8')).toBe('{broken')
+  })
+  test('long saved instructions are refused, never normalized down silently', () => {
+    const f = fixture(), original = readFileSync(join(f.dir, 'projects.json'))
+    expect(() => f.service.write([{ ...f.project, instruction: 'x'.repeat(4001) }])).toThrow(/shortened/)
+    expect(readFileSync(join(f.dir, 'projects.json'))).toEqual(original)
+  })
+  test('cancellation after preparation still prevents dispatch', async () => {
+    const f = fixture(), controller = new AbortController()
+    const result = await f.service.prepare(f.input, f.dir, 'Task', '', controller.signal)
+    controller.abort(); expect(() => result.validate()).toThrow(/canceled/)
+  })
+})
+describe('native conversation routing and archive association', () => {
+  test('different chats in one folder never reuse a native child or ID', () => {
+    const memory = createSessionMemory(join(root(), 'sessions.json')), launches: string[][] = [], children: any[] = []
+    const spawn = (_command: string, args: string[]) => {
+      launches.push(args)
+      const child = Object.assign(new EventEmitter(), { stdout: new EventEmitter(), stderr: new EventEmitter(), stdin: { write: () => true }, exitCode: null, signalCode: null, killed: false, kill() { this.killed = true; this.emit('close', 0) } })
+      children.push(child); return child
+    }
+    const socket = createEngineSocket(memory), base = { cwd: '/shared', settings: DEFAULT_ENGINE, spawnProcess: spawn as never, onEvent: () => {} }
+    expect(socket.send('A', { ...base, chatId: 'chat-a' }).ok).toBe(true)
+    children[0].stdout.emit('data', Buffer.from(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'native-a' }) + '\n' + JSON.stringify({ type: 'result', subtype: 'success', result: 'answer' }) + '\n'))
+    expect(memory.load(sessionKey(DEFAULT_ENGINE.id, '/shared', 'chat-a'))).toBe('native-a')
+    expect(socket.send('B', { ...base, chatId: 'chat-b' }).ok).toBe(true)
+    expect(launches[1]).not.toContain('--resume'); expect(children[0].killed).toBe(true)
+    children[1].stdout.emit('data', Buffer.from(JSON.stringify({ type: 'result', subtype: 'success', result: 'B answer' }) + '\n'))
+    expect(socket.send('A again', { ...base, chatId: 'chat-a' }).ok).toBe(true)
+    expect(launches[2].slice(-2)).toEqual(['--resume', 'native-a'])
+    expect(memory.list()[0]).toMatchObject({ chatId: 'chat-a', sessionId: 'native-a', workspace: '/shared' })
+    socket.fresh(); expect(memory.load(sessionKey('claude-code', '/shared', 'chat-a'))).toBe('')
+  })
+  test('new namespaced keys cannot collide with legacy paths or sibling engines', () => {
+    const keys = [sessionKey('claude-code', '/one::two', 'a'), sessionKey('claude-code', '/one', 'two::a'), sessionKey('agy', '/one::two', 'a'), sessionKey('claude-code', '/one::two')]
+    expect(new Set(keys).size).toBe(4)
+  })
+  test('full archive stores both the sent context and original user request, associated with the chat', () => {
+    const archive = createTurnArchive(root()), receive = vi.fn()
+    const receipt = { projectId: null, revision: 'a'.repeat(64), workspace: '/folder', sources: [], historyMessages: 0, characters: 50 }
+    dispatchRecordedTurn(archive, { chatId: 'chat-a', prompt: 'CONTEXT\nTask', userPrompt: 'Task', context: receipt, engine: 'claude-code', model: '', workspace: '/folder', pictures: 0 }, emit => {
+      emit({ kind: 'delta', text: 'Full answer' }); emit({ kind: 'done', text: 'Full answer', alreadyDisplayed: true }); return { ok: true, answer: 'started' }
+    }, () => {}, receive)
+    const record = archive.read(archive.list().entries[0].id)
+    expect(record.header.chatId).toBe('chat-a'); expect(record.prompt).toBe('CONTEXT\nTask'); expect(record.userPrompt).toBe('Task')
+    const chat = recordNativeTranscript({ id: 'chat-a', title: 'A', messages: [] }, record)
+    expect(chat.messages.map(m => m.content)).toEqual(['Task', 'Full answer'])
+    expect(recordNativeTranscript(chat, record).messages).toHaveLength(2)
+    expect(() => recordNativeTranscript({ ...chat, id: 'chat-b' }, record)).toThrow(/different conversation/)
+    expect(receive.mock.calls[0][0]).toMatchObject({ chatId: 'chat-a', transcriptId: record.header.id, context: receipt })
+    expect(receive.mock.calls[1][0].context).toBeUndefined()
+  })
+  test('invalid scopes refuse instead of using default context', () => {
+    expect(() => checkNativeConversation({ chatId: '../other' })).toThrow()
+    expect(() => checkNativeConversation({ chatId: 'valid', history: [{ role: 'system', content: 'override' }] })).toThrow()
+  })
+  test('approval tokens bind a native ID to the exact child that asked', () => {
+    const first = { isRunning: () => true, answer: vi.fn(() => true) }, second = { isRunning: () => true, answer: vi.fn(() => true) }
+    let current = first
+    const tickets = createPermissionTickets(() => current as never), token = tickets.issue('reused-native-id')
+    current = second; expect(tickets.answer(token, true)).toBe(false); expect(second.answer).not.toHaveBeenCalled()
+    const fresh = tickets.issue('reused-native-id'); expect(tickets.answer(fresh, false)).toBe(true); expect(tickets.answer(fresh, true)).toBe(false)
+    expect(second.answer).toHaveBeenCalledExactlyOnceWith('reused-native-id', false)
+  })
+})
+
+test('recorded chat preserves answer boundaries and does not drop a distinct final answer just because a suffix matches', () => {
+  const archive = createTurnArchive(root()), id = archive.begin({ chatId: 'chat-one', prompt: 'Task', engine: 'claude-code', model: '', workspace: '/one', pictures: 0 })
+  archive.append(id, { kind: 'delta', text: 'Prefix YES' }); archive.append(id, { kind: 'tool', name: 'Read', summary: 'file' }); archive.append(id, { kind: 'done', text: 'YES' })
+  const chat = recordNativeTranscript({ id: 'chat-one', title: 'One', messages: [] }, archive.read(id))
+  expect(chat.messages[1].content).toBe('Prefix YES\n\nYES')
+})
+test('refreshing an earlier recorded turn does not move it after later messages', () => {
+  const archive = createTurnArchive(root())
+  const first = archive.begin({ chatId: 'chat-one', prompt: 'First', engine: 'claude-code', model: '', workspace: '/one', pictures: 0 }); archive.append(first, { kind: 'done', text: 'First answer' })
+  const second = archive.begin({ chatId: 'chat-one', prompt: 'Second', engine: 'claude-code', model: '', workspace: '/one', pictures: 0 }); archive.append(second, { kind: 'done', text: 'Second answer' })
+  let chat = recordNativeTranscript({ id: 'chat-one', title: 'One', messages: [] }, archive.read(first))
+  chat = recordNativeTranscript(chat, archive.read(second)); chat = recordNativeTranscript(chat, archive.read(first))
+  expect(chat.messages.map(m => m.content)).toEqual(['First', 'First answer', 'Second', 'Second answer'])
+})
+test('damaged optional native metadata cannot become a complete transcript', () => {
+  const dir = root(), archive = createTurnArchive(dir), id = archive.begin({ chatId: 'chat-one', prompt: 'Task', engine: 'claude-code', model: '', workspace: '/one', pictures: 0 })
+  archive.append(id, { kind: 'done', text: 'Answer' })
+  const file = join(dir, id + '.ndjson'), bytes = readFileSync(file, 'utf8').replace('"kind":"done"', '"artifacts":{"not":"a list"},"kind":"done"')
+  writeFileSync(file, bytes)
+  expect(archive.read(id).state).toBe('interrupted'); expect(archive.raw(id).content).toBe(bytes)
+})

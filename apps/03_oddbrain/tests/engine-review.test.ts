@@ -33,7 +33,14 @@ type FakeApi = {
 
 function withFakeReviewEngine(): FakeApi {
   const fake: FakeApi = { listener: null, sent: [], answer: 'REVIEW: the second step was claimed, not shown.\nREVIEW: nothing verified the file exists.' }
-  ;(window as unknown as Record<string, unknown>).api = {}
+  ;(window as unknown as Record<string, unknown>).api = { automation: {
+    read: async () => ({ preferences: { autoKeep: true, autoReview: false, reviewModel: '', allowExternalReview: false }, current: null, reports: [], queued: 0, desktop: true }),
+    onChanged: () => () => {},
+    review: async (input: { prompt: string; answer: string }) => {
+      const verdict = parseVerdict(fake.answer)
+      return { ok: true, record: { id: 'report-' + fake.sent.length, prompt: input.prompt, model: 'local-reviewer', automatic: false, at: new Date().toISOString(), state: 'done', text: fake.answer, error: '', verdict, clipped: false } }
+    },
+  } }
   ;(window as unknown as Record<string, unknown>).engineApi = {
     read: async () => ({
       engine: { id: 'claude-code', model: 'gemma4:cloud', baseUrl: '', workspace: '', approval: 'ask' },
@@ -92,14 +99,15 @@ test('the order: report-only in the words, CLEAN contract, nothing auto-fixes', 
   const state = read('../src/renderer/src/state/review.ts')
 })
 
-test('a review end to end: the order sent, the verdict kept, the line honest about whose words they are', async () => {
+test('a review uses the protected report API, preserves the work turn, and labels the actual reviewer', async () => {
   const fake = withFakeReviewEngine()
   resetEngineForTests()
   const store = engineStore()
   await store.send('the work to be judged')
   await settleStore()
   assert.ok(await runReview())
-  assert.equal(fake.sent[1], REVIEW_ORDER)
+  assert.equal(fake.sent.length, 1, 'review never sends an executable agent turn')
+  assert.equal(store.turn?.prompt, 'the work to be judged', 'the reviewed work is not replaced by a review turn')
   const state = reviewState()
   // A clean review reads as clean.
   fake.answer = 'CLEAN'

@@ -1,9 +1,12 @@
+import { sampleEnabled } from '@shared/lib/sampleWorkspace'
+import { researchUrlProblem, type ResearchReply } from '@shared/lib/research'
 import { useEffect, useMemo, useState } from 'react'
 import { vaultGet } from '@shared/lib/vault'
-import { isDemo } from '../platform/bridge'
+import CopyText from '../ui/CopyText'
+import { bridge, isDemo } from '../platform/bridge'
 
 /**
- * Browsing Maps — what was read and when.
+ * Capture sources — what was read and when.
  *
  * The vault already holds every conversation the app kept and everything the
  * browser extension captured. This is the surface that lets a person *see* it:
@@ -98,7 +101,7 @@ function size(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export default function MemoryMap({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function MemoryMap({ open, onClose, embedded = false }: { open: boolean; onClose: () => void; embedded?: boolean }) {
   const [entries, setEntries] = useState<Entry[]>([])
   const [summary, setSummary] = useState<MapReply['summary'] | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'missing' | 'offline'>('loading')
@@ -108,12 +111,20 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
   const [days, setDays] = useState<number>(30)
   const [host, setHost] = useState('')
   const [opened, setOpened] = useState('')
+  // Fetching a page is a source action, not a chat action: the address is shown,
+  // the reason it would be refused is shown before the request, and the answer
+  // says where the bytes went. Nothing is summarized here.
+  const [address, setAddress] = useState('')
+  const [fetching, setFetching] = useState(false)
+  const [fetched, setFetched] = useState<ResearchReply | null>(null)
+  const [refresh, setRefresh] = useState(0)
+  const complaint = address.trim() ? researchUrlProblem(address) : ''
 
   // One request per change of the filters, one state per answer. The vault is
   // asked for what is on screen rather than filtered here, so the counts above
   // the list are always the counts of the list.
   useEffect(() => {
-    if (!open || isDemo) return
+    if (!open || (isDemo && !sampleEnabled())) return
     let cancelled = false
     const controller = new AbortController()
     setState(current => (current === 'ready' ? 'ready' : 'loading'))
@@ -145,16 +156,17 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
       cancelled = true
       controller.abort()
     }
-  }, [open, query, kind, days, host])
+  }, [open, query, kind, days, host, refresh])
 
   useEffect(() => {
     if (!open) return
+    if (embedded) return
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, onClose, embedded])
 
   // Days, from the entries themselves — the summary lists them, and each day's
   // rows are the ones the server sent, nothing regrouped behind its back.
@@ -174,9 +186,9 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
   const busiest = topHosts[0]?.count || 1
 
   return (
-    <div className="absolute inset-0 z-40 flex flex-col bg-bg" role="dialog" aria-modal="true" aria-label="Browsing Maps">
-      <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
-        <h1 className="text-[15px] font-medium">Browsing Maps</h1>
+    <div className={embedded ? "ob-embedded-map flex flex-col bg-bg" : "absolute inset-0 z-40 flex flex-col bg-bg"} role={embedded ? undefined : "dialog"} aria-modal={embedded ? undefined : true} aria-label="Capture sources">
+      {!embedded ? <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
+        <h1 className="text-[15px] font-medium">Capture sources</h1>
         {summary ? (
           <span className="text-[12px] text-muted">
             {summary.total} {summary.total === 1 ? 'entry' : 'entries'}
@@ -187,15 +199,15 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
           type="button"
           className="ml-auto rounded-lg px-2 py-1 text-muted hover:bg-white/[0.06] hover:text-ink"
           onClick={onClose}
-          aria-label="Close browsing maps"
+          aria-label="Close capture sources"
         >
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
             <path d="M5 5l10 10M15 5 5 15" />
           </svg>
         </button>
-      </header>
+      </header> : null}
 
-      {isDemo ? (
+      {isDemo && !sampleEnabled() ? (
         <div className="p-5">
           <p className="max-w-[560px] text-[12.5px] leading-relaxed text-muted">
             There is no vault behind this window. The map is drawn from what the app kept on your own machine: your
@@ -251,6 +263,56 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
                   {range.label}
                 </button>
               ))}
+            </div>
+
+            <div className="rounded-lg border border-line bg-card p-2">
+              <label className="block text-[11px] text-muted" htmlFor="research-address">
+                Add a page from the web
+              </label>
+              <input
+                id="research-address"
+                className="mt-1 w-full rounded-md border border-line bg-bg px-2 py-1.5 text-[12px] outline-none focus:border-accent"
+                value={address}
+                placeholder="https://example.com/article"
+                aria-label="Page address to fetch"
+                spellCheck={false}
+                onChange={event => { setAddress(event.target.value); setFetched(null) }}
+              />
+              {complaint ? <p className="mt-1 text-[11px] text-warn">{complaint}</p> : null}
+              <div className="mt-1.5 flex items-center gap-1.5">
+                <button
+                  type="button"
+                  className="rounded-md border border-line px-2 py-1 text-[11.5px] text-ink disabled:opacity-50"
+                  disabled={fetching || Boolean(complaint) || !address.trim()}
+                  onClick={() => {
+                    const target = address.trim()
+                    setFetching(true); setFetched(null)
+                    const request = bridge.research?.fetch(target)
+                    if (!request) { setFetched({ ok: false, answer: 'Fetching a page needs the desktop app. Nothing was written.' }); setFetching(false); return }
+                    void request
+                      .then((reply: ResearchReply) => { setFetched(reply); if (reply.ok) { setAddress(''); setRefresh(value => value + 1) } })
+                      .catch(() => setFetched({ ok: false, answer: 'The page could not be fetched. Nothing was written.' }))
+                      .finally(() => setFetching(false))
+                  }}
+                >
+                  {fetching ? 'Fetching…' : 'Fetch page'}
+                </button>
+                {fetching ? (
+                  <button type="button" className="text-[11.5px] text-muted hover:text-ink" onClick={() => { void bridge.research?.cancel() }}>
+                    Stop
+                  </button>
+                ) : null}
+              </div>
+              <p className="mt-1 text-[11px] leading-snug text-muted">
+                The page’s readable text is saved to the vault with its fingerprint. No summary is written, and a private
+                or non-https address is refused.
+              </p>
+              {fetched ? (
+                <p role="status" className={`mt-1 break-words text-[11px] ${fetched.ok ? 'text-muted' : 'text-warn'}`}>
+                  {fetched.answer}
+                  {fetched.ok && fetched.sha256 ? <span className="block break-all">sha256 {fetched.sha256}</span> : null}
+                </p>
+              ) : null}
             </div>
 
             <div className="min-h-0">
@@ -348,7 +410,7 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
                           </button>
                           {opened === entry.id ? (
                             <div className="px-1 pb-2 pl-[82px] text-[11.5px] leading-relaxed text-muted">
-                              {entry.url ? <div className="break-all">{entry.url}</div> : null}
+                              {entry.url ? <div className="break-all">{entry.url}</div> : null}<CopyText text={JSON.stringify(entry, null, 2)} label="Copy source details" />
                               <div className="break-all">{entry.path}</div>
                               <div>
                                 {size(entry.bytes) ? `${size(entry.bytes)} · ` : ''}

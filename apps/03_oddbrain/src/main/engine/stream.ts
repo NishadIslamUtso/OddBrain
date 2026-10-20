@@ -12,15 +12,21 @@
  */
 import type { EngineEvent } from '../../shared/lib/engine'
 import { toolDetail, toolSummary, type EngineUsage } from '../../shared/lib/engine'
+import { executionConfigRisk } from '../../shared/lib/executionConfig'
 
 export type EngineParser = {
   /** Feed raw output; returns every complete event found in it. */
+  beginTurn(): void
   feed(chunk: string): EngineEvent[]
   /**
    * Call once when the engine closes: returns the event in a final line that
    * arrived without its newline, so a last "done" is never lost.
    */
   flush(): EngineEvent[]
+}
+
+export class EngineReadError extends Error {
+  constructor(message: string, readonly prefix: EngineEvent[] = []) { super(message) }
 }
 
 type LooseRecord = Record<string, unknown>
@@ -36,6 +42,9 @@ export function createEngineParser(): EngineParser {
   // Same bookkeeping for the model's thinking: what the thinking deltas
   // already showed, so the finished thinking block is not printed twice.
   let streamedThinking = ''
+  let lastAnswer = ''
+  const limit = 8_000_000
+  const bounded = (text: string): string => { if (text.length > limit) throw Error('Claude output exceeds the supported text size. Stop requested; the recorded prefix is retained.'); return text }
   // How much of `buffer` is already known to hold no newline: everything
   // before this offset was scanned by an earlier feed. A line chopped at a
   // chunk boundary is therefore rescanned only in its new tail — a long-lived
@@ -49,7 +58,7 @@ export function createEngineParser(): EngineParser {
     try {
       parsed = JSON.parse(text)
     } catch {
-      // Not JSON — probably a stray console line. Ignored, never fatal.
+      if (/^(?:\{|\[)/.test(text)) throw Error('Claude returned malformed structured output. No complete ending can be confirmed.')
       return []
     }
     const message = asRecord(parsed)
@@ -110,11 +119,12 @@ export function createEngineParser(): EngineParser {
       if (event.type !== 'content_block_delta') return []
       const delta = asRecord(event.delta)
       if (delta.type === 'thinking_delta' && typeof delta.thinking === 'string' && delta.thinking) {
-        streamedThinking = streamedThinking.length > 200_000 ? delta.thinking : streamedThinking + delta.thinking
+        streamedThinking = bounded(streamedThinking + delta.thinking)
         return [{ kind: 'thinking', text: delta.thinking }]
       }
       if (delta.type !== 'text_delta' || typeof delta.text !== 'string' || !delta.text) return []
-      streamed = streamed.length > 200_000 ? delta.text : streamed + delta.text
+      streamed = bounded(streamed + delta.text)
+      lastAnswer = streamed
       return [{ kind: 'delta', text: delta.text }]
     }
 
@@ -144,6 +154,7 @@ export function createEngineParser(): EngineParser {
       // next message's stream must start fresh — a second turn that happens
       // to say the same words (two battle sides, a repeated question) would
       // otherwise pile onto the stale buffer and defeat the equality check.
+      if (messageText) lastAnswer = messageText
       const repeated = messageText && messageText === streamed
       streamed = ''
       streamedThinking = ''
@@ -169,31 +180,28 @@ export function createEngineParser(): EngineParser {
           summary: toolSummary(request.tool_name, request.input),
           detail: toolDetail(request.tool_name, request.input),
           ...(file ? { file } : {}),
+          // The Kiro/Cursor lesson: a write to the file that decides what runs
+          // is not an ordinary edit, and the approval card must say so.
+          ...(file ? { risk: executionConfigRisk(file) } : {}),
         },
       ]
     }
 
     if (message.type === 'result') {
       const text = typeof message.result === 'string' ? message.result : ''
-      const isError = message.is_error === true || message.subtype === 'error_during_execution'
-      // What the turn cost: the engine reports its own token counts and time,
-      // and the app shows those honest numbers instead of guessing.
+      // A result frame is not automatically success. Future/error statuses fail closed.
+      const success = message.subtype === 'success' && message.is_error !== true
       const usageRecord = asRecord(message.usage)
-      const usage: EngineUsage | undefined = message.usage
-        ? {
-            inTokens: typeof usageRecord.input_tokens === 'number' ? usageRecord.input_tokens : 0,
-            outTokens: typeof usageRecord.output_tokens === 'number' ? usageRecord.output_tokens : 0,
-            durationMs: typeof message.duration_ms === 'number' ? message.duration_ms : null,
-            costUsd: typeof message.total_cost_usd === 'number' ? message.total_cost_usd : null,
-          }
-        : undefined
-      const withUsage = (event: { kind: 'done'; text: string } | { kind: 'error'; text: string }): EngineEvent =>
-        usage ? { ...event, usage } : event
-      return [
-        isError
-          ? withUsage({ kind: 'error', text: text || 'the engine hit an error' })
-          : withUsage({ kind: 'done', text }),
-      ]
+      const count = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
+      const usage: EngineUsage | undefined = count(usageRecord.input_tokens) && count(usageRecord.output_tokens)
+        ? { inTokens: usageRecord.input_tokens, outTokens: usageRecord.output_tokens,
+            durationMs: count(message.duration_ms) ? message.duration_ms : null,
+            costUsd: count(message.total_cost_usd) ? message.total_cost_usd : null } : undefined
+      const errors = Array.isArray(message.errors) ? message.errors.filter((value): value is string => typeof value === 'string').join('\n') : ''
+      const event: EngineEvent = success
+        ? { kind: 'done', text, ...(text && text === lastAnswer ? { alreadyDisplayed: true } : {}) }
+        : { kind: 'error', text: text || errors || 'Claude did not report a successful result. Check the partial work before retrying.' }
+      return [usage ? { ...event, usage } : event]
     }
 
     // Everything else (user echoes, control responses to our own answers,
@@ -202,23 +210,19 @@ export function createEngineParser(): EngineParser {
   }
 
   return {
+    beginTurn(): void { streamed = ''; streamedThinking = ''; lastAnswer = '' },
     feed(chunk: string): EngineEvent[] {
       buffer += chunk
-      // A single line longer than this is not a sentence, it is a runaway —
-      // drop the oldest half rather than grow without limit.
-      if (buffer.length > 2_000_000) {
-        const cut = buffer.length - 1_000_000
-        buffer = buffer.slice(cut)
-        scanned = Math.max(0, scanned - cut)
-      }
       const events: EngineEvent[] = []
       let index = buffer.indexOf('\n', Math.min(scanned, buffer.length))
+      try {
       while (index !== -1) {
-        events.push(...parseLine(buffer.slice(0, index)))
+        events.push(...parseLine(bounded(buffer.slice(0, index))))
         buffer = buffer.slice(index + 1)
-        scanned = 0
-        index = buffer.indexOf('\n', scanned)
+        index = buffer.indexOf('\n')
       }
+      bounded(buffer)
+      } catch (error) { buffer = ''; scanned = 0; throw new EngineReadError(error instanceof Error ? error.message : 'Unreadable Claude output.', events) }
       scanned = buffer.length
       return events
     },
@@ -226,7 +230,7 @@ export function createEngineParser(): EngineParser {
       const rest = buffer
       buffer = ''
       scanned = 0
-      return parseLine(rest)
+      return parseLine(bounded(rest))
     },
   }
 }

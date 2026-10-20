@@ -26,10 +26,12 @@ export const LOCAL_API_ROUTES = new Map<string, string[]>([
   ['/api/vault/capsules', ['GET']],
   // Content search — Cook This Prompt reads the vault through it.
   ['/api/vault/grep', ['GET']],
+  ['/api/vault/recall', ['GET']],
   ['/api/vault/onui', ['GET']],
   ['/api/vault/links', ['GET']],
-  // The Vault screen's file list.
+  // The Vault screen's file list, and one file's text for a preview.
   ['/api/vault/files', ['GET']],
+  ['/api/vault/file', ['GET']],
   ['/api/vault/status', ['GET']],
   ['/api/vault/today', ['GET']],
   ['/api/vault/blacklist', ['GET', 'POST']],
@@ -76,7 +78,7 @@ export function protectLocalApi(
   if (!LOCAL_API_ROUTES.get(pathname)?.includes(request.method || '')) {
     return deny(
       403,
-      'This local API operation is not enabled. No model downloads, deletes, shell or cloud actions are exposed.'
+      `This local API operation is not enabled (${request.method || 'GET'} ${pathname}). No model downloads, deletes, shell or cloud actions are exposed.`
     )
   }
   const originHeader = header(request.headers.origin)

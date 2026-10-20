@@ -36,14 +36,14 @@ describe('the blacklist carries the pairing token', () => {
   })
 
   it('reading the list carries the token', async () => {
-    const blacklist = (await import('../../extension/lib/blacklist.js')) as { getBlacklist(): Promise<unknown> }
+    const blacklist = (await import('../../../extension/lib/blacklist.js')) as { getBlacklist(): Promise<unknown> }
     await blacklist.getBlacklist()
     expect(calls[0]!.path).toBe('/blacklist')
     expect(calls[0]!.headers['x-oddbrain-pair']).toBe('b'.repeat(64))
   })
 
   it('posting a blacklist update carries the token too', async () => {
-    const blacklist = (await import('../../extension/lib/blacklist.js')) as { addToBlacklist(pattern: string): Promise<void> }
+    const blacklist = (await import('../../../extension/lib/blacklist.js')) as { addToBlacklist(pattern: string): Promise<void> }
     await blacklist.addToBlacklist('nope.example/*')
     const post = calls.find(call => call.path === '/capture')
     expect(post).toBeTruthy()

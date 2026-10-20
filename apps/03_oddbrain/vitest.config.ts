@@ -36,9 +36,9 @@ export default defineConfig({
   },
   test: {
     environment: 'node',
-    // Top level only: tests/pending/ holds the tests whose subject is not ported
-    // yet, and it is listed in tests/pending/README.md. Nothing there runs or counts.
-    include: ['tests/*.test.{js,cjs,ts}'],
+    setupFiles: ['tests/shims/promise.ts'],
+    // Top-level suites include the restored renderer, composer and wiring checks.
+    include: ['tests/*.test.{js,cjs,ts,tsx}'],
     reporters: ['default'],
   },
 })

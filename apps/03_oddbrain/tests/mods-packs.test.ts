@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { mkdtempSync, mkdirSync, existsSync, readFileSync, rmSync, writeFileSync, readdirSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, existsSync, readFileSync, rmSync, symlinkSync, writeFileSync, readdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { describePermissions, normalizePack } from '../src/shared/lib/packs'
@@ -162,6 +162,48 @@ test('install refuses a manifestless folder, a lie, and a second copy', () => {
   const again = installPackFromFolder(join(targets.storeRoot, 'good'), targets)
   assert.equal(again.ok, false)
   if (!again.ok) assert.match(again.answer, /already installed/)
+})
+
+test('install never overwrites an existing engine skill', () => {
+  const targets = makeTargets()
+  const existing = join(targets.claudeSkillsDir, 'test-writer', 'SKILL.md')
+  mkdirSync(join(existing, '..'), { recursive: true })
+  writeFileSync(existing, 'owner bytes', 'utf8')
+  const manifest = { ...goodManifest, contributes: { skills: ['skills/writer/SKILL.md'], prompts: [], themes: [] } }
+  const source = makePack(join(mkdtempSync(join(tmpdir(), 'packs-conflict-')), 'pack'), manifest, { 'skills/writer/SKILL.md': skillMd })
+  const answer = installPackFromFolder(source, targets)
+  assert.equal(answer.ok, false)
+  if (!answer.ok) assert.match(answer.answer, /would overwrite an existing engine skill/)
+  assert.equal(readFileSync(existing, 'utf8'), 'owner bytes')
+  assert.equal(existsSync(join(targets.storeRoot, 'test-pack')), false)
+  assert.equal(readdirSync(targets.agySkillsDir).length, 0)
+})
+
+test('a mid-deploy failure rolls back the store copy and every new engine file', () => {
+  const targets = makeTargets()
+  rmSync(targets.agySkillsDir, { recursive: true, force: true })
+  writeFileSync(targets.agySkillsDir, 'not a directory', 'utf8')
+  const manifest = { ...goodManifest, contributes: { skills: ['skills/writer/SKILL.md'], prompts: [], themes: [] } }
+  const source = makePack(join(mkdtempSync(join(tmpdir(), 'packs-rollback-')), 'pack'), manifest, { 'skills/writer/SKILL.md': skillMd })
+  const answer = installPackFromFolder(source, targets)
+  assert.equal(answer.ok, false)
+  if (!answer.ok) assert.match(answer.answer, /rolled back/)
+  assert.equal(existsSync(join(targets.storeRoot, 'test-pack')), false)
+  assert.equal(existsSync(join(targets.claudeSkillsDir, 'test-writer', 'SKILL.md')), false)
+})
+
+test('pack installation refuses links to bytes outside the selected folder', () => {
+  if (process.platform === 'win32') return
+  const targets = makeTargets()
+  const source = makePack(join(mkdtempSync(join(tmpdir(), 'packs-link-')), 'pack'), { ...goodManifest, contributes: { skills: [], prompts: ['prompts/standup.md'], themes: [] } })
+  const outside = join(mkdtempSync(join(tmpdir(), 'packs-secret-')), 'secret.md')
+  writeFileSync(outside, 'private outside text', 'utf8')
+  mkdirSync(join(source, 'prompts'), { recursive: true })
+  symlinkSync(outside, join(source, 'prompts', 'standup.md'))
+  const answer = installPackFromFolder(source, targets)
+  assert.equal(answer.ok, false)
+  if (!answer.ok) assert.match(answer.answer, /symbolic link/)
+  assert.equal(existsSync(join(targets.storeRoot, 'test-pack')), false)
 })
 
 test('a traversal contribution is refused before anything is written', () => {

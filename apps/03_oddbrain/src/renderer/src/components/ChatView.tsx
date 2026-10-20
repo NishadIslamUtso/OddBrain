@@ -1,4 +1,10 @@
-import { useState, useRef, useEffect } from 'react'
+import WorkQueue from './WorkQueue'
+import type { ContextDefaults } from '@shared/lib/chatContext'
+import ChatContextPanel from './ChatContextPanel'
+import { chatMarkdown } from '@shared/lib/transcripts'
+import { downloadText } from '../lib/downloadText'
+import CopyText from '../ui/CopyText'
+import { useState, useRef, useEffect, type ReactNode } from 'react'
 import type { Attachment } from '@shared/types'
 import type { Artifact, Chat } from '@shared/types'
 import type { ElementPick } from '@shared/lib/artifacts'
@@ -9,15 +15,11 @@ import EnginePanel from './EnginePanel'
 import BattleSection from './BattleSection'
 import SplitSection from './SplitSection'
 import MessageRow from './MessageRow'
-import { Mascot } from '../motion/Mascot'
+import { ChatHome, HomeStarters } from '../ui/ChatHome'
+import EngineActivity from '../ui/EngineActivity'
+import { useEngine } from '../state/engine'
 import type { Project } from '@shared/lib/projects'
 import { bridge } from '@/platform/bridge'
-
-const STARTERS = [
-  'Explain how a hash table works, in plain language',
-  'Summarise this text and list the key points',
-  'Write a Python script that renames files by date',
-]
 
 /**
  * The conversation, and the box you write in.
@@ -49,8 +51,11 @@ export default function ChatView({
   onProject,
   attachments = [],
   onFiles,
+  fileTools,
   onDetach,
   mascotWords = true,
+  onBranch,
+  contextDefaults,
 }: {
   chat: Chat | null
   draft: string
@@ -76,6 +81,7 @@ export default function ChatView({
   rewriteError?: string
   rewriteErrorFor?: string
   attachments?: Attachment[]
+  fileTools?: ReactNode
   onFiles?: (files: File[]) => void
   onDetach?: (id: string) => void
   /** The approved greeting uses the owner's name; capture names the capsule. */
@@ -85,11 +91,16 @@ export default function ChatView({
   project?: string | null
   onProject?: (id: string | null) => void
   /** Appearance > Mascot mood words: the little word under the mascot. */
+  contextDefaults?: ContextDefaults
+  onBranch?: (messageId: string) => void
   mascotWords?: boolean
 }) {
   const scroller = useRef<HTMLDivElement | null>(null)
   const follow = useRef(true)
   const tokens = useDesignTokens()
+  const engine = useEngine()
+  const tail = engine.turn?.items.at(-1)
+  const activityKey = `${engine.turn?.state || ''}:${engine.turn?.items.length || 0}:${tail && 'text' in tail ? tail.text.length : 0}:${engine.turn?.permissions.length || 0}`
 
   const messages = chat?.messages || []
   const liveArtifacts: LiveArtifacts = live || { messageId: '', artifacts: [] }
@@ -101,7 +112,18 @@ export default function ChatView({
     const element = scroller.current
     if (!element || !follow.current) return
     element.scrollTop = element.scrollHeight
-  }, [lastContent, chat?.id])
+  }, [lastContent, chat?.id, activityKey])
+
+  useEffect(() => {
+    const show = (): void => {
+      const card = scroller.current?.querySelector<HTMLElement>('.ob-permission-request')
+      if (!card) return
+      card.scrollIntoView({ block: 'center', behavior: 'auto' }); card.focus()
+      // Focus the region, NEVER Allow: reviewing is not consent.
+    }
+    window.addEventListener('app:show-approval', show)
+    return () => window.removeEventListener('app:show-approval', show)
+  }, [])
 
   const trackScroll = (): void => {
     const element = scroller.current
@@ -109,98 +131,26 @@ export default function ChatView({
     follow.current = element.scrollHeight - element.scrollTop - element.clientHeight < 80
   }
 
-  return (
-    <main className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-      <div ref={scroller} data-find-root data-find-scroll onScroll={trackScroll} className="min-h-0 flex-1 overflow-y-auto">
-        <div className="mx-auto w-full max-w-[var(--chat-width)] px-6 py-6">
-          {messages.length === 0 ? (
-            <EmptyState onPick={setDraft} name={profileName} words={mascotWords} />
-          ) : (
-            <div className="flex flex-col gap-7">
-              {messages.map(message => (
-                <MessageRow
-                  key={message.id}
-                  message={message}
-                  artifacts={viewsForMessage(message.id, message.artifacts, liveArtifacts)}
-                  tokens={tokens}
-                  highlightId={highlightId}
-                  onRewrite={onRewrite}
-                  onRestore={onRestore}
-                  busyArtifactId={busyArtifactId}
-                  rewriteStage={rewriteStage}
-                  rewriteError={rewriteError}
-                  rewriteErrorFor={rewriteErrorFor}
-                />
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-
-      {chat && chat.messages.length > 0 ? <CaptureCapsule chat={chat} /> : null}
-      <EnginePanel />
-      <BattleSection />
-      <SplitSection />
-      <Composer
-        value={draft}
-        onChange={setDraft}
-        onSend={onSend}
-        onStop={onStop}
-        busy={busy}
-        notice={notice}
-        preview={preview}
-        projects={projects}
-        project={project}
-        onProject={onProject}
-        attachments={attachments}
-        onFiles={onFiles}
-        onDetach={onDetach}
-      />
-    </main>
-  )
-}
-
-function EmptyState({
-  onPick,
-  name = '',
-  words = true,
-}: {
-  onPick: (value: string) => void
-  name?: string
-  words?: boolean
-}) {
-  return (
-    <div className="flex flex-col items-center pt-20 text-center">
-      {/* The kit's resting scene carries the hero's personality; the honest
-          state (idle, nothing running) is this screen itself. The brand mark
-          stays in the title bar — the logo never moves. The mood word is a
-          switch (Appearance > Mascot mood words), default on. */}
-      <Mascot role="resting" size={104} seed={1} {...(words ? { withWord: true } : {})} />
-      <h1 className="mt-3 text-[30px] font-semibold tracking-tight [font-family:var(--transcript-font)]">
-        {greetingFor(name)}
-      </h1>
-      <p className="mt-4 max-w-[420px] text-[13px] leading-relaxed text-muted">
-        How can I help? The engines run on this machine. A brain without the <b>cloud</b> badge
-        never sends work anywhere; a brain wearing it sends its work to that brain&rsquo;s own
-        service — the chip says which kind is picked.
-      </p>
-      <ul className="mt-7 flex w-full max-w-[520px] flex-col gap-2">
-        {STARTERS.map(starter => (
-          <li key={starter}>
-            <button
-              type="button"
-              onClick={() => onPick(starter)}
-              className="w-full rounded-xl border border-line bg-panel px-4 py-2.5 text-left text-[13px] text-muted transition-colors hover:border-accent/40 hover:text-ink"
-            >
-              {starter}
-            </button>
-          </li>
-        ))}
-      </ul>
+  const home = messages.length === 0 && (!engine.turn || (!!engine.turn.chatId && engine.turn.chatId !== chat?.id)) && !engine.ambient.busy
+  const composer = <Composer draftScope={chat?.id || `new:${project || "none"}`} value={draft} onChange={setDraft} onSend={onSend} onStop={onStop} busy={busy} notice={notice} preview={preview} projects={projects} project={project} onProject={onProject} attachments={attachments} onFiles={onFiles} fileTools={fileTools} onDetach={onDetach} />
+  return <main className={`ob-chat-view ${home ? 'ob-chat-home' : ''}`}>
+    <div ref={scroller} data-find-root data-find-scroll onScroll={trackScroll} className="ob-chat-scroller">
+      {home ? <div className="ob-home-stack">
+        <ChatHome name={profileName} words={mascotWords} />
+        <BattleSection /><SplitSection />
+        {composer}
+        <HomeStarters onPick={setDraft} />
+        <EnginePanel chatId={chat?.id || ''} />
+      </div> : <div className="ob-transcript mx-auto w-full max-w-[var(--chat-width)] px-6 py-6">
+        <div className="flex flex-col gap-7">{messages.map(message => <MessageRow key={message.id} message={message} artifacts={viewsForMessage(message.id, message.artifacts, liveArtifacts)} tokens={tokens} highlightId={highlightId} onRewrite={onRewrite} onRestore={onRestore} busyArtifactId={busyArtifactId} rewriteStage={rewriteStage} rewriteError={rewriteError} rewriteErrorFor={rewriteErrorFor} />)}</div>
+        <div className="ob-engine-transcript">{engine.turn?.state !== 'running' && chat?.messages.some(m => m.nativeRecord?.transcriptId === engine.turn?.transcriptId) ? <details><summary>Last run details and kept files</summary><EnginePanel chatId={chat?.id || ''} /></details> : <EnginePanel chatId={chat?.id || ''} />}</div>
+      </div>}
     </div>
-  )
+    <WorkQueue />
+    {!home ? <><BattleSection /><SplitSection /><EngineActivity words={mascotWords} />{composer}</> : null}
+    {chat && chat.messages.length > 0 ? <><ChatContextPanel key={chat.id} chat={chat} draft={draft} branch={onBranch} defaults={contextDefaults} /><CaptureCapsule chat={chat} /></> : null}
+  </main>
 }
-
 
 /** Time-of-day greeting, as the approved home screen shows: the day part, then the name. */
 export function greetingFor(name: string, now: Date = new Date()): string {
@@ -216,28 +166,26 @@ export function greetingFor(name: string, now: Date = new Date()): string {
  */
 function CaptureCapsule({ chat }: { chat: Chat }) {
   const [state, setState] = useState<'idle' | 'busy' | 'done' | 'failed'>('idle')
+  const [notice, setNotice] = useState('')
+  useEffect(() => { setState('idle'); setNotice('') }, [chat.id, chat.messages.length])
   const capture = (): void => {
     setState('busy')
-    const lines = [`# ${chat.title}`, '', `*Captured from a conversation in OddBrain, ${new Date().toLocaleString()}.*`, '']
-    for (const message of chat.messages.slice(-30)) {
-      const who = message.role === 'user' ? 'You' : 'The engine'
-      const text = String(message.content ?? '').slice(0, 2000)
-      lines.push(`## ${who}`, '', text, '')
-    }
+    const markdown = chatMarkdown(chat)
     void bridge.vault
-      .captureChat(chat.title, lines.join('\n'))
-      .then((answer) => setState(answer.ok ? 'done' : 'failed'))
+      .captureChat(chat.title, markdown)
+      .then((answer) => { setState(answer.ok ? 'done' : 'failed'); setNotice(answer.answer) })
       .catch(() => setState('failed'))
   }
   return (
+    <details className="mx-6 mb-3 text-[12px] text-muted"><summary className="cursor-pointer">Save or copy this chat</summary><p>Full stored message text. Binary attachments are not embedded; this is not an account archive.</p><div className="ob-inline-actions"><CopyText text={chatMarkdown(chat)} label="Copy full chat" /><button type="button" onClick={() => downloadText(chatMarkdown(chat), `chat-${chat.id}.md`)}>Export chat Markdown</button>
     <button
       type="button"
       onClick={capture}
       disabled={state === 'busy'}
       title="Capture this conversation into the vault as a capsule"
-      className="fixed bottom-5 right-5 z-20 rounded-full border border-line bg-card px-3.5 py-2 text-[11.5px] text-muted shadow-lg hover:text-ink disabled:opacity-60"
+      className="ob-small-button"
     >
       {state === 'done' ? 'Captured ✓' : state === 'failed' ? 'The vault refused it' : state === 'busy' ? 'Capturing…' : 'Capture as Capsule'}
-    </button>
+    </button></div>{notice ? <p role="status">{notice}</p> : null}</details>
   )
 }

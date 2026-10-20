@@ -12,8 +12,36 @@
 export const ENGINE_IMAGE_MIMES = ['image/png', 'image/jpeg', 'image/webp'] as const
 
 export const MAX_ENGINE_ATTACHMENTS = 4
-/** Base64 image budget per attachment: the reader's 2 MB decoded, as chars. */
-export const MAX_ENGINE_IMAGE_CHARS = 2 * 1024 * 1024 * 4 // 2 MB × (4/3) ≈ 2.7M
+export const MAX_ENGINE_IMAGE_BYTES = 2 * 1024 * 1024
+/** Base64 ceiling for exactly the decoded-byte budget (rounded to a quartet). */
+export const MAX_ENGINE_IMAGE_CHARS = Math.ceil(MAX_ENGINE_IMAGE_BYTES / 3) * 4
+
+export type EngineImage = { mime: typeof ENGINE_IMAGE_MIMES[number]; data: string }
+export type EngineImagesAnswer = { ok: true; images: EngineImage[] } | { ok: false; answer: string }
+
+/** Validate the privileged IPC boundary without truncating or decoding a huge string. */
+export function engineImages(input: unknown): EngineImagesAnswer {
+  if (!Array.isArray(input)) return { ok: false, answer: 'Pictures must be sent as a list. Nothing was sent.' }
+  if (input.length > MAX_ENGINE_ATTACHMENTS) return { ok: false, answer: `At most ${MAX_ENGINE_ATTACHMENTS} pictures can ride with one task. Nothing was silently dropped.` }
+  const images: EngineImage[] = []
+  for (const value of input) {
+    const entry = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+    const mime = entry.mime
+    const data = entry.data
+    if (typeof mime !== 'string' || !ENGINE_IMAGE_MIMES.includes(mime as EngineImage['mime']) || typeof data !== 'string') {
+      return { ok: false, answer: 'One of the pictures is not a PNG, JPEG or WebP. Nothing was sent.' }
+    }
+    if (!data || data.length > MAX_ENGINE_IMAGE_CHARS || !/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(data)) {
+      return { ok: false, answer: 'One of the pictures is invalid or larger than 2 MB. Nothing was sent.' }
+    }
+    const padding = data.endsWith('==') ? 2 : data.endsWith('=') ? 1 : 0
+    if ((data.length * 3) / 4 - padding > MAX_ENGINE_IMAGE_BYTES) {
+      return { ok: false, answer: 'One of the pictures is invalid or larger than 2 MB. Nothing was sent.' }
+    }
+    images.push({ mime: mime as EngineImage['mime'], data })
+  }
+  return { ok: true, images }
+}
 
 /**
  * Where to seek in a video when pulling still frames.
@@ -28,14 +56,4 @@ export function framePoints(durationSeconds: number, count = 4): number[] {
   const last = duration * 0.92
   const step = (last - first) / (count - 1)
   return Array.from({ length: count }, (_, index) => first + step * index)
-}
-
-/** True when this browser window can listen (Chromium's speech recognition). */
-export function dictationSupported(scope: { webkitSpeechRecognition?: unknown } = globalThis as never): boolean {
-  return typeof scope.webkitSpeechRecognition === 'function'
-}
-
-/** True when this browser window can speak aloud (the speech synthesis API). */
-export function ttsSupported(scope: { speechSynthesis?: unknown } = globalThis as never): boolean {
-  return typeof scope.speechSynthesis === 'object' && scope.speechSynthesis !== null
 }

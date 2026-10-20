@@ -63,7 +63,7 @@ test('the latest web_page capture is the page: url, title and the readable conte
 test('the newest line wins: a later visit-only capture hides the older page text', t => {
   const service = fixture(t)
   service.capture({ type: 'web_page', url: 'https://example.com/a', content: 'Old content.' })
-  service.capture({ type: 'browser_visit', url: 'https://example.com/b', title: 'Just a visit' })
+  service.files().append('02 Sources/Browser Activity/2026/10.jsonl', JSON.stringify({ url: 'https://example.com/b', title: 'Just a visit', capture_status: 'visit-only' }) + '\n')
   const answer = service.onui() as {
     page: { url: string; capture_status: string; note?: string; content?: string }
   }
@@ -128,7 +128,7 @@ test('deployBuiltInSkills writes only where an engine already lives', t => {
   const written = deployBuiltInSkills({ claudeSkillsDir: join(home, '.claude', 'skills'), agySkillsDir: join(workspace, '.agents', 'skills') })
   assert.equal(written.length, 2)
   const claudeFile = readFileSync(join(home, '.claude', 'skills', 'browser-page', 'SKILL.md'), 'utf8')
-  const agyFile = readFileSync(join(workspace, '.agents', 'skills', 'browser-page.md'), 'utf8')
+  const agyFile = readFileSync(join(workspace, '.agents', 'skills', 'browser-page', 'SKILL.md'), 'utf8')
   assert.match(claudeFile, /onui/)
   assert.match(agyFile, /onui/)
 })

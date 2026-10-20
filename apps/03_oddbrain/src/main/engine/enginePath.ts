@@ -187,7 +187,10 @@ export function resolveEngineCommand(id: 'claude-code' | 'agy', env: NodeJS.Proc
   // The owner's pointer is the first answer — before every probe.
   const pointed = binaryOverride(id)
   if (pointed) return pointed
-  for (const candidate of engineCandidates(id, env)) {
+  const candidates = engineCandidates(id, env)
+  // Prefer a real executable over an npm shell shim, even when npm appears
+  // earlier on PATH. Native stream/inspection launches never invoke a shell.
+  for (const candidate of [...candidates.filter(path => !/\.(cmd|bat)$/i.test(path)), ...candidates.filter(path => /\.(cmd|bat)$/i.test(path))]) {
     try {
       if (existsSync(candidate)) return candidate
     } catch {

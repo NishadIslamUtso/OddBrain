@@ -331,13 +331,12 @@ test('an inaccessible source is logged, in both locations, with the required wor
   }
 })
 
-test('a visit is recorded as a visit and claims nothing more', (t) => {
-  const { read, service } = fixture(t)
-  const result = service.capture({ type: 'browser_visit', url: 'https://example.org/visit', visited_at: '2026-10-01T01:00:00Z', title: 'Visit' })
-  const line = JSON.parse(read(String(result.source)).trim())
-  assert.equal(line.capture_status, 'visit-only')
-  assert.match(line.interpretation, /not proof/)
-  assert.equal(line.visited_at, '2026-10-01T01:00:00Z')
+test('new history collection is refused without removing earlier saved visits', (t) => {
+  const { service } = fixture(t), path = '02 Sources/Browser Activity/2026/10.jsonl'
+  service.files().writeAtomic(path, '{"url":"https://example.org/old","capture_status":"visit-only"}\n')
+  assert.throws(() => service.capture({ type: 'browser_visit', url: 'https://example.org/new' }), /retired/)
+  assert.match(service.files().read(path), /example.org\/old/)
+  assert.doesNotMatch(service.files().read(path), /example.org\/new/)
 })
 
 test('a readable page is recorded as content, with the visit beside it', (t) => {

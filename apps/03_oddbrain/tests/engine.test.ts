@@ -1,3 +1,4 @@
+import { effortTarget } from '../src/shared/lib/engineCapabilities'
 import { EventEmitter } from 'node:events'
 import { sep as pathSep } from 'node:path'
 import test from 'node:test'
@@ -139,9 +140,9 @@ test('the wire: a second turn that says the same words is not shown twice', () =
   const events = parser.feed(turn() + turn())
   assert.deepEqual(events, [
     { kind: 'delta', text: 'Same words.' },
-    { kind: 'done', text: 'Same words.' },
+    { kind: 'done', text: 'Same words.', alreadyDisplayed: true },
     { kind: 'delta', text: 'Same words.' },
-    { kind: 'done', text: 'Same words.' },
+    { kind: 'done', text: 'Same words.', alreadyDisplayed: true },
   ])
 })
 
@@ -254,6 +255,8 @@ test('a session: a permission card can be allowed, and the answer is on the wire
     onEvent: rec.on,
     spawnProcess: (() => fake.child) as unknown as typeof import('node:child_process').spawn,
   })
+  assert.equal(session.send('Requested task'), true)
+  fake.written.length = 0
   fake.child.stdout.emit(
     'data',
     Buffer.from(
@@ -280,6 +283,8 @@ test('a session: a denial carries a message — the real CLI rejects a bare deny
     onEvent: rec.on,
     spawnProcess: (() => fake.child) as unknown as typeof import('node:child_process').spawn,
   })
+  assert.equal(session.send('Requested task'), true)
+  fake.written.length = 0
   fake.child.stdout.emit(
     'data',
     Buffer.from(
@@ -333,8 +338,8 @@ test('a session: a missing engine becomes a sentence, not a crash', async () => 
   })
   await new Promise((resolve) => setImmediate(resolve))
   const error = rec.last('error') as Extract<EngineEvent, { kind: 'error' }>
-  assert.match(error.text, /not found/i)
-  assert.match(error.text, /npm install -g @anthropic-ai\/claude-code/)
+  assert.match(error.text, /could not start/i)
+  assert.match(error.text, /native executable/)
   assert.equal(session.send('anything'), false)
 })
 
@@ -366,7 +371,7 @@ test('a key from Models rides the ENGINE: its env points the engine at the provi
   // the app itself still calls no provider. The local door is not touched at all.
   const env = brainEnvironment('http://localhost:11434', 'sk-ant-test')
   assert.deepEqual(env, {
-    ANTHROPIC_BASE_URL: 'https://api.anthropic.com/v1',
+    ANTHROPIC_BASE_URL: 'https://api.anthropic.com',
     ANTHROPIC_API_KEY: 'sk-ant-test',
   })
   assert.equal('ANTHROPIC_AUTH_TOKEN' in env, false)
@@ -473,19 +478,19 @@ test('the socket: a changed launch flag relaunches the engine with the new flags
   // Same engine, same model, only the THINKING budget changed: the running
   // process was launched without the new flag — a silent gear mismatch — so
   // the honest move is a relaunch, not reuse.
-  const first = socket.send('a', { ...base, settings: { ...DEFAULT_ENGINE, thinking: 'default' } })
+  const first = socket.send('a', { ...base, settings: { ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native', thinking: 'default' } })
   assert.equal(first.ok, true)
   const line = JSON.stringify({ type: 'result', subtype: 'success', result: 'done' }) + '\n'
   children[0].stdout.emit('data', Buffer.from(line, 'utf8'))
 
-  const second = socket.send('b', { ...base, settings: { ...DEFAULT_ENGINE, thinking: 'extended' } })
+  const second = socket.send('b', { ...base, settings: { ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native', thinking: 'high', effortTarget: effortTarget({ ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native' }) } })
   assert.equal(second.ok, true, second.answer)
   assert.equal(children[0].killed, true, 'the process launched with the old thinking flag is set aside')
   assert.equal(spawnCount, 2, 'a fresh start carries the new launch flag')
   children[1].stdout.emit('data', Buffer.from(line, 'utf8'))
 
   // And an UNCHANGED gear still reuses: the fix must not turn every send into a relaunch.
-  const third = socket.send('c', { ...base, settings: { ...DEFAULT_ENGINE, thinking: 'extended' } })
+  const third = socket.send('c', { ...base, settings: { ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native', thinking: 'high', effortTarget: effortTarget({ ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native' }) } })
 
   assert.equal(third.ok, true)
   assert.equal(spawnCount, 2, 'same launch flags, same process')
@@ -653,6 +658,10 @@ test('the socket: agy routes to its own adapter and an engine switch starts fres
   assert.deepEqual(started[0].args.slice(0, 4), ['--input-format', 'stream-json', '--output-format', 'stream-json'])
   assert.ok(started[0].args.includes('gemini-3-pro'))
 
+  // A busy worker must not be killed by another sender changing gear.
+  const refused = socket.send('not yet', { cwd: '.', platform: 'linux', settings: { ...DEFAULT_ENGINE, id: 'claude-code', model: 'm' }, onEvent: rec.on, spawnProcess: fake })
+  assert.equal(refused.ok, false); assert.equal(started.length, 1); assert.equal(children[0].killed, false)
+  children[0].stdout.emit('data', Buffer.from(JSON.stringify({ event: 'result', result: { status: 'SUCCESS', response: 'finished' } }) + '\n'))
   // an engine switch sets the old process aside and starts the chosen engine
   socket.send('y', {
     cwd: '.',
@@ -691,4 +700,18 @@ test('tool summaries speak about the thing, not the JSON', () => {
   assert.equal(toolSummary('Bash', { command: 'npm test', timeout: 3000 }), 'npm test')
   assert.equal(toolSummary('Read', { file_path: '/vault/today.md', limit: 10 }), '/vault/today.md')
   assert.equal(toolSummary('Whatever', { a: 1 }).length <= 160, true)
+})
+
+test('the socket: a same-named native model never reuses an Ollama session', () => {
+  const children: ReturnType<typeof fakeEngine>['child'][] = []
+  const start = (() => { const fake = fakeEngine(); children.push(fake.child); return fake.child }) as unknown as typeof import('node:child_process').spawn
+  const socket = createEngineSocket(), rec = recorder()
+  const settings = { ...DEFAULT_ENGINE, model: 'same-name' }
+  const base = { cwd: '.', platform: 'linux', spawnProcess: start, onEvent: rec.on }
+  assert.equal(socket.send('first', { ...base, settings }).ok, true)
+  children[0].stdout.emit('data', Buffer.from(JSON.stringify({ type: 'result', subtype: 'success', result: 'done' }) + '\n'))
+  assert.equal(socket.send('second', { ...base, settings: { ...settings, cloudProvider: 'native' } }).ok, true)
+  assert.equal(children.length, 2)
+  assert.equal(children[0].killed, true)
+  socket.stop()
 })

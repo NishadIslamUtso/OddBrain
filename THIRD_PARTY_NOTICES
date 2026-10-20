@@ -1,0 +1,29 @@
+# Third-party notices
+
+## Design system tokens — from open-design
+
+The 16 design systems bundled in `apps/03_oddbrain/src/shared/lib/design-systems/` are derived from the
+`design-systems/` directory of **open-design** by nexu-io.
+
+- Source: <https://github.com/nexu-io/open-design>
+- License: **Apache License 2.0** — <https://www.apache.org/licenses/LICENSE-2.0>
+- Copyright 2025 nexu-io / open-design contributors
+
+What was taken: each upstream `tokens.css` (152 systems available; these 16
+were bundled) contributes only its `:root { … }` block of CSS custom
+properties — variable names and colour/type values. Comments, component
+manifest data and all surrounding application code were **not** taken. Each
+system here is a plain ES module exporting that CSS as a string; nothing was
+reimplemented from source.
+
+Bundled systems: claude, default, minimal, modern, shadcn, linear-app, apple,
+stripe, notion, vercel, airbnb, neobrutalism, glassmorphism, editorial,
+dashboard, retro.
+
+The **skills** concept (a named, reusable instruction kept as data rather than
+code) is also modelled on open-design's `skills/` directory. No skill text was
+copied — the mechanism was, and the six built-in roles are our own, tuned for a
+3B model on 4 GB of VRAM.
+
+Per Apache-2.0 §4(d), this notice is reproduced here and the upstream licence
+text is available at the URL above.

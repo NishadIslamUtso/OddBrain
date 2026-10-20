@@ -61,12 +61,12 @@ test('violet is deepened exactly enough for white text, not more', () => {
   assert.ok(r < 6, `white on violet is ${r.toFixed(2)}:1 - deepened further than it needed to be`)
 })
 
-test('the two quiet switches exist and default on: nothing changes until touched', () => {
-  assert.equal(DEFAULT_APPEARANCE.mascotWords, true)
-  assert.equal(DEFAULT_APPEARANCE.rowExplanations, true)
+test('the quiet switches remain available and default off per the owner', () => {
+  assert.equal(DEFAULT_APPEARANCE.mascotWords, false)
+  assert.equal(DEFAULT_APPEARANCE.rowExplanations, false)
   assert.deepEqual(normalizeAppearance({ mascotWords: false, rowExplanations: 'no' }), {
     ...DEFAULT_APPEARANCE,
     mascotWords: false,
-    rowExplanations: true,
+    rowExplanations: false,
   })
 })

@@ -1,3 +1,21 @@
+import type { WorkflowBridge } from '@shared/lib/workflows'
+import type { ScheduleBridge } from '@shared/lib/schedules'
+import type { CommandBridge } from '@shared/lib/commands'
+import type { WorktreeBridge } from '@shared/lib/worktrees'
+import type { PromptLayerFacts } from '@shared/lib/promptLayers'
+import type { WorkQueueBridge } from '@shared/lib/workQueue'
+import type { McpReview, NativeMcpInventory } from '@shared/lib/mcpReview'
+import type { SkillDraft, SkillInventory, SkillFile, CatalogSkillReview } from '@shared/lib/installedSkills'
+import type { NativeConversation, NativeSessionLink, NativeContextTarget } from '@shared/lib/nativeConversation'
+import type { FileReview, FileDecision } from '@shared/lib/changeReview'
+import type { TranscriptBridge } from '@shared/lib/transcripts'
+import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
+import type { ThinkingMode } from '@shared/lib/engine'
+import type { MemoryBridge } from '@shared/lib/memoryWorkspace'
+import { demoMemoryWorkspace } from './sampleMemory'
+import { DEFAULT_MEDIA, type MediaBridge } from '@shared/lib/mediaBridge'
+import type { MarketplaceBridge } from '@shared/lib/marketplace'
+import { DEFAULT_AUTOMATION, normalizeAutomation, type AutomationBridge, type AutomationView } from '@shared/lib/automation'
 /**
  * The one place the interface talks to the machine.
  *
@@ -14,9 +32,9 @@
  *      resolves. A capability that is missing is a value the UI can show as
  *      "not available here", never an exception in the console.
  *   2. Nothing here pretends to be real. `isDemo` is true in the browser, and
- *      the demo layer never returns invented vault contents, chat history or
- *      model output — it returns empty, or a sentence saying what is missing,
- *      so the UI's own empty state is what the person sees.
+ *      the empty preview returns empty data or a capability refusal. The browser
+ *      entry can install the labelled sample-workspace adapter separately;
+ *      it never replaces a native preload or calls real services.
  */
 import type { CloudModelsAnswer, CloudTestAnswer, CloudView } from '@shared/lib/providers'
 import {
@@ -43,11 +61,18 @@ import type {
 
 /** What the preload script exposes today. It grows as the main process does. */
 export type DesktopBridge = {
+  transcripts: TranscriptBridge
+  media: MediaBridge
+  marketplace: MarketplaceBridge
+  memoryWorkspace: MemoryBridge
+  automation: AutomationBridge
   extensionPair: {
     get: () => Promise<{ token: string }>
     rotate: () => Promise<{ ok: boolean; token: string }>
   }
   app: {
+    claimLaunch?: () => Promise<boolean>
+    previewHtml?: () => Promise<{ ok: boolean; html?: string; error?: string }>
     version: string
     platform: string
     /** Desktop only: open the vault folder in the file manager. */
@@ -67,28 +92,43 @@ export type DesktopBridge = {
     /** Desktop only: the native menu's events (File > New chat, Go > screens). */
     onMenu?: (channel: string, callback: () => void) => () => void
   }
+  promptLayers: (historyMessages: number) => Promise<PromptLayerFacts>
   houseRules: {
+    previewGlobal: (engine: 'claude-code' | 'agy') => Promise<FileReview>
+    previewProject: (projectId: string, engine: 'claude-code' | 'agy') => Promise<FileReview>
+    decide: (token: string, decision: 'allow' | 'deny') => Promise<FileDecision>
     /** The rulebook as it stands; blanks already filled from the defaults. */
     read: () => Promise<{ rules: HouseRules; defaults: HouseRules }>
-    /** Save the rulebook and deliver it to every engine's global file. */
+    /** Save app instructions; native file changes require a separate review. */
     write: (rules: HouseRules) => Promise<{ ok: boolean; written: string[] }>
   }
+  workflows: WorkflowBridge
+  schedules: ScheduleBridge
+  worktrees: WorktreeBridge
+  commands: CommandBridge
   projects: {
+    attach: (projectId: string) => Promise<import('@shared/lib/projects').ProjectReference[]>
     read: () => Promise<Project[]>
-    write: (projects: Project[]) => Promise<{ ok: boolean; projects: Project[] }>
+    write: (projects: Project[], expected?: Project[]) => Promise<{ ok: boolean; projects: Project[] }>
     blank: (name: string) => Promise<Project>
   }
   engine: {
+    queue: WorkQueueBridge
+    contextTarget: (input: NativeConversation) => Promise<NativeContextTarget>
+    chatSessions: (chatId: string) => Promise<NativeSessionLink[]>
     /** "Work here": the owner points the engine at a folder explicitly. */
     setWorkspace: (folder: string) => Promise<{ ok: boolean; answer: string }>
     /** The resumable threads, per workspace. */
     sessions: () => Promise<Array<{ workspace: string; sessionId: string }>>
     boardRead: () => Promise<unknown>
-    boardWrite: (board: unknown) => Promise<{ ok: boolean }>
+    boardWrite: (board: unknown, expected: unknown) => Promise<{ ok: boolean }>
     pickFiles: () => Promise<string[]>
     forgetSession: (workspace: string) => Promise<{ ok: boolean }>
     openFolder: (folder: string) => Promise<{ ok: boolean }>
     checkpoints: {
+      preview: (copy: string, original: string) => Promise<FileReview>
+      decide: (token: string, decision: 'allow' | 'deny') => Promise<FileDecision>
+      inspect: (copy: string) => Promise<{ ok: boolean; content?: string; clipped?: boolean; answer?: string }>
       list: () => Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }>
       restore: (copy: string, original?: string) => Promise<{ ok: boolean; answer: string }>
     }
@@ -100,7 +140,7 @@ export type DesktopBridge = {
     update: (patch: {
       vaultPath?: string
       cloud?: { baseUrl?: string; model?: string }
-      permissions?: Permissions
+      permissions?: Partial<Permissions>
     }) => Promise<{
       ok: boolean
       error?: string
@@ -115,6 +155,13 @@ export type DesktopBridge = {
     }>
   }
   skills: {
+    planCatalog: (name: string) => Promise<CatalogSkillReview>
+    decideCatalog: (token: string, decision: 'allow' | 'deny') => Promise<{ ok: boolean; answer: string }>
+    cancelCatalog: () => Promise<void>
+    inventory: (engine: 'claude-code' | 'agy') => Promise<SkillInventory>
+    inspectInstalled: (engine: 'claude-code' | 'agy', id: string) => Promise<SkillFile & { content: string }>
+    previewCreate: (draft: SkillDraft) => Promise<FileReview>
+    decideCreate: (token: string, decision: 'allow' | 'deny') => Promise<FileDecision>
     /** Install one skill from the app's own catalog, into every engine. */
     installCatalog: (name: string) => Promise<{ ok: boolean; answer: string; written?: string[] }>
     scan: () => Promise<Array<{ name: string; description: string; body: string; source: string }>>
@@ -148,8 +195,11 @@ export type DesktopBridge = {
   }
   /** The engine's tool servers (MCP). Browser control is one entry in this list. */
   mcp: {
-    read: () => Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }> }>
-    write: (servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>) => Promise<{ ok: boolean; written: string[] }>
+    preview: (servers: unknown) => Promise<McpReview>
+    decide: (token: string, decision: 'allow' | 'deny') => Promise<{ ok: boolean; answer: string }>
+    inventory: (engine: 'claude-code' | 'agy') => Promise<NativeMcpInventory>
+    read: () => Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>; problem?: string }>
+    write: (servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>) => Promise<{ ok: boolean; written: string[]; answer: string }>
   }
   structure: {
     /** What a folder is, and exactly what a structure apply would add. */
@@ -181,12 +231,20 @@ export type DesktopBridge = {
     /** A finished turn, written into the vault as a handoff document. */
     saveHandoff: (name: string, markdown: string) => Promise<{ ok: boolean; answer: string }>
     /** A timestamped portable copy of the vault, written to the exports folder. */
+    backup: (operation: 'create' | 'restore') => Promise<{ ok: boolean; answer: string }>
     exportCopy: () => Promise<{ ok: boolean; answer: string }>
     /** The open conversation, captured into the vault as a capsule. */
     captureChat: (title: string, markdown: string) => Promise<{ ok: boolean; answer: string }>
   }
+  /** Fetch one page the owner names and keep it as a sourced vault page. */
+  research?: {
+    fetch: (url: string) => Promise<import('@shared/lib/research').ResearchReply>
+    cancel: () => Promise<void>
+  }
   /** Whether the browser extension can reach this app, and where. */
   extension: {
+    export: (destination: 'downloads' | 'choose') => Promise<{ ok: boolean; answer: string; path?: string }>
+    publishAppearance?: (value: import('@shared/lib/extensionAppearance').ExtensionAppearance) => Promise<{ ok: boolean }>
     status: () => Promise<{ ok: boolean; listening: boolean; port: number; url: string; error: string }>
   }
   /**
@@ -214,6 +272,8 @@ export type DesktopBridge = {
   }
 
   artifacts: {
+    trashList: () => Promise<{ ok: boolean; items: import('../../../main/artifacts/store').TrashItem[]; error?: string }>
+    trashRestore: (key: string) => Promise<ItemAnswer>
     list: () => Promise<ListAnswer>
     read: (id: string, version?: number) => Promise<ReadAnswer>
     save: (input: SaveInput) => Promise<ItemAnswer>
@@ -240,7 +300,35 @@ export const hasDesktopBridge = (): boolean =>
   typeof window !== 'undefined' && typeof window.api === 'object' && window.api !== null
 
 /** Empty, and honest about it. See rule 2 above. */
+let demoAutomationPreferences = { ...DEFAULT_AUTOMATION }
+try { if (typeof localStorage !== 'undefined') demoAutomationPreferences = normalizeAutomation(JSON.parse(localStorage.getItem('oddbrain.automation-preview') || 'null')) } catch {}
+const demoAutomationListeners = new Set<(view: AutomationView) => void>()
+const demoAutomationView = (): AutomationView => ({ preferences: { ...demoAutomationPreferences }, current: null, reports: [], queued: 0, desktop: false })
+const demoAutomation: AutomationBridge = {
+  history: async () => ({ records: [], next: '', notice: 'Saved native review history is available in the desktop app.' }),
+  saved: async () => { throw Error('Saved reviews require the desktop app.') },
+  read: async () => demoAutomationView(),
+  update: async patch => { demoAutomationPreferences = normalizeAutomation({ ...demoAutomationPreferences, ...patch }); try { localStorage.setItem('oddbrain.automation-preview', JSON.stringify(demoAutomationPreferences)) } catch {} const view = demoAutomationView(); for (const notify of demoAutomationListeners) notify(view); return { ok: true, view } },
+  models: async () => ({ ok: false, models: [], error: 'Reviewer models are listed by the installed app.' }),
+  review: async () => ({ ok: false, error: 'Report-only review uses the installed app and its model service. No review was sent from this preview.' }),
+  cancel: async () => ({ ok: true }),
+  onChanged: listener => { demoAutomationListeners.add(listener); return () => demoAutomationListeners.delete(listener) },
+}
+let previewMedia = { ...DEFAULT_MEDIA }
+const unavailableMarket = async () => ({ ok: false as const, error: 'Marketplaces require the installed desktop app.' })
 const demoBridge: DesktopBridge = {
+  promptLayers: async (historyMessages: number) => ({ engine: 'claude-code' as const, workspace: '', houseRules: [], vaultSelected: false, historyMessages }),
+  media: {
+    authorizeRecording: async () => ({ ok: false, name: 'Microphone', error: 'Provider recording requires the desktop app.' }), onCancelled: () => () => {},
+    read: async () => ({ ...previewMedia }), update: async patch => (previewMedia = { ...previewMedia, ...patch, ffmpeg: '' }),
+    chooseDecoder: async () => ({ ...previewMedia }),
+    decode: async input => ({ ok: false, name: input.name, error: 'Native decoding and provider uploads require the desktop app. No file was sent.' }),
+    dictate: async () => ({ ok: false, name: 'Dictation', error: 'Offline Windows dictation requires the desktop app.' }), cancel: async () => {},
+  },
+  transcripts: { raw: async () => ({ ok: false as const, error: 'Original transcripts require the desktop app.' }), list: async () => ({ ok: false, error: 'Native transcripts require the desktop app. Sample chats remain separate.' }), read: async () => ({ ok: false, error: 'Native transcripts require the desktop app.' }), picture: async () => ({ ok: false, error: 'Saved image bytes require the desktop app.' }) },
+  marketplace: { inspect: unavailableMarket, sources: async () => [], browse: unavailableMarket, probe: unavailableMarket, installed: unavailableMarket, plan: unavailableMarket, confirm: unavailableMarket, cancel: async () => {} },
+  automation: demoAutomation,
+  memoryWorkspace: demoMemoryWorkspace,
   extensionPair: {
     get: async () => ({ token: '' }),
     rotate: async () => ({ ok: false, token: '' }),
@@ -269,6 +357,13 @@ const demoBridge: DesktopBridge = {
     }),
   },
   skills: {
+    planCatalog: async () => { throw Error('Package installation review requires the desktop app.') },
+    decideCatalog: async () => ({ ok: false, answer: 'Package installation requires the desktop app.' }),
+    cancelCatalog: async () => {},
+    inventory: async () => ({ entries: [], notices: ['Installed skill files are available in the desktop app, not this preview.'] }),
+    inspectInstalled: async () => { throw Error('Inspect installed files in the desktop app.') },
+    previewCreate: async () => { throw Error('Creating native skill files requires the desktop app. Nothing was written.') },
+    decideCreate: async () => ({ ok: false, answer: 'Native skill files require the desktop app.' }),
     installCatalog: async () => ({ ok: false, answer: 'Installing skills needs the desktop app.' }),
     scan: async () => [],
   },
@@ -286,8 +381,11 @@ const demoBridge: DesktopBridge = {
     communityIndex: async () => ({ ok: false }),
   },
   mcp: {
-    read: async () => ({ servers: [] }),
-    write: async () => ({ ok: false, written: [] }),
+    preview: async () => { throw Error('Native connector review requires the desktop app.') },
+    decide: async () => ({ ok: false, answer: 'Native connector review requires the desktop app.' }),
+    inventory: async () => ({ files: [], notices: ['Native configuration inspection requires the desktop app.'] }),
+    read: async () => ({ servers: [], problem: '' }),
+    write: async () => ({ ok: false, written: [], answer: 'Tool servers are written by the installed app.' }),
   },
   structure: {
     inspect: async () => ({ ok: false, error: 'Inspecting a structure needs the desktop app.' }),
@@ -295,9 +393,10 @@ const demoBridge: DesktopBridge = {
     resolve: async () => ({ ok: false, error: 'Settling a conflict needs the desktop app.' }),
     linkCheck: async () => ({ files: 0, checked: 0, dead: [], ambiguous: [], edges: [], error: 'The link check needs the desktop app.' }),
   },
-  vault: { chooseFolder: async () => null, useDefault: async () => ({ ok: false, error: 'Choosing the default vault needs the desktop app.' }), saveHandoff: async () => ({ ok: false, answer: 'Writing a handoff needs the desktop app.' }), exportCopy: async () => ({ ok: false, answer: 'Exporting needs the desktop app.' }), captureChat: async () => ({ ok: false, answer: 'Capturing needs the desktop app.' }) },
+  research: { fetch: async () => ({ ok: false, answer: 'Fetching a page needs the desktop app. Nothing was written.' }), cancel: async () => {} },
+  vault: { backup: async () => ({ ok: false, answer: 'Backup and restore require the desktop app. No files were copied.' }), chooseFolder: async () => null, useDefault: async () => ({ ok: false, error: 'Choosing the default vault needs the desktop app.' }), saveHandoff: async () => ({ ok: false, answer: 'Writing a handoff needs the desktop app.' }), exportCopy: async () => ({ ok: false, answer: 'Exporting needs the desktop app.' }), captureChat: async () => ({ ok: false, answer: 'Capturing needs the desktop app.' }) },
   // No socket is open here, and none can be: this is a page, not the app.
-  extension: {
+  extension: { export: async () => ({ ok: false, answer: 'Open the desktop app to export the bundled extension. No files were created.' }),
     status: async () => ({
       ok: false,
       listening: false,
@@ -311,6 +410,8 @@ const demoBridge: DesktopBridge = {
    * grid that implies nothing was ever made.
    */
 artifacts: {
+    trashList: async () => ({ ok: false, items: [], error: 'Trash recovery uses the installed app’s library.' }),
+    trashRestore: async () => ({ ok: false, error: 'Trash recovery uses the installed app’s library.' }),
     list: async (): Promise<ListAnswer> => ({
       ok: false,
       error: 'The artifact library is part of the desktop app: this window has no folder to keep documents in.',
@@ -365,18 +466,29 @@ artifacts: {
     }),
   },
   houseRules: {
+    previewGlobal: async () => { throw Error('Native rule files require the desktop app.') },
+    previewProject: async () => { throw Error('Native rule files require the desktop app.') },
+    decide: async () => ({ ok: false, answer: 'Native rule files require the desktop app.' }),
     read: async () => ({ rules: { ...DEFAULT_HOUSE_RULES }, defaults: { ...DEFAULT_HOUSE_RULES } }),
     write: async () => ({
       ok: false,
       written: [],
     }),
   },
+  workflows: { list: async () => ({ items: [], next: '', notice: 'Workflow files require the desktop app.' }), save: async () => { throw Error('Saving workflows requires the desktop app.') }, archive: async () => { throw Error('Workflow files require the desktop app.') }, preview: async () => { throw Error('Workflow execution requires the desktop app.') }, decide: async () => { throw Error('Workflow execution requires the desktop app.') }, cancel: async () => ({ requested: false, answer: 'No workflow runs in this preview.' }), runs: async () => ({ records: [], next: '', notice: 'Workflow history requires the desktop app.' }), readRun: async () => { throw Error('Workflow history requires the desktop app.') } },
+  schedules: { list: async () => ({ items: [], notice: 'Schedules require the running desktop app and OS-protected approval storage.' }), preview: async () => { throw Error('Recurring command approval requires the desktop app.') }, decide: async () => { throw Error('Schedules cannot run in a browser preview.') }, pause: async () => { throw Error('Schedules require the desktop app.') }, inbox: async () => ({ items: [], next: '', notice: 'The scheduled-work inbox requires the desktop app.' }), acknowledge: async () => { throw Error('The scheduled-work inbox requires the desktop app.') } },
+  worktrees: { list: async () => ({ worktrees: [], problem: 'Isolated checkouts require the desktop app.' }), create: async () => ({ ok: false, answer: 'Creating an isolated checkout requires the desktop app. Nothing was created.' }), remove: async () => ({ ok: false, answer: 'Removing an isolated checkout requires the desktop app. Nothing was removed.' }) },
+  commands: { saved: async () => ({ items: [], next: '', notice: 'Saved OS commands require the desktop app.' }), save: async () => { throw Error('Saving OS commands requires the desktop app.') }, archiveSaved: async () => { throw Error('Saved OS commands require the desktop app.') }, previewSaved: async () => { throw Error('Saved OS commands require the desktop app.') }, context: async () => ({ cwd: '', allowed: false, explanation: 'OS command execution requires the desktop app. This browser preview cannot run commands.', activeId: null }), preview: async () => { throw Error('OS command execution requires the desktop app. Nothing was run.') }, decide: async () => { throw Error('OS command execution requires the desktop app.') }, cancel: async () => ({ requested: false, answer: 'No app command is running in this preview.' }), history: async () => ({ records: [], next: '', notice: 'Command records are available in the desktop app.' }), read: async () => { throw Error('Command records require the desktop app.') }, output: async () => { throw Error('Command output requires the desktop app.') } },
   projects: {
+    attach: async () => { throw Error('Choose project references in the desktop app. Nothing was read.') },
     read: async () => [],
     write: async (projects: Project[]) => ({ ok: false, projects }),
     blank: async (name: string) => newProject(name),
   },
   engine: {
+    queue: { read: async () => [], hold: async () => {}, enqueue: async () => { throw Error('A durable work queue requires the desktop app. Your draft was not queued.') }, resume: async () => { throw Error('Saved tasks require the desktop app.') }, cancel: async () => { throw Error('Saved tasks require the desktop app.') }, history: async () => ({ items: [], next: '' }) },
+    contextTarget: async () => ({ workspace: '', route: '', resume: false }),
+    chatSessions: async () => [],
     setWorkspace: async () => ({ ok: false, answer: 'Choosing a workspace needs the desktop app.' }),
     sessions: async () => [],
     boardRead: async () => ({ continuing: {}, done: [] }),
@@ -385,6 +497,9 @@ artifacts: {
     forgetSession: async () => ({ ok: false }),
     openFolder: async () => ({ ok: false }),
     checkpoints: {
+      preview: async () => { throw Error('Reviewed restores require the desktop app. No files were changed.') },
+      decide: async () => ({ ok: false, answer: 'Reviewed restores require the desktop app.' }),
+      inspect: async () => ({ ok: false, answer: 'Snapshots live in the installed app.' }),
       list: async () => ({ ok: true, checkpoints: [] }),
       restore: async () => ({ ok: false, answer: 'Checkpoints live in the desktop app.' }),
     },
@@ -399,7 +514,7 @@ export const bridge: DesktopBridge = hasDesktopBridge() ? (window.api as Desktop
  * refusals, the same rule every other demo answer here follows.
  */
 export type EngineBridge = {
-  read: () => Promise<{ engine: EngineSettings; running: boolean; history: EngineEvent[] }>
+  read: () => Promise<{ engine: EngineSettings; running: boolean; history: EngineEvent[]; lastSequence?: number; active?: { transcriptId: string; chatId?: string; prompt: string }; busy?: boolean }>
   pick: (id: EngineId) => Promise<{ ok: boolean; answer: string }>
   models: () => Promise<{ ok: boolean; models: EngineModelEntry[]; error?: string }>
   detect: (fresh?: boolean) => Promise<EngineAvailability[]>
@@ -407,18 +522,28 @@ export type EngineBridge = {
   pickBinary: (id: 'claude-code' | 'agy') => Promise<{ ok: boolean; answer: string; path?: string }>
   clearBinary: (id: 'claude-code' | 'agy') => Promise<{ ok: boolean; answer: string }>
   binaryOverride: (id: 'claude-code' | 'agy') => Promise<{ path: string }>
+  /** The engine's own sign-in state, asked from its CLI. */
+  authStatus: (id?: 'claude-code' | 'agy') => Promise<{ ok: boolean; loggedIn: boolean; method: string; provider: string; answer: string }>
+  /** Open the engine's own login in a terminal; nothing is read back. */
+  openLogin: () => Promise<{ ok: boolean; answer: string }>
+  restart: () => Promise<{ ok: boolean; answer: string }>
+  /** The Ollama answering on the door, and whether it can serve Claude Code. */
+  ollamaVersion: () => Promise<{ ok: boolean; version: string; compatible: boolean; answer: string }>
   pull: (name: string) => Promise<{ ok: boolean; answer: string }>
   deleteModel: (name: string) => Promise<{ ok: boolean; answer: string }>
   /** Pull progress ticks; returns the unsubscribe. */
   onPullEvent: (listener: (tick: unknown) => void) => () => void
   readHouseRules: () => Promise<{ rules: HouseRules; defaults: HouseRules }>
   writeHouseRules: (rules: HouseRules) => Promise<{ ok: boolean; written: string[] }>
-  setModel: (model: string, provider?: 'anthropic') => Promise<{ ok: boolean; answer: string }>
+  setModel: (model: string, provider?: 'anthropic' | 'native', expectedEngine?: EngineId) => Promise<{ ok: boolean; answer: string }>
   setApproval: (mode: ApprovalMode) => Promise<{ ok: boolean; answer: string }>
-  setThinking: (mode: 'default' | 'extended') => Promise<{ ok: boolean; answer: string }>
+  capabilities: () => Promise<EngineCapabilityReport>
+  setThinking: (mode: ThinkingMode, target: string) => Promise<{ ok: boolean; answer: string }>
   memory: {
-    list: () => Promise<{ ok: boolean; folder?: string; files?: Array<{ name: string; path: string; updated: string; content: string; clipped: boolean }> }>
-    remove: (name: string) => Promise<{ ok: boolean; answer: string }>
+    chooseFolder?: () => Promise<{ ok: boolean; answer: string; folder?: string; canceled?: boolean }>
+    defaultFolder?: () => Promise<{ ok: boolean; answer: string }>
+    list: () => Promise<{ ok: boolean; answer?: string; folder?: string; files?: Array<{ name: string; path: string; updated: string; content: string; clipped: boolean }> }>
+    remove: (name: string, expectedFolder?: string) => Promise<{ ok: boolean; answer: string }>
   }
   journal: {
     list: () => Promise<{ ok: boolean; entries: Array<{ at: string; prompt: string; answer: string; sessionId: string | null; usage: string; workspace: string }> }>
@@ -426,8 +551,10 @@ export type EngineBridge = {
     clear: () => Promise<{ ok: boolean; answer: string }>
   }
   pickWorkspace: () => Promise<{ ok: boolean; answer: string }>
-  send: (prompt: string, cwd: string, pictures?: Array<{ mime: string; data: string }>) => Promise<{ ok: boolean; answer: string }>
+  send: (prompt: string, cwd: string, pictures?: Array<{ mime: string; data: string }>, conversation?: NativeConversation, queuedId?: string) => Promise<{ ok: boolean; answer: string; transcriptId?: string }>
   checkpoints: {
+    preview: (copy: string, original: string) => Promise<FileReview>
+    decide: (token: string, decision: 'allow' | 'deny') => Promise<FileDecision>
     list: () => Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }>
     restore: (copy: string, original?: string) => Promise<{ ok: boolean; answer: string }>
   }
@@ -489,6 +616,10 @@ const demoEngineBridge: EngineBridge = {
   pickBinary: async () => ({ ok: false, answer: 'Pointing at a binary needs the desktop app.' }),
   clearBinary: async () => ({ ok: false, answer: 'The desktop app manages the binary override.' }),
   binaryOverride: async () => ({ path: '' }),
+  authStatus: async () => ({ ok: false, loggedIn: false, method: '', provider: '', answer: 'Sign-in is checked by the installed app.' }),
+  restart: async () => ({ ok: false, answer: 'Connection restart requires the desktop app. No process was restarted.' }),
+  openLogin: async () => ({ ok: false, answer: 'Signing in needs the installed app.' }),
+  ollamaVersion: async () => ({ ok: false, version: '', compatible: false, answer: 'The installed app checks the local runtime.' }),
   pull: async () => ({ ok: false, answer: 'Pulling brains needs the desktop app.' }),
   deleteModel: async () => ({ ok: false, answer: 'Removing brains needs the desktop app.' }),
   onPullEvent: () => () => undefined,
@@ -508,8 +639,11 @@ const demoEngineBridge: EngineBridge = {
     answer: 'The engine works in the desktop app: this window is the interface only.',
   }),
   answer: async () => ({ ok: false }),
+  capabilities: async () => unverifiedCapabilities(DEFAULT_ENGINE, 'Model capabilities need the desktop app. No engine is connected in this preview.'),
   setThinking: async () => ({ ok: false, answer: 'Thinking lives in the desktop app.' }),
   memory: {
+    chooseFolder: async () => ({ ok: false, answer: 'Choosing a memory folder uses the installed app.' }),
+    defaultFolder: async () => ({ ok: false, answer: 'Memory locations are saved by the installed app.' }),
     list: async () => ({ ok: true, files: [] }),
     remove: async () => ({ ok: false, answer: 'Memories live in the desktop app.' }),
   },
@@ -519,6 +653,8 @@ const demoEngineBridge: EngineBridge = {
     clear: async () => ({ ok: false, answer: 'The record lives in the desktop app.' }),
   },
   checkpoints: {
+    preview: async () => { throw Error('Reviewed restores require the desktop app. No files were changed.') },
+    decide: async () => ({ ok: false, answer: 'Reviewed restores require the desktop app.' }),
     list: async () => ({ ok: true, checkpoints: [] }),
     restore: async () => ({ ok: false, answer: 'Checkpoints live in the desktop app.' }),
   },
@@ -576,3 +712,11 @@ export const getEngineApi = (): EngineBridge => {
 
 /** True in the browser preview, where there is no main process behind the UI. */
 export const isDemo = !hasDesktopBridge()
+
+/** The preload's operational service, with an honest browser-only fallback. */
+export const getAutomationApi = (): AutomationBridge => {
+  if (typeof window !== 'undefined') { const candidate = (window as unknown as { api?: { automation?: AutomationBridge } }).api?.automation; if (candidate) return candidate }
+  return demoAutomation
+}
+
+export const getMemoryWorkspaceApi = (): MemoryBridge => window.api?.memoryWorkspace || demoMemoryWorkspace

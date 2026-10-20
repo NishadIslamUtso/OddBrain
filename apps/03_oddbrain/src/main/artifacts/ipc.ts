@@ -2,7 +2,7 @@ import { handle } from '../ipcGuard'
 import { BrowserWindow, dialog } from 'electron'
 import { readFileSync, statSync } from 'node:fs'
 import { basename, extname } from 'node:path'
-import { adopt, duplicate, list, read, remove, rename, restore, save, type ItemAnswer } from './store'
+import { adopt, duplicate, list, read, remove, rename, restore, save, listTrash, restoreTrash, type ItemAnswer } from './store'
 
 /**
  * The library's channels, and the one place an artifact can enter the app from a
@@ -64,6 +64,8 @@ function registerImport(root: string): void {
 
 export function registerArtifactIpc(root: string): void {
   handle('artifacts:list', () => list(root))
+  handle('artifacts:trash-list', () => listTrash(root))
+  handle('artifacts:trash-restore', (_event, key: unknown) => restoreTrash(root, key))
   handle('artifacts:read', (_event, id: unknown, version?: unknown) => read(root, id, version))
   handle('artifacts:save', (_event, input: unknown) => save(root, (input || {}) as never))
   handle('artifacts:rename', (_event, id: unknown, title: unknown) => rename(root, id, title))

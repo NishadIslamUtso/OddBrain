@@ -1,13 +1,16 @@
 import { useEffect, useState } from 'react'
-import { Volume2, Square as StopSquare } from 'lucide-react'
+import ReadAloudButton from '../ui/ReadAloudButton'
+import { bridge } from '@/platform/bridge'
+import { downloadBytes } from '@shared/lib/zip'
 import type { Artifact, Message } from '@shared/types'
 import type { ElementPick } from '@shared/lib/artifacts'
-import { ttsSupported } from '@shared/lib/media'
 import { THINKING_OPEN_EVENT, setThinkingOpen, thinkingOpenNow } from '@shared/lib/thinkingOpen'
 import { parseCloudModel } from '@shared/lib/providers'
 import type { ArtifactView } from '@/state/artifactView'
 import ArtifactCard from './ArtifactCard'
 import BrainMark from './BrainMark'
+import CopyText from '../ui/CopyText'
+import { useLook } from '../ui/LookContext'
 
 /**
  * One turn in the conversation.
@@ -19,36 +22,45 @@ import BrainMark from './BrainMark'
  */
 
 /**
- * Read one reply aloud, with the window's own voice. Its own component so the
- * speaking state is a hook that never depends on which branch rendered.
+ * The pictures that rode with one request.
+ *
+ * New records kept the exact bytes before dispatch; this button asks the app
+ * for one, which re-checks size and digest before handing it over. An older
+ * record answers honestly that its bytes were never stored — nothing is
+ * reconstructed from a count.
  */
-function SpeakButton({ text }: { text: string }) {
-  const [speaking, setSpeaking] = useState(false)
-  if (!ttsSupported()) return null
-  const toggle = (): void => {
-    if (speaking) {
-      window.speechSynthesis.cancel()
-      setSpeaking(false)
-      return
-    }
-    const voice = new SpeechSynthesisUtterance(text)
-    voice.onend = () => setSpeaking(false)
-    voice.onerror = () => setSpeaking(false)
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(voice)
-    setSpeaking(true)
+function SavedPictures({ transcriptId, count }: { transcriptId?: string; count: number }) {
+  const [note, setNote] = useState('')
+  const [busy, setBusy] = useState(-1)
+  if (!count || !transcriptId) return null
+  const save = async (index: number): Promise<void> => {
+    setBusy(index); setNote('')
+    try {
+      const reply = await bridge.transcripts.picture?.(transcriptId, index)
+      if (!reply) { setNote('Saving pictures requires the desktop app.'); return }
+      if (!reply.ok) { setNote(reply.error); return }
+      const binary = atob(reply.value.data)
+      const bytes = new Uint8Array(binary.length)
+      for (let i = 0; i < binary.length; i += 1) bytes[i] = binary.charCodeAt(i)
+      const extension = reply.value.mime === 'image/png' ? 'png' : reply.value.mime === 'image/jpeg' ? 'jpg' : 'webp'
+      const saved = downloadBytes(bytes, `picture-${index + 1}.${extension}`, reply.value.mime, setNote)
+      if (!saved) setNote('The browser refused the download. Nothing was changed.')
+    } catch {
+      setNote('The saved picture could not be read.')
+    } finally { setBusy(-1) }
   }
   return (
-    <button
-      type="button"
-      onClick={toggle}
-      aria-label={speaking ? 'Stop reading aloud' : 'Read aloud'}
-      title={speaking ? 'Stop reading aloud' : 'Read this reply aloud'}
-      className="mt-2 flex items-center gap-1 rounded-lg border border-line px-1.5 py-0.5 text-[10.5px] text-muted hover:text-ink"
-    >
-      {speaking ? <StopSquare size={10} /> : <Volume2 size={10} />}
-      {speaking ? 'Stop' : 'Listen'}
-    </button>
+    <div className="mt-1 text-[11px] text-muted">
+      <span>{count} image{count === 1 ? '' : 's'} accompanied this request.</span>
+      <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
+        {Array.from({ length: count }, (_, index) => (
+          <button type="button" key={index} className="ob-text-button" disabled={busy >= 0} onClick={() => void save(index)}>
+            {busy === index ? 'Checking…' : `Save picture ${index + 1}`}
+          </button>
+        ))}
+      </div>
+      {note ? <p role="status" className="text-warn">{note}</p> : null}
+    </div>
   )
 }
 
@@ -83,11 +95,14 @@ export default function MessageRow({
   /** The artifact the error belongs to, so it is not printed on every card. */
   rewriteErrorFor?: string
 }) {
+  const look = useLook()
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-2xl bg-card px-4 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
+      <div className="flex justify-end" data-message-id={message.id}>
+        <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-[14px_14px_4px_14px] bg-card px-3.5 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
           {message.content}
+          <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div>
+          {message.nativeRecord?.pictures ? <SavedPictures transcriptId={message.nativeRecord.transcriptId} count={message.nativeRecord.pictures} /> : null}
           {message.editedAt && <span className="mt-1 block text-[11px] text-muted">edited</span>}
           {(message.attachments || []).length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5">
@@ -115,16 +130,16 @@ export default function MessageRow({
     return () => window.removeEventListener(THINKING_OPEN_EVENT, follow)
   }, [])
   return (
-    <div className="flex gap-3.5">
+    <div className="flex gap-3" data-message-id={message.id}>
       <span className="mt-0.5 shrink-0">
-        <BrainMark size={26} />
+        <BrainMark size={18} />
       </span>
       <div className="min-w-0 flex-1">
         {message.thinking ? (
           <details
             open={thinkingOpen || undefined}
             onToggle={(event) => setThinkingOpen((event.target as HTMLDetailsElement).open)}
-            className="mb-2 rounded-lg border border-line bg-panel/60 px-3 py-2"
+            className="mb-2 py-2"
           >
             <summary className="cursor-pointer text-[12px] text-muted">
               Thinking{streaming ? ' (still going)' : ''}
@@ -139,17 +154,18 @@ export default function MessageRow({
           <p className="mb-2 text-[12px] text-muted">{message.stage}</p>
         ) : null}
 
-        {message.content ? (
+        {message.content && (look.streamReplies || !streaming) ? (
           <div className="whitespace-pre-wrap break-words text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
             {message.content}
           </div>
         ) : null}
-        {message.content && message.status !== 'streaming' ? <SpeakButton text={message.content} /> : null}
+        {message.content && message.status !== 'streaming' ? <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div> : null}
+        {message.content && message.status !== 'streaming' ? <ReadAloudButton text={message.content} /> : null}
 
         {streaming && !message.content && !message.stage ? (
           <p className="text-[13px] text-muted">Thinking…</p>
         ) : null}
-        {streaming && message.content ? (
+        {streaming && message.content && look.streamReplies ? (
           <span className="caret ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 bg-accent" />
         ) : null}
 
@@ -186,6 +202,8 @@ export default function MessageRow({
           </ul>
         ) : null}
 
+        {!!message.nativeRecord?.artifacts?.length && <section aria-label="Observed artifact files"><p className="text-[12px] text-muted">These standalone files changed during the turn. File observation is not a test result or proof of authorship.</p>{message.nativeRecord.artifacts.map(item => <button type="button" key={item.id} className="ob-text-button" onClick={() => window.dispatchEvent(new CustomEvent('app:open-artifact', { detail: { id: item.id, version: item.version } }))}>Open {item.title} · v{item.version}</button>)}</section>}
+        {message.status === 'stopped' && <p role="status" className="mt-2 text-[12px] text-muted">Interrupted. The recorded text may be incomplete; no successful finish was confirmed.</p>}
         {message.error ? <p className="mt-2 text-[12px] text-warn">{message.error}</p> : null}
 
         {message.status === 'complete' && typeof message.ms === 'number' ? (

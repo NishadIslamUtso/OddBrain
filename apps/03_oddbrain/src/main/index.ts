@@ -1,15 +1,66 @@
-import { app, BrowserWindow, dialog, Menu, safeStorage, shell, globalShortcut } from 'electron'
-import { randomBytes } from 'node:crypto'
+import { createApprovalSigner } from './workflows/approvalSigner'
+import { createWorkflowScheduler } from './workflows/scheduler'
+import type { ScheduleInput } from '../shared/lib/schedules'
+import { createWorkflowService } from './workflows/service'
+import type { WorkflowStep } from '../shared/lib/workflows'
+import { createCommandRunner, COMMAND_DISCLOSURE } from './commands/runner'
+import { createWorktreeService } from './worktrees/service'
+import type { ShellRequest } from '../shared/lib/commands'
+import { createWorkQueue } from './engine/workQueue'
+import { snapshotNativeArtifacts, collectNativeArtifacts } from './engine/nativeArtifacts'
+import { createMcpReview, inspectNativeMcp } from './engine/mcpReview'
+import { createSkillAuthoring, readInstalledSkills, inspectInstalledSkill, type SkillRoot } from './engine/installedSkills'
+import type { SkillDraft } from '../shared/lib/installedSkills'
+import { createPermissionTickets } from './engine/permissionTickets'
+import { createNativeContext } from './nativeContext'
+import { checkNativeConversation } from '../shared/lib/nativeConversation'
+import { sessionKey } from './engine/socket'
+import { createSessionBoardStore } from './engine/sessionBoardStore'
+import { createCheckpointReviewGate } from './engine/checkpointReviewGate'
+import { engineCommandRefusal } from '../shared/lib/engineCommandPolicy'
+import { createSessionMemory } from './engine/sessionMemory'
+import { AGY_PICTURES_ANSWER } from './engine/agy'
+import { restartIdleConnection } from './engine/restart'
+import { createTurnArchive } from './turnArchive'
+import { dispatchRecordedTurn } from './recordedDispatch'
+import { effortTarget, selectedEffort, type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
+import { checkEffortSelection, createCapabilityInspector } from './engine/nativeCapabilities'
+import type { ThinkingMode } from '../shared/lib/engine'
+import { createVaultFiles } from './vault/files'
+import { exportExtension } from './extension/export'
+import { discoverClaudeModels } from './engine/modelDiscovery'
+import { selectEngine } from '../shared/lib/engine'
+import { configBytes, noLinkedPath, commitConfigs, preserveConfig } from './engine/configTransaction'
+import { createMemoryWorkspace } from './memory/workspace'
+import { createMemoryOrganizer } from './memory/organizer'
+import type { MemoryAction } from '../shared/lib/memoryWorkspace'
+import { normalizeExtensionAppearance, type ExtensionAppearance } from '../shared/lib/extensionAppearance'
+import { createMediaService } from './media/service'
+import { createMarketplaceService } from './engine/marketplace'
+import { createAgyMarketplaceService } from './engine/agyMarketplace'
+import type { MediaInput, MediaPreferences } from '../shared/lib/mediaBridge'
+import type { MarketplaceAction } from '../shared/lib/marketplace'
+import { fitWindow } from './windowBounds'
+import { inferenceAllowed } from './automation/inferencePolicy'
+import { CLOUD_PROVIDERS } from '../shared/lib/providers'
+import { createAutomationService, type AutomationService } from './automation/service'
+import { createTextReviewer } from './automation/reviewer'
+import type { AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
+import { readUiPreview } from './uiPreview'
+import { createLaunchGate } from './uiLaunch'
+import { app, BrowserWindow, dialog, Menu, safeStorage, shell, globalShortcut, screen, session } from 'electron'
+import { randomBytes, randomUUID, createHash } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
-import { loadAppFlags, saveAppFlags } from './appFlags'
+import { loadAppFlags, readAppFlagsStrict, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
-import { registerStagingRoot, setBinaryOverride, binaryOverride } from './engine/enginePath'
-import { handle, lockNavigation, pinOwnOrigins } from './ipcGuard'
-import { dirname, join, resolve } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { registerStagingRoot, setBinaryOverride, binaryOverride, resolveEngineCommand } from './engine/enginePath'
+import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
+import { dirname, join, resolve, relative, isAbsolute } from 'node:path'
+import { existsSync, statSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
 import { createVaultService, resolveVaultRoot } from './vault/service'
+import { canonicalStructureRoot, conflictWasSettled, normalizeSettledConflicts, settleStructureConflict, validStructureRelative, type SettledStructureConflict } from './vault/settled'
 import { createKeyStore, type KeyStore } from './cloud/keys'
 import { createCloudClient, type CloudClient } from './cloud/client'
 import { providerById } from '../shared/lib/providers'
@@ -21,13 +72,13 @@ import {
   writeSettings,
   type AppSettings,
 } from './settings'
-import { cloudEnabled, normalizePermissions } from '../shared/lib/permissions'
+import { cloudEnabled, applyPermissionPatch } from '../shared/lib/permissions'
 import { registerArtifactIpc } from './artifacts/ipc'
 import { createEngineSocket, type EngineSocket } from './engine/socket'
-import { normalizeEngine } from '../shared/lib/engine'
+import { isValidModelName, normalizeEngine } from '../shared/lib/engine'
 import { APPROVAL_MODES, type ApprovalMode, type EngineAvailability, type EngineEvent, type EngineId, type EngineModelEntry } from '../shared/lib/engine'
-import { ENGINE_IMAGE_MIMES, MAX_ENGINE_IMAGE_CHARS as ENGINE_IMAGE_CHARS, MAX_ENGINE_ATTACHMENTS as ENGINE_IMAGE_LIMIT } from '../shared/lib/media'
-import { listCheckpoints, restoreCheckpoint } from './engine/checkpoints'
+import { engineImages } from '../shared/lib/media'
+import { listCheckpoints, restoreCheckpoint, inspectCheckpoint } from './engine/checkpoints'
 import { createRecipeManager } from './recipes'
 import { createCompactManager } from './compact'
 import { buildRepoMap } from './repoMap'
@@ -40,19 +91,24 @@ import { agyModelSource, detectEngine } from './engine/availability'
 import { enginePath } from './engine/enginePath'
 import { pdfSafeName } from '../shared/lib/artifacts'
 import { parsePullLine, validateModelName } from './engine/pull'
-import { deployMcp, deploySkill, scanClaudeSkills, type McpServer, type VaultSkill } from './engine/deploy'
-import { installCatalogSkill } from './engine/skillCatalogInstall'
+import { openLogin, readAuthStatus } from './engine/authStatus'
+import { readOllamaVersion } from './engine/ollamaVersion'
+import { scanClaudeSkills, type McpServer } from './engine/deploy'
+import { createCatalogInstallReview } from './engine/skillCatalogInstall'
+import { readMcpList } from '../shared/lib/mcp'
 import { installPackFromFolder, listPacks, removePack } from './engine/packs'
 import { exportPack } from './engine/exportPack'
 import { installFromIndex, readIndex } from './engine/storeIndex'
 import { starterPackFiles } from './engine/vaultSkills'
 import { deployBuiltInSkills } from './engine/vaultSkills'
 import { applyConflictAction, brainFileContents, classifyBrainRoot, defaultVaultPath, planBrainApply, planBrainRefresh } from '../shared/lib/brainStructure'
-import { normalizeBoard } from '../shared/lib/sessionsBoard'
+import { backupVault, restoreVault } from './vault/backup'
 import { exportVaultCopy } from './vault/exportCopy'
-import { deployHouseRules } from './engine/houseRulesDeploy'
-import { DEFAULT_HOUSE_RULES, type HouseRules } from '../shared/lib/houseRules'
-import { newProject, normalizeProjects, type Project } from '../shared/lib/projects'
+import { fetchWebSource } from './research/sourceFetch'
+import type { ResearchReply } from '../shared/lib/research'
+import { createProjectRuleReview, houseRulesFile as nativeHouseRulesFile } from './engine/houseRulesDeploy'
+import { DEFAULT_HOUSE_RULES, instructionBlock, type HouseRules } from '../shared/lib/houseRules'
+import { newProject, type Project } from '../shared/lib/projects'
 
 /**
  * The main process. Everything that touches the machine lives on this side:
@@ -152,7 +208,9 @@ function stampFor(now: Date): string {
 // first engine start never hunts folders with a slim inherited PATH.
 void enginePath()
 
+let engineEventSequence = 0
 function pushEngineEvent(event: EngineEvent): void {
+  event = { ...event, sequence: ++engineEventSequence }
   // Stream pieces are for the live window only: a hundred of them would
   // crowd out the real story from the small remembered history, and the
   // finished text arrives in its own event for whoever reads it later.
@@ -170,20 +228,21 @@ function pushEngineEvent(event: EngineEvent): void {
   // The plan is made here, from the real folder, never from the renderer's
   // word; an existing file is never rewritten.
   const settledFile = (): string => join(app.getPath('userData'), 'structure-settled.json')
-  const readSettled = (): string[] => {
+  const readSettled = (): SettledStructureConflict[] => {
     try {
       const parsed: unknown = JSON.parse(readFileSync(settledFile(), 'utf8'))
-      return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : []
+      const normalized = normalizeSettledConflicts(parsed, canonicalStructureRoot(vaultRoot()))
+      if (Array.isArray(parsed) && parsed.some(entry => typeof entry === 'string')) {
+        try { writeFileSync(settledFile(), JSON.stringify(normalized, null, 2), 'utf8') } catch { return normalizeSettledConflicts(parsed.filter(entry => typeof entry !== 'string'), canonicalStructureRoot(vaultRoot())) } // Never silently scope the same legacy entries to another vault on a failed migration.
+      }
+      return normalized
     } catch {
       return []
     }
   }
-  const rememberSettled = (relative: string): void => {
-    const list = readSettled()
-    if (!list.includes(relative)) {
-      list.push(relative)
-      writeFileSync(settledFile(), JSON.stringify(list, null, 2), 'utf8')
-    }
+  const rememberSettled = (root: string, relative: string): void => {
+    const before = readSettled(), after = settleStructureConflict(before, root, relative)
+    if (after !== before) writeFileSync(settledFile(), JSON.stringify(after, null, 2), 'utf8')
   }
 
   const structurePlan = (root: string) => {
@@ -206,7 +265,7 @@ function pushEngineEvent(event: EngineEvent): void {
       }
     }
     const settled = readSettled()
-    const plan = planBrainApply(kind, relative => existsSync(join(root, relative)), readExisting, relative => settled.includes(relative))
+    const plan = planBrainApply(kind, relative => existsSync(join(root, relative)), readExisting, relative => conflictWasSettled(settled, root, relative))
     const differing = planBrainRefresh(kind, readExisting)
     return { kind: plan.kind, present: plan.present, missing: plan.missing, differing, conflicts: plan.conflicts, writes: plan.writes }
   }
@@ -237,8 +296,180 @@ function pushEngineEvent(event: EngineEvent): void {
   }
 
 
+function inferencePermissions() {
+  if (automation?.preferences().allowCloudInference !== false) return settings.permissions
+  return { ...settings.permissions, cloud: Object.fromEntries(CLOUD_PROVIDERS.map(p => [p.id, false])) }
+}
+
+const capabilityInspector = createCapabilityInspector()
+let mediaService: ReturnType<typeof createMediaService> | undefined
+let marketplaceService: ReturnType<typeof createMarketplaceService> | undefined
+let agyMarketplaceService: ReturnType<typeof createAgyMarketplaceService> | undefined
 function registerBridges(): void {
+  const workQueue = createWorkQueue(join(app.getPath('userData'), 'work-queue'), () => JSON.stringify(settings.engine), () => createHash('sha256').update(JSON.stringify([settings.engine, settings.permissions, automation?.preferences().allowCloudInference !== false, resolveEngineCommand(settings.engine.id), settings.engine.cloudProvider === 'anthropic' ? keyStore?.get('anthropic') || '' : ''])).digest('hex'))
+  const permissionTickets = createPermissionTickets(() => engine?.current() || null)
+  let nativeWork = 0
+  let activeTranscript: { transcriptId: string; chatId?: string; prompt: string } | undefined
+  const researchJobs = new Map<number, AbortController>()
+  let preparing: { owner: number; controller: AbortController } | undefined
+  const catalogReviews = new Map<number, ReturnType<typeof createCatalogInstallReview>>()
+  const mcpReviews = new Map<number, ReturnType<typeof createMcpReview>>()
+  const ruleReviews = new Map<number, Map<string, { service: ReturnType<typeof createProjectRuleReview>; expiresAt: number }>>()
+  const skillReviews = new Map<number, ReturnType<typeof createSkillAuthoring>>()
+  const checkpointReviews = new Map<number, ReturnType<typeof createCheckpointReviewGate>>()
+  const nativeContext = createNativeContext(join(app.getPath('userData'), 'projects.json'), join(app.getPath('userData'), 'project-context-grants.json'))
+  const sessionMemory = createSessionMemory(join(app.getPath('userData'), 'engine-sessions.json'))
+  const turnArchive = createTurnArchive(join(app.getPath('userData'), 'turn-transcripts'))
+  const transcriptAnswer = <T,>(read: () => T) => { try { return { ok: true as const, value: read() } } catch { return { ok: false as const, error: 'The transcript could not be read. Its original file has not been changed.' } } }
+  handle('transcripts:list', (_event, before: string = '', chatId: string = '') => transcriptAnswer(() => turnArchive.list(before, chatId)))
+  handle('transcripts:read', (_event, id: string) => transcriptAnswer(() => turnArchive.read(id)))
+  handle('transcripts:raw', (_event, id: string) => transcriptAnswer(() => turnArchive.raw(id)))
+  // The exact picture bytes saved with a turn, re-verified against the digest
+  // recorded before dispatch. An older record says its bytes were never stored.
+  handle('transcripts:picture', (_event, id: string, index: number) => transcriptAnswer(() => turnArchive.picture(String(id ?? ''), Number(index))))
+  mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
+  marketplaceService = createMarketplaceService({ file: join(app.getPath('userData'), 'marketplaces.json') })
+  agyMarketplaceService = createAgyMarketplaceService({ cacheFile: join(app.getPath('home'), '.gemini', 'antigravity', 'cache', 'marketplaces', 'antigravity-plugins-official', 'marketplace.json') })
+  const market = (engine: unknown) => {
+    if (engine === 'agy') return agyMarketplaceService!
+    if (engine === undefined || engine === 'claude-code') return marketplaceService!
+    throw Error('Unknown marketplace engine.')
+  }
+  const commandSessions = new WeakMap<object, number>(); let commandSessionSerial = 0
+  const worktrees = createWorktreeService({ root: join(app.getPath('userData'), 'worktrees'), folder: () => resolve(settings.engine.workspace || vaultRoot()) })
+  // One command at a time in the selected folder; a second only in an isolated
+  // checkout this app created (see createCommandRunner's cap and checks).
+  let commandLeases = 0
+  const commandScope = (reserved = false, request?: ShellRequest) => {
+    const child = engine?.current()
+    if (child && !commandSessions.has(child)) commandSessions.set(child, ++commandSessionSerial)
+    const checkout = request?.cwd && typeof request.cwd === 'string' ? worktrees.check(request.cwd) : { ok: false }
+    const cwd = checkout.ok ? checkout.path! : resolve(settings.engine.workspace || vaultRoot())
+    const parallel = checkout.ok
+    const authority = JSON.stringify([cwd, settings.engine, settings.permissions, child ? commandSessions.get(child) : null, engine?.currentTarget(), nativeWork, workDispatchGeneration])
+    const blocked = !!engine?.turnBusy() || foregroundApiRequests > 0
+    const occupied = (dispatchingWork || commandLeases > 0) && !reserved && !parallel
+    const atCap = commandLeases >= 2 && !reserved
+    const explanation = !settings.permissions.manualCommands ? 'Enable Reviewed OS commands in Settings → Agent access first. This is separate from native engine tool approval.'
+      : settings.engine.approval === 'plan' ? 'Arbitrary OS commands are disabled while the engine is in Plan mode. Choose a non-plan mode explicitly before reviewing a command.'
+      : blocked || occupied || atCap ? 'Wait for active work before running an app command.' : COMMAND_DISCLOSURE
+    return { cwd, authority, stableAuthority: JSON.stringify([cwd, settings.engine.approval, settings.permissions]), busy: blocked || occupied || atCap, allowed: settings.permissions.manualCommands === true && settings.engine.approval !== 'plan' && !blocked && !occupied && !atCap, explanation }
+  }
+  const commandRunner = createCommandRunner({ root: join(app.getPath('userData'), 'command-runs'), scope: request => commandScope(false, request),
+    isolated: path => worktrees.check(path).ok,
+    acquire: async (request, authority, signal) => {
+      const initial = commandScope(false, request)
+      if (!initial.allowed || initial.authority !== authority || resolve(request.cwd) !== resolve(initial.cwd)) throw Error('Command authority changed before reservation. Nothing was run.')
+      commandLeases++
+      dispatchingWork = true
+      try {
+        memoryOrganizer?.cancel(); await automation?.cancel(); signal.throwIfAborted()
+        const recheck = () => { const current = commandScope(true, request); if (!current.allowed || current.authority !== authority) throw Error('Command access, engine, session or working folder changed. Nothing was run.'); signal.throwIfAborted() }
+        recheck()
+        return { recheck, release: () => {
+          commandLeases = Math.max(0, commandLeases - 1)
+          if (commandLeases === 0) { dispatchingWork = false; workDispatchGeneration++ }
+        } }
+      } catch (error) {
+        commandLeases = Math.max(0, commandLeases - 1)
+        if (commandLeases === 0) { dispatchingWork = false; workDispatchGeneration++ }
+        throw error
+      }
+    },
+  })
+  const workflows = createWorkflowService(join(app.getPath('userData'), 'workflows'), commandRunner)
+  const scheduleSigner = createApprovalSigner(join(app.getPath('userData'), 'workflow-approval-key.json'), {
+    available: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
+    encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value),
+  })
+  const scheduler = createWorkflowScheduler({ root: join(app.getPath('userData'), 'workflow-schedules'), workflows, signer: scheduleSigner,
+    busy: () => workQueue.view(-1).some(item => item.status === 'queued') || automation?.view().current?.automatic === false,
+  })
+  scheduler.start()
+
+  app.on('before-quit', () => { scheduler.dispose(); workflows.cancel(); commandRunner.cancel() })
+  const owners = new Set<number>()
+  const track = (sender: Electron.WebContents): number => {
+    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { scheduler.forget(sender.id); workflows.forget(sender.id); commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); researchJobs.get(sender.id)?.abort(); researchJobs.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
+    return sender.id
+  }
+  handle('schedules:list', () => scheduler.list())
+  handle('schedules:preview', (event, input: ScheduleInput) => scheduler.preview(track(event.sender), input))
+  handle('schedules:decide', (event, token: string, decision: 'allow' | 'deny') => scheduler.decide(track(event.sender), token, decision))
+  handle('schedules:pause', (_event, id: string) => scheduler.pause(id))
+  handle('schedules:inbox', (_event, before?: string) => scheduler.inbox(before))
+  handle('schedules:acknowledge', (_event, id: string) => scheduler.acknowledge(id))
+  handle('workflows:list', (_event, before?: string) => workflows.list(before))
+  handle('workflows:save', (_event, input: { name: string; cwd: string; steps: WorkflowStep[] }) => workflows.save(input))
+  handle('workflows:archive', (_event, id: string, archived: boolean) => workflows.archive(id, archived))
+  handle('workflows:preview', (event, id: string) => workflows.preview(track(event.sender), id))
+  handle('workflows:decide', (event, token: string, decision: 'allow' | 'deny') => workflows.decide(track(event.sender), token, decision))
+  handle('workflows:cancel', () => workflows.cancel())
+  handle('workflows:runs', (_event, before?: string) => workflows.runs(before))
+  handle('workflows:read-run', (_event, id: string) => workflows.readRun(id))
+  handle('commands:saved', (_event, before?: string) => commandRunner.saved(before))
+  handle('commands:save', (_event, input: { name: string; command: string; cwd: string }) => commandRunner.save(input))
+  handle('commands:archive-saved', (_event, id: string, archived: boolean) => commandRunner.archiveSaved(id, archived))
+  handle('commands:preview-saved', (event, id: string) => commandRunner.previewSaved(track(event.sender), id))
+  handle('commands:context', () => commandRunner.context())
+  handle('commands:preview', (event, request: ShellRequest) => commandRunner.preview(track(event.sender), request))
+  handle('commands:decide', (event, token: string, decision: 'allow' | 'deny') => commandRunner.decide(track(event.sender), token, decision))
+  handle('commands:cancel', () => commandRunner.cancel())
+  handle('commands:history', (_event, before?: string) => commandRunner.history(before))
+  handle('commands:read', (_event, id: string) => commandRunner.read(id))
+  handle('commands:output', (_event, id: string, stream: 'stdout' | 'stderr') => commandRunner.output(id, stream))
+  handle('worktrees:list', () => worktrees.list())
+  handle('worktrees:create', () => worktrees.create())
+  handle('worktrees:remove', (_event, id: string, discardChanges: boolean) => worktrees.remove(id, discardChanges))
+  const marketAnswer = async <T,>(run: () => Promise<T>) => { try { return { ok: true as const, value: await run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
+  handle('media:authorize-recording', (event, expected: { provider: string; model: string }) => mediaService!.authorizeRecording(track(event.sender), expected))
+  handle('media:read', () => mediaService!.read())
+  handle('media:update', (_event, patch: Partial<MediaPreferences>) => mediaService!.update(patch))
+  handle('media:decoder', async () => {
+    const picked = await dialog.showOpenDialog({ title: 'Choose the installed FFmpeg executable', properties: ['openFile'] })
+    if (picked.canceled || !picked.filePaths[0]) return mediaService!.read()
+    return mediaService!.update({ ffmpeg: picked.filePaths[0] }, true)
+  })
+  handle('media:decode', (event, input: MediaInput) => mediaService!.decode(track(event.sender), input))
+  handle('media:dictate', event => mediaService!.dictate(track(event.sender)))
+  handle('media:cancel', event => { mediaService!.cancel(event.sender.id) })
+  handle('market:sources', (_event, engine?: unknown) => market(engine).sources())
+  handle('market:browse', (event, repo: string, engine?: unknown) => marketAnswer(() => market(engine).browse(repo, track(event.sender))))
+  handle('market:inspect', (event, repo: string, plugin: string, engine?: unknown) => marketAnswer(() => market(engine).inspect(track(event.sender), repo, plugin)))
+  handle('market:probe', (event, engine?: unknown) => marketAnswer(() => market(engine).probe(track(event.sender))))
+  handle('market:installed', (event, engine?: unknown) => marketAnswer(() => market(engine).installed(track(event.sender))))
+  handle('market:plan', (event, repo: string, action: MarketplaceAction, plugin?: string, engine?: unknown) => marketAnswer(() => market(engine).plan(track(event.sender), repo, action, plugin)))
+  handle('market:confirm', (event, token: string, engine?: unknown) => marketAnswer(() => market(engine).confirm(track(event.sender), token)))
+  handle('market:cancel', (event, engine?: unknown) => { market(engine).cancel(event.sender.id) })
+  const memoryAnswer = async (run: () => unknown) => { try { if (!memoryOrganizer) throw Error('Memory organizer is still starting.'); return { ok: true, view: await run() } } catch (e) { return { ok: false, error: (e as Error).message } } }
+  handle('memory-workspace:read', () => memoryAnswer(() => memoryOrganizer!.read()))
+  handle('memory-workspace:act', (_event, action: MemoryAction) => memoryAnswer(() => memoryOrganizer!.act(action)))
+  handle('memory-workspace:run', () => memoryAnswer(() => memoryOrganizer!.run()))
   handle('settings:read', () => settings)
+  handle('automation:history', (_event, before?: string) => { if (!automation) throw Error('Automation is still starting.'); return automation.history(before) })
+  handle('automation:saved', (_event, id: string) => { if (!automation) throw Error('Automation is still starting.'); return automation.saved(id) })
+  handle('automation:read', () => { if (!automation) throw Error('Automation is still starting.'); return automation.view() })
+  handle('automation:update', (_event, input: Partial<AutomationPreferences>) => {
+    if (!automation) throw Error('Automation is still starting.')
+    const patch: Partial<AutomationPreferences> = {}
+    for (const key of ['autoKeep', 'autoReview', 'allowExternalReview', 'allowCloudInference'] as const) if (typeof input?.[key] === 'boolean') patch[key] = input[key]
+    if (typeof input?.reviewModel === 'string') patch.reviewModel = input.reviewModel
+    const wasCloud = automation.preferences().allowCloudInference
+    const result = automation.update(patch)
+    if (result.ok && wasCloud !== result.view.preferences.allowCloudInference) { workDispatchGeneration++; automation.stopWork(); mediaService?.cancelAll(); engine?.stop() }
+    return result
+  })
+  handle('automation:models', async () => {
+    try { if (!automation || !reviewer) throw Error('The reviewer is still starting.'); return { ok: true, models: await reviewer.models(automation.preferences()) } }
+    catch (error) { return { ok: false, models: [], error: (error as Error).message } }
+  })
+  handle('automation:review', async (_event, input: ReviewInput) => {
+    if (!automation) return { ok: false, error: 'The reviewer is still starting.' }
+    if (engine?.turnBusy()) return { ok: false, error: 'Wait for normal work to finish before reviewing it.' }
+    return automation.review(input)
+  })
+  handle('automation:cancel', async () => { await automation?.cancel(); return { ok: true } })
+
 
   handle(
     'settings:update',
@@ -254,6 +485,7 @@ function registerBridges(): void {
       // folder problem must never lose what somebody just typed into the other
       // pane of the same window.
       if (patch?.cloud && typeof patch.cloud === 'object') {
+        mediaService?.cancelAll()
         const cloud = settings.cloud
         settings = writeSettings(settingsFile, {
           ...settings,
@@ -265,11 +497,16 @@ function registerBridges(): void {
       }
       // What an agent may do. Sanitised on the way in — the window asks, the main
       // process decides — and the app's own settings file is the record.
-      if (patch?.permissions && typeof patch.permissions === 'object') {
-        settings = writeSettings(settingsFile, {
-          ...settings,
-          permissions: normalizePermissions(patch.permissions),
-        })
+      if (patch?.permissions !== undefined) {
+        const previousAccess = settings.permissions
+        let nextAccess: typeof previousAccess
+        try { nextAccess = applyPermissionPatch(previousAccess, patch.permissions) }
+        catch (error) { return { ok: false, error: (error as Error).message, settings } }
+        if (JSON.stringify(nextAccess) !== JSON.stringify(previousAccess)) {
+          settings = writeSettings(settingsFile, { ...settings, permissions: nextAccess })
+          workflows.cancel(); commandRunner.cancel(); void automation?.cancel(); mediaService?.cancelAll()
+          if (previousAccess.local !== settings.permissions.local || JSON.stringify(previousAccess.cloud) !== JSON.stringify(settings.permissions.cloud)) { workDispatchGeneration++; automation?.stopWork(); engine?.stop() }
+        }
       }
       // No vault path in the patch means the caller is not moving the vault, so
       // there is nothing to check and nothing to reconsider.
@@ -309,6 +546,7 @@ function registerBridges(): void {
   })
 
   handle('cloud:save-key', (_event, id: string, key: string) => {
+    void automation?.cancel(); mediaService?.cancelAll()
     const provider = providerById(String(id || ''))
     if (!provider || !keyStore) return { ok: false, error: 'That is not a provider this app knows.' }
     if (!String(key || '').trim()) return { ok: false, error: 'Paste a key first.' }
@@ -317,6 +555,7 @@ function registerBridges(): void {
   })
 
   handle('cloud:clear-key', (_event, id: string) => {
+    void automation?.cancel(); mediaService?.cancelAll()
     keyStore?.clear(String(id || ''))
     // A cleared key must not keep speaking — but only ITS engine: the app has
     // one engine process, and stopping it because some OTHER provider's key
@@ -342,6 +581,26 @@ function registerBridges(): void {
    * Settings > System: a port that is open is a fact the person should be able to
    * see, not something to find out from an extension that quietly stopped working.
    */
+  handle('extension:appearance', (_event, value: unknown) => {
+    const clean = normalizeExtensionAppearance(value)
+    if (!clean) return { ok: false }
+    extensionAppearance = clean
+    return { ok: true }
+  })
+  handle('extension:export', async (_event, destination: unknown) => {
+    if (destination !== 'downloads' && destination !== 'choose') return { ok: false, answer: 'Choose Downloads or a folder.' }
+    let parent = app.getPath('downloads')
+    if (destination === 'choose') {
+      const chosen = await dialog.showOpenDialog({ title: 'Where should the extension folder go?', properties: ['openDirectory', 'createDirectory'] })
+      if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, answer: 'Cancelled. No extension folder was created.' }
+      parent = chosen.filePaths[0]
+    }
+    const source = app.isPackaged ? join(process.resourcesPath, 'extension') : resolve(app.getAppPath(), '../../extension')
+    const target = join(parent, `OddBrain-extension-${Date.now()}-${randomUUID().slice(0,8)}`)
+    const result = exportExtension(source, target)
+    if (result.ok && result.path) shell.showItemInFolder(join(result.path, 'manifest.json'))
+    return result
+  })
   handle('extension:status', () => ({
     ok: true,
     listening: Boolean(extensionApi?.listening),
@@ -418,20 +677,16 @@ function registerBridges(): void {
     (_event, root: string, original: string, added: string, action: 'mine' | 'new' | 'both' | 'combine') => {
       try {
         if (typeof root !== 'string' || !root.trim()) return { ok: false, error: 'Give a real folder path.' }
+        if (canonicalStructureRoot(root) !== canonicalStructureRoot(vaultRoot())) return { ok: false, error: 'Only the selected vault can settle a structure conflict.' }
         if (action !== 'mine' && action !== 'new' && action !== 'both' && action !== 'combine') {
           return { ok: false, error: 'Unknown choice.' }
         }
-        const clean = (relative: string): string => {
-          if (typeof relative !== 'string' || /['\n\r]/.test(relative) || relative.includes('..')) {
-            throw new Error('Not a vault-relative path.')
-          }
-          return relative
-        }
-        const mine = clean(original)
-        const theirs = clean(added)
-        if (!theirs.includes(' (new)')) return { ok: false, error: 'That beside-copy was not added by the structure.' }
-        const mineFull = join(root, mine)
-        const theirsFull = join(root, theirs)
+        if (!validStructureRelative(original) || !validStructureRelative(added)) throw new Error('Not a vault-relative path.')
+        const mine = original, theirs = added
+        const scoped = createVaultFiles(root, () => new Date())
+        const mineFull = scoped.filePath(mine), theirsFull = scoped.filePath(theirs)
+        const plan = structurePlan(root)
+        if ('error' in plan || !plan.conflicts.some(conflict => conflict.original === mine && conflict.added === theirs)) return { ok: false, error: 'That pair is not a current structure conflict.' }
         if (!existsSync(mineFull) || !existsSync(theirsFull)) return { ok: false, error: 'One of the two files is gone.' }
         // The never-check list is functional, not prose: the default seed must
         // never overwrite the patterns the owner actually keeps.
@@ -439,10 +694,10 @@ function registerBridges(): void {
           return { ok: false, error: 'The privacy list is never replaced by the default seed. Keep yours, or combine.' }
         }
         const verdict = applyConflictAction(action, readFileSync(mineFull, 'utf8'), readFileSync(theirsFull, 'utf8'))
-        if (verdict.original !== null) writeFileSync(mineFull, verdict.original, { encoding: 'utf8' })
+        if (verdict.original !== null) scoped.writeAtomic(mine, verdict.original)
         if (verdict.deleteAdded) rmSync(theirsFull)
         // Settled is settled: the plan stops offering this file.
-        rememberSettled(mine)
+        rememberSettled(root, mine)
         if (resolve(root) === resolve(vaultRoot())) {
           try {
             const service = createVaultService({ vaultPath: vaultRoot() })
@@ -502,68 +757,161 @@ function registerBridges(): void {
   handle('engine:read', () => ({
     engine: settings.engine,
     running: engine?.running() === true,
-    history: [...engineHistory],
+    history: activeTranscript ? engineHistory.filter(event => event.transcriptId === activeTranscript?.transcriptId) : [...engineHistory],
+    active: activeTranscript, lastSequence: engineEventSequence, busy: engine?.turnBusy() === true,
   }))
 
   handle('engine:pick', (_event, id: string): { ok: boolean; answer: string } => {
-    const wanted = normalizeEngine({ id }).id
-    settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, id: wanted } })
+    if (id !== 'claude-code' && id !== 'agy') return { ok: false, answer: 'Unknown engine.' }
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Stop the active task or wait for it to finish before switching engines.' }
+    const wanted = id
+    settings = writeSettings(settingsFile, { ...settings, engine: selectEngine(settings.engine, wanted) })
     return { ok: true, answer: `engine set to ${wanted}` }
   })
 
-  handle(
-    'engine:send',
-    (_event, prompt: string, cwd: string, pictures: unknown = []): { ok: boolean; answer: string } => {
-      const text = typeof prompt === 'string' ? prompt.trim().slice(0, 20000) : ''
-      if (!text) return { ok: false, answer: 'Write what the engine should do first.' }
+  const sendNative = async (event: Electron.IpcMainInvokeEvent, prompt: string, cwd: string, pictures: unknown = [], conversation?: unknown): Promise<{ ok: boolean; answer: string }> => {
+      let context: ReturnType<typeof checkNativeConversation>
+      try { context = checkNativeConversation(conversation) } catch (error) { return { ok: false, answer: (error as Error).message } }
+      const text = typeof prompt === 'string' ? prompt : ''
+      if (text.length > 20000) return { ok: false, answer: 'The prompt exceeds 20,000 characters. Nothing was sent or shortened.' }
+      if (!text.trim()) return { ok: false, answer: 'Write what the engine should do first.' }
+      const commandRefusal = engineCommandRefusal(text)
+      if (commandRefusal) return { ok: false, answer: commandRefusal }
       // Pictures: only what the wire can carry, only a few, only small. A bad
       // list is refused with the reason, never silently dropped.
-      const images: Array<{ mime: string; data: string }> = []
-      if (Array.isArray(pictures)) {
-        for (const entry of pictures.slice(0, ENGINE_IMAGE_LIMIT)) {
-          const mime = (entry as Record<string, unknown>)?.mime
-          const data = (entry as Record<string, unknown>)?.data
-          if (typeof mime !== 'string' || typeof data !== 'string' || !ENGINE_IMAGE_MIMES.includes(mime as never)) {
-            return { ok: false, answer: 'One of the pictures is not a PNG, JPEG or WebP. Nothing was sent.' }
-          }
-          if (data.length > ENGINE_IMAGE_CHARS || !data) {
-            return { ok: false, answer: 'One of the pictures is larger than 2 MB. Nothing was sent.' }
-          }
-          images.push({ mime, data })
-        }
-      }
+      const checkedImages = engineImages(pictures ?? [])
+      if (!checkedImages.ok) return checkedImages
+      const images = checkedImages.images
+      if (settings.engine.id === 'agy' && images.length) return { ok: false, answer: AGY_PICTURES_ANSWER }
       if (!engine) return { ok: false, answer: 'The engine is still waking up, try again in a moment.' }
       // The working folder is the app's decision, never the window's: the
       // folder the owner picked in the engine bay, or the vault when none.
       // The renderer's value is deliberately not consulted (review finding).
       void cwd
-      deployRulesNow()
+      if (dispatchingWork || engine.turnBusy()) return { ok: false, answer: 'An engine is already working. Stop it first, or wait for it to finish.' }
+      dispatchingWork = true
+      const ownWork = ++nativeWork
+      permissionTickets.clear()
+      preparing = { owner: track(event.sender), controller: new AbortController() }
+      try {
+      const ownDispatch = workDispatchGeneration
+      const savedEngine = { ...settings.engine }, usedEngine = { ...savedEngine }
+      if (context?.expectedRoute && context.expectedRoute !== JSON.stringify(savedEngine)) throw Error('The selected engine or model changed while preparing this task. Nothing was sent; review the selection and retry.')
+      if (context) usedEngine.workspace = nativeContext.workspace(context, savedEngine.workspace || vaultRoot())
+      const policy = () => JSON.stringify([settings.permissions, automation?.preferences().allowCloudInference !== false])
+      const usedPolicy = policy()
+      const folderSubject = context?.projectId && !Object.hasOwn(context.overrides || {}, 'workspace') ? `project:${context.projectId}` : context?.chatId
+      if (context && folderSubject && resolve(usedEngine.workspace) !== resolve(savedEngine.workspace || vaultRoot()) && !nativeContext.workspaceGranted(folderSubject, usedEngine.workspace)) {
+        const approval = await dialog.showMessageBox({ type: 'question', title: 'Authorize the working folder', message: `Use ${usedEngine.workspace} for ${folderSubject.startsWith('project:') ? 'chats using this project’s default folder' : 'this chat'}?`, detail: 'This sets the working folder, not an OS sandbox. Existing native tool approval rules still apply; additional folder references grant no permissions. Cancel keeps the draft unsent.', buttons: ['Cancel', 'Use this folder'], defaultId: 0, cancelId: 0 })
+        if (approval.response !== 1 || ownDispatch !== workDispatchGeneration) return { ok: false, answer: 'Working folder not authorized. Nothing was sent.' }
+        nativeContext.grantWorkspace(folderSubject, usedEngine.workspace)
+      }
+      if (selectedEffort(savedEngine) !== 'default' && usedEngine.workspace !== savedEngine.workspace) return { ok: false, answer: 'This chat uses a different folder. Choose Engine default effort or inspect effort in that folder before sending.' }
+      memoryOrganizer?.cancel()
+      await automation?.beginWork(text, usedEngine)
+      if (ownDispatch !== workDispatchGeneration) { automation?.rejectWork(); return { ok: false, answer: 'The task was canceled before it started.' } }
+      const usedCommand = resolveEngineCommand(usedEngine.id)
+      // Saved effort is a request, not permanent proof about a changing CLI/account.
+      // Recheck before any task text is handed to the engine; no agent turn is used.
+      const effort = selectedEffort(usedEngine)
+      if (effort !== 'default') {
+        const checked = await checkEffortSelection(usedEngine, effort, effortTarget(usedEngine), current => capabilityInspector.inspect(track(event.sender), current, current.workspace || vaultRoot()))
+        if (!checked.ok) { automation?.rejectWork(); return { ok: false, answer: 'The requested effort could not be verified for this model. Refresh Reasoning effort or choose Engine default. No message was sent.' } }
+      }
+      const access = await inferenceAllowed(usedEngine, settings.permissions.local, automation?.preferences().allowCloudInference !== false)
+      if (!access.ok || usedPolicy !== policy() || usedCommand !== resolveEngineCommand(usedEngine.id) || ownDispatch !== workDispatchGeneration || JSON.stringify(savedEngine) !== JSON.stringify(settings.engine)) {
+        automation?.rejectWork(); return { ok: false, answer: access.answer || 'The task was canceled or its model changed before dispatch. Send again when ready.' }
+      }
+      automation?.retargetWork(usedEngine)
       // A provider brain rides the ENGINE: the key from Models goes into the
       // engine's own environment for this launch. The app itself never calls
       // the provider — and a missing key refuses honestly instead of falling
       // back to a different brain than the one that was chosen.
       let auth: { provider: 'anthropic'; apiKey: string } | undefined
-      if (settings.engine.cloudProvider === 'anthropic') {
+      if (usedEngine.cloudProvider === 'anthropic') {
+        if (!cloudEnabled(inferencePermissions(), 'anthropic', keyStore?.has('anthropic') === true)) { automation?.rejectWork(); return { ok: false, answer: 'Anthropic inference is not enabled in Agent access or has no key. Nothing was sent.' } }
         const key = keyStore?.get('anthropic') || ''
         if (!key) {
+          automation?.rejectWork()
           return { ok: false, answer: 'The Anthropic brain needs its key: add it in Settings > Models (it is held for this run). Nothing was sent.' }
         }
         auth = { provider: 'anthropic', apiKey: key }
       }
-      return engine.send(text, {
-        cwd: settings.engine.workspace || vaultRoot(),
-        settings: settings.engine,
+      const prepared = context ? await nativeContext.prepare(context, usedEngine.workspace || vaultRoot(), text,
+        sessionMemory.load(sessionKey(usedEngine.id, usedEngine.workspace || vaultRoot(), context.chatId)), preparing.controller.signal) : undefined
+      if (ownDispatch !== workDispatchGeneration || policy() !== usedPolicy || JSON.stringify(settings.engine) !== JSON.stringify(savedEngine) || usedCommand !== resolveEngineCommand(usedEngine.id)) throw Error('Task settings changed while reading context. Nothing was sent.')
+      if (preparing.controller.signal.aborted) throw Error('Task preparation canceled. Nothing was sent.')
+      if (auth && (keyStore?.get('anthropic') !== auth.apiKey || !cloudEnabled(inferencePermissions(), 'anthropic', keyStore?.has('anthropic') === true))) throw Error('Provider access changed while reading context. Nothing was sent.')
+      prepared?.validate()
+      const appInstructions = instructionBlock(usedEngine.id, usedEngine.model, effectiveRules(), settings.memoryFolder || '')
+      const dispatchedText = `OddBrain app instructions (not additional tool permissions):\n${appInstructions}\n\n${prepared?.prompt || text}`
+      if (dispatchedText.length > 100_000) throw Error('App instructions plus selected context exceed 100,000 characters. Nothing was shortened or sent.')
+      const receipt = prepared?.receipt || { projectId: null, revision: '', workspace: usedEngine.workspace || vaultRoot(), sources: [], historyMessages: 0, characters: 0 }
+      receipt.sources.unshift({ id: 'app-instructions', title: 'Saved app instructions', chars: appInstructions.length, digest: createHash('sha256').update(appInstructions).digest('hex'), coverage: 'Complete app-owned instruction block; not a permission grant' })
+      receipt.characters = dispatchedText.length
+      receipt.revision = createHash('sha256').update(JSON.stringify([receipt.revision, appInstructions])).digest('hex')
+      const artifactBefore = snapshotNativeArtifacts(usedEngine.workspace || vaultRoot())
+      const sent = dispatchRecordedTurn(turnArchive, { prompt: dispatchedText, userPrompt: text, chatId: context?.chatId, context: receipt, engine: usedEngine.id, model: usedEngine.model, workspace: usedEngine.workspace || vaultRoot(), pictures: images.length, images }, receive => engine!.send(dispatchedText, {
+        chatId: context?.chatId,
+        cwd: usedEngine.workspace || vaultRoot(),
+        settings: usedEngine,
         auth, images,
         checkpointDir: join(app.getPath('userData'), 'checkpoints'),
-        onEvent: (event: EngineEvent) => {
-          pushEngineEvent(event)
-          if (event.kind === 'done') void hookRunner.run('turn-done').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
-          if (event.kind === 'error') void hookRunner.run('turn-error').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
-          if (event.kind === 'permission') void hookRunner.run('permission').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
+        shouldCheckpoint: () => automation?.preferences().autoKeep !== false,
+        onEvent: output => {
+          if (output.kind === 'done') {
+            try {
+              const observed = collectNativeArtifacts(join(app.getPath('userData'), 'artifacts'), usedEngine.workspace || vaultRoot(), artifactBefore, context?.chatId)
+              for (const notice of observed.notices) receive({ kind: 'status', text: notice })
+              output = { ...output, ...(observed.links.length ? { artifacts: observed.links } : {}) }
+            } catch { receive({ kind: 'status', text: 'Artifact inspection could not finish. Original outputs remain in the working folder.' }) }
+          }
+          receive(output)
         },
+      }), () => engine?.stop(), (event: EngineEvent) => {
+        if (event.kind === 'permission') {
+          try { event = { ...event, requestId: permissionTickets.issue(event.requestId) } }
+          catch { engine?.stop(); event = { kind: 'error', text: 'The permission could not be bound to the active engine. Stop requested; no approval was sent.', chatId: context?.chatId } }
+        }
+        if (event.kind === 'done' || event.kind === 'error' || event.kind === 'closed') permissionTickets.clear()
+        automation?.ingest(event)
+        pushEngineEvent(event)
+        if (event.kind === 'done') void hookRunner.run('turn-done').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
+        if (event.kind === 'error') void hookRunner.run('turn-error').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
+        if (event.kind === 'permission') void hookRunner.run('permission').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
       })
-    },
-  )
+      if (sent.transcriptId) activeTranscript = { transcriptId: sent.transcriptId, chatId: context?.chatId, prompt: text }
+      if (!sent.ok) automation?.rejectWork()
+      return sent
+      } catch (error) { automation?.rejectWork(); return { ok: false, answer: (error as Error).message } } finally { preparing = undefined; dispatchingWork = false }
+    }
+  handle('queue:read', event => workQueue.view(track(event.sender)))
+  handle('queue:enqueue', (event, prompt: string, conversation?: unknown) => workQueue.enqueue(track(event.sender), prompt, checkNativeConversation(conversation)))
+  handle('queue:resume', (event, id: string, acknowledge?: boolean) => {
+    if (dispatchingWork || engine?.turnBusy()) throw Error('Wait for active work before resuming a saved task.')
+    return workQueue.resume(track(event.sender), id, acknowledge === true)
+  })
+  handle('queue:cancel', (event, id: string) => workQueue.cancel(track(event.sender), id))
+  handle('queue:hold', (event, id: string) => workQueue.block(id, 'The handoff response was not confirmed. Inspect transcripts before resuming.', event.sender.id))
+  handle('queue:history', (_event, before?: string) => workQueue.history(before))
+  handle('engine:send', async (event, prompt: string, cwd: string, pictures?: unknown, conversation?: unknown, queuedId?: string) => {
+    if (!queuedId) return sendNative(event, prompt, cwd, pictures, conversation)
+    let started = false
+    try {
+      if (dispatchingWork || engine?.turnBusy()) throw Error('Another task is active. Resume this saved task after it finishes.')
+      if (Array.isArray(pictures) && pictures.length) throw Error('The saved queue contains text, not image bytes. Send images directly.')
+      workQueue.start(track(event.sender), queuedId, prompt, checkNativeConversation(conversation)); started = true
+      const answer = await sendNative(event, prompt, cwd, pictures, conversation)
+      try { workQueue.finish(queuedId, answer) }
+      catch { return { ...answer, answer: answer.answer + ' Queue receipt could not be confirmed. Inspect transcripts before any retry.' } }
+      return answer
+    } catch (error) {
+      const answer = { ok: false, answer: (error as Error).message }
+      try { if (started) workQueue.finish(queuedId, answer); else workQueue.block(queuedId, answer.answer, event.sender.id) } catch { /* existing queue/turn records are retained */ }
+      return answer
+    }
+  })
+
 
   // Bringing a brain home: official-endpoint downloads into the app's own
   // engines folder, a run permission for staged installers, honest removal.
@@ -594,7 +942,10 @@ function registerBridges(): void {
 
   // The two "keep it running" switches, in their own file (see appFlags.ts).
   const appFlagsFile = (): string => join(app.getPath('userData'), 'app-flags.json')
-  handle('app:flags:get', () => loadAppFlags(appFlagsFile()))
+  handle('app:preview-html', () => readUiPreview(app.getAppPath(), process.resourcesPath, app.isPackaged))
+  handle('app:claim-launch', () => claimUiLaunch())
+  const confirmedFlags = () => ({ ...readAppFlagsStrict(appFlagsFile()), ...(['win32', 'darwin'].includes(process.platform) ? { loginItem: app.getLoginItemSettings().openAtLogin } : {}) })
+  handle('app:flags:get', confirmedFlags)
   // The machine's own name for this person, offered as a suggestion on first
   // run. The real machine lesson: the app asked for a name and detected
   // nothing, so the owner typed empty quotes and moved on. Spaces in the
@@ -662,7 +1013,7 @@ function registerBridges(): void {
     // staged copy must exist. (The always-loaded env applies when the runtime
     // next starts; a running one is never restarted under the person's feet.)
     if (clean.warmRuntime === true || clean.keepLoadedAlways === true) void warmStartRuntime()
-    return next
+    return confirmedFlags()
   })
 
   // The battle tally: a PRIVATE local ledger of what won for this person.
@@ -708,9 +1059,12 @@ function registerBridges(): void {
   const briefs = createCompactManager(join(app.getPath('userData'), 'handoffs'))
   handle('compact:save', (_event, input: { brief?: string; workspace?: string; at?: string }) => briefs.save(input ?? {}))
   handle('engine:fresh', (): { ok: boolean; answer: string } => {
+    if (commandRunner.running()) return { ok: false, answer: 'An app command is active. Stop it or wait for its result before resetting the engine session.' }
+    preparing?.controller.abort(); permissionTickets.clear()
+    workDispatchGeneration++; automation?.stopWork()
     if (!engine) return { ok: false, answer: 'The engine door is not open on this machine yet.' }
-    engine.fresh()
-    return { ok: true, answer: 'Session ended and its resume id forgotten. The next task starts fresh.' }
+    try { engine.fresh(); return { ok: true, answer: 'Stop requested and the saved resume ID forgotten. The next task starts fresh; inspect any in-flight tool activity before retrying.' } }
+    catch { return { ok: false, answer: 'The fresh-session request could not be confirmed. Retry Fresh session before sending; no automatic retry was made.' } }
   })
 
   // The repo map: the working folder's structure on one page — the folder the
@@ -760,19 +1114,35 @@ function registerBridges(): void {
   // the way back. Read from the folder the engine was handed at send time.
   handle('engine:checkpoints:list', async () => {
     try {
-      return { ok: true, checkpoints: await listCheckpoints(join(app.getPath('userData'), 'checkpoints')) }
+      return { ok: true, checkpoints: await listCheckpoints(join(app.getPath('userData'), 'checkpoints'), Number.MAX_SAFE_INTEGER) }
     } catch {
-      return { ok: true, checkpoints: [] }
+      return { ok: false, checkpoints: [], answer: 'The checkpoint index could not be read. Its original was not changed.' }
     }
   })
+  const checkpointGate = (sender: Electron.WebContents) => {
+    const owner = track(sender)
+    let gate = checkpointReviews.get(owner)
+    if (!gate) {
+      gate = createCheckpointReviewGate(join(app.getPath('userData'), 'checkpoints'), path => {
+        if (dispatchingWork || engine?.turnBusy()) throw Error('Stop active work before reviewing or restoring files.')
+        const root = resolve(engine?.currentTarget()?.workspace || settings.engine.workspace || vaultRoot()), target = resolve(path), within = relative(root, target)
+        if (!within || within === '..' || within.startsWith('../') || within.startsWith('..\\') || isAbsolute(within)) throw Error('Choose this file’s working folder before reviewing its restore.')
+        noLinkedPath(root); noLinkedPath(target)
+        return JSON.stringify([root, engine?.currentTarget(), settings.engine, settings.permissions, workDispatchGeneration])
+      })
+      checkpointReviews.set(owner, gate)
+    }
+    return gate
+  }
+  handle('engine:checkpoint:preview', (event, copy: string, original: string) => checkpointGate(event.sender).preview(copy, original))
+  handle('engine:checkpoint:decide', (event, token: string, decision: 'allow' | 'deny') => checkpointGate(event.sender).decide(token, decision))
+  handle('engine:checkpoint:inspect', (_event, copy: string) => inspectCheckpoint(join(app.getPath('userData'), 'checkpoints'), typeof copy === 'string' ? copy : ''))
   handle('engine:checkpoint:restore', (_event, copy: string, original: string): Promise<{ ok: boolean; answer: string }> =>
     restoreCheckpoint(join(app.getPath('userData'), 'checkpoints'), typeof copy === 'string' ? copy : '', typeof original === 'string' ? original : ''))
 
   handle('engine:answer', (_event, requestId: string, allow: boolean): { ok: boolean } => {
-    const session = engine?.current()
-    if (!session || typeof requestId !== 'string' || !requestId) return { ok: false }
-    session.answer(requestId, allow === true)
-    return { ok: true }
+    if (typeof requestId !== 'string' || typeof allow !== 'boolean') return { ok: false }
+    return { ok: permissionTickets.answer(requestId, allow) }
   })
 
   // The two folders skills deploy into: Claude Code reads its skills from
@@ -791,20 +1161,43 @@ function registerBridges(): void {
   // defaults inside the compiler — never an empty rule).
   const houseRulesFile = join(app.getPath('userData'), 'house-rules.json')
   const readHouseRules = (): Partial<HouseRules> => {
-    try {
-      return JSON.parse(readFileSync(houseRulesFile, 'utf8')) as Partial<HouseRules>
-    } catch {
-      return {}
-    }
+    const bytes = configBytes(houseRulesFile)
+    if (bytes === null) return {}
+    const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.entries(value).some(([key, text]) => !Object.hasOwn(DEFAULT_HOUSE_RULES, key) || typeof text !== 'string')) throw Error('Saved app instructions could not be read. Originals are unchanged.')
+    return value
   }
-  const deployRulesNow = (): void => {
-    try {
-      const home = process.env['USERPROFILE'] || process.env['HOME'] || ''
-      deployHouseRules(settings.engine.id, settings.engine.model, home, readHouseRules())
-    } catch {
-      // A failed rules deploy must never block the work itself.
-    }
+  const effectiveRules = (): HouseRules => {
+    const saved = readHouseRules()
+    return Object.fromEntries(Object.entries(DEFAULT_HOUSE_RULES).map(([key, fallback]) => [key, saved[key as keyof HouseRules]?.trim() ? saved[key as keyof HouseRules] : fallback])) as HouseRules
   }
+  const rulePreview = (sender: Electron.WebContents, id: EngineId, projectId?: string) => {
+    if (id !== 'claude-code' && id !== 'agy') throw Error('Choose a known engine.')
+    const owner = track(sender), project = projectId ? nativeContext.projects().find(p => p.id === projectId) : undefined
+    if (projectId && (!project || !project.folder)) throw Error('Choose a working folder for this project before writing a native rule file. Shared chat instructions do not require one.')
+    const target = project ? join(project.folder, id === 'agy' ? 'GEMINI.md' : 'CLAUDE.md') : nativeHouseRulesFile(id, app.getPath('home'))
+    const snapshot = JSON.stringify([settings.engine, settings.permissions, project || null, readHouseRules()])
+    const authorize = () => {
+      if (dispatchingWork || engine?.turnBusy()) throw Error('Wait for active work before changing native rules.')
+      const currentProject = projectId ? nativeContext.projects().find(p => p.id === projectId) : undefined
+      if (snapshot !== JSON.stringify([settings.engine, settings.permissions, currentProject || null, readHouseRules()])) throw Error('Rule text or engine settings changed. Review again.')
+      if (project && resolve(project.folder) !== resolve(engine?.currentTarget()?.workspace || settings.engine.workspace || vaultRoot())) throw Error('Use Work here for this project before reviewing its native rule file.')
+      noLinkedPath(target)
+    }
+    const text = project ? [project.instruction, project.goals.length ? '## Project goals\n' + project.goals.map(goal => '- ' + goal).join('\n') : ''].filter(Boolean).join('\n\n') : instructionBlock(id, settings.engine.id === id ? settings.engine.model : '', effectiveRules(), settings.memoryFolder || '')
+    const service = createProjectRuleReview(authorize), review = service.preview(target, text)
+    let owned = ruleReviews.get(owner)
+    if (!owned) { owned = new Map(); ruleReviews.set(owner, owned) }
+    for (const [key, entry] of owned) if (entry.expiresAt <= Date.now()) owned.delete(key)
+    if (owned.size >= 20) { service.decide(review.token, 'deny'); throw Error('Too many pending rule reviews. Deny old reviews or wait for expiry.') }
+    owned.set(review.token, { service, expiresAt: review.expiresAt }); return review
+  }
+  handle('rules:preview-project', (event, projectId: string, id: EngineId) => rulePreview(event.sender, id, projectId))
+  handle('rules:preview-global', (event, id: EngineId) => rulePreview(event.sender, id))
+  handle('rules:decide', (event, token: string, decision: 'allow' | 'deny') => {
+    const owned = ruleReviews.get(event.sender.id), review = owned?.get(token); owned?.delete(token)
+    return review ? review.service.decide(token, decision) : { ok: false, answer: 'Unknown rule review in this window.' }
+  })
 
   // The vault folder, opened in the file manager. The vault root only —
   // this door is a convenience for the owner, not a general launcher.
@@ -835,8 +1228,7 @@ function registerBridges(): void {
   // CSP travels with the html.
   handle('artifact:popout', (_event, payload: { html: string; title: string }) => {
     const win = new BrowserWindow({
-      width: 760,
-      height: 860,
+      ...fitWindow(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea, { width: 760, height: 860, minWidth: 480, minHeight: 320 }),
       title: payload.title || 'OddBrain — artifact',
       autoHideMenuBar: true,
       backgroundColor: '#141417',
@@ -872,7 +1264,13 @@ function registerBridges(): void {
     }
   })
 
+  handle('engine:restart', () => restartIdleConnection(engine, dispatchingWork))
+
   handle('engine:stop', () => {
+    workflows.cancel(); commandRunner.cancel()
+    preparing?.controller.abort(); permissionTickets.clear()
+    workDispatchGeneration++
+    automation?.stopWork()
     engine?.stop()
     return { ok: true }
   })
@@ -888,10 +1286,15 @@ function registerBridges(): void {
       for (const window of BrowserWindow.getAllWindows()) window.webContents.send('engine:pull-event', tick)
     }
     try {
+      // The brain door is reached the same way everywhere: model discovery
+      // already refuses redirects on this exact URL, so pull and delete do
+      // too — following one would send a model request somewhere the
+      // settings never named.
       const answer = await fetch(`${door}/api/pull`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: name }),
+        redirect: 'error',
       })
       if (!answer.ok || !answer.body) {
         const why = `the brain door answered ${answer.status}`
@@ -942,20 +1345,36 @@ function registerBridges(): void {
     }
   })
 
+  // One page the owner names, fetched once and kept as a source. This writes
+  // no summary and asks no model; a private or non-https destination is refused
+  // by the shared rule and again after resolving the host.
+  handle('research:fetch', async (event, url: unknown): Promise<ResearchReply> => {
+    const service = createVaultService({ vaultPath: vaultRoot() })
+    if (!service.available()) return { ok: false, answer: 'No vault is selected, so a fetched page has nowhere to go. Choose the vault in Settings first.' }
+    const controller = new AbortController()
+    researchJobs.set(event.sender.id, controller)
+    try {
+      return await fetchWebSource(url, { capture: data => service.capture(data) }, controller.signal)
+    } finally {
+      if (researchJobs.get(event.sender.id) === controller) researchJobs.delete(event.sender.id)
+    }
+  })
+  handle('research:cancel', event => { researchJobs.get(event.sender.id)?.abort() })
+
   // Capture the current conversation as a capsule: the digest lands in the
   // vault's Captures/ folder — the same shape the browser extension queues
   // into, so both paths feed one memory.
   handle('vault:capture-chat', (_event, payload: { title: string; markdown: string }): { ok: boolean; answer: string } => {
     const title = typeof payload?.title === 'string' ? payload.title.trim().slice(0, 80) : ''
     const markdown = typeof payload?.markdown === 'string' ? payload.markdown : ''
-    if (!title || !markdown || markdown.length > 100_000) {
-      return { ok: false, answer: 'That is not a conversation this app will capture.' }
+    if (!title || !markdown || Buffer.byteLength(markdown, 'utf8') > 8_000_000) {
+      return { ok: false, answer: 'The capture is empty or exceeds 8 MB. Export the full chat as Markdown instead; nothing was shortened.' }
     }
     const service = createVaultService({ vaultPath: vaultRoot() })
     if (!service.available()) return { ok: false, answer: 'No vault to capture into.' }
     try {
       const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-      const name = `${stampFor(new Date())}${slug ? `-${slug}` : ''}.md`
+      const name = `${stampFor(new Date())}-${randomUUID()}${slug ? `-${slug}` : ''}.md`
       service.files().write(`Captures/${name}`, markdown)
       return { ok: true, answer: `Captures/${name}` }
     } catch (error) {
@@ -996,7 +1415,47 @@ function registerBridges(): void {
     return { ok: true, answer: `${result.count} files copied to ${result.destination}` }
   })
 
+  handle('vault:backup', async (_event, operation: unknown) => {
+    if (operation !== 'create' && operation !== 'restore') return { ok: false, answer: 'Choose backup or restore.' }
+    let source = vaultRoot()
+    if (operation === 'restore') {
+      const selected = await dialog.showOpenDialog({ title: 'Choose an OddBrain backup folder', properties: ['openDirectory'] })
+      if (selected.canceled || !selected.filePaths[0]) return { ok: false, answer: 'Restore cancelled. Nothing changed.' }
+      source = selected.filePaths[0]
+    }
+    const parent = await dialog.showOpenDialog({ title: operation === 'create' ? 'Choose where to keep the backup' : 'Choose where to create the restored vault', properties: ['openDirectory', 'createDirectory'] })
+    if (parent.canceled || !parent.filePaths[0]) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+    const destination = join(parent.filePaths[0], `OddBrain-${operation === 'create' ? 'backup' : 'restored'}-${Date.now()}-${randomUUID().slice(0,8)}`)
+    const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', operation === 'create' ? 'Create backup' : 'Restore to new folder'], defaultId: 0, cancelId: 0, message: operation === 'create' ? 'Copy the entire vault, including sensitive conversations and attachments?' : 'Restore into a new folder? Your current vault will not be replaced.', detail: `Source: ${source}\nDestination: ${destination}\nVault files only. Installed models, application credentials and browser queues are not included. Keep the backup somewhere private.` })
+    if (confirmation.response !== 1) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+    // Native dialog paths, never arbitrary renderer-provided source/destination paths.
+    const result = operation === 'create' ? backupVault(source, destination) : restoreVault(source, destination)
+    if (!result.ok) return result
+    return { ok: true, answer: `${result.count} files copied and verified at ${result.destination}. ${operation === 'restore' ? 'Your current vault is unchanged. Choose this restored folder in Settings → Memory & files → Vault when ready.' : 'Keep another copy on a different drive. This is not an automatic backup schedule.'}` }
+  })
+
   // The skills the owner's engine already has — the import list.
+  const skillRoots = (id: EngineId): SkillRoot[] => {
+    if (id !== 'claude-code' && id !== 'agy') throw Error('Choose a known engine.')
+    const home = app.getPath('home')
+    return id === 'claude-code' ? [{ engine: id, path: join(home, '.claude', 'skills') }]
+      : [{ engine: id, path: skillTargets().agySkillsDir }, { engine: id, path: join(home, '.gemini', 'config', 'skills') }, { engine: id, path: join(home, '.gemini', 'antigravity-cli', 'skills') }]
+  }
+  const skillReview = (sender: Electron.WebContents) => {
+    const owner = track(sender); let service = skillReviews.get(owner)
+    if (!service) {
+      service = createSkillAuthoring(id => skillRoots(id)[0].path, () => {
+        if (dispatchingWork || engine?.turnBusy()) throw Error('Wait for active work to finish before changing installed skills.')
+        return JSON.stringify([settings.engine, settings.permissions, workDispatchGeneration])
+      }); skillReviews.set(owner, service)
+    }
+    return service
+  }
+  handle('skills:inventory', (_event, id: EngineId) => readInstalledSkills(skillRoots(id)))
+  handle('skills:inspect-installed', (_event, id: EngineId, skill: string) => inspectInstalledSkill(skill, skillRoots(id)))
+  handle('skills:preview-create', (event, draft: SkillDraft) => skillReview(event.sender).preview(draft))
+  handle('skills:decide-create', (event, token: string, decision: 'allow' | 'deny') => skillReview(event.sender).decide(token, decision))
+
   handle('skills:scan', () => {
     const home = process.env['USERPROFILE'] || process.env['HOME'] || ''
     return scanClaudeSkills(join(home, '.claude', 'skills'))
@@ -1006,42 +1465,56 @@ function registerBridges(): void {
   // the catalog (this door fetches nothing else), the file comes from
   // anthropics/skills, and it lands in every engine's own folder through the
   // same deploy everything else uses.
-  handle('skills:install-catalog', async (_event, name: string): Promise<{ ok: boolean; answer: string; written?: string[] }> => {
-    const result = await installCatalogSkill(String(name ?? ''), skillTargets())
-    if (!result.ok) return { ok: false, answer: result.answer }
-    return { ok: true, answer: `${result.skill.name} installed to ${result.written.length} engine folders`, written: result.written }
-  })
-
-  // Deploy the app's vault into every engine's own folder. The renderer sends
-  // its vault; the main process validates every name before anything lands.
-  handle('skills:deploy', (_event, skills: VaultSkill[]): { ok: boolean; written: string[] } => {
-    const written: string[] = []
-    for (const skill of Array.isArray(skills) ? skills.slice(0, 200) : []) {
-      if (!skill || typeof skill.name !== 'string' || !skill.name.trim()) continue
-      const clean: VaultSkill = {
-        name: String(skill.name),
-        description: typeof skill.description === 'string' ? skill.description : '',
-        body: typeof skill.body === 'string' ? skill.body.slice(0, 20_000) : '',
-      }
-      if (!clean.body) continue
-      written.push(...deploySkill(clean, skillTargets()))
+  handle('skills:install-catalog', () => ({ ok: false, answer: 'Inspect the pinned package and allow its installation first. Nothing was installed.' }))
+  const catalogReview = (sender: Electron.WebContents) => {
+    const owner = track(sender); let service = catalogReviews.get(owner)
+    if (!service) {
+      service = createCatalogInstallReview(() => {
+        if (dispatchingWork || engine?.turnBusy()) throw Error('Wait for active work before installing skills.')
+        const targets = skillTargets()
+        return { targets, authority: JSON.stringify([targets, settings.engine, settings.permissions, workDispatchGeneration]) }
+      }); catalogReviews.set(owner, service)
     }
-    return { ok: true, written }
-  })
+    return service
+  }
+  handle('skills:plan-catalog', (event, name: string) => catalogReview(event.sender).plan(name))
+  handle('skills:decide-catalog', (event, token: string, decision: 'allow' | 'deny') => catalogReview(event.sender).decide(token, decision))
+  handle('skills:cancel-catalog', event => catalogReviews.get(event.sender.id)?.cancel())
+  // Retire the unexposed legacy writer rather than leave a review bypass.
+  handle('skills:deploy', () => ({ ok: false, written: [], answer: 'Use a reviewed skill-file change or package installation. Nothing was written.' }))
 
   // The one MCP list, stored once, deployed to every engine's config.
-  handle('mcp:read', () => {
+  //
+  // A list that cannot be parsed is reported, not shown as empty: an empty
+  // screen next to a Save button is how a hand-edited list would disappear.
+  handle('mcp:read', (): { servers: McpServer[]; problem: string } => {
     try {
-      return JSON.parse(readFileSync(mcpFile, 'utf8')) as { servers: McpServer[] }
-    } catch {
-      return { servers: [] as McpServer[] }
+      const bytes = configBytes(mcpFile)
+      return bytes === null ? { servers: [], problem: '' } : readMcpList(bytes.toString('utf8'))
+    } catch (e) {
+      return { servers: [], problem: `The saved tool-server list could not be read: ${(e as Error).message}` }
     }
   })
 
-  handle('mcp:write', (_event, payload: { servers: McpServer[] }): { ok: boolean; written: string[] } => {
-    const servers = Array.isArray(payload?.servers) ? payload.servers.slice(0, 100) : []
-    writeFileSync(mcpFile, JSON.stringify({ servers }), 'utf8')
-    return { ok: true, written: deployMcp(servers, settings.engine.workspace || vaultRoot()) }
+  handle('mcp:write', () => ({ ok: false, written: [], answer: 'Review the exact connector file changes before allowing them. No files changed.' }))
+  const mcpReview = (sender: Electron.WebContents) => {
+    const owner = track(sender); let service = mcpReviews.get(owner)
+    if (!service) {
+      service = createMcpReview(() => {
+        if (dispatchingWork || engine?.turnBusy()) throw Error('Wait for active work before changing connector files.')
+        const workspace = settings.engine.workspace || vaultRoot()
+        return { workspace, centralFile: mcpFile, authority: JSON.stringify([workspace, settings.engine, settings.permissions, workDispatchGeneration]) }
+      }); mcpReviews.set(owner, service)
+    }
+    return service
+  }
+  handle('mcp:preview', (event, servers: unknown) => mcpReview(event.sender).preview(servers))
+  handle('mcp:decide', (event, token: string, decision: 'allow' | 'deny') => mcpReview(event.sender).decide(token, decision))
+  handle('mcp:inventory', (_event, id: EngineId) => {
+    const home = app.getPath('home'), workspace = settings.engine.workspace || vaultRoot()
+    if (id === 'claude-code') return inspectNativeMcp([{ scope: 'Claude user configuration', path: join(home, '.claude.json') }, { scope: 'Claude workspace configuration', path: join(workspace, '.mcp.json') }])
+    if (id === 'agy') return inspectNativeMcp([{ scope: 'agy global configuration', path: join(home, '.gemini', 'config', 'mcp_config.json') }, { scope: 'agy workspace configuration', path: join(workspace, '.agents', 'mcp_config.json') }])
+    throw Error('Choose a known engine.')
   })
 
   // Mods (Phase 1): a pack is a folder with a manifest. Install = the person
@@ -1092,7 +1565,7 @@ function registerBridges(): void {
     if (kind === 'url' || /^https?:\/\//.test(clean)) {
       try {
         const parsed = new URL(clean)
-        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+        if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) return null
         return { kind: 'url', url: parsed.toString() }
       } catch {
         return null
@@ -1206,20 +1679,11 @@ function registerBridges(): void {
   // The resume ids themselves stay in engine-sessions.json; this file only
   // carries the owner's links and history.
   const boardFile = (): string => join(app.getPath('userData'), 'sessions-board.json')
-  handle('sessions:board-read', (): unknown => {
-    try {
-      return JSON.parse(readFileSync(boardFile(), 'utf8'))
-    } catch {
-      return { continuing: {}, done: [] }
-    }
-  })
-  handle('sessions:board-write', (_event, value: unknown): { ok: boolean } => {
-    try {
-      writeFileSync(boardFile(), JSON.stringify(normalizeBoard(value), null, 2), 'utf8')
-      return { ok: true }
-    } catch {
-      return { ok: false }
-    }
+  const sessionBoard = createSessionBoardStore(boardFile())
+  handle('sessions:board-read', () => sessionBoard.read())
+  handle('sessions:board-write', (_event, value: unknown, expected: unknown): { ok: boolean } => {
+    try { sessionBoard.save(value, expected); return { ok: true } }
+    catch { return { ok: false } }
   })
   handle('sessions:pick-files', async (): Promise<string[]> => {
     const picked = await dialog.showOpenDialog({
@@ -1232,19 +1696,22 @@ function registerBridges(): void {
   // Projects: the owner's named homes for related work. Stored once,
   // validated on the way in and the way out; a damaged file means "no
   // projects yet", never a failed launch.
-  const projectsFile = join(app.getPath('userData'), 'projects.json')
-  handle('projects:read', (): Project[] => {
-    try {
-      return normalizeProjects(JSON.parse(readFileSync(projectsFile, 'utf8')))
-    } catch {
-      return []
-    }
+  handle('projects:read', () => nativeContext.projects())
+  handle('projects:write', (_event, projects: unknown, expected?: unknown) => { if (!Array.isArray(expected)) throw Error('Read projects before saving; no current data was replaced.'); return { ok: true, projects: nativeContext.write(projects, expected) } })
+  handle('projects:attach', async (_event, projectId: string) => {
+    if (!nativeContext.projects().some(p => p.id === projectId)) throw Error('Choose an existing project first.')
+    const picked = await dialog.showOpenDialog({ title: 'Choose project references. Selected text may be sent with this project’s chats only after you enable it.', properties: ['openFile', 'multiSelections'] })
+    return picked.canceled ? [] : nativeContext.attach(projectId, picked.filePaths)
   })
-
-  handle('projects:write', (_event, projects: unknown): { ok: boolean; projects: Project[] } => {
-    const clean = normalizeProjects(projects)
-    writeFileSync(projectsFile, JSON.stringify(clean, null, 2), 'utf8')
-    return { ok: true, projects: clean }
+  handle('engine:context-target', (_event, value: unknown) => {
+    const input = checkNativeConversation(value)
+    if (!input) throw Error('Choose a chat first.')
+    const workspace = nativeContext.workspace(input, settings.engine.workspace || vaultRoot())
+    return { workspace, route: JSON.stringify(settings.engine), resume: !!sessionMemory.load(sessionKey(settings.engine.id, workspace, input.chatId)) }
+  })
+  handle('engine:chat-sessions', (_event, chatId: string) => {
+    checkNativeConversation({ chatId })
+    return sessionMemory.list().filter(row => row.chatId === chatId).map(({ key: _key, ...row }) => row)
   })
 
   handle('projects:new', (_event, name: string): Project => newProject(String(name ?? '')))
@@ -1253,45 +1720,35 @@ function registerBridges(): void {
   // window never chooses a working folder behind the app's back; this door
   // IS the owner's explicit choice, same as the picker.
   handle('engine:workspace-set', (_event, folder: string): { ok: boolean; answer: string } => {
-    const clean = typeof folder === 'string' ? folder.trim().slice(0, 4096) : ''
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Stop active work before changing its working folder.' }
+    if (typeof folder !== 'string' || folder.length > 4096) return { ok: false, answer: 'Choose a valid working folder. Nothing was changed.' }
+    const clean = folder.trim()
     // Empty is allowed and means "back to the vault" — a real choice, not a mistake.
     if (clean === '') {
       settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, workspace: '' } })
       return { ok: true, answer: '' }
     }
-    if (/[\n\r]/.test(clean) || /^https?:\/\//.test(clean)) {
+    if (!isAbsolute(clean) || /[\n\r]/.test(clean) || /^https?:\/\//.test(clean)) {
       return { ok: false, answer: 'That is not a folder this app will work in.' }
     }
-    if (!existsSync(clean)) return { ok: false, answer: 'That folder does not exist on this machine.' }
+    try { if (!statSync(clean).isDirectory()) return { ok: false, answer: 'Choose a directory, not a file.' } }
+    catch { return { ok: false, answer: 'That folder could not be read on this machine.' } }
     settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, workspace: clean } })
     return { ok: true, answer: clean }
   })
 
   // The engine sessions, per workspace: the threads a fresh launch will
   // continue. Read-only for the screen, with an explicit forget.
-  const sessionsFile = (): string => join(app.getPath('userData'), 'engine-sessions.json')
-  handle('engine:sessions', (): Array<{ workspace: string; sessionId: string }> => {
+  handle('engine:sessions', () => sessionMemory.list(settings.engine.id).filter(row => !row.chatId))
+  handle('engine:sessions-forget', (_event, workspace: string): { ok: boolean; answer?: string } => {
+    if (typeof workspace !== 'string' || !workspace || /[\x00-\x1f]/.test(workspace)) return { ok: false, answer: 'Invalid saved workspace.' }
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Stop the active task before forgetting a session.' }
     try {
-      const data = JSON.parse(readFileSync(sessionsFile(), 'utf8')) as Record<string, string>
-      return Object.entries(data)
-        .filter(([, id]) => typeof id === 'string' && id.length > 3)
-        .map(([workspace, sessionId]) => ({ workspace, sessionId: String(sessionId).slice(0, 64) }))
-        .slice(0, 20)
-    } catch {
-      return []
-    }
-  })
-
-  handle('engine:sessions-forget', (_event, workspace: string): { ok: boolean } => {
-    try {
-      const file = sessionsFile()
-      const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>
-      delete data[String(workspace ?? '')]
-      writeFileSync(file, JSON.stringify(data), 'utf8')
+      const target = engine?.currentTarget()
+      if (target?.engine === settings.engine.id && target.workspace === workspace && !target.chatId) engine!.fresh()
+      else sessionMemory.save(`${settings.engine.id}::${workspace}`, '')
       return { ok: true }
-    } catch {
-      return { ok: true }
-    }
+    } catch { return { ok: false, answer: 'Removal of the saved resume ID could not be confirmed. Refresh and inspect the saved record before retrying.' } }
   })
 
   // Open a folder in the file manager. Guarded to folders that exist and are
@@ -1320,6 +1777,26 @@ function registerBridges(): void {
 
   // The rulebook itself: read for the edit screen, write to persist and
   // deploy immediately to every engine's global file.
+  handle('prompt:layers', (_event, input?: { historyMessages?: number }): import('../shared/lib/promptLayers').PromptLayerFacts => {
+    const home = app.getPath('home')
+    // Digests of what is on disk right now, never a remembered copy.
+    const houseRules = (['claude-code', 'agy'] as const).map(engineId => {
+      const file = nativeHouseRulesFile(engineId, home)
+      let bytes: Buffer | null = null
+      try { bytes = configBytes(file) } catch { bytes = null }
+      return { engine: engineId, file, present: bytes !== null, digest: bytes ? createHash('sha256').update(bytes).digest('hex') : '' }
+    })
+    const target = engine?.currentTarget()
+    const messages = input?.historyMessages
+    return {
+      engine: target?.engine === 'agy' ? 'agy' : 'claude-code',
+      workspace: target?.workspace || settings.engine.workspace || '',
+      houseRules,
+      vaultSelected: Boolean(vaultRoot()),
+      // The chat itself lives in the renderer; it reports the count it holds.
+      historyMessages: Number.isSafeInteger(messages) && (messages as number) >= 0 ? (messages as number) : 0,
+    }
+  })
   handle('houserules:read', () => {
     const rules = readHouseRules()
     return {
@@ -1340,60 +1817,35 @@ function registerBridges(): void {
       const value = rules?.[key]
       if (typeof value === 'string' && value.trim()) clean[key] = value
     }
-    writeFileSync(houseRulesFile, JSON.stringify(clean), 'utf8')
-    const home = process.env['USERPROFILE'] || process.env['HOME'] || ''
-    const written = deployHouseRules(settings.engine.id, settings.engine.model, home, clean)
-    return { ok: true, written }
+    readHouseRules() // damaged originals are not replaced with defaults
+    const previous = configBytes(houseRulesFile); if (previous) preserveConfig(houseRulesFile, previous)
+    commitConfigs([{ path: houseRulesFile, text: JSON.stringify(clean) }])
+    return { ok: true, written: [] }
   })
 
   // The brains the engine can actually use, straight from the brain door —
   // the same list Claude Code itself would choose from. Real data only: what
   // Ollama reports, with cloud brains flagged because their work leaves the
   // machine and the label must say so.
-  handle('engine:models', async (): Promise<{ ok: boolean; models: EngineModelEntry[]; error?: string }> => {
+  handle('engine:capabilities', async (event): Promise<EngineCapabilityReport> => capabilityInspector.inspect(track(event.sender), { ...settings.engine }, settings.engine.workspace || vaultRoot()))
+  handle('engine:models', async (event): Promise<{ ok: boolean; models: EngineModelEntry[]; error?: string }> => {
     // Each engine is served by its OWN source: Claude Code reads its brains
     // from the owner's door; agy answers only to Google. Never a pickable lie.
     if (settings.engine.id !== 'claude-code') {
       const known = await detectEngine(settings.engine.id as EngineId)
-      const answer = await agyModelSource(known.found).models()
+      const answer = await agyModelSource(known.found, () => capabilityInspector.inspect(track(event.sender), { ...settings.engine }, settings.engine.workspace || vaultRoot())).models()
       return answer
     }
-    const door = settings.engine.baseUrl || 'http://localhost:11434'
-    try {
-      const answer = await fetch(`${door}/api/tags`, { signal: AbortSignal.timeout(4000) })
-      if (!answer.ok) return { ok: false, models: [], error: `the brain door answered ${answer.status}` }
-      const data = (await answer.json()) as { models?: Array<{ name?: string; size?: number; remote_model?: string }> }
-      const models: EngineModelEntry[] = (data.models ?? [])
-        .filter((m): m is { name: string; size?: number; remote_model?: string } => typeof m.name === 'string')
-        .map((m) => {
-          const cloud = Boolean(m.remote_model) || m.name.endsWith(':cloud')
-          return {
-            name: m.name,
-            cloud,
-            sizeGB: cloud || typeof m.size !== 'number' ? null : Math.round((m.size / 1e9) * 10) / 10,
-          }
-        })
-      // A key saved in Models adds that provider's real brains to this list —
-      // read from the provider's own door, never invented. The app itself
-      // still calls no provider: picking one of these routes the ENGINE there
-      // with the key on the next send.
-      if (cloud && keyStore?.has('anthropic') && cloudEnabled(settings.permissions, 'anthropic', true)) {
-        try {
-          const providerBrains = await cloud.listModels('anthropic')
-          for (const brain of providerBrains.slice(0, 50)) {
-            if (brain && typeof brain.name === 'string' && !models.some((m) => m.name === brain.name)) {
-              models.push({ name: brain.name, cloud: true, sizeGB: null, provider: 'anthropic' })
-            }
-          }
-        } catch {
-          // The provider door not answering costs nothing: the local list
-          // stands, and the Test button in Models says what went wrong.
-        }
-      }
-      return { ok: true, models }
-    } catch {
-      return { ok: false, models: [], error: 'the brain door (Ollama) is not answering, start Ollama, then refresh' }
-    }
+    return discoverClaudeModels({
+      baseUrl: settings.engine.baseUrl || 'http://localhost:11434',
+      nativeModels: async () => {
+        const report = await capabilityInspector.inspect(track(event.sender), { ...settings.engine }, settings.engine.workspace || vaultRoot())
+        if (!report.ok) throw Error('Native model inspection unavailable.')
+        return report.models
+      },
+      providerModels: cloud && keyStore?.has('anthropic') && cloudEnabled(inferencePermissions(), 'anthropic', true)
+        ? () => cloud!.listModels('anthropic') : undefined,
+    })
   })
 
   // The throttle: how much the engine may do before asking. The app offers
@@ -1402,6 +1854,7 @@ function registerBridges(): void {
     const mode: ApprovalMode = APPROVAL_MODES.includes(approval as ApprovalMode)
       ? (approval as ApprovalMode)
       : 'ask'
+    if (approval === 'plan') { workflows.cancel(); commandRunner.cancel() }
     settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, approval: mode } })
     return { ok: true, answer: mode }
   })
@@ -1419,31 +1872,76 @@ function registerBridges(): void {
   // The memory home is the ENGINE's own working folder — the same root it
   // spawns in — so what the pane lists is always what the engine wrote,
   // even when the workspace is not the vault.
-  const memoryFiles = createMemoryManager(() => settings.engine.workspace || vaultRoot())
+  const memoryFiles = createMemoryManager(() => settings.engine.workspace || vaultRoot(), () => settings.memoryFolder || '')
   handle('memory:list', () => memoryFiles.list())
-  handle('memory:remove', (_event, name: string) => memoryFiles.remove(typeof name === 'string' ? name : ''))
+  handle('memory:remove', (_event, name: string, expectedFolder?: string) => memoryFiles.remove(typeof name === 'string' ? name : '', typeof expectedFolder === 'string' ? expectedFolder : undefined))
 
-  handle('engine:thinking', (_event, thinking: string): { ok: boolean; answer: string } => {
-    const mode = thinking === 'extended' ? 'extended' : 'default'
-    settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, thinking: mode } })
-    return { ok: true, answer: mode === 'extended' ? 'Extended thinking: the engine gets its own big budget.' : 'Default thinking.' }
+  handle('memory:choose-folder', async () => {
+    const chosen = await dialog.showOpenDialog({ title: 'Choose a dedicated memory folder (existing notes are not moved)', properties: ['openDirectory'] })
+    if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, canceled: true, answer: '' }
+    const problem = folderProblem(chosen.filePaths[0]); if (problem) return { ok: false, answer: problem }
+    try {
+      const folder = realpathSync(chosen.filePaths[0])
+      if (/[\r\n]/.test(folder) || folder.length > 4096) return { ok: false, answer: 'That folder name cannot be used in an engine instruction.' }
+      settings = writeSettings(settingsFile, { ...settings, memoryFolder: folder })
+      return { ok: true, answer: 'Memory folder selected. Existing notes were not moved.', folder }
+    } catch { return { ok: false, answer: 'The memory folder could not be saved.' } }
+  })
+  handle('memory:default-folder', () => {
+    const next = { ...settings }; delete next.memoryFolder
+    try { settings = writeSettings(settingsFile, next); return { ok: true, answer: 'Memory uses the working-folder default again.' } }
+    catch { return { ok: false, answer: 'The memory preference could not be saved.' } }
   })
 
-  handle('engine:model', (_event, model: string, provider?: string): { ok: boolean; answer: string } => {
-    const clean = normalizeEngine({ ...settings.engine, model, cloudProvider: provider === 'anthropic' ? 'anthropic' : '' })
+
+  handle('engine:thinking', async (event, thinking: string, expectedTarget: string): Promise<{ ok: boolean; answer: string }> => {
+    const original = settings.engine
+    const snapshot = { ...original }
+    const target = effortTarget(snapshot)
+    const command = resolveEngineCommand(snapshot.id)
+    const checked = await checkEffortSelection(snapshot, thinking, expectedTarget, current => capabilityInspector.inspect(track(event.sender), current, current.workspace || vaultRoot()))
+    if (!checked.ok) return checked
+    if (command !== resolveEngineCommand(snapshot.id) || original !== settings.engine || target !== effortTarget(settings.engine)) return { ok: false, answer: 'Engine settings changed during the check. Nothing was changed.' }
+    settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, thinking: thinking as ThinkingMode, effortTarget: target } })
+    return checked
+  })
+
+  handle('engine:model', (_event, model: string, provider?: string, expectedEngine?: string): { ok: boolean; answer: string } => {
+    if ((expectedEngine && expectedEngine !== settings.engine.id) || (provider === 'anthropic' && settings.engine.id !== 'claude-code')) return { ok: false, answer: 'The engine changed. Choose a model from the current engine’s list.' }
+    const typed = typeof model === 'string' ? model.trim() : ''
+    if (typed && !isValidModelName(typed)) {
+      return { ok: false, answer: 'Model names use letters, digits, dots, colons, @, / and dashes only; nothing was changed.' }
+    }
+    const clean = normalizeEngine({ ...settings.engine, model: typed, cloudProvider: provider === 'anthropic' || provider === 'native' ? provider : '', thinking: 'default', effortTarget: undefined })
     settings = writeSettings(settingsFile, { ...settings, engine: clean })
     return { ok: true, answer: clean.cloudProvider ? `brain set to ${clean.model} via ${clean.cloudProvider}` : `brain set to ${clean.model}` }
   })
 
+  // Is the engine actually signed in? The CLI answers for itself; agy does not.
+  handle('engine:auth-status', (_event, id?: string): Promise<unknown> =>
+    readAuthStatus(id === 'agy' ? 'agy' : 'claude-code'),
+  )
+
+  // Open the CLI's own login in a terminal. The app starts the CLI; it never
+  // receives the credentials and never runs an OAuth flow in its own window.
+  handle('engine:open-login', () => openLogin())
+
+  // Which Ollama is answering, and whether it can serve Claude Code's door.
+  handle('engine:ollama-version', (): Promise<unknown> =>
+    readOllamaVersion({ baseUrl: settings.engine.baseUrl || 'http://127.0.0.1:11434' }),
+  )
+
   // "Open a folder" — the engine's workplace, chosen once and remembered.
   handle('engine:pick-workspace', async (): Promise<{ ok: boolean; answer: string }> => {
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Stop active work before changing its working folder.' }
     const answer = await dialog.showOpenDialog({
       title: 'Where should the engine work?',
       properties: ['openDirectory', 'createDirectory'],
     })
     if (answer.canceled || !answer.filePaths[0]) {
-      return { ok: false, answer: 'No folder chosen, the vault stays the workplace.' }
+      return { ok: false, answer: 'No folder chosen. The working folder was not changed.' }
     }
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Work started while the picker was open. The folder was not changed.' }
     const workspace = answer.filePaths[0]
     settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, workspace } })
     // The agy skills copy follows the workspace; refresh so a brand-new
@@ -1519,7 +2017,7 @@ let downloadManager: ReturnType<typeof createDownloadManager> | null = null
 async function warmStartRuntime(): Promise<void> {
   try {
     if (!downloadManager) return
-    const status = downloadManager.ollamaStatus()
+    const status = await downloadManager.ollamaStatus()
     if (status && typeof status === 'object' && 'running' in status && (status as { running?: boolean }).running) return
     // The always-loaded switch is a RUNTIME property: Ollama's own env sets
     // the default hold forever, so every brain the engine drives stays warm.
@@ -1539,10 +2037,7 @@ function createQuickWindow(): void {
   }
   const icon = windowIcon()
   quickWindow = new BrowserWindow({
-    width: 440,
-    height: 620,
-    minWidth: 360,
-    minHeight: 420,
+    ...fitWindow(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea, { width: 440, height: 620, minWidth: 360, minHeight: 420 }),
     title: 'OddBrain — quick ask',
     autoHideMenuBar: true,
     ...(icon ? { icon } : {}),
@@ -1579,6 +2074,7 @@ function applyQuickShortcut(): void {
 }
 
 
+let extensionAppearance: ExtensionAppearance | null = null
 let extensionApi: ExtensionApi | null = null
 let settings: AppSettings = { ...EMPTY_SETTINGS }
 let settingsFile = ''
@@ -1586,6 +2082,12 @@ let keyStore: KeyStore | null = null
 let cloud: CloudClient | null = null
 /** The engine plug and the last events it produced, for windows opened mid-turn. */
 let engine: EngineSocket | null = null
+let automation: AutomationService | null = null
+let reviewer: ReturnType<typeof createTextReviewer> | null = null
+let memoryOrganizer: ReturnType<typeof createMemoryOrganizer> | null = null
+let foregroundApiRequests = 0
+let dispatchingWork = false
+let workDispatchGeneration = 0
 const engineHistory: EngineEvent[] = []
 
 /**
@@ -1610,10 +2112,7 @@ function windowIcon(): string | undefined {
 function createWindow(): BrowserWindow {
   const icon = windowIcon()
   const window = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 940,
-    minHeight: 620,
+    ...fitWindow(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea),
     show: false,
     ...(icon ? { icon } : {}),
     // The window paints this before the renderer draws, so there is never a white flash.
@@ -1716,7 +2215,15 @@ function runSmoke(window: BrowserWindow): void {
         } catch (probeError) {
           scrollLine = `SCROLL FAILED ${(probeError as Error).message}`
         }
-        const image = await window.webContents.capturePage()
+        // A loaded Linux runner can hand back an unpainted frame; ask for two
+        // frames and retry once within a bound. A window that is really blank
+        // still fails, and the console gate above is unchanged.
+        let image = await window.webContents.capturePage()
+        if (image.isEmpty()) {
+          await window.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))', true).catch(() => {})
+          await new Promise(resolve => setTimeout(resolve, 750))
+          image = await window.webContents.capturePage()
+        }
         if (smokeOut) writeFileSync(smokeOut, image.toPNG())
         const bounds = window.getBounds()
         const title = window.getTitle()
@@ -1792,7 +2299,6 @@ if (!gotLock) {
         { label: 'Today', accelerator: 'CmdOrCtrl+3', click: () => sendToWindow('menu:view:today') },
         { label: 'Projects', accelerator: 'CmdOrCtrl+4', click: () => sendToWindow('menu:view:projects') },
         { label: 'Vault', accelerator: 'CmdOrCtrl+5', click: () => sendToWindow('menu:view:vault') },
-        { label: 'Code', accelerator: 'CmdOrCtrl+6', click: () => sendToWindow('menu:view:code') },
         { label: 'Brain', accelerator: 'CmdOrCtrl+7', click: () => sendToWindow('menu:view:brain') },
       ],
     },
@@ -1824,6 +2330,17 @@ if (!gotLock) {
 })
 
 app.whenReady().then(async () => {
+    // Only a main-frame, explicitly initiated dictation session may use the mic.
+    session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) => {
+      if (!contents || !urlIsOurs(contents.getURL()) || !details.isMainFrame) return false
+      if (permission === 'media') return details.mediaType === 'audio' && mediaService?.canRecord(contents.id) === true
+      return permission === 'clipboard-sanitized-write'
+    })
+    session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+      const own = urlIsOurs(contents.getURL()) && details.isMainFrame && urlIsOurs(details.requestingUrl)
+      if (permission === 'media') callback(!!own && 'mediaTypes' in details && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'audio' && mediaService?.canRecord(contents.id) === true)
+      else callback(!!own && permission === 'clipboard-sanitized-write')
+    })
     Menu.setApplicationMenu(menu)
     console.log(`[menu] application menu set: ${Menu.getApplicationMenu()?.items.length ?? 0} top items`)
     const rendererDir = process.env['ELECTRON_RENDERER_URL']
@@ -1837,37 +2354,7 @@ app.whenReady().then(async () => {
     // immediately (drives and tests use this door).
     applyQuickShortcut()
     if (process.argv.includes('--quick')) createQuickWindow()
-    engine = createEngineSocket({
-      // Engine sessions, remembered per workspace so a conversation survives
-      // an app restart (the engine's own --resume). A damaged file means
-      // "nothing to resume", never a failed launch.
-      load: (cwd) => {
-        try {
-          const file = join(app.getPath('userData'), 'engine-sessions.json')
-          const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>
-          return typeof data[cwd] === 'string' ? data[cwd] : ''
-        } catch {
-          return ''
-        }
-      },
-      save: (cwd, sessionId) => {
-        try {
-          const file = join(app.getPath('userData'), 'engine-sessions.json')
-          let data: Record<string, string> = {}
-          try {
-            data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>
-          } catch {
-            data = {}
-          }
-          data[cwd] = sessionId
-          // Keep the map small: the twenty most recent workplaces are enough.
-          const entries = Object.entries(data).slice(-20)
-          writeFileSync(file, JSON.stringify(Object.fromEntries(entries)), 'utf8')
-        } catch {
-          // A failed save costs only the resume; the work itself is unaffected.
-        }
-      },
-    })
+    engine = createEngineSocket(createSessionMemory(join(app.getPath('userData'), 'engine-sessions.json')))
     registerBridges()
     // The keep-it-running flags, honored every boot — HERE, after the bridges
     // registered, because the warm runtime starts through the download
@@ -1912,9 +2399,24 @@ app.whenReady().then(async () => {
       keys: keyStore,
       config: () => ({ custom: settings.cloud }),
       // Read fresh on every call, so a switch in Settings takes effect at once.
-      permissions: () => settings.permissions,
+      permissions: () => inferencePermissions(),
       env: process.env,
     })
+    const reviewCloud = createCloudClient({ keys: keyStore, config: () => ({ custom: settings.cloud }), permissions: () => inferencePermissions(), env: process.env,
+      fetchImpl: (input, init) => fetch(input, { ...init, redirect: 'error' }) })
+    reviewer = createTextReviewer({ permissions: () => inferencePermissions(), cloudAllowed: () => automation?.preferences().allowCloudInference !== false, cloud: () => reviewCloud, engine: () => settings.engine })
+    automation = createAutomationService({ file: join(app.getPath('userData'), 'automation.json'), engine: () => settings.engine,
+      runText: (task, preferences, signal) => { memoryOrganizer?.cancel(); return reviewer!.run(task, preferences, signal) },
+      onChanged: (view: AutomationView) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('automation:changed', view) } })
+    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) try { window.webContents.send('automation:changed', automation.view()) } catch {}
+    app.on('before-quit', () => { void automation?.dispose() })
+    memoryOrganizer = createMemoryOrganizer({
+      store: () => createMemoryWorkspace(createVaultService({ vaultPath: vaultRoot() }).files()),
+      busy: () => dispatchingWork || !!engine?.turnBusy() || foregroundApiRequests > 0 || !!automation?.view().current,
+      configuration: () => JSON.stringify({ engine: settings.engine, permissions: inferencePermissions(), cloud: automation?.preferences().allowCloudInference, custom: settings.cloud, keyProviders: keyStore?.ids() }),
+      run: (system, prompt, preferences, signal) => reviewer!.organize(system, prompt, preferences, signal),
+    })
+    app.on('before-quit', () => memoryOrganizer?.dispose())
     const enabled = keyStore.ids().length
     console.log(
       `[cloud] keys ${keyStore.encryption === 'os' ? 'sealed by this machine' : 'held for this run only'}; ` +
@@ -1933,7 +2435,7 @@ app.whenReady().then(async () => {
       // The API is handed the cloud client, so a chat whose model names a
       // provider streams from there — through the same address, as the same
       // records, with no second path for the interface to know about.
-      api = await startLocalApi({ port: API_PORT, rendererDir, vault, cloud: cloud || undefined })
+      api = await startLocalApi({ port: API_PORT, rendererDir, vault, cloud: cloud || undefined, onInferenceActivity: busy => { foregroundApiRequests = Math.max(0, foregroundApiRequests + (busy ? 1 : -1)); if (busy) memoryOrganizer?.cancel() } })
       if (api.port !== API_PORT) {
         console.log(`[api] port ${API_PORT} was busy; listening on ${api.port} instead.`)
       }
@@ -1964,6 +2466,7 @@ app.whenReady().then(async () => {
     }
     extensionApi = await startExtensionApi({
       port: extensionPortWanted(),
+      appearance: () => extensionAppearance,
       vault,
       mayCapture: () => settings.permissions.browserCapture,
       pairToken,
@@ -1992,6 +2495,10 @@ app.whenReady().then(async () => {
   })
 
   app.on('before-quit', () => {
+    capabilityInspector.cancelAll()
+    mediaService?.cancelAll()
+    marketplaceService?.cancelAll()
+    agyMarketplaceService?.cancelAll()
     void api?.close()
     void extensionApi?.close()
   })
@@ -2000,3 +2507,6 @@ app.whenReady().then(async () => {
     if (process.platform !== 'darwin') app.quit()
   })
 }
+
+// Module scope: registration/window recreation cannot reset the launch ticket.
+const claimUiLaunch = createLaunchGate()

@@ -30,7 +30,7 @@ const VIRTUAL_HEIGHT = 440
 /** An SVG on its own is a drawing, not a page; centre it on a plain sheet. */
 function documentFor(content: string, type: ArtifactKind): string {
   if (type !== 'svg') return content
-  return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;height:100%;display:grid;place-items:center;background:#ffffff}svg{max-width:92%;max-height:92%}</style></head><body>${content}</body></html>`
+  return `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;width:100%;height:100%;background:#ffffff}body{display:grid;place-items:center}svg{display:block;width:92%;height:92%;max-width:100%;max-height:100%}</style></head><body>${content}</body></html>`
 }
 
 export default function ArtifactThumb({ id, type }: { id: string; type: ArtifactKind }) {

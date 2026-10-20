@@ -1,3 +1,4 @@
+import { sampleEnabled, sampleVaultReply } from './sampleWorkspace'
 import type { Capsule } from '../types'
 import { apiJson } from './ollama'
 
@@ -6,9 +7,10 @@ import { apiJson } from './ollama'
 export type VaultReply = Record<string, any>
 
 export const vaultGet = (path: string, signal?: AbortSignal): Promise<VaultReply> =>
-  apiJson<VaultReply>(`/api/vault${path}`, { signal })
+  sampleEnabled() ? (signal?.aborted ? Promise.reject(new DOMException('Aborted', 'AbortError')) : Promise.resolve(sampleVaultReply(path))) : apiJson<VaultReply>(`/api/vault${path}`, { signal })
 
 export async function vaultPost(path: string, payload: unknown): Promise<VaultReply> {
+  if (sampleEnabled()) throw new Error('This write is not simulated. No real vault was changed.')
   const data = await apiJson<VaultReply>(`/api/vault${path}`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
   })

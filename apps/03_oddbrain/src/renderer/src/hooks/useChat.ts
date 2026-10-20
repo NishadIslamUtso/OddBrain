@@ -1,3 +1,4 @@
+import { branchChat } from '@shared/lib/chatContext'
 import { useRef, useState } from 'react'
 import type {
   Artifact,
@@ -425,26 +426,9 @@ export default function useChat({
   ): string | null {
     const source = chatsRef.current.find(chat => chat.id === chatId)
     if (!source) return null
-    const index = source.messages.findIndex(message => message.id === messageId)
-    if (index === -1) return null
-    const kept = source.messages
-      .slice(0, includeMessage ? index + 1 : index)
-      .map(message => ({
-        ...message,
-        // Status belongs to the old run; a branch is a clean transcript.
-        status: message.status === 'error' ? undefined : message.status,
-        error: undefined,
-      }))
-    const chat: Chat = {
-      id: newId(),
-      title: `${source.title.replace(/ \(branch(?: \d+)?\)$/, '')} (branch${
-        source.branches ? ` ${source.branches + 1}` : ''
-      })`,
-      date: 'Today',
-      projectId: source.projectId || null,
-      messages: kept,
-      branchedFrom: { chatId, messageId, at: new Date().toISOString() },
-    }
+    let chat: Chat
+    try { chat = branchChat(source, messageId, newId, includeMessage) }
+    catch (error) { notify((error as Error).message); return null }
     setChats(previous => [
       { ...chat, branches: undefined },
       ...previous.map(item =>
@@ -470,6 +454,7 @@ export default function useChat({
     }
     const chat = chatsRef.current.find(entry => entry.id === currentChat)
     if (!chat) return false
+    if (chat.messages.some(message => message.status === 'streaming')) { notify('Finish or stop the stored streaming reply before revising this chat.'); return false }
     const index = chat.messages.findIndex(message => message.id === assistantMessageId)
     if (index === -1) return false
     const before = chat.messages.slice(0, index)
@@ -479,6 +464,8 @@ export default function useChat({
       return false
     }
 
+    const original = branchChat(chat, chat.messages[chat.messages.length - 1].id, newId)
+    original.title = `${chat.title} (before regeneration)`
     const controller = new AbortController()
     jobRef.current = { controller, chatId: chat.id }
     setBusyChatId(chat.id)
@@ -493,7 +480,7 @@ export default function useChat({
       regenerated: true,
     }
     const next: Chat = { ...chat, messages: [...before, assistant] }
-    setChats(previous => previous.map(item => (item.id === chat.id ? next : item)))
+    setChats(previous => [original, ...previous.map(item => (item.id === chat.id ? next : item))])
     setLive({ chatId: chat.id, messageId: assistant.id, artifacts: [] })
     void run({
       chat: next,
@@ -529,6 +516,7 @@ export default function useChat({
     }
     const chat = chatsRef.current.find(entry => entry.id === currentChat)
     if (!chat) return false
+    if (chat.messages.some(message => message.status === 'streaming')) { notify('Finish or stop the stored streaming reply before revising this chat.'); return false }
     const index = chat.messages.findIndex(message => message.id === userMessageId)
     if (index === -1) return false
     // Keep the edit where it was and drop the old answer, which no longer
@@ -539,6 +527,8 @@ export default function useChat({
       content: text,
       editedAt: new Date().toISOString(),
     }
+    const original = branchChat(chat, chat.messages[chat.messages.length - 1].id, newId)
+    original.title = `${chat.title} (before edit)`
     const controller = new AbortController()
     jobRef.current = { controller, chatId: chat.id }
     setBusyChatId(chat.id)
@@ -553,7 +543,7 @@ export default function useChat({
       regenerated: true,
     }
     const next: Chat = { ...chat, messages: [...before, edited, assistant] }
-    setChats(previous => previous.map(item => (item.id === chat.id ? next : item)))
+    setChats(previous => [original, ...previous.map(item => (item.id === chat.id ? next : item))])
     setLive({ chatId: chat.id, messageId: assistant.id, artifacts: [] })
     void run({
       chat: next,

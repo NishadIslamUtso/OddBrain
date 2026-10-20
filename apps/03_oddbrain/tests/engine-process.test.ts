@@ -151,7 +151,7 @@ test('a deliberate stop is quiet; a real crash still says why', () => {
   crashed.stderr.emit('data', Buffer.from('boom: the brain refused'))
   crashed.emit('close', 1)
   const error = its.events.find((event) => event.kind === 'error')
-  assert.match(error && 'text' in error ? error.text : '', /boom/)
+  assert.match(error && 'text' in error ? error.text : '', /exit 1/); assert.ok(!JSON.stringify(its.events).includes('boom'), 'raw stderr is not exposed')
 })
 
 test('a dead pipe does not crash a send', () => {

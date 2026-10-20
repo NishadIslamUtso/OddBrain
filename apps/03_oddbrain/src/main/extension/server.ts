@@ -1,5 +1,6 @@
+import { normalizeExtensionAppearance, type ExtensionAppearance } from '../../shared/lib/extensionAppearance'
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http'
-import { randomBytes, timingSafeEqual } from 'node:crypto'
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto'
 import { BODY_LIMIT, readBody } from '../api/body'
 import { handleVaultRequest } from '../vault/routes'
 import type { VaultService } from '../vault/service'
@@ -16,7 +17,7 @@ import type { VaultService } from '../vault/service'
  * answers the capture side of the vault and nothing else:
  *
  *   - no chat and no model routes, so an extension can never spend a saved key
- *   - no settings, so it cannot change how the app is configured
+ *   - read-only appearance tokens, never general settings or configuration writes
  *   - no export, so it cannot ask for the whole vault in one response
  *   - JSON writes only, same 20 MB ceiling as the app, loopback only
  *
@@ -48,6 +49,7 @@ export const DEFAULT_EXTENSION_PORT = 8765
 export const EXTENSION_ROUTES = new Map<string, string[]>([
   ['/', ['GET']],
   ['/health', ['GET']],
+  ['/appearance', ['GET']],
   ['/status', ['GET']],
   ['/context', ['GET']],
   ['/capsules', ['GET']],
@@ -56,6 +58,7 @@ export const EXTENSION_ROUTES = new Map<string, string[]>([
   ['/links', ['GET']],
   ['/blacklist', ['GET', 'POST']],
   ['/capture', ['POST']],
+  ['/conversation-sync', ['POST']],
 ])
 
 export type ExtensionApi = {
@@ -121,7 +124,7 @@ function cors(origin: string): Record<string, string> {
   return {
     'Access-Control-Allow-Origin': origin,
     'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-    'Access-Control-Allow-Headers': 'content-type',
+    'Access-Control-Allow-Headers': 'content-type, x-oddbrain-pair',
     'Access-Control-Max-Age': '600',
     Vary: 'Origin',
   }
@@ -140,6 +143,7 @@ export function startExtensionApi(options: {
    * a caller that has not been told about permissions (a test) is not silently
    * blocked, and the app always passes the real answer.
    */
+  appearance?: () => ExtensionAppearance | null
   mayCapture?: () => boolean
   /**
    * The per-install pairing secret. Absent means one is generated for this
@@ -153,6 +157,66 @@ export function startExtensionApi(options: {
   const service = options.vault
   const mayCapture = (): boolean => (options.mayCapture ? options.mayCapture() : true)
   let pairToken = options.pairToken ?? randomBytes(24).toString('hex')
+  const upgradeToken = pairToken
+
+  /**
+   * The identity that binds a browser's waiting captures to this vault.
+   *
+   * Deliberately stable: it is the vault's own random identity plus where the
+   * vault lives. It does NOT include the pairing token or the port, because a
+   * person may rotate the token (a security action the app offers) or restart
+   * the app on another port; neither changes the vault, and neither may orphan
+   * bytes already queued in a browser. The token still authenticates every
+   * request — this value only answers "which vault was this capture made for?".
+   *
+   * It never throws. A read-only or damaged vault must not take the whole
+   * extension surface down: `/health` still has to answer with the reason.
+   */
+  function captureIdentity(): { target: string | null; problem: string; legacy?: string[] } {
+    if (!service.available()) return { target: null, problem: '' }
+    let files: ReturnType<typeof service.files>
+    try { files = service.files() } catch { return { target: null, problem: 'The vault folder cannot be read. Waiting captures are held until it is available.' } }
+    const path = '.oddbrain/capture-destination'
+    try {
+      files.writeOnce(path, randomBytes(32).toString('hex'))
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException).code || ''
+      return {
+        target: null,
+        problem: `The vault folder could not store a capture identity${code ? ` (${code})` : ''}. Recoverable browser capture is off until the folder can be written to; nothing was queued.`,
+      }
+    }
+    let identity = ''
+    try {
+      identity = files.readHead(path, 128).trim()
+    } catch {
+      return {
+        target: null,
+        problem: 'The vault capture identity could not be read. Restore .oddbrain/capture-destination from a backup; waiting browser captures are held, not sent.',
+      }
+    }
+    if (!/^[a-f0-9]{64}$/.test(identity)) {
+      return {
+        target: null,
+        problem: 'The vault capture identity is damaged (.oddbrain/capture-destination is not a 64-character identity). Restore it from a backup; waiting browser captures are held, not sent.',
+      }
+    }
+    const target = createHash('sha256').update(service.root + '\n' + identity).digest('hex')
+    // Preserve the old token-bound address before any token rotation. Only a
+    // hash is stored, never the token. The filename binds it to this exact
+    // root+vault identity: moving/restoring a vault cannot adopt another queue.
+    const migration = `.oddbrain/capture-legacy-${target}`
+    try {
+      files.writeOnce(migration, createHash('sha256').update(upgradeToken + '\n' + service.root + '\n' + identity).digest('hex'))
+      const legacy = files.readHead(migration, 128).trim()
+      if (!/^[a-f0-9]{64}$/.test(legacy)) throw Error('Invalid upgrade address')
+      return { target, legacy: [legacy], problem: '' }
+    } catch {
+      return { target: null, problem: 'Capture upgrade information could not be saved or read. Restore the vault capture identity files or make the folder writable. Waiting captures are held, not sent.' }
+    }
+  }
+
+  captureIdentity() // Persist the legacy address before the UI can rotate pairing.
 
   const server = createServer((request, response) => {
     void handle(request, response).catch(error => {
@@ -240,7 +304,7 @@ export function startExtensionApi(options: {
         {
           ok: false,
           error:
-            'This extension is not paired with OddBrain yet. Open OddBrain, choose Settings > Plugins > Agent access, copy the pairing token, and paste it into the extension popup (or send it as the x-oddbrain-pair header).',
+            'This extension is not paired with OddBrain yet. Open OddBrain, choose Settings > Apps & extensions > Agent access, copy the pairing token, and paste it into the extension popup (or send it as the x-oddbrain-pair header).',
         },
         decision.allow
       )
@@ -250,6 +314,7 @@ export function startExtensionApi(options: {
     // The app's own identity, and the one route the extension uses to decide
     // whether the app is there at all. Deliberately cheap: no counting files.
     if (route === '/' || route === '/health') {
+      const capture = captureIdentity()
       send(
         response,
         200,
@@ -258,15 +323,27 @@ export function startExtensionApi(options: {
           app: 'OddBrain',
           port,
           vault: service.root,
+          capture_target: capture.target,
+          capture_legacy_targets: capture.legacy || [],
+          // Empty when capture identity works; a sentence when it does not, so
+          // the popup can say which of the two is wrong instead of blaming an
+          // out-of-date app.
+          capture_problem: capture.problem,
           available: service.available(),
           // So the extension can say "the app has captures switched off" instead
           // of retrying a request that will keep being refused.
           captures: mayCapture(),
           timezone: 'Asia/Dhaka',
-          message: 'The browser extension posts captures here. Nothing else is served on this port.',
+          message: 'Paired browser capture, context, site exclusions and read-only appearance.',
         },
         decision.allow
       )
+      return
+    }
+
+    // A paired, read-only visual snapshot. No general settings endpoint.
+    if (route === '/appearance') {
+      send(response, 200, { ok: true, appearance: normalizeExtensionAppearance(options.appearance?.()) }, decision.allow)
       return
     }
 
@@ -301,7 +378,7 @@ export function startExtensionApi(options: {
     // The one permission this port acts on. Reading the never-check list is still
     // allowed while captures are off: the list is what keeps a site private, and
     // the popup has to be able to show it.
-    if (route === '/capture' && !mayCapture()) {
+    if (['/capture', '/conversation-sync'].includes(route) && !mayCapture()) {
       send(
         response,
         403,
@@ -316,6 +393,19 @@ export function startExtensionApi(options: {
       return
     }
 
+    // New clients bind every replay to the original vault. Old unqueued clients
+    // remain compatible; a supplied identity is always enforced before writing.
+    if (route === '/conversation-sync' && body && typeof body === 'object' && 'capture_target' in body) {
+      const capture = captureIdentity()
+      if (!capture.target) {
+        send(response, 503, { ok: false, code: 'capture-unavailable', error: capture.problem || 'This vault cannot accept a recoverable capture right now. Nothing was written; the capture stays in the browser.' }, decision.allow)
+        return
+      }
+      if (body.capture_target !== capture.target && !capture.legacy?.includes(String(body.capture_target))) {
+        send(response, 409, { ok: false, code: 'destination-changed', error: 'This capture belongs to a different vault. Reopen its original vault or discard it from the browser outbox.' }, decision.allow)
+        return
+      }
+    }
     const reply = handleVaultRequest(service, {
       route,
       method: request.method || 'GET',
@@ -328,6 +418,18 @@ export function startExtensionApi(options: {
   let live: { port: number } = { port: wanted }
   const currentPort = (): number => live.port
 
+  /**
+   * The returned `pairToken` must be the token in force now, not the one that
+   * happened to exist when the server started. Rotation is an offered action,
+   * and a reader that keeps the old value would send a token the port refuses.
+   */
+  function withLiveToken(answer: Omit<ExtensionApi, 'pairToken'>): ExtensionApi {
+    return Object.defineProperty(answer, 'pairToken', {
+      enumerable: true,
+      get: () => pairToken,
+    }) as ExtensionApi
+  }
+
   return new Promise<ExtensionApi>(resolve => {
     server.once('error', (error: NodeJS.ErrnoException) => {
       const reason =
@@ -335,15 +437,14 @@ export function startExtensionApi(options: {
           ? `Port ${wanted} is already in use by something else, so the browser extension cannot reach this app right now.`
           : `The extension port could not be opened (${error.message}).`
       console.log(`[extension] ${reason}`)
-      resolve({
+      resolve(withLiveToken({
         port: wanted,
         url: `http://${host}:${wanted}`,
-        pairToken,
         listening: false,
         error: reason,
         close: async () => {},
         setPairToken: (next: string) => { pairToken = next },
-      })
+      }))
     })
     // Loopback only, like everything else in this app. This port is part of the
     // app, not part of the network.
@@ -351,15 +452,14 @@ export function startExtensionApi(options: {
       const address = server.address()
       const port = typeof address === 'object' && address ? address.port : wanted
       live = { port }
-      resolve({
+      resolve(withLiveToken({
         port,
         url: `http://${host}:${port}`,
-        pairToken,
         listening: true,
         error: '',
         close: () => new Promise<void>(done => server.close(() => done())),
         setPairToken: (next: string) => { pairToken = next },
-      })
+      }))
     })
   })
 }

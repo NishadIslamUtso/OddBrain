@@ -1,3 +1,5 @@
+import { sampleEnabled } from '@shared/lib/sampleWorkspace'
+import { Mascot } from '../motion/Mascot'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Check,
@@ -15,6 +17,9 @@ import type { ArtifactSummary } from '../../../main/artifacts/store'
 import { bridge } from '@/platform/bridge'
 import { createZip, downloadBytes, slugify, staticSiteEntries } from '@shared/lib/zip'
 import useDismiss from '@/hooks/useDismiss'
+import usePersistentState from '../hooks/usePersistentState'
+import type { TrashItem } from '../../../main/artifacts/store'
+import { trapDialogFocus } from '../ui/focus'
 import ArtifactThumb from './ArtifactThumb'
 
 /**
@@ -31,6 +36,11 @@ import ArtifactThumb from './ArtifactThumb'
 export type LibraryAnswer = { ok: boolean; error?: string; movedTo?: string; canceled?: boolean }
 
 type Props = {
+  onLibraryChanged?: () => void
+  onQueryChange?: (query: string) => void
+  onAskChange?: (title: string, source: string) => void
+  focusId?: string
+  focusVersion?: number
   items: ArtifactSummary[]
   loading: boolean
   error: string
@@ -77,28 +87,36 @@ export default function ArtifactsView({
   onImport,
   onOpenInChat,
   note = '',
+  focusId = '',
+  focusVersion,
+  onLibraryChanged,
+  onQueryChange,
+  onAskChange,
 }: Props) {
-  const [selectedId, setSelectedId] = useState('')
+  const [selectedId, setSelectedId] = useState(focusId)
+  useEffect(() => { if (focusId) { setSelectedId(focusId); setVersion(focusVersion ?? null); setTypeFilter('all'); onQueryChange?.('') } }, [focusId, focusVersion])
   const [version, setVersion] = useState<number | null>(null)
   const [shown, setShown] = useState<Shown>({ id: '', version: 0, content: '', error: '' })
   const [said, setSaid] = useState('')
   const [menuFor, setMenuFor] = useState('')
+  const [typeFilter, setTypeFilter] = usePersistentState<'all' | 'html' | 'svg'>('oddbrain.artifactFilter', 'all', value => value === 'html' || value === 'svg' ? value : 'all')
+  const [sort, setSort] = usePersistentState<'recent' | 'name'>('oddbrain.artifactSort', 'recent', value => value === 'name' ? 'name' : 'recent')
+  const [trash, setTrash] = useState<TrashItem[] | null>(null)
+  const [trashError, setTrashError] = useState('')
+  const [restoring, setRestoring] = useState('')
   const [renaming, setRenaming] = useState<{ id: string; text: string } | null>(null)
 
   const matching = useMemo(() => {
     const needle = query.trim().toLowerCase()
-    if (!needle) return items
-    return items.filter(
-      item =>
-        item.title.toLowerCase().includes(needle) ||
-        item.type.includes(needle) ||
-        (item.origin === 'import' ? 'imported'.includes(needle) : false)
-    )
-  }, [items, query])
+    return items.filter(item => (typeFilter === 'all' || item.type === typeFilter) && (!needle || item.title.toLowerCase().includes(needle) || item.type.includes(needle) || (item.origin === 'import' && 'imported'.includes(needle))))
+      .sort((a, b) => sort === 'name' ? a.title.localeCompare(b.title) || a.id.localeCompare(b.id) : b.updatedAt.localeCompare(a.updatedAt) || a.id.localeCompare(b.id))
+  }, [items, query, typeFilter, sort])
+  const openTrash = async (): Promise<void> => { setTrashError(''); try { const reply = await bridge.artifacts.trashList(); if (!reply.ok) throw Error(reply.error || 'Trash could not be read.'); setTrash(reply.items) } catch (error) { setSaid(String((error as Error).message)) } }
+  const recover = async (key: string): Promise<void> => { setRestoring(key); try { const reply = await bridge.artifacts.trashRestore(key); if (!reply.ok) throw Error(reply.error); setTrash(old => old?.filter(item => item.key !== key) || []); setSelectedId(reply.item.id); onLibraryChanged?.(); setSaid('Recovered with all stored versions. Existing active artifacts were not overwritten.') } catch (error) { setTrashError(String((error as Error).message)) } finally { setRestoring('') } }
 
   const selected = useMemo(
-    () => matching.find(item => item.id === selectedId) || matching[0] || null,
-    [matching, selectedId]
+    () => matching.find(item => item.id === selectedId) || (focusId && focusId === selectedId ? null : matching[0]) || null,
+    [matching, selectedId, focusId]
   )
 
   // A line from the app (adoption, usually) is shown the same way as one of
@@ -198,6 +216,11 @@ export default function ArtifactsView({
     }
   }
 
+  const askChange = (): void => {
+    if (!selected || !shown.content || !onAskChange) return
+    onAskChange(selected.title, shown.content)
+  }
+
   const bring = async (): Promise<void> => {
     const answer = await onImport()
     if (answer.canceled) return
@@ -205,12 +228,13 @@ export default function ArtifactsView({
   }
 
   return (
-    <section className="relative flex min-w-0 flex-1">
+    <section className="ob-artifacts-view relative flex min-w-0 flex-1" aria-label="Artifacts">
+      {trash ? <div className="ob-modal-backdrop"><section className="ob-journal" role="dialog" aria-modal="true" aria-label="Artifact trash" onKeyDown={e => { trapDialogFocus(e); if (e.key === 'Escape') { e.stopPropagation(); setTrash(null) } }}><header><h2>Trash</h2><button type="button" className="ob-small-button" autoFocus onClick={() => setTrash(null)}>Close trash</button></header>{trash.length ? trash.map(item => <div key={item.key} className="ob-kept-row"><div><strong>{item.title}</strong><small>{item.type.toUpperCase()} · {item.versionCount} version{item.versionCount === 1 ? '' : 's'} · {day(item.removedAt)}{item.recoveredMetadata ? ' · title recovered from file id' : ''}</small></div><button type="button" className="ob-small-button" disabled={!!restoring} onClick={() => void recover(item.key)}>{restoring === item.key ? 'Recovering…' : 'Recover'}</button></div>) : <p>Trash is empty.</p>}{trashError ? <p role="alert">{trashError}</p> : null}</section></div> : null}
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="flex items-end justify-between gap-4 px-6 pb-4 pt-5">
+        <header className="ob-screen-header flex items-center justify-between gap-4 px-6 pb-4 pt-5">
+          <Mascot motion="sketch" size={32} static />
           <div className="min-w-[180px] flex-1">
             <h1 className="text-[22px] font-semibold leading-tight">Artifacts</h1>
-            <p className="mt-1 text-[12.5px] text-muted">Save, browse, and iterate on your creations.</p>
           </div>
           <button
             type="button"
@@ -222,6 +246,8 @@ export default function ArtifactsView({
           </button>
         </header>
 
+        <div className="ob-artifact-controls">{onQueryChange ? <input aria-label="Search artifact library" placeholder="Search artifacts" value={query} onChange={e => onQueryChange(e.target.value)} /> : null}<div className="ob-choices" role="group" aria-label="Artifact type">{(['all', 'html', 'svg'] as const).map(type => <button type="button" className="ob-choice" key={type} aria-pressed={typeFilter === type} onClick={() => setTypeFilter(type)}>{type === 'all' ? 'Everything' : type.toUpperCase()}</button>)}</div><select aria-label="Artifact sort" value={sort} onChange={e => setSort(e.target.value as 'recent' | 'name')}><option value="recent">Newest first</option><option value="name">By name</option></select><button type="button" className="ob-text-button" onClick={() => void openTrash()}>View trash</button></div>
+        {selected && onAskChange ? <div className="px-6 pb-3"><button type="button" className="ob-small-button" disabled={!shown.content} onClick={askChange}>Ask for a change</button></div> : null}
         {said ? (
           <p className="mx-6 mb-3 rounded-lg border border-line bg-card px-3 py-2 text-[12px] leading-relaxed text-muted">
             {said}
@@ -230,21 +256,21 @@ export default function ArtifactsView({
 
         <div className="min-h-0 flex-1 overflow-y-auto px-6 pb-5">
           {error ? (
-            <p className="rounded-lg border border-line bg-card p-4 text-[12.5px] leading-relaxed text-muted">{error}</p>
+            <div className="ob-screen-empty"><Mascot motion="rain-check" size={88} static /><h2>Library unavailable</h2><p role="status">{error}</p></div>
           ) : loading && !items.length ? (
             <p className="text-[12.5px] text-muted">Reading the library…</p>
           ) : !items.length ? (
-            <div className="rounded-xl border border-line bg-card p-6">
-              <p className="text-[13px]">Nothing here yet.</p>
+            <div className="ob-screen-empty">
+              <Mascot motion="sketch" size={88} static />
+              <h2>No artifacts yet</h2>
               <p className="mt-2 max-w-[52ch] text-[12.5px] leading-relaxed text-muted">
-                Ask for something like “make me a pomodoro timer” in a chat, the reply’s document lands here with its
-                versions, or bring an existing page or drawing in with Import.
+                Create an artifact in chat or import an HTML or SVG file.
               </p>
             </div>
           ) : !matching.length ? (
             <p className="text-[12.5px] text-muted">Nothing in the library matches “{query.trim()}”.</p>
           ) : (
-            <ul className="grid grid-cols-[repeat(auto-fill,minmax(248px,1fr))] gap-4">
+            <ul className="ob-artifact-gallery grid grid-cols-[repeat(auto-fill,minmax(248px,1fr))] gap-4">
               {matching.map(item => {
                 const active = selected?.id === item.id
                 return (
@@ -330,7 +356,7 @@ export default function ArtifactsView({
             <p className="mt-5 flex items-start gap-1.5 text-[11px] leading-relaxed text-muted" title={where}>
               <Package size={12} className="mt-0.5 shrink-0" />
               <span className="min-w-0 break-all">
-                Kept on this machine in {where}. A version is a file, so nothing here is hidden from you.
+                {sampleEnabled() ? 'Sample library in browser storage. No files were saved to disk.' : <>Kept on this machine in {where}. A version is a file, so nothing here is hidden from you.</>}
               </span>
             </p>
           ) : null}

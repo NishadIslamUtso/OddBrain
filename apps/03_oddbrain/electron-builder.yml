@@ -41,6 +41,10 @@ files:
 # `resources/extension` so "Load unpacked" at chrome://extensions has a folder to
 # point at. It is not packed into the asar — Chrome needs real files on disk.
 extraResources:
+  - from: ../../THIRD_PARTY_NOTICES
+    to: THIRD_PARTY_NOTICES
+  - from: resources/oddbrain-preview.html
+    to: oddbrain-preview.html
   - from: ../../extension
     to: extension
     filter:
@@ -50,6 +54,7 @@ extraResources:
       - lib/**
       - popup/**
       - icons/**
+      - assets/**
   # The community store ships with the app too: a real folder index at
   # resources/store, so the Plugins pane offers packs that exist on the
   # person's disk from the first run — offline, no account, no network.

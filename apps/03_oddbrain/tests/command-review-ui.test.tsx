@@ -1,0 +1,89 @@
+// @vitest-environment jsdom
+import { act } from 'react'
+import { createRoot, type Root } from 'react-dom/client'
+import { afterEach, expect, test, vi } from 'vitest'
+import ShellReview from '../src/renderer/src/components/ShellReview'
+import type { CommandBridge } from '../src/shared/lib/commands'
+let root: Root | undefined, host: HTMLDivElement
+async function mount(port: CommandBridge) {
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true })
+  if (!root) { host = document.createElement('div'); document.body.append(host); root = createRoot(host) }
+  await act(async () => root!.render(<ShellReview port={port} />))
+}
+afterEach(async () => { if (root) await act(() => root!.unmount()); root = undefined; host?.remove() })
+const button = (text: string) => [...host.querySelectorAll('button')].find(button => button.textContent === text)!
+const input = async (text: string) => { await act(() => { const area = host.querySelector('textarea')!; Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(area, text); area.dispatchEvent(new Event('input', { bubbles: true })) }) }
+const click = async (text: string) => { await act(async () => button(text).click()) }
+function port(): CommandBridge {
+  return { saved: vi.fn(), save: vi.fn(), archiveSaved: vi.fn(), previewSaved: vi.fn(), context: vi.fn(async () => ({ cwd: '/selected', allowed: true, explanation: 'Fixture permission granted', activeId: null })),
+    preview: vi.fn(async request => ({ ...request, token: 'reviewed', expiresAt: Date.now() + 120000, explanation: 'Outside native engine sandbox' })),
+    decide: vi.fn(async () => ({ exitCode: 7, stdout: 'real output', stderr: 'failure', interrupted: false, outputComplete: true, runId: 'run' })),
+    cancel: vi.fn(async () => ({ requested: true, answer: 'Stop requested, not proof of termination' })), history: vi.fn(async () => ({ records: [], next: '', notice: '' })), read: vi.fn(), output: vi.fn() }
+}
+test('typing and preview cannot execute; explicit allow reports the actual exit rather than success', async () => {
+  const api = port(); await mount(api); await input('echo exact')
+  expect(api.decide).not.toHaveBeenCalled(); await click('Prepare command review')
+  expect(api.preview).toHaveBeenCalledWith({ command: 'echo exact', cwd: '/selected' }); expect(api.decide).not.toHaveBeenCalled()
+  expect(host.textContent).toContain('Nothing has run yet')
+  await click('Allow this command once')
+  expect(api.decide).toHaveBeenCalledExactlyOnceWith('reviewed', 'allow')
+  expect(host.textContent).toContain('Exit: 7'); expect(host.textContent).toContain('not verify the requested outcome')
+})
+test('late preview cannot expose an old executable approval after the port changes', async () => {
+  const api = port(); let resolve!: (value: any) => void
+  api.preview = vi.fn(() => new Promise(done => { resolve = done }))
+  await mount(api); await input('old command'); await click('Prepare command review')
+  await mount(port())
+  await act(async () => resolve({ token: 'old', command: 'old command', cwd: '/selected', expiresAt: Date.now()+1000, explanation: 'old' }))
+  expect(host.textContent).not.toContain('Allow this command once'); expect(api.decide).not.toHaveBeenCalled()
+})
+test('an in-flight allow cannot be clicked twice and exposes a real stop control', async () => {
+  const api = port(); let finish!: (value: any) => void
+  api.decide = vi.fn(() => new Promise(resolve => { finish = resolve }))
+  await mount(api); await input('long command'); await click('Prepare command review'); await click('Allow this command once')
+  expect(button('Allow this command once').disabled).toBe(true)
+  await click('Stop app command'); expect(api.cancel).toHaveBeenCalledTimes(1)
+  await act(async () => finish({ exitCode: null, stdout: 'prefix', stderr: '', interrupted: true, outputComplete: false }))
+  expect(api.decide).toHaveBeenCalledTimes(1); expect(host.textContent).toContain('incomplete')
+})
+test('permission refusal keeps preview unavailable without inventing an execution', async () => {
+  const api = port(); api.context = vi.fn(async () => ({ cwd: '/selected', allowed: false, explanation: 'Command access is off', activeId: null }))
+  await mount(api); await input('not allowed')
+  expect(button('Prepare command review').disabled).toBe(true); expect(host.textContent).toContain('Command access is off')
+  expect(api.preview).not.toHaveBeenCalled(); expect(api.decide).not.toHaveBeenCalled()
+})
+
+test('an isolated checkout is named, chosen and removed explicitly, never called a sandbox', async () => {
+  const api = port()
+  const entry = { id: '1700000000000-00000000-0000-4000-8000-000000000000', path: '/app/checkouts/1700000000000-00000000-0000-4000-8000-000000000000', repo: '/repo', base: 'a'.repeat(40), createdAt: '2026-10-20T00:00:00.000Z', changes: 2 }
+  const worktrees = { list: vi.fn(async () => ({ worktrees: [entry], problem: '' })), create: vi.fn(async () => ({ ok: true, answer: 'Isolated checkout created.', worktree: entry })), remove: vi.fn(async () => ({ ok: true, answer: 'The checkout was removed. Its record stays as history.' })) }
+  api.worktrees = worktrees
+  await mount(api); await input('npm test')
+  expect(host.textContent).toContain('the folder is separate, the permissions are not')
+  expect(host.textContent).toContain('2 changed or untracked files')
+  await click('Run here')
+  expect(host.textContent).toContain(`Commands will run in the checkout at ${entry.path}`)
+  expect(host.textContent).toContain('Nothing is committed, pushed or merged back')
+  await click('Prepare command review')
+  expect(api.preview).toHaveBeenCalledWith({ command: 'npm test', cwd: entry.path })
+  await click('Allow this command once')
+  expect(api.decide).toHaveBeenCalledWith('reviewed', 'allow')
+  // Removing a checkout states the discard choice it was given; it never guesses.
+  await click('Remove checkout')
+  expect(worktrees.remove).toHaveBeenCalledWith(entry.id, false)
+  expect(host.textContent).toContain('The checkout was removed.')
+})
+test('no checkout control appears when the desktop app does not offer one', async () => {
+  const api = port(); await mount(api)
+  expect(host.textContent).not.toContain('Run in an isolated checkout')
+  expect(api.preview).not.toHaveBeenCalled()
+})
+test('saving a named command never invokes preview or execution', async () => {
+  const api = port(); api.save = vi.fn(async value => ({ ...value, id: 'saved', platform: 'linux', archived: false, at: new Date().toISOString(), digest: 'a'.repeat(64) }))
+  await mount(api); await input('echo saved')
+  await act(() => { const name = host.querySelectorAll('input')[1]; Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(name, 'Reusable'); name.dispatchEvent(new Event('input', { bubbles: true })) })
+  await click('Save new command')
+  expect(api.save).toHaveBeenCalledWith({ name: 'Reusable', command: 'echo saved', cwd: '/selected' })
+  expect(api.preview).not.toHaveBeenCalled(); expect(api.decide).not.toHaveBeenCalled()
+  expect(host.textContent).toContain('Nothing ran and no approval was saved')
+})

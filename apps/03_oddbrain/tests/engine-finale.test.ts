@@ -1,3 +1,6 @@
+import { bridge } from '../src/renderer/src/platform/bridge'
+import type { WorkQueueItem } from '../src/shared/lib/workQueue'
+import { effortTarget } from '../src/shared/lib/engineCapabilities'
 // @vitest-environment jsdom
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -18,7 +21,7 @@ import { resetEngineForTests, engineStore, registerLineHold } from '../src/rende
 /**
  * The finale batch, five small honed pieces:
  *  - copy/edit: the turn as text, the order back in the composer
- *  - extended thinking: the engine's own MAX_THINKING_TOKENS, set at launch
+ *  - reasoning effort: native --effort, never a fixed thinking-token budget
  *  - context visibility: the window's honest totals, on the card
  *  - the line: work orders parked while the engine works, run in order
  *  - the journal: finished turns kept as a record a reopened window can read
@@ -44,7 +47,7 @@ test('the turn copies as the order plus the words; totals format honestly', () =
   assert.equal(formatTotals({ turns: 1, inTokens: 12, outTokens: 34, costUsd: 0.0001 }), '1 turn this window · 12 in · 34 out · $0.0001')
 })
 
-// ---------- extended thinking ----------
+// ---------- reasoning effort ----------
 
 function fakeEngineChild() {
   const child = new EventEmitter() as EventEmitter & {
@@ -69,26 +72,31 @@ function fakeEngineChild() {
   return child
 }
 
-test('extended thinking sets the engine\u2019s own env at launch; default sets nothing', () => {
+test('native effort uses its real flag, default adds no budget, legacy Extended migrates safely', () => {
   const seen: Array<Record<string, string | undefined>> = []
+  const args: string[][] = []
+  const native = { ...DEFAULT_ENGINE, model: 'fixture', cloudProvider: 'native' as const }
   const makeSpawn = () =>
     ((_command: string, _args: string[], options?: { env?: Record<string, string> }) => {
       seen.push(options?.env)
+      args.push(_args)
       const child = fakeEngineChild()
       setTimeout(() => child.emit('close', 0), 5)
       return child
     }) as unknown as typeof spawn
   const extended = startClaudeCodeSession({
-    cwd: '.', settings: { ...DEFAULT_ENGINE, thinking: 'extended' }, onEvent: () => undefined, spawnProcess: makeSpawn(),
+    cwd: '.', settings: { ...native, thinking: 'high', effortTarget: effortTarget(native) }, onEvent: () => undefined, spawnProcess: makeSpawn(),
   })
   extended.stop()
-  assert.equal(seen[0]?.MAX_THINKING_TOKENS, '31999')
+  assert.equal(seen[0]?.MAX_THINKING_TOKENS, undefined)
+  assert.deepEqual(args[0].slice(-2), ['--effort', 'high'])
+  assert.equal(seen[0]?.ANTHROPIC_BASE_URL, undefined, 'native models use their CLI login, not Ollama')
   const plain = startClaudeCodeSession({
     cwd: '.', settings: { ...DEFAULT_ENGINE }, onEvent: () => undefined, spawnProcess: makeSpawn(),
   })
   plain.stop()
   assert.equal(seen[1]?.MAX_THINKING_TOKENS, undefined, 'default thinking leaves the engine alone')
-  assert.equal(normalizeEngine({ ...DEFAULT_ENGINE, thinking: 'extended' }).thinking, 'extended')
+  assert.equal(normalizeEngine({ ...DEFAULT_ENGINE, thinking: 'extended' as never }).thinking, 'default')
   assert.equal(normalizeEngine({ ...DEFAULT_ENGINE, thinking: 'wild' as never }).thinking, 'default')
 })
 
@@ -104,6 +112,8 @@ type CoreFake = {
 }
 
 function withCoreFake(): CoreFake {
+  let queued: WorkQueueItem[] = []; let serial = 0
+  bridge.engine.queue = { read: async () => [...queued], enqueue: async prompt => { queued.push({ id: String(++serial), prompt, status: 'queued', eligible: true, notice: '', route: '', at: new Date().toISOString() }); return [...queued] }, cancel: async id => { queued = queued.filter(q => q.id !== id); return [...queued] }, resume: async () => [...queued], hold: async id => { queued = queued.map(q => q.id === id ? { ...q, status: 'blocked', eligible: false } : q) }, history: async () => ({ items: [], next: '' }) }
   const fake: CoreFake = { listener: null, sent: [], journalKept: [], thinking: null, usage: { inTokens: 100, outTokens: 50, durationMs: 300, costUsd: 0.002 }, busyHold: false }
   ;(window as unknown as Record<string, unknown>).api = {}
   ;(window as unknown as Record<string, unknown>).engineApi = {
@@ -119,7 +129,8 @@ function withCoreFake(): CoreFake {
       fake.thinking = mode
       return { ok: true, answer: mode }
     },
-    send: async (prompt: string) => {
+    send: async (prompt: string, _cwd: string, _pictures: unknown, _context: unknown, queuedId?: string) => {
+      if (queuedId) queued = queued.filter(q => q.id !== queuedId)
       fake.sent.push(prompt)
       if (!fake.busyHold) {
         setTimeout(() => {
@@ -184,11 +195,11 @@ test('the line: busy sends park, drain in order when the engine frees, holds sto
   resetEngineForTests()
   const store = engineStore()
   await store.send('the running task')
-  const one = store.enqueue('parked one')
-  const two = store.enqueue('parked two')
+  await store.enqueue('parked one'); const one = store.line[0]
+  await store.enqueue('parked two')
   assert.equal(store.line.length, 2)
   assert.equal(fake.sent.length, 1, 'parked work orders are not sent while the engine works')
-  store.removeFromLine(one.id)
+  await store.removeFromLine(one.id)
   assert.equal(store.line.length, 1)
   assert.equal(store.line[0]?.prompt, 'parked two')
   // Hold: a sequencer is driving; the line must not jump in between its steps.
@@ -258,3 +269,16 @@ test('a finished turn is journaled once, with the engine\u2019s own words and us
 })
 
 // ---------- wiring ----------
+
+test('empty or whitespace-only completion says what happened once; streamed answers are untouched', async () => {
+  for (const spoken of [false, true]) {
+    const fake = withCoreFake(); fake.busyHold = true; resetEngineForTests()
+    await engineStore().send('try this')
+    if (spoken) fake.listener?.({ kind: 'delta', text: 'A real answer' } as EngineEvent)
+    fake.listener?.({ kind: 'done', text: '   ' } as EngineEvent)
+    fake.listener?.({ kind: 'done', text: '' } as EngineEvent)
+    await settleStore()
+    const messages = engineStore().turn!.items.filter(i => i.kind === 'status' && i.text.includes('no words from the model'))
+    assert.equal(messages.length, spoken ? 0 : 1)
+  }
+})

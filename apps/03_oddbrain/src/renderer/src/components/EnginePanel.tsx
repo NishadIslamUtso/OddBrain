@@ -1,8 +1,12 @@
-import { useEffect, useRef, useState } from 'react'
+import ChangeReview from './ChangeReview'
+import { sampleEnabled } from '@shared/lib/sampleWorkspace'
+import { useEffect, useMemo, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { Copy, Eye, Handshake, ListOrdered, Minimize2, Pencil, Wrench, FilePen, Terminal, Search, CircleCheck, TriangleAlert, Square, X } from 'lucide-react'
+import ReadAloudButton from '../ui/ReadAloudButton'
+import { useLook } from '../ui/LookContext'
+import { Copy, Eye, Handshake, Minimize2, Pencil, Wrench, FilePen, Terminal, Search, CircleCheck, TriangleAlert, Square, X } from 'lucide-react'
 import { buildHandoff, handoffFileName } from '@shared/lib/handoff'
-import { PHASE_LABEL, pairingAt, pairingMotion, phaseFromTurn, WAITING_LOADER, type MotionRole } from '@shared/lib/motionKit'
+import { PHASE_LABEL, phaseFromTurn, WAITING_LOADER, type MotionRole } from '@shared/lib/motionKit'
 import { Mascot } from '../motion/Mascot'
 import { BRIEF_ORDER } from '@shared/lib/compact'
 import { modelLabel } from '@shared/lib/engine'
@@ -23,49 +27,24 @@ import { clearReviewError, runReview, useReview } from '@/state/review'
  */
 type Kept = { copy: string; original: string; at: string; existed?: boolean }
 
-export default function EnginePanel() {
+export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
   const engine = useEngine()
   const turn = engine.turn
   const [handed, setHanded] = useState('')
   // What the app kept before allowed writes this session, and what a restore said.
   const [kept, setKept] = useState<Kept[]>([])
   const [restored, setRestored] = useState('')
+  const [restoreTarget, setRestoreTarget] = useState<Kept | null>(null), [showAllKept, setShowAllKept] = useState(false)
+  const restorePort = useMemo(() => restoreTarget ? { preview: () => bridge.engine.checkpoints.preview(restoreTarget.copy, restoreTarget.original), decide: (token: string, decision: 'allow' | 'deny') => bridge.engine.checkpoints.decide(token, decision) } : undefined, [restoreTarget])
   const finished = turn?.state === 'done' || turn?.state === 'error'
   useEffect(() => {
     if (!finished) return
     void bridge.engine.checkpoints.list().then((answer) => {
-      if (answer.ok) setKept(answer.checkpoints.slice(0, 3))
-    })
-  }, [finished])
-  // The kit's status words, driven by the turn's REAL phase: the word turns
-  // over while the engine works and always carries the animation it was
-  // measured for. Flavour, never a substitute for the honest phase name in
-  // the header beside it.
-  const running = turn?.state === 'running'
+      if (answer.ok) setKept(answer.checkpoints)
+      else setRestored('The checkpoint index could not be read. Its original was not changed.')
+    }).catch(() => setRestored('Kept files could not be read. No restore was attempted.'))
+  }, [finished, turn])
   const phase: MotionRole = turn ? phaseFromTurn(turn) : 'resting'
-  const [tick, setTick] = useState(0)
-  useEffect(() => {
-    if (!running) return
-    const timer = setInterval(() => setTick((n) => n + 1), 5_500)
-    return () => clearInterval(timer)
-  }, [running])
-  const [seed] = useState(() => Math.floor(Math.random() * 97))
-  const pairing = pairingAt(phase, tick, seed)
-  // When a turn closes, its done scene plays once — a short, quiet end.
-  const [doneTick, setDoneTick] = useState<number | null>(null)
-  const wasRunning = useRef(false)
-  useEffect(() => {
-    if (running) {
-      wasRunning.current = true
-      return
-    }
-    if (wasRunning.current) {
-      wasRunning.current = false
-      setDoneTick(Date.now() % 100000)
-      const timer = setTimeout(() => setDoneTick(null), 6_500)
-      return () => clearTimeout(timer)
-    }
-  }, [running])
   const [compacting, setCompacting] = useState(false)
   const compact = useCompact()
   const review = useReview()
@@ -88,6 +67,8 @@ export default function EnginePanel() {
       /* storage refused — the fold lives only for this visit */
     }
   }
+  if (engine.ambient.busy && turn?.state !== 'running') return <p role="status">Another task is active. <button type="button" onClick={() => void bridge.quick.open()}>Open active work and approvals</button></p>
+  if (chatId !== undefined && turn?.chatId && turn.chatId !== chatId) return turn.state === 'running' ? <p role="status">Work continues in another chat. <button type="button" onClick={() => window.dispatchEvent(new CustomEvent('app:open-chat', { detail: turn.chatId }))}>Open that chat</button></p> : null
   // No live turn: the card waits, but the record of earlier sessions still
   // shows — a fresh window should know what happened here before it opened.
   if (!turn) {
@@ -101,7 +82,6 @@ export default function EnginePanel() {
             aria-label="Engine working in another window"
             className="mx-auto mb-3 flex w-full max-w-[var(--chat-width)] items-center gap-2 rounded-xl border border-line bg-card px-4 py-2"
           >
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-warn" aria-hidden />
             <p className="text-[12px] text-muted">
               The engine is working in another window — <span className="text-ink">{engine.ambient.note || 'working'}</span>.
               Its cards are answered there; this window watches.
@@ -111,7 +91,7 @@ export default function EnginePanel() {
         {engine.journal.length ? (
           <details aria-label="Earlier sessions" className="mx-auto mb-3 w-full max-w-[var(--chat-width)] rounded-xl border border-line bg-card px-4 py-2.5">
             <summary className="cursor-pointer text-[12px] font-medium text-muted">
-              Earlier sessions on this machine ({engine.journal.length} {engine.journal.length === 1 ? 'turn' : 'turns'})
+              {sampleEnabled() ? 'Sample sessions' : 'Earlier sessions on this machine'} ({engine.journal.length} {engine.journal.length === 1 ? 'turn' : 'turns'})
             </summary>
             <ul className="mt-2 space-y-1.5">
               {engine.journal.slice(0, 10).map((entry, index) => (
@@ -157,8 +137,12 @@ export default function EnginePanel() {
     <>
     <section
       aria-label="Engine work"
-      className="mx-auto mb-3 w-full max-w-[var(--chat-width)] rounded-xl border border-line bg-card px-4 py-3"
+      className="ob-engine-work mx-auto mb-3 w-full max-w-[var(--chat-width)] px-0 py-3"
     >
+      <p className="ob-turn-prompt">
+        {turn.prompt}
+        {turn.pictures ? <span className="text-muted"> + {turn.pictures} picture{turn.pictures === 1 ? '' : 's'}</span> : null}
+      </p>
       <header className="flex items-center gap-2">
         <button
           type="button"
@@ -170,17 +154,12 @@ export default function EnginePanel() {
         >
           {panelOpen ? <ChevronDown size={13} /> : <ChevronRight size={13} />}
         </button>
-        <span
-          className={`h-1.5 w-1.5 shrink-0 rounded-full ${
-            turn.state === 'running' ? 'bg-warn' : turn.state === 'error' ? 'bg-warn' : 'bg-ok'
-          }`}
-        />
-        <h2 className="text-[12px] font-medium text-muted">
+        <details className="ob-task-meta"><summary>Task details</summary><p>
           Engine · {engine.settings.id} · {modelLabel(engine.settings.model)}
           {' · ' + (engine.settings.workspace ? engine.settings.workspace.split(/[\\/]/).filter(Boolean).at(-1) : 'vault')}
           {turn.state === 'running' ? ` · ${PHASE_LABEL[phase]}…` : turn.state === 'error' ? ' · stopped' : ' · done'}
           {` · ${formatTotals(engine.totals)}`}
-        </h2>
+                </p></details>
         {turn.state === 'running' ? (
           <button
             type="button"
@@ -213,7 +192,8 @@ export default function EnginePanel() {
           <button
             type="button"
             onClick={() => void runReview()}
-            title="Review: the engine checks its own work and is asked to report only — a report, not a technical lock"
+            disabled={review.running}
+            title="Review the completed text with a tool-free model call. No app actions or approvals are available."
             className="flex items-center gap-1 rounded-lg border border-line px-2 py-0.5 text-[11px] text-muted hover:text-ink"
           >
             <Eye size={10} /> Review
@@ -257,25 +237,9 @@ export default function EnginePanel() {
           ) : null}
         </p>
       ) : null}
+      {review.running ? <p className="ob-control-scope" role="status">A text-only review is running. It cannot run app tools or answer approvals.</p> : null}
+      {review.record ? <details className="ob-review-report"><summary>Review report · {review.record.model || 'not sent'} · {review.record.state}<span>{review.record.prompt}</span></summary><pre>{review.record.text || review.record.error}</pre><p className="ob-control-scope">Text evidence only; files and tests were not independently inspected.{review.record.clipped ? ' This report covers a bounded excerpt.' : ''}</p></details> : null}
 
-      {engine.line.length ? (
-        <div className="mt-1.5 rounded-lg border border-line bg-bg px-2 py-1.5" aria-label="Work waiting in the line">
-          <div className="flex items-center justify-between gap-2">
-            <p className="flex items-center gap-1 text-[11.5px] font-medium text-ink">
-              <ListOrdered size={10} aria-hidden /> In the line: {engine.line.length}
-            </p>
-            <button type="button" onClick={() => engine.clearLine()} className="text-[11px] text-muted hover:text-ink">Clear the line</button>
-          </div>
-          <ul className="mt-1 space-y-0.5">
-            {engine.line.map(item => (
-              <li key={item.id} className="flex items-start justify-between gap-2 text-[11.5px] text-muted">
-                <span className="min-w-0 flex-1 truncate">▸ {item.prompt}</span>
-                <button type="button" onClick={() => engine.removeFromLine(item.id)} aria-label="Remove from the line" className="shrink-0 text-muted hover:text-warn">×</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
 
       {compact.notice ? (
         <p role="status" className="mt-1.5 rounded-lg border border-line bg-bg px-2 py-1 text-[11.5px] leading-relaxed text-ink">
@@ -284,38 +248,23 @@ export default function EnginePanel() {
         </p>
       ) : null}
 
-      <p className="mt-1.5 line-clamp-3 text-[12.5px] text-muted">
-        ▸ {turn.prompt}
-        {turn.pictures ? <span className="text-muted"> + {turn.pictures} picture{turn.pictures === 1 ? '' : 's'}</span> : null}
-      </p>
+
 
       <ul className="mt-2 flex flex-col gap-1.5">
-  {turn.state === 'running' ? (
-          <li className="flex items-center gap-2" aria-live="polite">
-            <Mascot motion={pairingMotion(pairing)} size={44} seed={seed} active />
-            <span className="text-[12.5px] text-muted">{pairing.word}…</span>
-          </li>
-        ) : null}
         {turn.items.map((item, index) => {
           // The thinking block that is still being written stays unfolded;
           // once the answer starts (or the turn ends) it folds away.
           const live = turn.state === 'running' && item.kind === 'thinking' && index === turn.items.length - 1
-          return <EngineItemRow key={`${index}-${live ? 'live' : 'kept'}`} item={item} live={live} />
+          return <EngineItemRow key={`${index}-${live ? 'live' : 'kept'}`} item={item} live={live} pending={turn.state === 'running'} />
         })}
       </ul>
 
-      {doneTick !== null && turn.state !== 'running' ? (
-        <div className="flex items-center gap-2" role="status">
-          <Mascot motion={pairingMotion(pairingAt('done', doneTick, seed))} size={36} seed={seed} active={false} />
-          <span className="text-[12px] text-muted">{pairingAt('done', doneTick, seed).word}</span>
-        </div>
-      ) : null}
       {handed ? <p className="mt-1 text-[11px] text-muted">{handed}</p> : null}
       {finished && kept.length > 0 ? (
         <div className="mt-2 rounded-lg border border-line bg-bg p-2">
           <p className="text-[11px] text-muted">Kept before the engine changed a file, newest first:</p>
           <ul className="mt-1 flex flex-col gap-1">
-            {kept.map(entry => (
+            {kept.slice(0, showAllKept ? kept.length : 3).map(entry => (
               <li key={entry.copy || entry.original} className="flex items-center gap-2 text-[11.5px]">
                 <span className="min-w-0 flex-1 truncate text-muted" title={entry.original}>
                   {entry.original.split(/[\\/]/).filter(Boolean).at(-1)} · {new Date(entry.at).toLocaleTimeString()}
@@ -326,21 +275,16 @@ export default function EnginePanel() {
                   title={entry.existed === false
                     ? `Remove ${entry.original} — the engine created it; it did not exist before`
                     : `Put the older self of ${entry.original} back`}
-                  onClick={() => {
-                    // The original path rides along so the right ghost is the
-                    // one undone — several files can be created in one turn.
-                    void bridge.engine.checkpoints.restore(entry.copy, entry.original).then((answer) => {
-                      setRestored(answer.answer)
-                      if (answer.ok) setKept(current => current.filter(row => !(row.copy === entry.copy && row.original === entry.original)))
-                    })
-                  }}
+                  onClick={() => setRestoreTarget(entry)}
                   className="rounded-lg border border-line px-2 py-0.5 text-[11px] text-muted hover:text-ink"
                 >
-                  {entry.existed === false ? 'Undo the creation' : 'Restore'}
+                  {entry.existed === false ? 'Review removal' : 'Review restore'}
                 </button>
               </li>
             ))}
           </ul>
+          {kept.length > 3 ? <button type="button" onClick={() => setShowAllKept(!showAllKept)}>{showAllKept ? 'Show latest three' : `Show all ${kept.length} kept files`}</button> : null}
+          {restorePort ? <div><ChangeReview port={restorePort} label="Review checkpoint restore" /><button type="button" onClick={() => setRestoreTarget(null)}>Close restore review</button></div> : null}
           {restored ? <p className="mt-1 text-[11px] text-muted">{restored}</p> : null}
         </div>
       ) : null}
@@ -354,7 +298,7 @@ export default function EnginePanel() {
       ) : null}
 
       {turn.permissions.length > 0 ? (
-        <div className="mt-2.5 rounded-lg border border-line bg-bg p-2.5">
+        <div className="ob-permission-request mt-2.5 rounded-lg border border-line bg-bg p-2.5" tabIndex={-1} role="region" aria-label="Permission request">
           <p className="flex items-center gap-2 text-[12.5px] text-ink">
             <Mascot motion={WAITING_LOADER} size={20} />
             <span>
@@ -369,6 +313,11 @@ export default function EnginePanel() {
           </p>
           {turn.permissions[0].summary ? (
             <p className="mt-0.5 break-words font-mono text-[11.5px] text-muted">{turn.permissions[0].summary}</p>
+          ) : null}
+          {turn.permissions[0].risk ? (
+            <p role="note" className="mt-1.5 rounded-md border border-warn/50 bg-warn/5 px-2 py-1 text-[11.5px] leading-relaxed text-warn">
+              {turn.permissions[0].risk} Allowing this writes a file that can start a program; the next reload or commit may run it.
+            </p>
           ) : null}
           {turn.permissions[0].detail ? <DiffBlock detail={turn.permissions[0].detail} /> : null}
           <div className="mt-2 flex gap-2">
@@ -394,7 +343,7 @@ export default function EnginePanel() {
     {engine.journal.length ? (
       <details aria-label="Earlier sessions" className="mx-auto mb-3 w-full max-w-[var(--chat-width)] rounded-xl border border-line bg-card px-4 py-2.5">
         <summary className="cursor-pointer text-[12px] font-medium text-muted">
-          Earlier sessions on this machine ({engine.journal.length} {engine.journal.length === 1 ? 'turn' : 'turns'})
+          {sampleEnabled() ? 'Sample sessions' : 'Earlier sessions on this machine'} ({engine.journal.length} {engine.journal.length === 1 ? 'turn' : 'turns'})
         </summary>
         <ul className="mt-2 space-y-1.5">
           {engine.journal.slice(0, 10).map((entry, index) => (
@@ -416,15 +365,17 @@ export default function EnginePanel() {
 }
 
 /** One line of the engine's story, with the icon that matches the act. */
-function EngineItemRow({ item, live = false }: { item: EngineItem; live?: boolean }) {
+function EngineItemRow({ item, live = false, pending = false }: { item: EngineItem; live?: boolean; pending?: boolean }) {
   // The owner's rule, same as the chat brain: collapsed unless he opened
   // one anywhere — once opened, every thinking block shows open.
-  const [open, setOpen] = useState(live || thinkingOpenNow())
+  const look = useLook()
+  const [open, setOpen] = useState((live && look.showThinking) || thinkingOpenNow())
   useEffect(() => {
-    const follow = (): void => setOpen(live || thinkingOpenNow())
+    const follow = (): void => setOpen((live && look.showThinking) || thinkingOpenNow())
     window.addEventListener(THINKING_OPEN_EVENT, follow)
+    follow()
     return () => window.removeEventListener(THINKING_OPEN_EVENT, follow)
-  }, [live])
+  }, [live, look.showThinking])
   if (item.kind === 'thinking') {
     return (
       <li>
@@ -435,7 +386,7 @@ function EngineItemRow({ item, live = false }: { item: EngineItem; live?: boolea
             setOpen(now)
             if (!live) setThinkingOpen(now)
           }}
-          className="rounded-lg border border-line bg-panel/60 px-3 py-2"
+          className="ob-thinking-block py-2"
         >
           <summary className="cursor-pointer text-[12px] text-muted">
             Thinking{live ? ', still going' : ''}
@@ -448,7 +399,8 @@ function EngineItemRow({ item, live = false }: { item: EngineItem; live?: boolea
     )
   }
   if (item.kind === 'text') {
-    return <li className="whitespace-pre-wrap break-words text-[13.5px] leading-relaxed text-ink">{item.text}</li>
+    if (pending && !look.streamReplies) return null
+    return <li className="whitespace-pre-wrap break-words text-[length:var(--transcript-size,14.5px)] leading-[1.65] text-ink [font-family:var(--transcript-font)]">{item.text}{!pending ? <ReadAloudButton text={item.text} /> : null}</li>
   }
   if (item.kind === 'error') {
     return (

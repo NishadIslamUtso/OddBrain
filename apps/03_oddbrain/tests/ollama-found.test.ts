@@ -93,8 +93,8 @@ test('the boot starts the door by itself (the desktop app quits fully)', () => {
 
 test('the Connectors card offers Start + Point-to-exe, and the doors exist', () => {
   const section = readFileSync(new URL('../src/renderer/src/components/ConnectorsSection.tsx', import.meta.url), 'utf8')
-  assert.match(section, /Start the brain door/)
-  assert.match(section, /Point to the exe/)
+  assert.match(section, /Start Ollama/)
+  assert.match(section, /Choose executable/)
   const preload = readFileSync(new URL('../src/preload/index.ts', import.meta.url), 'utf8')
   for (const door of ['engine:pick-binary', 'engine:clear-binary', 'engine:binary-override']) {
     assert.ok(preload.includes(`'${door}'`), door)

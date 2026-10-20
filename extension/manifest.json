@@ -1,39 +1,18 @@
 {
- "manifest_version": 3,
- "name": "OddBrain - Vault Collector",
- "version": "0.1.4",
- "description": "Local-only collector + context suggester. AI sites by default, optional broad capture. Capsule Hub + Quillbot style.",
- "permissions": [
-  "storage",
-  "activeTab",
-  "scripting",
-  "contextMenus"
- ],
- "optional_permissions": [
-  "history"
- ],
- "host_permissions": [
-  "https://chat.openai.com/*",
-  "https://chatgpt.com/*",
-  "https://claude.ai/*",
-  "https://gemini.google.com/*",
-  "https://aistudio.google.com/*",
-  "https://chat.deepseek.com/*",
-  "https://www.deepseek.com/*",
-  "https://grok.com/*",
-  "https://www.perplexity.ai/*",
-  "https://copilot.microsoft.com/*",
-  "http://127.0.0.1/*"
- ],
- "optional_host_permissions": [
-  "<all_urls>"
- ],
- "background": {
-  "service_worker": "background.js"
- },
- "content_scripts": [
-  {
-   "matches": [
+  "manifest_version": 3,
+  "name": "OddBrain",
+  "version": "0.5.1",
+  "description": "Remember AI conversations and messages while you use supported sites. Incremental saving, original attachments, and honest progress. Pairs with OddBrain.",
+  "permissions": [
+    "storage",
+    "unlimitedStorage",
+    "activeTab",
+    "scripting",
+    "contextMenus",
+    "sidePanel",
+    "alarms"
+  ],
+  "host_permissions": [
     "https://chat.openai.com/*",
     "https://chatgpt.com/*",
     "https://claude.ai/*",
@@ -43,51 +22,90 @@
     "https://www.deepseek.com/*",
     "https://grok.com/*",
     "https://www.perplexity.ai/*",
-    "https://copilot.microsoft.com/*"
-   ],
-   "js": [
-    "lib/blacklist.js",
-    "lib/capsule.js",
-    "lib/vault-writer.js",
-    "content-scripts/ai-capture.js",
-    "content-scripts/capsule-inject.js"
-   ],
-   "run_at": "document_idle"
-  },
-  {
-   "matches": [
+    "https://copilot.microsoft.com/*",
+    "http://127.0.0.1/*",
+    "https://arena.ai/*",
+    "https://www.arena.ai/*",
+    "https://lmarena.ai/*",
+    "https://chat.z.ai/*",
+    "https://chatglm.cn/*",
+    "https://www.kimi.com/*",
+    "https://kimi.com/*",
+    "https://kimi.moonshot.cn/*",
+    "https://chat.qwen.ai/*",
+    "https://chat.mistral.ai/*",
+    "https://poe.com/*",
+    "https://perplexity.ai/*"
+  ],
+  "optional_host_permissions": [
     "<all_urls>"
-   ],
-   "exclude_matches": [
-    "https://chat.openai.com/*",
-    "https://chatgpt.com/*",
-    "https://claude.ai/*",
-    "https://gemini.google.com/*",
-    "https://aistudio.google.com/*",
-    "https://chat.deepseek.com/*",
-    "https://www.deepseek.com/*",
-    "https://grok.com/*",
-    "https://www.perplexity.ai/*",
-    "https://copilot.microsoft.com/*"
-   ],
-   "js": [
-    "lib/blacklist.js",
-    "lib/vault-writer.js",
-    "content-scripts/generic-capture.js",
-    "content-scripts/quillbot-suggestions.js",
-    "content-scripts/capsule-inject.js"
-   ],
-   "run_at": "document_idle",
-   "all_frames": false
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://chat.openai.com/*",
+        "https://chatgpt.com/*",
+        "https://claude.ai/*",
+        "https://gemini.google.com/*",
+        "https://aistudio.google.com/*",
+        "https://chat.deepseek.com/*",
+        "https://www.deepseek.com/*",
+        "https://grok.com/*",
+        "https://www.perplexity.ai/*",
+        "https://copilot.microsoft.com/*",
+        "https://arena.ai/*",
+        "https://www.arena.ai/*",
+        "https://lmarena.ai/*",
+        "https://chat.z.ai/*",
+        "https://chatglm.cn/*",
+        "https://www.kimi.com/*",
+        "https://kimi.com/*",
+        "https://kimi.moonshot.cn/*",
+        "https://chat.qwen.ai/*",
+        "https://chat.mistral.ai/*",
+        "https://poe.com/*",
+        "https://perplexity.ai/*"
+      ],
+      "js": [
+        "lib/page-extract.js",
+        "lib/blacklist.js",
+        "lib/capsule.js",
+        "lib/vault-writer.js",
+        "lib/appearance.js",
+        "content-scripts/companion.js",
+        "lib/conversation-adapters.js",
+        "content-scripts/conversation-sync.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup/popup.html",
+    "default_title": "OddBrain \u2014 save & remember",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "minimum_chrome_version": "116",
+  "incognito": "not_allowed",
+  "side_panel": {
+    "default_path": "popup/popup.html?panel=1"
+  },
+  "options_ui": {
+    "page": "popup/popup.html?settings=1",
+    "open_in_tab": true
+  },
+  "content_security_policy": {
+    "extension_pages": "script-src 'self'; object-src 'none'; base-uri 'none'; connect-src 'self' http://127.0.0.1:*; img-src 'self' data:; style-src 'self' 'unsafe-inline'"
   }
- ],
- "action": {
-  "default_popup": "popup/popup.html",
-  "default_title": "OddBrain Vault"
- },
- "icons": {
-  "16": "icons/icon16.png",
-  "48": "icons/icon48.png",
-  "128": "icons/icon128.png"
- }
 }

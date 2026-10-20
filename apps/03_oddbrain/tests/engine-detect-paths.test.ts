@@ -86,14 +86,18 @@ test('off Windows the helper is a no-op — the array form needs no quoting', ()
   assert.equal(shellSafeCommand('/home/nishad islam utso/.local/bin/claude', 'linux'), '/home/nishad islam utso/.local/bin/claude')
 })
 
-test('every place that shells out an engine command quotes it first', () => {
+test('stream adapters bypass shells; older read-only probes quote their shell commands', () => {
   // Source pins: a new engine spawn or probe that forgets the quoting
   // re-creates the exact "'claude' is not recognized" his machine showed.
   const claude = readFileSync(new URL('../src/main/engine/claudeCode.ts', import.meta.url), 'utf8')
   const agy = readFileSync(new URL('../src/main/engine/agy.ts', import.meta.url), 'utf8')
   const detect = readFileSync(new URL('../src/main/engine/availability.ts', import.meta.url), 'utf8')
-  assert.match(claude, /start\(shellSafeCommand\(resolveEngineCommand\('claude-code'\)\)/)
-  assert.match(agy, /start\(shellSafeCommand\(resolveEngineCommand\('agy'\)\)/)
+  assert.ok(claude.includes('child = start(command, args, {'))
+  assert.ok(claude.includes('shell: false'))
+  assert.ok(!claude.includes('shellSafeCommand'))
+  // Native agy now bypasses the shell entirely; quoting would become part of the filename.
+  assert.ok(agy.includes('child = start(command, args, {'))
+  assert.ok(agy.includes('shell: false'))
   assert.ok(detect.includes('run(shellSafeCommand(command)'))
   assert.ok(detect.includes('run(shellSafeCommand(candidates[index])'))
 })
