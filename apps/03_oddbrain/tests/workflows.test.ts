@@ -75,7 +75,8 @@ test('parallel workflow commands use separate retained worktrees and actually ov
   const review = f.workflows.preview(1, definition.id)
   expect(review.isolation).toMatchObject({ repositoryRoot: f.repo, maxConcurrency: 2 }); expect(review.isolation?.baseRevision).toMatch(/^[a-f0-9]{40}$/)
   const run = await f.workflows.decide(1, review.token, 'allow'); if ('denied' in run) throw Error('Unexpected denial')
-  expect(run.state).toBe('succeeded'); expect(run.steps.map(step => step.state)).toEqual(['succeeded', 'succeeded'])
+  const resultDetails = JSON.stringify(run.steps.map(step => ({ state: step.state, exitCode: step.exitCode, note: step.note })))
+  expect(run.state, resultDetails).toBe('succeeded'); expect(run.steps.map(step => step.state), resultDetails).toEqual(['succeeded', 'succeeded'])
   const paths = run.steps.map(step => step.worktree?.path || ''); expect(new Set(paths).size).toBe(2)
   expect(run.steps.every(step => step.worktree?.retained && step.worktree.changed)).toBe(true)
   expect(readFileSync(join(paths[0], 'one.txt'), 'utf8')).toBe('one'); expect(readFileSync(join(paths[1], 'two.txt'), 'utf8')).toBe('two')
@@ -102,7 +103,8 @@ test('a failed parallel task prevents a third checkout while an already-running 
   const slowSuccess = process.platform === 'win32' ? `Start-Sleep -Milliseconds 300; ${isolatedWrite('sibling.txt', 'done')}` : `sleep 0.3; ${isolatedWrite('sibling.txt', 'done')}`
   const definition = f.workflows.save({ name: 'Fail fast pair', cwd: f.repo, mode: 'parallel-worktrees', steps: [{ name: 'Fails', command: fail }, { name: 'Already running', command: slowSuccess }, { name: 'Must not start', command: isolatedWrite(third, 'bad') }] })
   const review = f.workflows.preview(1, definition.id), run = await f.workflows.decide(1, review.token, 'allow'); if ('denied' in run) throw Error()
-  expect(run.steps.map(step => step.state)).toEqual(['failed', 'succeeded', 'skipped']); expect(existsSync(third)).toBe(false)
+  const resultDetails = JSON.stringify(run.steps.map(step => ({ state: step.state, exitCode: step.exitCode, note: step.note })))
+  expect(run.steps.map(step => step.state), resultDetails).toEqual(['failed', 'succeeded', 'skipped']); expect(existsSync(third)).toBe(false)
   expect(run.steps[2].worktree).toBeUndefined(); expect(f.commands.history().records).toHaveLength(2)
 }, 30000)
 test('a nonzero step prevents every later step, without rolling back earlier work', async () => {
