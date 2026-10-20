@@ -397,6 +397,7 @@ async function loadLibrary() {
   $("capsule-detail").hidden = true;
   $("capsule-list").hidden = false;
   $("search").hidden = false;
+  $("research-saved").hidden = false;
   try {
     const result = await api({ type: "ob-library" });
     capsules = (result.capsules || []).filter(
@@ -409,6 +410,24 @@ async function loadLibrary() {
   } catch (e) {
     notice(e.message, true);
   }
+}
+async function researchSaved() {
+  const query = $("search").value.trim();
+  if (!query) { notice("Enter saved-source search words first.", true); $("search").focus(); return; }
+  const button = $("research-saved"); button.disabled = true; notice("Reading current saved originals…");
+  try {
+    const result = await api({ type: "ob-research", query });
+    if (!result?.ok || !result.packet) { notice(result?.notices?.join(" ") || result?.error || "No matching saved original could be placed in a packet.", true); return; }
+    const detail = $("capsule-detail"); detail.hidden = false; $("capsule-list").hidden = true; $("search").hidden = true; button.hidden = true; detail.replaceChildren();
+    const back = action("← Capsule library", () => loadLibrary(), "text-button");
+    detail.append(back, node("h2", `Cited packet · ${result.sources.length} source(s)`), node("p", "Local lexical retrieval over already-saved originals, not live web research. Review the exact packet before using it.", "small muted"), node("pre", result.packet));
+    detail.append(action("Copy exact packet", async () => { await navigator.clipboard.writeText(result.packet); notice("Cited packet copied. Nothing was sent."); }));
+    for (const source of result.sources) detail.append(node("p", `${source.id} · ${source.title} · ${source.url || source.path}`, "small muted"));
+    for (const message of result.notices || []) detail.append(node("p", message, "small muted"));
+    notice(""); back.focus();
+  } catch (error) {
+    notice(error?.message || "The saved-source packet could not be built.", true);
+  } finally { button.disabled = false; }
 }
 async function openCapsule(c) {
   const detail = $("capsule-detail");
@@ -853,6 +872,7 @@ bind("refresh-page", async () => {
   await review();
 });
 bind("refresh-library", loadLibrary);
+bind("research-saved", researchSaved);
 $("search").addEventListener("input", renderLibrary);
 bind("sync-appearance", async () => {
   const result = await sync();

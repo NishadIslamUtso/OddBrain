@@ -1,4 +1,5 @@
 import type { WorkQueueItem } from '@shared/lib/workQueue'
+import type { EngineSourceFile } from '@shared/lib/media'
 import type { NativeConversation, ContextReceipt } from '@shared/lib/nativeConversation'
 import { effortTarget } from '@shared/lib/engineCapabilities'
 import type { ThinkingMode } from '@shared/lib/engine'
@@ -126,7 +127,7 @@ type EngineStore = EngineState & {
   /** Wire the bridge up once: read the settings, listen for events. */
   init(): Promise<void>
   setOn(value: boolean): void
-  send(prompt: string, pictures?: Array<{ mime: string; data: string }>, conversation?: NativeConversation, queuedId?: string): Promise<{ ok: boolean; answer: string; transcriptId?: string }>
+  send(prompt: string, pictures?: Array<{ mime: string; data: string }>, conversation?: NativeConversation, queuedId?: string, originalFiles?: EngineSourceFile[]): Promise<{ ok: boolean; answer: string; transcriptId?: string }>
   answer(allow: boolean): Promise<void>
   stop(): Promise<void>
   /** Fold one wire event into the turn. Public so tests can drive it directly. */
@@ -520,7 +521,7 @@ const store: EngineStore = {
     if (state.on) void store.init()
   },
 
-  async send(prompt: string, pictures: Array<{ mime: string; data: string }> = [], conversation?: NativeConversation, queuedId?: string): Promise<{ ok: boolean; answer: string; transcriptId?: string }> {
+  async send(prompt: string, pictures: Array<{ mime: string; data: string }> = [], conversation?: NativeConversation, queuedId?: string, originalFiles: EngineSourceFile[] = []): Promise<{ ok: boolean; answer: string; transcriptId?: string }> {
     if (sending || state.ambient.busy || state.turn?.state === 'running') {
       return { ok: false, answer: 'The engine is already working on the last task.' }
     }
@@ -535,7 +536,7 @@ const store: EngineStore = {
     repeats.count = 0
     const turn: EngineTurn = { chatId: conversation?.chatId, prompt, items: [], permissions: [], state: 'running', sessionId: null, usage: null, pictures: pictures.length }
     setState({ turn })
-    const answer = await getEngineApi().send(prompt, '', pictures, conversation, queuedId)
+    const answer = await getEngineApi().send(prompt, '', pictures, conversation, queuedId, originalFiles)
     if (answer.transcriptId) turn.transcriptId = answer.transcriptId
     if (answer.ok) { state.alive = true; emit() }
     if (!answer.ok) {

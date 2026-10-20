@@ -7,6 +7,7 @@ import type { SkillDraft, SkillInventory, SkillFile, CatalogSkillReview } from '
 import type { NativeConversation, NativeSessionLink, NativeContextTarget } from '@shared/lib/nativeConversation'
 import type { FileReview, FileDecision } from '@shared/lib/changeReview'
 import type { TranscriptBridge } from '@shared/lib/transcripts'
+import type { EngineSourceFile } from '@shared/lib/media'
 import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
 import type { ThinkingMode } from '@shared/lib/engine'
 import type { MemoryBridge } from '@shared/lib/memoryWorkspace'
@@ -539,7 +540,7 @@ export type EngineBridge = {
     clear: () => Promise<{ ok: boolean; answer: string }>
   }
   pickWorkspace: () => Promise<{ ok: boolean; answer: string }>
-  send: (prompt: string, cwd: string, pictures?: Array<{ mime: string; data: string }>, conversation?: NativeConversation, queuedId?: string) => Promise<{ ok: boolean; answer: string; transcriptId?: string }>
+  send: (prompt: string, cwd: string, pictures?: Array<{ mime: string; data: string }>, conversation?: NativeConversation, queuedId?: string, originalFiles?: EngineSourceFile[]) => Promise<{ ok: boolean; answer: string; transcriptId?: string }>
   checkpoints: {
     preview: (copy: string, original: string) => Promise<FileReview>
     decide: (token: string, decision: 'allow' | 'deny') => Promise<FileDecision>

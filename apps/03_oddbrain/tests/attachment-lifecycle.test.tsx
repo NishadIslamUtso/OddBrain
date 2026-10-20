@@ -30,7 +30,7 @@ test('cancelling while the original file is still being read prevents a late dec
 })
 test('failed explicit upload keeps the original and old extraction, and binds to the label the user clicked', async () => {
   await act(async () => { await controls.addFiles([file()]) })
-  expect(attached[0].text).toBe('extracted words')
+  expect(attached[0].text).toBe('extracted words'); expect(attached[0].originalFile).toBeDefined(); expect(attached[0].originalId).toBeTruthy()
   media.read.mockResolvedValue({ ...DEFAULT_MEDIA, provider: 'openai', model: 'new-model' })
   media.decode.mockResolvedValue({ ok: false, name: 'notes.txt', error: 'Selection changed; nothing sent.' })
   await act(async () => { button('Upload to openai / shown-model').click(); await new Promise(resolve => setTimeout(resolve, 0)) })

@@ -987,6 +987,22 @@ it('legacy message and attachment rows survive restart and real re-pairing with 
     expect(h.calls.every(url=>url.startsWith(h.app.url))).toBe(true)
   } finally {await h.dispose()}
 })
+it('research reads current saved originals only after an explicit, non-excluded request and never substitutes a cache offline', async () => {
+  const h=await harness()
+  try {
+    h.vault.files().writeAtomic('Notes/research.md','A cobalt windmill needs a direct saved-source citation.')
+    const sender={id:'test',tab:{id:1,url:'https://example.com/article'}}
+    const result=await h.dispatch({type:'ob-research',query:'cobalt windmill'},sender)
+    expect(result.ok).toBe(true); expect(result.packet).toContain('[S1]'); expect(result.sources[0].excerpt).toContain('cobalt windmill')
+    await h.dispatch({type:'ob-blacklist-update',excluded_patterns:['example.com/*']}); const before=h.calls.filter(url=>url.includes('/research?')).length
+    const excluded=await h.dispatch({type:'ob-research',query:'cobalt windmill'},sender)
+    expect(excluded.ok).toBe(false); expect(excluded.error).toContain('excluded'); expect(h.calls.filter(url=>url.includes('/research?'))).toHaveLength(before)
+    const popupExcluded=await h.dispatch({type:'ob-research',query:'cobalt windmill'}); expect(popupExcluded.ok).toBe(false); expect(popupExcluded.error).toMatch(/excluded|Never-check/i)
+    await h.dispatch({type:'ob-blacklist-update',excluded_patterns:[]}); h.setOffline(true)
+    const offline=await h.dispatch({type:'ob-research',query:'cobalt windmill'},sender)
+    expect(offline.ok).toBe(false); expect(offline.offline).toBe(true); expect(offline.error).toContain('No cached packet')
+  } finally {await h.dispose()}
+})
 it('unknown legacy addresses stay held, and returning to the original vault releases only its own queue', async () => {
   const h=await harness()
   try {

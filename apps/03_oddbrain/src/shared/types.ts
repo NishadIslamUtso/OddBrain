@@ -54,10 +54,13 @@ export type Attachment = {
   seenBy?: string
   /** Plain text of a text/code attachment, already read. */
   text?: string
+  /** Composer-only handle to the exact source. Removed before a chat message is stored. */
+  originalFile?: File
+  originalId?: string
 }
 
-/** An attachment as it is kept in a message: the bytes are stored separately. */
-export type StoredAttachment = Omit<Attachment, 'data'>
+/** An attachment as it is kept in a message: the bytes and File handles are stored separately. */
+export type StoredAttachment = Omit<Attachment, 'data' | 'originalFile' | 'originalId'>
 
 /** The bridge's description of an image, kept so follow-up turns still work. */
 export type BridgeRecord = {
@@ -74,7 +77,7 @@ export type Citation = { id: string; url: string; label: string }
 export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error'
 
 export type Message = {
-  nativeRecord?: { pictures?: number; images?: import('./lib/transcripts').TranscriptImage[]; artifacts?: import('./lib/nativeArtifacts').NativeArtifactLink[]; transcriptId: string; chatId: string; engine: 'claude-code' | 'agy'; sessionId: string | null; context?: import('./lib/nativeConversation').ContextReceipt }
+  nativeRecord?: { pictures?: number; images?: import('./lib/transcripts').TranscriptImage[]; attachments?: import('./lib/transcripts').TranscriptAttachment[]; artifacts?: import('./lib/nativeArtifacts').NativeArtifactLink[]; transcriptId: string; chatId: string; engine: 'claude-code' | 'agy'; sessionId: string | null; context?: import('./lib/nativeConversation').ContextReceipt }
   id: string
   role: Role
   content: string

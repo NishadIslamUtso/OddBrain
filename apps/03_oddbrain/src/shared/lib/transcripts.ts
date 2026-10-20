@@ -8,16 +8,32 @@ export type TranscriptImage = {
   bytes: number
   sha256: string
 }
-export type TranscriptHeader = { chatId?: string; context?: import('./nativeConversation').ContextReceipt; id: string; at: string; engine: EngineId; model: string; workspace: string; title: string; pictures: number; /** Undefined means an older record that kept only the count. */ images?: TranscriptImage[] }
+export type TranscriptAttachment = { id: string; name: string; mime: string; bytes: number; sha256: string }
+export type TranscriptHeader = { chatId?: string; context?: import('./nativeConversation').ContextReceipt; id: string; at: string; engine: EngineId; model: string; workspace: string; title: string; pictures: number; /** Undefined means an older record that kept only the count. */ images?: TranscriptImage[]; /** Exact original source files retained separately before dispatch. */ attachments?: TranscriptAttachment[] }
 export type Transcript = { userPrompt?: string; header: TranscriptHeader; prompt: string; events: EngineEvent[]; state: 'running' | 'done' | 'error' | 'interrupted'; incomplete: boolean }
 export type TranscriptPage = { entries: TranscriptHeader[]; next: string; notice: string }
+export type TranscriptRecoveryPage = { records: Transcript[]; next: string; notice: string }
 export type TranscriptResult<T> = { ok: true; value: T } | { ok: false; error: string }
 export type TranscriptImageDownload = TranscriptImage & { data: string; name: string; verified: true }
+export type TranscriptAttachmentDownload = TranscriptAttachment & { data: string; verified: true }
 export type TranscriptBridge = {
   raw?(id: string): Promise<TranscriptResult<{ content: string; bytes: number; format: 'ndjson' }>>
+  recover?(chatIds: string[], knownTranscriptIds: string[], before?: string): Promise<TranscriptResult<TranscriptRecoveryPage>>
   image?(id: string, imageId: string): Promise<TranscriptResult<TranscriptImageDownload>>
+  attachment?(id: string, attachmentId: string): Promise<TranscriptResult<TranscriptAttachmentDownload>>
   list(before?: string): Promise<TranscriptResult<TranscriptPage>>
   read(id: string): Promise<TranscriptResult<Transcript>>
+}
+
+export function validTranscriptAttachments(value: unknown): value is TranscriptAttachment[] | undefined {
+  if (value === undefined) return true
+  if (!Array.isArray(value) || value.length > 8) return false
+  let total = 0
+  return value.every((file, index) => {
+    if (!file || typeof file !== 'object' || file.id !== `attachment-${index + 1}` || typeof file.name !== 'string' || !file.name || file.name.length > 255 || /[\x00-\x1f]/.test(file.name) || typeof file.mime !== 'string' || file.mime.length > 200 || /[\x00-\x1f]/.test(file.mime) || !Number.isSafeInteger(file.bytes) || file.bytes <= 0 || file.bytes > 50 * 1024 * 1024 || typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(file.sha256)) return false
+    total += file.bytes
+    return total <= 64 * 1024 * 1024
+  })
 }
 
 export function validTranscriptImages(value: unknown, pictures: number): value is TranscriptImage[] | undefined {
@@ -34,6 +50,11 @@ export function transcriptMarkdown(turn: Transcript): string {
   else if (h.images?.length) {
     lines.push(`Attachment notice: ${h.images.length} image(s) accompanied this request. Their bytes are retained as separate digest-checked transcript files; they are not embedded in this text export.`, '')
     for (const image of h.images) lines.push(`- ${image.id}: ${image.mime}, ${image.bytes} bytes, SHA-256 ${image.sha256}`)
+    lines.push('')
+  }
+  if (h.attachments?.length) {
+    lines.push(`Original-file notice: ${h.attachments.length} source file(s) were retained separately before dispatch. Their bytes are not embedded in this text export.`, '')
+    for (const file of h.attachments) lines.push(`- ${file.id}: ${file.name}, ${file.mime || 'MIME not reported'}, ${file.bytes} bytes, SHA-256 ${file.sha256}`)
     lines.push('')
   }
   let text = ''
@@ -72,6 +93,11 @@ export function chatMarkdown(chat: Chat): string {
     else if (m.nativeRecord?.images?.length) {
       lines.push('### Retained native image attachments', '', 'Open the linked original transcript in OddBrain to download the separately stored, digest-checked bytes.', '')
       for (const image of m.nativeRecord.images) lines.push(`- ${image.id}: ${image.mime}, ${image.bytes} bytes, SHA-256 ${image.sha256}`)
+      lines.push('')
+    }
+    if (m.nativeRecord?.attachments?.length) {
+      lines.push('### Retained original source files', '', 'Open the linked original transcript in OddBrain to download the separately stored, digest-checked bytes.', '')
+      for (const file of m.nativeRecord.attachments) lines.push(`- ${file.name}: ${file.mime || 'MIME not reported'}, ${file.bytes} bytes, SHA-256 ${file.sha256}`)
       lines.push('')
     }
     for (const a of m.attachments || []) lines.push(`### Attachment: ${a.name}`, '', a.extraction || '', a.text || '(binary content is not embedded)', '')

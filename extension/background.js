@@ -282,6 +282,15 @@ async function context(query) {
     cached: true,
   };
 }
+async function research(query) {
+  const text = String(query || "").trim();
+  if (!text) return { ok: false, error: "Enter saved-source search words first." };
+  try {
+    return await api("/research?q=" + encodeURIComponent(text.slice(0, 500)));
+  } catch {
+    return { ok: false, offline: true, error: "The paired app must be open to build a packet from current saved originals. No cached packet was substituted." };
+  }
+}
 async function insertCapsule(capsule) {
   const tab = await activeTab();
   await chrome.scripting.executeScript({
@@ -446,6 +455,7 @@ async function dispatch(msg, sender) {
     "ob-conversation-progress",
     "ob-blacklist-get",
     "ob-context",
+    "ob-research",
     "ob-appearance",
     "ob-site-access",
   ];
@@ -481,6 +491,16 @@ async function dispatch(msg, sender) {
       if (sender.tab && (await checkBlacklist(sender.tab.url)))
         return { context: { capsules: [], entities: [], claims: [] } };
       return { context: await context(msg.query) };
+    case "ob-research": {
+      let tab = sender.tab;
+      if (!tab) {
+        try { tab = await activeTab(); }
+        catch (error) { return { ok: false, error: error?.message || "This page cannot request saved sources." }; }
+      }
+      if (tab?.url && (await checkBlacklist(tab.url)))
+        return { ok: false, error: "This site is excluded. No saved sources were read for it." };
+      return research(msg.query);
+    }
     case "ob-site-access":
       return {
         allowed: !!sender.tab?.url && !(await checkBlacklist(sender.tab.url)),

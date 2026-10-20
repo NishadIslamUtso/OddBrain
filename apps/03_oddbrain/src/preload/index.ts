@@ -7,6 +7,7 @@ import { type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
 import type { ThinkingMode } from '../shared/lib/engine'
 import type { MemoryBridge } from '../shared/lib/memoryWorkspace'
 import type { MediaBridge } from '../shared/lib/mediaBridge'
+import type { EngineSourceFile } from '../shared/lib/media'
 import type { MarketplaceBridge } from '../shared/lib/marketplace'
 import type { AutomationBridge, AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
 import { contextBridge, ipcRenderer } from 'electron'
@@ -110,8 +111,8 @@ const engineApi = {
   pickWorkspace: (): Promise<{ ok: boolean; answer: string }> =>
     ipcRenderer.invoke('engine:pick-workspace'),
   /** Hand the engine a task. Events arrive through `onEvent` from then on. */
-  send: (prompt: string, cwd: string, pictures?: Array<{ mime: string; data: string }>, conversation?: NativeConversation, queuedId?: string): Promise<{ ok: boolean; answer: string; transcriptId?: string }> =>
-    ipcRenderer.invoke('engine:send', prompt, cwd, pictures, conversation, queuedId),
+  send: (prompt: string, cwd: string, pictures?: Array<{ mime: string; data: string }>, conversation?: NativeConversation, queuedId?: string, originalFiles?: EngineSourceFile[]): Promise<{ ok: boolean; answer: string; transcriptId?: string }> =>
+    ipcRenderer.invoke('engine:send', prompt, cwd, pictures, conversation, queuedId, originalFiles),
   /** What the app kept before allowed writes, and the way back. */
   checkpoints: {
     preview: (copy: string, original: string) => ipcRenderer.invoke('engine:checkpoint:preview', copy, original),
@@ -219,7 +220,7 @@ const marketplaceApi: MarketplaceBridge = {
   confirm: (token, engine) => ipcRenderer.invoke('market:confirm', token, engine), cancel: engine => ipcRenderer.invoke('market:cancel', engine),
 }
 const api = {
-  transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), image: (id: string, imageId: string) => ipcRenderer.invoke('transcripts:image', id, imageId), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
+  transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), image: (id: string, imageId: string) => ipcRenderer.invoke('transcripts:image', id, imageId), attachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:attachment', id, attachmentId), recover: (chatIds: string[], knownTranscriptIds: string[], before?: string) => ipcRenderer.invoke('transcripts:recover', chatIds, knownTranscriptIds, before), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
   media: mediaApi, marketplace: marketplaceApi,
   automation: automationApi,
   memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,

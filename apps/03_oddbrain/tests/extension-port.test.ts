@@ -276,11 +276,11 @@ test('the port carries the capture side only: no chat, no export, no settings', 
     assert.match(response.body.error, /not one of the routes/)
   }
   // The table is the whole surface, and nothing else in this file may add to it
-  // without saying so here. /onui (A.6) is a read-only door: the newest captured
-  // page for the engine to ask about, served by the same vault route table.
+  // without saying so here. /onui (A.6) is a read-only door for the newest
+  // captured page; /research builds a bounded packet from current saved originals.
   assert.deepEqual(
     [...EXTENSION_ROUTES.keys()].sort(),
-    ['/', '/appearance', '/blacklist', '/capsules', '/capture', '/context', '/conversation-sync', '/grep', '/health', '/links', '/onui', '/status']
+    ['/', '/appearance', '/blacklist', '/capsules', '/capture', '/context', '/conversation-sync', '/grep', '/health', '/links', '/onui', '/research', '/status']
   )
 })
 

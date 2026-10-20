@@ -14,6 +14,7 @@
  *         save that did not happen
  */
 import { searchVault } from './recall'
+import { researchSavedSources } from './research'
 import { InputError, VaultMissingError } from './errors'
 import { createSourceMap } from './sources'
 import type { VaultService } from './service'
@@ -43,6 +44,7 @@ export const VAULT_ROUTES: Record<string, string[]> = {
   '/file': ['GET'],
   '/grep': ['GET'],
   '/recall': ['GET'],
+  '/research': ['GET'],
   '/onui': ['GET'],
   '/links': ['GET'],
   '/capture': ['POST'],
@@ -96,6 +98,7 @@ export function handleVaultRequest(service: VaultService, request: VaultRouteReq
         return { status: 200, body: { ok: true, path: relative, content: content.slice(0, 200_000), truncated: content.length > 200_000 } }
       }
       if (route === '/recall') return { status: 200, body: searchVault(service.files(), query) }
+      if (route === '/research') { const packet = researchSavedSources(service.files(), query); return { status: packet.ok ? 200 : 400, body: packet } }
       if (route === '/grep') {
         // Content search: which files mention this, with the matching line.
         const needle = query.trim().toLowerCase()

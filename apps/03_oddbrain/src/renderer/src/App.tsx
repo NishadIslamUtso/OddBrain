@@ -1,6 +1,7 @@
 import { newId } from '@shared/lib/storage'
 import { branchChat, chatNotesStore, emptyChatNotes } from '@shared/lib/chatContext'
 import { recordNativeTranscript } from '@shared/lib/nativeChat'
+import { originalSourceFiles } from '@shared/lib/attachments'
 import type { NativeConversation } from '@shared/lib/nativeConversation'
 import { publishExtensionAppearance } from './lib/extensionAppearance'
 import { sampleEnabled, workspaceKey } from '@shared/lib/sampleWorkspace'
@@ -298,8 +299,37 @@ export default function App() {
   )
 
   const engine = useEngine()
-  const commitNativeChat = useRef(chats.commit), nativeRecorded = useRef(new Set<string>())
+  const commitNativeChat = useRef(chats.commit), nativeRecorded = useRef(new Set<string>()), nativeRecoveryStarted = useRef(false)
   commitNativeChat.current = chats.commit
+  useEffect(() => {
+    if (isDemo || nativeRecoveryStarted.current || !bridge.transcripts.recover || !chats.chats.length) return
+    nativeRecoveryStarted.current = true
+    const chatIds = chats.chats.map(chat => chat.id).filter(id => /^[a-zA-Z0-9_.:-]{1,256}$/.test(id)).slice(0, 2_000)
+    const chatLimitNotice = chats.chats.length > chatIds.length ? 'Startup recovery was limited to the first 2,000 valid saved chats. Other original records remain in Full transcripts.' : ''
+    const known = new Set(chats.chats.flatMap(chat => chat.messages.map(message => message.nativeRecord?.transcriptId || '')).filter(id => /^\d{13}-[a-f0-9-]{36}$/.test(id)).slice(0, 10_000))
+    void (async () => {
+      let before = '', recovered = 0, note = chatLimitNotice
+      for (let page = 0; page < 10; page++) {
+        const reply = await bridge.transcripts.recover!(chatIds, [...known], before)
+        if (!reply.ok) throw Error(reply.error)
+        note = [note, reply.value.notice].filter(Boolean).join(' ')
+        if (reply.value.records.length) {
+          const saved = commitNativeChat.current(previous => previous.map(chat => {
+            let next = chat
+            for (const record of reply.value.records) if (record.header.chatId === chat.id) next = recordNativeTranscript(next, record)
+            return next
+          }))
+          if (!saved) throw Error('Recovered turns could not be copied into saved chats. Their original transcripts remain unchanged.')
+          for (const record of reply.value.records) known.add(record.header.id)
+          recovered += reply.value.records.length
+        }
+        before = reply.value.next
+        if (!before) break
+        if (page === 9) note = [note, 'Recovery checked the 500 newest transcript entries. Older records remain available in Full transcripts and were not changed.'].filter(Boolean).join(' ')
+      }
+      if (recovered || note) setNotice([recovered ? `Recovered ${recovered} finished or interrupted native turn${recovered === 1 ? '' : 's'} into matching saved chats. Nothing was resumed.` : '', note].filter(Boolean).join(' '))
+    })().catch(error => { setNotice(`${(error as Error).message} Open Full transcripts before retrying any uncertain work.`) })
+  }, [chats.chats.length])
   useEffect(() => {
     const turn = engine.turn, id = turn?.transcriptId
     if (!turn?.chatId || !id || turn.state === 'running' || nativeRecorded.current.has(id)) return
@@ -524,6 +554,7 @@ export default function App() {
     const pendingBrief = peekSeed()
     const order = pendingBrief ? buildSeededPrompt(pendingBrief, withFiles) : withFiles
     if (order.length > 20000) { setNotice('The prompt and attached text exceed the engine’s 20,000-character limit. Reduce the text or attachments; nothing was sent.'); return }
+    const originalFiles = await originalSourceFiles(attachments)
     const chatId = chat?.id || newId(), projectId = pendingProject ?? chat?.projectId ?? null
     const overrides = chatNotesStore(localStorage, workspaceKey('oddbrain.chat-notes.v1'), chatId).read()?.value.overrides || {}
     const target = await bridge.engine.contextTarget({ chatId, projectId, overrides })
@@ -538,6 +569,8 @@ export default function App() {
       order,
       attachments.filter(entry => entry.kind === 'image' && entry.data).map(entry => ({ mime: entry.mime || 'image/png', data: entry.data || '' })),
       conversation,
+      undefined,
+      originalFiles,
     )
     if (answer.ok) {
       consumeSeed(pendingBrief)
@@ -546,7 +579,7 @@ export default function App() {
         setPendingProject(null)
       }
     } else if ((answer.answer.startsWith('The engine is already working') || answer.answer.startsWith('An engine is already working'))) {
-      if (attachments.some(entry => entry.kind === 'image')) { setNotice('Images cannot be parked in the text-only queue. Your draft and attachments are unchanged; send them after this task finishes.'); return }
+      if (attachments.some(entry => entry.originalFile || entry.kind === 'image')) { setNotice('Original files and images cannot be parked in the text-only queue. Your draft and attachments are unchanged; send them after this task finishes.'); return }
       // Busy is not a refusal here: the owner typed a work order, so it
       // waits in the line and runs the moment the engine is free.
       await engineStore().enqueue(order, conversation)

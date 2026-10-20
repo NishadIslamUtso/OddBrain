@@ -50,6 +50,7 @@ export default function useMediaAttachments(attachments: Attachment[], setAttach
         added = attachmentsFromMedia(result, source.file.size); description = result.disclosure || ''
       }
       if (ticket !== generation.current) return
+      added = added.map(attachment => ({ ...attachment, originalId: source.id, originalFile: source.file }))
       const remaining = current.current.filter(file => !source.attachments.includes(file.id))
       if (!added.length) throw Error('The decoder returned no usable content.')
       if (remaining.length + added.length > 4) throw Error(`This source produces ${added.length} attachment(s), but only ${4 - remaining.length} slot(s) remain. Nothing from it was silently dropped. Remove attachments, then retry.`)

@@ -17,7 +17,28 @@ export const MAX_ENGINE_IMAGE_BYTES = 2 * 1024 * 1024
 export const MAX_ENGINE_IMAGE_CHARS = Math.ceil(MAX_ENGINE_IMAGE_BYTES / 3) * 4
 
 export type EngineImage = { mime: typeof ENGINE_IMAGE_MIMES[number]; data: string }
+export type EngineSourceFile = { id: string; name: string; mime: string; data: Uint8Array }
 export type EngineImagesAnswer = { ok: true; images: EngineImage[] } | { ok: false; answer: string }
+export type EngineSourceFilesAnswer = { ok: true; files: EngineSourceFile[] } | { ok: false; answer: string }
+export const MAX_ENGINE_SOURCE_BYTES = 50 * 1024 * 1024
+export const MAX_ENGINE_SOURCE_TOTAL = 64 * 1024 * 1024
+
+/** Exact original files retained beside a native transcript before dispatch. */
+export function engineSourceFiles(input: unknown): EngineSourceFilesAnswer {
+  if (!Array.isArray(input)) return { ok: false, answer: 'Original attachments must be sent as a list. Nothing was sent.' }
+  if (input.length > 8) return { ok: false, answer: 'At most eight original attachment files can be retained for one task. Nothing was silently dropped.' }
+  const files: EngineSourceFile[] = []; let total = 0
+  for (const value of input) {
+    const entry = value && typeof value === 'object' ? value as Record<string, unknown> : {}
+    if (typeof entry.id !== 'string' || !/^[a-zA-Z0-9_.:-]{1,256}$/.test(entry.id) || typeof entry.name !== 'string' || !entry.name || entry.name.length > 255 || /[\x00-\x1f]/.test(entry.name) || typeof entry.mime !== 'string' || entry.mime.length > 200 || /[\x00-\x1f]/.test(entry.mime) || !(entry.data instanceof Uint8Array)) return { ok: false, answer: 'One original attachment has invalid metadata or bytes. Nothing was sent.' }
+    if (!entry.data.byteLength || entry.data.byteLength > MAX_ENGINE_SOURCE_BYTES) return { ok: false, answer: 'One original attachment is empty or exceeds the 50 MB retention limit. Nothing was sent.' }
+    total += entry.data.byteLength
+    if (total > MAX_ENGINE_SOURCE_TOTAL) return { ok: false, answer: 'Original attachments exceed the 64 MB per-turn retention limit. Remove or split files; nothing was sent or shortened.' }
+    files.push({ id: entry.id, name: entry.name, mime: entry.mime, data: new Uint8Array(entry.data) })
+  }
+  if (new Set(files.map(file => file.id)).size !== files.length) return { ok: false, answer: 'Original attachment identifiers must be unique. Nothing was sent.' }
+  return { ok: true, files }
+}
 
 /** Validate the privileged IPC boundary without truncating or decoding a huge string. */
 export function engineImages(input: unknown): EngineImagesAnswer {

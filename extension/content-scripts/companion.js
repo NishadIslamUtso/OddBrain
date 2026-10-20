@@ -8,7 +8,8 @@
     appearance,
     prefs = {},
     cache = [],
-    timer;
+    timer,
+    mounting;
   const sensitive =
     /password|passcode|credit|card.?number|cvv|cvc|secret|token|one.?time|otp|payment/i;
   function editable(el) {
@@ -48,27 +49,33 @@
     return r?.allowed === true;
   }
   async function mount() {
-    if (host || !(await allowed())) return !!host;
-    host = el("div");
-    host.dataset.oddbrain = "companion";
-    shadow = host.attachShadow({ mode: "closed" });
-    const style = el("style");
-    style.textContent = `
-      :host{all:initial;--color-bg:#fff;--color-panel:#f4f5f6;--color-card:#fff;--color-line:#dedfe2;--color-ink:#25262b;--color-muted:#646771;--color-accent:#333943;--accent-ink:#fff;--font-sans:system-ui,sans-serif;--ob-control-radius:8px;--ob-radius:14px;position:fixed;right:20px;bottom:20px;z-index:2147483646;color:var(--color-ink);font:13px var(--font-sans);color-scheme:light;}
-      *{box-sizing:border-box}button,input,textarea{font:inherit;color:inherit}button{cursor:pointer;border:1px solid var(--color-line);background:var(--color-card);border-radius:var(--ob-control-radius);padding:8px 12px}button:hover{border-color:var(--color-ink)}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}button:disabled{opacity:.6;cursor:default}.launch{border-radius:24px;padding:9px 16px;background:var(--color-bg)}.surface{width:min(390px,calc(100vw - 40px));max-height:75vh;overflow:auto;background:var(--color-bg);border:1px solid var(--color-line);border-radius:var(--ob-radius);padding:20px;box-shadow:0 6px 22px #0002}h2{font:600 19px var(--ob-heading-font,var(--font-sans));margin:0 0 14px}p{line-height:1.5;margin:10px 0;color:var(--color-muted)}.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}label{display:block;margin:12px 0 5px}input,textarea{width:100%;border:1px solid var(--color-line);border-radius:var(--ob-control-radius);background:var(--color-card);padding:9px}textarea{height:150px;resize:vertical;line-height:1.5}.primary{background:var(--color-accent);color:var(--accent-ink);border-color:var(--color-accent)}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.6;max-height:240px;overflow:auto}.result{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--color-line);border-radius:0;padding:12px 0}.foot{font-size:12px}
-    `;
-    shadow.append(style);
-    document.documentElement.append(host);
-    const data = await chrome.storage.local.get({
-      appAppearance: null,
-      inlineSuggestions: false,
-      companionEnabled: true,
-      capsules: [],
-    });
-    appearance = OddAppearance.apply(data.appAppearance, host);
-    prefs = data;
-    cache = data.capsules;
-    return true;
+    if (host?.isConnected && shadow) return true;
+    if (mounting) return mounting;
+    mounting = (async () => {
+      if (!(await allowed())) return false;
+      if (host?.isConnected && shadow) return true;
+      const root = document.documentElement;
+      if (!root?.isConnected) return false;
+      const nextHost = el("div");
+      nextHost.dataset.oddbrain = "companion";
+      const nextShadow = nextHost.attachShadow({ mode: "closed" });
+      const style = el("style");
+      style.textContent = `
+        :host{all:initial;--color-bg:#fff;--color-panel:#f4f5f6;--color-card:#fff;--color-line:#dedfe2;--color-ink:#25262b;--color-muted:#646771;--color-accent:#333943;--accent-ink:#fff;--font-sans:system-ui,sans-serif;--ob-control-radius:8px;--ob-radius:14px;position:fixed;right:20px;bottom:20px;z-index:2147483646;color:var(--color-ink);font:13px var(--font-sans);color-scheme:light;}
+        *{box-sizing:border-box}button,input,textarea{font:inherit;color:inherit}button{cursor:pointer;border:1px solid var(--color-line);background:var(--color-card);border-radius:var(--ob-control-radius);padding:8px 12px}button:hover{border-color:var(--color-ink)}button:focus-visible,input:focus-visible,textarea:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px}button:disabled{opacity:.6;cursor:default}.launch{border-radius:24px;padding:9px 16px;background:var(--color-bg)}.surface{width:min(390px,calc(100vw - 40px));max-height:75vh;overflow:auto;background:var(--color-bg);border:1px solid var(--color-line);border-radius:var(--ob-radius);padding:20px;box-shadow:0 6px 22px #0002}h2{font:600 19px var(--ob-heading-font,var(--font-sans));margin:0 0 14px}p{line-height:1.5;margin:10px 0;color:var(--color-muted)}.row{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}label{display:block;margin:12px 0 5px}input,textarea{width:100%;border:1px solid var(--color-line);border-radius:var(--ob-control-radius);background:var(--color-card);padding:9px}textarea{height:150px;resize:vertical;line-height:1.5}.primary{background:var(--color-accent);color:var(--accent-ink);border-color:var(--color-accent)}pre{white-space:pre-wrap;overflow-wrap:anywhere;font:inherit;line-height:1.6;max-height:240px;overflow:auto}.result{display:block;width:100%;text-align:left;border:0;border-bottom:1px solid var(--color-line);border-radius:0;padding:12px 0}.foot{font-size:12px}
+      `;
+      nextShadow.append(style);
+      root.append(nextHost);
+      host = nextHost;
+      shadow = nextShadow;
+      const data = await chrome.storage.local.get({ appAppearance: null, inlineSuggestions: false, companionEnabled: true, capsules: [] });
+      appearance = OddAppearance.apply(data.appAppearance, nextHost);
+      prefs = data;
+      cache = data.capsules;
+      return nextHost.isConnected;
+    })();
+    try { return await mounting; }
+    finally { mounting = null; }
   }
   function clear() {
     shadow?.querySelectorAll(".surface,.launch").forEach((n) => n.remove());
@@ -125,7 +132,7 @@
       .join("\n\n")
       .slice(0, 60000);
   }
-  async function insertPreview(capsule, cooked) {
+  async function insertPreview(capsule, cooked, appendCooked = false) {
     if (!(await allowed()) || !(await mount()))
       return { ok: false, error: "This site is excluded." };
     if (!target?.isConnected || !editable(target)) {
@@ -141,8 +148,9 @@
       };
     const chosen = target,
       original = "value" in chosen ? chosen.value : chosen.textContent;
+    const replacing = Boolean(cooked) && !appendCooked;
     const { box, actions } = surface(
-      cooked ? "Cook this prompt" : "Add capsule to your draft",
+      appendCooked ? "Add cited packet to your draft" : cooked ? "Cook this prompt" : "Add capsule to your draft",
     );
     box.insertBefore(
       el("p", "Review exactly what will be added. Nothing is sent for you."),
@@ -152,7 +160,7 @@
     preview.setAttribute("aria-label", "Context to insert");
     preview.value = cooked || capsuleText(capsule);
     box.insertBefore(preview, actions);
-    const insert = button(cooked ? "Replace draft" : "Insert context", () => {
+    const insert = button(appendCooked ? "Insert cited packet" : cooked ? "Replace draft" : "Insert context", () => {
       const current = "value" in chosen ? chosen.value : chosen.textContent;
       if (!chosen.isConnected || current !== original) {
         box.insertBefore(
@@ -165,10 +173,10 @@
       chosen.focus();
       const addition = preview.value;
       if ("value" in chosen) {
-        const start = cooked
+        const start = replacing
             ? 0
             : (chosen.selectionStart ?? chosen.value.length),
-          end = cooked ? chosen.value.length : (chosen.selectionEnd ?? start);
+          end = replacing ? chosen.value.length : (chosen.selectionEnd ?? start);
         const next =
           chosen.value.slice(0, start) + addition + chosen.value.slice(end);
         const prototype =
@@ -190,7 +198,7 @@
         const selection = window.getSelection();
         const range = document.createRange();
         range.selectNodeContents(chosen);
-        if (!cooked) range.collapse(false);
+        if (!replacing) range.collapse(false);
         selection.removeAllRanges();
         selection.addRange(range);
         if (!document.execCommand("insertText", false, addition)) {
@@ -309,6 +317,22 @@
     search.oninput = render;
     render();
     actions.prepend(button("Capture capsule", captureCapsule));
+    actions.prepend(
+      button("Build cited packet", async () => {
+        const query = search.value.trim();
+        if (!query) {
+          list.replaceChildren(el("p", "Enter saved-source search words first."));
+          search.focus();
+          return;
+        }
+        const result = await send({ type: "ob-research", query });
+        if (!result?.ok || !result.packet) {
+          list.replaceChildren(el("p", result?.notices?.join(" ") || result?.error || "No saved originals matched. Nothing was inserted."));
+          return;
+        }
+        await insertPreview(null, result.packet, true);
+      }),
+    );
     if (target && editable(target))
       actions.prepend(
         button("Cook this prompt", async () => {

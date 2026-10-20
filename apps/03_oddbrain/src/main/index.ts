@@ -76,7 +76,7 @@ import { registerArtifactIpc } from './artifacts/ipc'
 import { createEngineSocket, type EngineSocket } from './engine/socket'
 import { isValidModelName, normalizeEngine } from '../shared/lib/engine'
 import { APPROVAL_MODES, type ApprovalMode, type EngineAvailability, type EngineEvent, type EngineId, type EngineModelEntry } from '../shared/lib/engine'
-import { engineImages } from '../shared/lib/media'
+import { engineImages, engineSourceFiles } from '../shared/lib/media'
 import { listCheckpoints, restoreCheckpoint, inspectCheckpoint } from './engine/checkpoints'
 import { createRecipeManager } from './recipes'
 import { createCompactManager } from './compact'
@@ -321,6 +321,8 @@ function registerBridges(): void {
   handle('transcripts:read', (_event, id: string) => transcriptAnswer(() => turnArchive.read(id)))
   handle('transcripts:raw', (_event, id: string) => transcriptAnswer(() => turnArchive.raw(id)))
   handle('transcripts:image', (_event, id: string, imageId: string) => transcriptAnswer(() => turnArchive.image(id, imageId)))
+  handle('transcripts:attachment', (_event, id: string, attachmentId: string) => transcriptAnswer(() => turnArchive.attachment(id, attachmentId)))
+  handle('transcripts:recover', (_event, chatIds: string[], knownTranscriptIds: string[], before: string = '') => transcriptAnswer(() => turnArchive.recover(chatIds, knownTranscriptIds, before)))
   mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
   marketplaceService = createMarketplaceService({ file: join(app.getPath('userData'), 'marketplaces.json') })
   agyMarketplaceService = createAgyMarketplaceService({ cacheFile: join(app.getPath('home'), '.gemini', 'antigravity', 'cache', 'marketplaces', 'antigravity-plugins-official', 'marketplace.json') })
@@ -742,7 +744,7 @@ function registerBridges(): void {
     return { ok: true, answer: `engine set to ${wanted}` }
   })
 
-  const sendNative = async (event: Electron.IpcMainInvokeEvent, prompt: string, cwd: string, pictures: unknown = [], conversation?: unknown): Promise<{ ok: boolean; answer: string }> => {
+  const sendNative = async (event: Electron.IpcMainInvokeEvent, prompt: string, cwd: string, pictures: unknown = [], conversation?: unknown, originalFiles: unknown = []): Promise<{ ok: boolean; answer: string }> => {
       let context: ReturnType<typeof checkNativeConversation>
       try { context = checkNativeConversation(conversation) } catch (error) { return { ok: false, answer: (error as Error).message } }
       const text = typeof prompt === 'string' ? prompt : ''
@@ -755,6 +757,9 @@ function registerBridges(): void {
       const checkedImages = engineImages(pictures ?? [])
       if (!checkedImages.ok) return checkedImages
       const images = checkedImages.images
+      const checkedSources = engineSourceFiles(originalFiles ?? [])
+      if (!checkedSources.ok) return checkedSources
+      const retainedFiles = checkedSources.files
       if (settings.engine.id === 'agy' && images.length) return { ok: false, answer: AGY_PICTURES_ANSWER }
       if (!engine) return { ok: false, answer: 'The engine is still waking up, try again in a moment.' }
       // The working folder is the app's decision, never the window's: the
@@ -824,7 +829,7 @@ function registerBridges(): void {
       receipt.characters = dispatchedText.length
       receipt.revision = createHash('sha256').update(JSON.stringify([receipt.revision, appInstructions])).digest('hex')
       const artifactBefore = snapshotNativeArtifacts(usedEngine.workspace || vaultRoot())
-      const sent = dispatchRecordedTurn(turnArchive, { prompt: dispatchedText, userPrompt: text, chatId: context?.chatId, context: receipt, engine: usedEngine.id, model: usedEngine.model, workspace: usedEngine.workspace || vaultRoot(), pictures: images.length, images }, receive => engine!.send(dispatchedText, {
+      const sent = dispatchRecordedTurn(turnArchive, { prompt: dispatchedText, userPrompt: text, chatId: context?.chatId, context: receipt, engine: usedEngine.id, model: usedEngine.model, workspace: usedEngine.workspace || vaultRoot(), pictures: images.length, images, ...(retainedFiles.length ? { attachments: retainedFiles } : {}) }, receive => engine!.send(dispatchedText, {
         chatId: context?.chatId,
         cwd: usedEngine.workspace || vaultRoot(),
         settings: usedEngine,
@@ -867,12 +872,15 @@ function registerBridges(): void {
   handle('queue:cancel', (event, id: string) => workQueue.cancel(track(event.sender), id))
   handle('queue:hold', (event, id: string) => workQueue.block(id, 'The handoff response was not confirmed. Inspect transcripts before resuming.', event.sender.id))
   handle('queue:history', (_event, before?: string) => workQueue.history(before))
-  handle('engine:send', async (event, prompt: string, cwd: string, pictures?: unknown, conversation?: unknown, queuedId?: string) => {
-    if (!queuedId) return sendNative(event, prompt, cwd, pictures, conversation)
+  handle('engine:send', async (event, prompt: string, cwd: string, pictures?: unknown, conversation?: unknown, queuedId?: string, originalFiles?: unknown) => {
+    if (!queuedId) return sendNative(event, prompt, cwd, pictures, conversation, originalFiles)
     let started = false
     try {
       if (dispatchingWork || engine?.turnBusy()) throw Error('Another task is active. Resume this saved task after it finishes.')
       if (Array.isArray(pictures) && pictures.length) throw Error('The saved queue contains text, not image bytes. Send images directly.')
+      const queuedSources = engineSourceFiles(originalFiles ?? [])
+      if (!queuedSources.ok) throw Error(queuedSources.answer)
+      if (queuedSources.files.length) throw Error('The saved queue contains text, not original attachment bytes. Send files directly.')
       workQueue.start(track(event.sender), queuedId, prompt, checkNativeConversation(conversation)); started = true
       const answer = await sendNative(event, prompt, cwd, pictures, conversation)
       try { workQueue.finish(queuedId, answer) }

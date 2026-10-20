@@ -41,7 +41,9 @@
     );
   }
   async function mount() {
-    if (host?.isConnected) return;
+    if (host?.isConnected && shadow) return true;
+    const root = document.documentElement;
+    if (!root?.isConnected) return false;
     host = el("div");
     host.dataset.oddbrain = "conversation-progress";
     shadow = host.attachShadow({ mode: "closed" });
@@ -69,18 +71,20 @@
     bar.setAttribute("aria-label", "Capture progress");
     box.append(row, bar, detail);
     shadow.append(style, box);
-    document.documentElement.append(host);
+    root.append(host);
     if (globalThis.OddAppearance)
       OddAppearance.apply(prefs.appAppearance, host);
+    return host.isConnected;
   }
   async function status(state, text, done = 0, total = 0, media = "") {
-    await mount();
-    label.textContent = "OddBrain · " + state;
-    detail.textContent = text;
-    bar.max = Math.max(1, total);
-    bar.value = Math.min(done, total || 0);
-    bar.hidden = !total;
-    pause.textContent = prefs.conversationPaused ? "Resume" : "Pause";
+    if (await mount()) {
+      label.textContent = "OddBrain · " + state;
+      detail.textContent = text;
+      bar.max = Math.max(1, total);
+      bar.value = Math.min(done, total || 0);
+      bar.hidden = !total;
+      pause.textContent = prefs.conversationPaused ? "Resume" : "Pause";
+    }
     // Progress metadata only, in session storage. No message bodies or attachment URLs.
     await send({
       type: "ob-conversation-progress",

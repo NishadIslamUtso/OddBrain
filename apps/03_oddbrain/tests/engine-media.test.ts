@@ -9,6 +9,7 @@ import { join } from 'node:path'
 import { readFileSync } from 'node:fs'
 import {
   engineImages,
+  engineSourceFiles,
   framePoints,
   MAX_ENGINE_ATTACHMENTS,
   MAX_ENGINE_IMAGE_BYTES,
@@ -59,6 +60,15 @@ test('the media boundary limits what can ride with one engine task without trunc
 })
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8')
+
+test('the native boundary accepts exact bounded source bytes and refuses omission-prone batches', () => {
+  const file = { id: 'source-1', name: 'notes.bin', mime: 'application/octet-stream', data: new Uint8Array([0, 255, 10]) }
+  const answer = engineSourceFiles([file]); assert.equal(answer.ok, true)
+  if (answer.ok) { assert.deepEqual(answer.files[0].data, file.data); assert.notEqual(answer.files[0].data, file.data) }
+  assert.equal(engineSourceFiles([{ ...file, data: new Uint8Array() }]).ok, false)
+  assert.equal(engineSourceFiles([{ ...file, name: '../bad\u0000' }]).ok, false)
+  assert.equal(engineSourceFiles(Array.from({ length: 9 }, (_, index) => ({ ...file, id: `source-${index}` }))).ok, false)
+})
 
 test('the composer carries the media front door, the ear, and honest titles', () => {
   const composer = read('../src/renderer/src/components/Composer.tsx')

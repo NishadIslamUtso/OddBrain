@@ -81,7 +81,23 @@ export async function persistAttachments(attachments: Attachment[]): Promise<Sto
       database.close()
     }
   }
-  return attachments.map(({ data, ...metadata }) => metadata)
+  return attachments.map(({ data, originalFile, originalId, ...metadata }) => metadata)
+}
+
+/** Read each explicitly attached original once for the privileged pre-dispatch archive. */
+export async function originalSourceFiles(attachments: Attachment[]): Promise<import('./media').EngineSourceFile[]> {
+  const unique = new Map<string, File>()
+  for (const attachment of attachments) if (attachment.originalId && attachment.originalFile && !unique.has(attachment.originalId)) unique.set(attachment.originalId, attachment.originalFile)
+  const files: import('./media').EngineSourceFile[] = []; let total = 0
+  for (const [id, file] of unique) {
+    if (!file.size || file.size > 50 * 1024 * 1024) throw Error(`${file.name}: original file is empty or exceeds the 50 MB retention limit. Nothing was sent.`)
+    total += file.size
+    if (total > 64 * 1024 * 1024) throw Error('Original attachments exceed the 64 MB per-turn retention limit. Remove or split files; nothing was sent or shortened.')
+    const data = new Uint8Array(await file.arrayBuffer())
+    if (data.byteLength !== file.size) throw Error(`${file.name}: the original file changed while being read. Nothing was sent.`)
+    files.push({ id, name: file.name, mime: file.type, data })
+  }
+  return files
 }
 
 export async function loadImage(file: { id: string; name?: string; data?: string }): Promise<string> {

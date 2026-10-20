@@ -35,6 +35,7 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
   const [query, setQuery] = useState('')
   const [hits, setHits] = useState<RecallHit[] | null>(null)
   const [searching, setSearching] = useState(false), [searchNote, setSearchNote] = useState('')
+  const [research, setResearch] = useState<{ packet: string; sources: Array<{ id: string; title: string; url: string; path: string; completeness: string }>; notices: string[] } | null>(null), [researching, setResearching] = useState(false)
   const [problem, setProblem] = useState('')
 
   const loadTree = (): void => {
@@ -104,6 +105,21 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
       .catch(() => { if (mounted.current && ticket === searchTicket.current) { setSearching(false); setProblem('The search failed.') } })
   }
 
+  const buildResearchPacket = (): void => {
+    const ticket = ++searchTicket.current, needle = query.trim()
+    setResearch(null); setProblem('')
+    if (!needle) { setProblem('Enter a saved-source search first. No research packet was built.'); return }
+    setResearching(true)
+    vaultGet(`/research?q=${encodeURIComponent(needle)}`)
+      .then(reply => {
+        if (!mounted.current || ticket !== searchTicket.current) return
+        setResearching(false)
+        if (reply?.ok !== true) { setProblem(String(reply?.notices?.join(' ') || reply?.error || 'The source packet could not be built.')); return }
+        setResearch({ packet: String(reply.packet || ''), sources: Array.isArray(reply.sources) ? reply.sources : [], notices: Array.isArray(reply.notices) ? reply.notices.map(String) : [] })
+      })
+      .catch(() => { if (mounted.current && ticket === searchTicket.current) { setResearching(false); setProblem('The saved-source packet could not be built.') } })
+  }
+
   const nameMatches = query.trim()
     ? files.filter((file) => file.toLowerCase().includes(query.trim().toLowerCase()))
     : files
@@ -158,7 +174,7 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
             <Search size={13} aria-hidden className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-muted" />
             <input
               value={query}
-              onChange={(event) => { searchTicket.current++; setHits(null); setSearching(false); setSearchNote(''); setQuery(event.target.value) }}
+              onChange={(event) => { searchTicket.current++; setHits(null); setResearch(null); setSearching(false); setResearching(false); setSearchNote(''); setQuery(event.target.value) }}
               onKeyDown={(event) => {
                 if (event.key === 'Enter') searchContents()
               }}
@@ -167,6 +183,8 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
               className="h-9 w-full rounded-lg border border-line bg-card pl-8 pr-3 text-[12.5px] text-ink outline-none placeholder:text-muted focus:border-accent/60"
             />
           </div>
+          <button type="button" className="ob-small-button" disabled={!query.trim() || searching || researching} onClick={searchContents}>Search content</button>
+          <button type="button" className="ob-small-button" disabled={!query.trim() || searching || researching} onClick={buildResearchPacket}>Build cited packet</button>
         </div>
 
         {state === 'loading' ? <p className="mt-6 text-[12.5px] text-muted">Reading the vault…</p> : null}
@@ -179,6 +197,8 @@ export default function VaultView({ onAddToComposer, sourceRequest }: { sourceRe
         {searching && <p role="status" className="ob-memory-caption">Searching saved conversations, confirmed memory and files…</p>}
         {searchNote && <p role="status" className="ob-memory-caption">{searchNote}</p>}
         {problem ? <p className="mt-2 text-[12px] text-warn">{problem}</p> : null}
+        {researching && <p role="status" className="ob-memory-caption">Building a bounded packet from saved originals. No model or network search is running…</p>}
+        {research && <section className="mt-2 rounded-xl border border-line bg-card p-3" aria-label="Saved-source research packet"><div className="flex items-center gap-2"><h2 className="text-[12px] font-semibold text-ink">Cited saved-source packet · {research.sources.length} source(s)</h2><button type="button" className="ob-small-button" onClick={() => setResearch(null)}>Close packet</button>{research.packet && <button type="button" className="ob-small-button" onClick={() => onAddToComposer(`saved-source research for ${query.trim()}`, research.packet)}>Add packet to composer</button>}</div><p className="ob-memory-caption">Local lexical retrieval over already-saved sources, not live web research. Exact bounded excerpts carry source/excerpt hashes and ranges. Review originals before relying on anything outside those ranges.</p>{research.notices.map((notice, index) => <p className="ob-memory-caption" key={index}>{notice}</p>)}<ul>{research.sources.map(source => <li key={source.id}><button type="button" className="text-[11.5px] text-ink underline" onClick={() => openFile(source.path, source.title)}>{source.id} · {source.title}</button><span className="text-[11px] text-muted"> · {source.completeness}{source.url ? ` · ${source.url}` : ''}</span></li>)}</ul>{research.packet ? <details><summary>Review exact packet</summary><pre className="max-h-48 overflow-auto whitespace-pre-wrap text-[11px] text-muted">{research.packet}</pre></details> : <p className="ob-memory-caption">No matching saved original could be added without clipping or guessing.</p>}</section>}
 
         <div className="mt-3 flex min-h-0 flex-1 gap-4">
           {/* The tree, grouped by the folders that really exist. */}
