@@ -133,6 +133,8 @@ export type Chat = {
   branches?: number
   /** Set on a branch, pointing back at what it came from. */
   branchedFrom?: { chatId: string; messageId: string; at: string }
+  /** Added only by reviewed recovery import; preserves the source identity even when an ID collision needs a new local ID. */
+  recoveredFrom?: { exportedAt: string; originalChatId: string; sha256: string }
 }
 
 export type Profile = {

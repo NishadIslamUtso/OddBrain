@@ -257,7 +257,7 @@ export default function Composer({
             </div> : null}
           </div>
           <span className="ml-auto flex items-center gap-2">
-            {preparing ? <span role="status" className="text-[11.5px] text-muted">Saving before send…</span> : queueHasFiles ? <span role="status" className="text-[11.5px] text-muted">Files send after current work.</span> : null}
+            {preparing ? <span role="status" className="text-[11.5px] text-muted">Saving before send…</span> : queueHasFiles ? <span role="status" className="text-[11.5px] text-muted">Exact files can’t enter the text queue. Remove them to queue text, or wait.</span> : null}
             {busy ? (
               <button
                 type="button"

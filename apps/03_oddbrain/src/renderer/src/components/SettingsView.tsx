@@ -316,17 +316,17 @@ function Switch({
   )
 }
 
-function ChatStorageControls({ storage }: { storage: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'openStorageLocation'> }): React.JSX.Element {
+function ChatStorageControls({ storage }: { storage: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'importRecovery' | 'openStorageLocation'> }): React.JSX.Element {
   const [busy, setBusy] = useState(''), [notice, setNotice] = useState('')
-  const run = async (action: 'retry' | 'export' | 'open'): Promise<void> => {
+  const run = async (action: 'retry' | 'export' | 'import' | 'open'): Promise<void> => {
     if (busy) return
     setBusy(action); setNotice('')
     try {
       if (action === 'retry') setNotice(await storage.retryStorage() ? 'Conversation storage is working.' : 'Conversation storage still needs attention.')
-      else setNotice((action === 'export' ? await storage.exportRecovery() : await storage.openStorageLocation()).answer)
+      else setNotice((action === 'export' ? await storage.exportRecovery() : action === 'import' ? await storage.importRecovery() : await storage.openStorageLocation()).answer)
     } finally { setBusy('') }
   }
-  return <div><p className="text-[12px] leading-relaxed text-muted">App chats use private revisioned storage, separate from the vault. A vault backup does not include them.</p><p className={`mt-1 text-[11.5px] ${storage.storage.state === 'attention' ? 'text-warn' : 'text-muted'}`}>{storage.storage.message}</p><div className="ob-inline-actions mt-2"><button type="button" disabled={!!busy} onClick={() => void run('retry')}>{busy === 'retry' ? 'Retrying…' : 'Retry storage'}</button><button type="button" disabled={!!busy} onClick={() => void run('export')}>{busy === 'export' ? 'Exporting…' : 'Export app chats'}</button><button type="button" disabled={!!busy} onClick={() => void run('open')}>{busy === 'open' ? 'Opening…' : 'Open storage folder'}</button></div>{notice ? <p className="ob-inline-note" role="status">{notice}</p> : null}</div>
+  return <div><p className="text-[12px] leading-relaxed text-muted">App chats use private revisioned storage, separate from the vault. A vault backup does not include them. Recovery import previews the result and merges without silently replacing existing chats.</p><p className={`mt-1 text-[11.5px] ${storage.storage.state === 'attention' ? 'text-warn' : 'text-muted'}`}>{storage.storage.message}</p><div className="ob-inline-actions mt-2"><button type="button" disabled={!!busy} onClick={() => void run('retry')}>{busy === 'retry' ? 'Retrying…' : 'Retry storage'}</button><button type="button" disabled={!!busy} onClick={() => void run('export')}>{busy === 'export' ? 'Exporting…' : 'Export recovery'}</button><button type="button" disabled={!!busy} onClick={() => void run('import')}>{busy === 'import' ? 'Importing…' : 'Import recovery'}</button><button type="button" disabled={!!busy} onClick={() => void run('open')}>{busy === 'open' ? 'Opening…' : 'Open storage folder'}</button></div>{notice ? <p className="ob-inline-note" role="status">{notice}</p> : null}</div>
 }
 
 export default function SettingsView({
@@ -356,7 +356,7 @@ export default function SettingsView({
   onClose: () => void
   permissions: Permissions
   onPermissionsChange: (next: Permissions) => void
-  chatStorage: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'openStorageLocation'>
+  chatStorage: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'importRecovery' | 'openStorageLocation'>
   vault: VaultState
   /** Called after the vault moves, so the rest of the app re-reads it. */
   onChanged: () => void
@@ -703,7 +703,7 @@ export default function SettingsView({
           </div>
         ),
       },
-      ...(!isDemo ? [{ label: 'App-chat storage', terms: 'chat conversation storage recovery export retry folder backup', body: <ChatStorageControls storage={chatStorage} /> }] : []),
+      ...(!isDemo ? [{ label: 'App-chat storage', terms: 'chat conversation storage recovery export import restore merge retry folder backup', body: <ChatStorageControls storage={chatStorage} /> }] : []),
       ...(isDemo
         ? [
             {

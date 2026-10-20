@@ -317,6 +317,7 @@ const demoBridge: DesktopBridge = {
     migrate: async () => ({ ok: false, error: 'Main-process conversation storage requires the installed app.' }),
     write: async () => ({ ok: false, error: 'Main-process conversation storage requires the installed app.' }),
     exportRecovery: async () => ({ ok: false, answer: 'Chat recovery export requires the installed app.' }),
+    importRecovery: async () => ({ ok: false, answer: 'Chat recovery import requires the installed app.' }),
     openLocation: async () => ({ ok: false, answer: 'Chat storage folders require the installed app.' }),
   },
   media: {

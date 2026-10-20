@@ -39,6 +39,7 @@ export type ChatState = {
   storage: ChatStorageHealth
   retryStorage: () => Promise<boolean>
   exportRecovery: () => Promise<{ ok: boolean; answer: string }>
+  importRecovery: () => Promise<{ ok: boolean; answer: string }>
   openStorageLocation: () => Promise<{ ok: boolean; answer: string }>
   open: (chatId: string) => void
   create: () => string
@@ -85,6 +86,7 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
   const queuedCurrent = useRef<Array<SetStateAction<string>>>([])
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
   const writes = useRef<Promise<void>>(Promise.resolve())
+  const storageAction = useRef(false)
   const gate = useRef<ReadyGate | null>(null)
   if (!gate.current) gate.current = readyGate()
   if (isDemo) gate.current.resolve()
@@ -278,14 +280,36 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
       return await bridge.chats.exportRecovery({ chats: chatsRef.current, currentChat: currentRef.current, rawChats: initial.current!.rawChats, rawCurrentChat: initial.current!.rawCurrent })
     } catch { return { ok: false, answer: 'Chat recovery data could not be exported. The live store was not changed.' } }
   }, [])
+  const importRecovery = useCallback(async (): Promise<{ ok: boolean; answer: string }> => {
+    if (isDemo) return { ok: false, answer: 'Chat recovery import requires the installed app.' }
+    if (storageAction.current) return { ok: false, answer: 'Another conversation-storage action is still open.' }
+    storageAction.current = true
+    try {
+      if (timer.current) { clearTimeout(timer.current); timer.current = null }
+      await writes.current
+      if (nativeReady.current && !await persist(chatsRef.current, currentRef.current)) {
+        return { ok: false, answer: 'Current visible chats could not be saved, so recovery import did not start. Retry storage or export recovery data first.' }
+      }
+      // While the native chooser/confirmation is open, retain any incoming
+      // stream edits and replay them over the imported snapshot before success.
+      nativeReady.current = false
+      setStorage({ state: 'loading', message: 'Reviewing chat recovery import…' })
+      let answer: { ok: boolean; answer: string }
+      try { answer = await bridge.chats.importRecovery() }
+      catch { answer = { ok: false, answer: 'Chat recovery data could not be imported. Current visible chats remain in this window.' } }
+      const loaded = await loadNative()
+      if (answer.ok && !loaded) return { ok: false, answer: `${answer.answer} The imported store could not be reopened; use the persistent recovery controls before closing.` }
+      return answer
+    } finally { storageAction.current = false }
+  }, [loadNative, persist])
   const openStorageLocation = useCallback(async (): Promise<{ ok: boolean; answer: string }> => {
     try { return await bridge.chats.openLocation() }
     catch { return { ok: false, answer: 'The private chat storage folder could not be opened.' } }
   }, [])
 
   return useMemo<ChatState>(
-    () => ({ commit, chats, setChats, currentChat, ready, storage, retryStorage, exportRecovery, openStorageLocation, open, create, remove, rename, pin, setProject }),
-    [commit, chats, setChats, currentChat, ready, storage, retryStorage, exportRecovery, openStorageLocation, open, create, remove, rename, pin, setProject]
+    () => ({ commit, chats, setChats, currentChat, ready, storage, retryStorage, exportRecovery, importRecovery, openStorageLocation, open, create, remove, rename, pin, setProject }),
+    [commit, chats, setChats, currentChat, ready, storage, retryStorage, exportRecovery, importRecovery, openStorageLocation, open, create, remove, rename, pin, setProject]
   )
 }
 

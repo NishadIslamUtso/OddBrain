@@ -76,7 +76,7 @@ test('an open failure stays globally actionable and retry preserves edits made w
     return { ok: true, snapshot }
   })
   const exportRecovery = vi.fn(async (input: ChatStoreMigration) => ({ ok: true, answer: `exported ${String((input.chats as Chat[])[0]?.title)}` }))
-  window.api = { chats: { read, migrate: vi.fn(), write, exportRecovery, openLocation: async () => ({ ok: true, answer: 'opened' }) } } as NonNullable<Window['api']>
+  window.api = { chats: { read, migrate: vi.fn(), write, exportRecovery, importRecovery: async () => ({ ok: false, answer: 'cancelled' }), openLocation: async () => ({ ok: true, answer: 'opened' }) } } as NonNullable<Window['api']>
   const { useChats } = await import('../src/renderer/src/state/useChats')
   let state!: ReturnType<typeof useChats>
   function Harness() { state = useChats(); return createElement('span', null, state.storage.state) }
@@ -92,4 +92,34 @@ test('an open failure stays globally actionable and retry preserves edits made w
   expect((write.mock.calls[0][0].upserts as Chat[])[0].title).toBe('Kept while unavailable')
   await act(async () => { expect((await state.exportRecovery()).ok).toBe(true) })
   expect(exportRecovery.mock.calls[0][0].rawChats).toBe(rawChats)
+})
+
+test('recovery import reloads the merged library and durably reapplies edits made while its dialogs were open', async () => {
+  let snapshot: ChatStoreSnapshot = { initialized: true, revision: 2, chats: [first], currentChat: 'one' }
+  const read = vi.fn(async (): Promise<ChatStoreAnswer> => ({ ok: true, snapshot }))
+  const write = vi.fn(async (input: ChatStoreWrite): Promise<ChatStoreAnswer> => {
+    const changed = new Map((input.upserts as Chat[]).map(chat => [chat.id, chat]))
+    const previous = new Map(snapshot.chats.map(chat => [chat.id, chat]))
+    snapshot = { initialized: true, revision: snapshot.revision + 1, chats: (input.order as string[]).map(id => changed.get(id) || previous.get(id)!), currentChat: input.currentChat as string }
+    return { ok: true, snapshot }
+  })
+  let finishImport!: (answer: { ok: boolean; answer: string }) => void
+  const importRecovery = vi.fn(() => new Promise<{ ok: boolean; answer: string }>(resolve => { finishImport = resolve }))
+  window.api = { chats: { read, migrate: vi.fn(), write, exportRecovery: vi.fn(), importRecovery, openLocation: vi.fn() } } as NonNullable<Window['api']>
+  const { useChats } = await import('../src/renderer/src/state/useChats')
+  let state!: ReturnType<typeof useChats>
+  function Harness() { state = useChats(); return createElement('span', null, state.storage.state) }
+  await act(async () => { root.render(createElement(Harness)); await Promise.resolve(); await Promise.resolve() })
+
+  let importing!: Promise<{ ok: boolean; answer: string }>
+  await act(async () => { importing = state.importRecovery(); await Promise.resolve(); await Promise.resolve(); await Promise.resolve() })
+  expect(importRecovery).toHaveBeenCalledOnce()
+  await act(() => state.rename('one', 'Edited during import review'))
+  snapshot = { ...snapshot, revision: snapshot.revision + 1, chats: [...snapshot.chats, { id: 'recovered', title: 'Recovered chat', date: 'Older', messages: [] }] }
+  await act(async () => { finishImport({ ok: true, answer: 'Imported.' }); expect(await importing).toEqual({ ok: true, answer: 'Imported.' }) })
+
+  expect(state.chats.map(chat => chat.id)).toEqual(['one', 'recovered'])
+  expect(state.chats[0].title).toBe('Edited during import review')
+  expect((write.mock.calls.at(-1)![0].upserts as Chat[])[0].title).toBe('Edited during import review')
+  expect(state.storage.state).toBe('ready')
 })

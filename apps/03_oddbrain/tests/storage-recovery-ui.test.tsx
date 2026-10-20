@@ -26,18 +26,22 @@ afterEach(async () => {
 test('storage attention stays visible and exposes all recovery actions', async () => {
   const retryStorage = vi.fn().mockResolvedValue(true)
   const exportRecovery = vi.fn().mockResolvedValue({ ok: true, answer: 'Recovery data exported.' })
+  const importRecovery = vi.fn().mockResolvedValue({ ok: true, answer: 'Recovery data imported.' })
   const openStorageLocation = vi.fn().mockResolvedValue({ ok: true, answer: 'Storage folder opened.' })
-  const chats: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'openStorageLocation'> = {
+  const chats: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'importRecovery' | 'openStorageLocation'> = {
     storage: { state: 'attention', message: 'Conversation storage could not be opened.' },
     retryStorage,
     exportRecovery,
+    importRecovery,
     openStorageLocation,
   }
   await act(async () => root.render(<ChatStorageBanner chats={chats} />))
   expect(host.querySelector('[role="alert"]')?.textContent).toContain(chats.storage.message)
+  expect(host.querySelector('aside')?.className).not.toContain('fixed')
   for (const [label, action] of [
-    ['Retry', retryStorage],
-    ['Export recovery data', exportRecovery],
+    ['Retry storage', retryStorage],
+    ['Export recovery', exportRecovery],
+    ['Import recovery', importRecovery],
     ['Open storage folder', openStorageLocation],
   ] as const) {
     await act(async () => {
@@ -46,6 +50,12 @@ test('storage attention stays visible and exposes all recovery actions', async (
     })
     expect(action).toHaveBeenCalledOnce()
   }
+})
+
+test('routine checkpoint saving never takes layout space', async () => {
+  const noop = async () => ({ ok: true, answer: '' })
+  await act(async () => root.render(<ChatStorageBanner chats={{ storage: { state: 'saving', message: 'Saving conversation…' }, retryStorage: async () => true, exportRecovery: noop, importRecovery: noop, openStorageLocation: noop }} />))
+  expect(host.querySelector('[aria-label="Conversation storage status"]')).toBeNull()
 })
 
 test('remembered Read access shows its authority and is revocable outside an active prompt', async () => {
@@ -79,6 +89,10 @@ test('remembered Read access shows its authority and is revocable outside an act
   })
   expect(host.textContent).toContain('C:\\owner\\project')
   expect(host.textContent).toContain('Claude Code · Working folder: C:\\owner')
+  const details = host.querySelector('details')!
+  expect(details.open).toBe(true)
+  await act(() => host.querySelector('summary')!.click())
+  expect(details.open).toBe(false)
   await act(async () => {
     ;[...host.querySelectorAll('button')].find(button => button.textContent === 'Revoke')!.click()
     await Promise.resolve()

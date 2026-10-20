@@ -3,7 +3,8 @@ import { afterEach, expect, test } from 'vitest'
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { chatRecoveryDocument, createChatStore } from '../src/main/chats/store'
+import { createChatStore } from '../src/main/chats/store'
+import { chatRecoveryDocument } from '../src/main/chats/recovery'
 import type { Chat } from '../src/shared/types'
 
 const roots: string[] = []

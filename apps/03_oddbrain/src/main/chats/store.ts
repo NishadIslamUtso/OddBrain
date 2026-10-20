@@ -21,6 +21,7 @@ import type {
 import type { Chat } from '../../shared/types'
 import { noLinkedPath } from '../engine/configTransaction'
 import { readRegularFileSync } from '../safeFile'
+import { mergeChatRecovery, type ChatRecoveryDocument, type ChatRecoveryMerge } from './recovery'
 
 const FORMAT = 'oddbrain-chats'
 const VERSION = 1
@@ -42,6 +43,15 @@ type ChatIndex = {
 
 type Loaded = { snapshot: ChatStoreSnapshot; index: ChatIndex | null; recovered: boolean }
 type Prepared = { chats: Chat[]; currentChat: string; serialized: Array<{ chat: Chat; text: string; bytes: number }> }
+export type ChatRecoveryImportPlan = {
+  prepared: Prepared
+  merge: ChatRecoveryMerge
+  repair: boolean
+  expectedInitialized: boolean
+  expectedRevision: number
+  storageToken: string
+  storageProblem?: string
+}
 
 const digest = (value: string | Buffer): string => createHash('sha256').update(value).digest('hex')
 const validId = (value: unknown): value is string =>
@@ -106,30 +116,6 @@ function prepare(chatsInput: unknown, currentInput: unknown): Prepared {
   return { chats, currentChat, serialized }
 }
 
-/** A user-requested, portable rescue copy. It does not replace or repair the live store. */
-export function chatRecoveryDocument(input: ChatStoreMigration): string {
-  // Recovery deliberately has a wider envelope than live storage: exceeding a
-  // live limit is one reason the owner may need this export in the first place.
-  if (!Array.isArray(input?.chats) || input.chats.length > CHAT_COUNT_LIMIT + 1_000) throw Error('The chat recovery export exceeds its 21,000-chat safety limit. Nothing was exported.')
-  const chats = normalizeChats(input.chats)
-  if (typeof input?.currentChat !== 'string') throw Error('The current chat recovery value is invalid. Nothing was exported.')
-  const currentChat = input.currentChat
-  if (!(input?.rawChats === null || typeof input?.rawChats === 'string') || !(input?.rawCurrentChat === null || typeof input?.rawCurrentChat === 'string')) {
-    throw Error('The original browser recovery values are invalid. Nothing was exported.')
-  }
-  const document = `${JSON.stringify({
-    format: 'oddbrain-chat-recovery-export',
-    version: 1,
-    exportedAt: new Date().toISOString(),
-    currentChat,
-    chats,
-    legacy: { rawChats: input.rawChats, rawCurrentChat: input.rawCurrentChat },
-  }, null, 2)}\n`
-  const limit = CHAT_TOTAL_LIMIT + 256_000_000
-  if (Buffer.byteLength(document) > limit) throw Error(`The chat recovery export exceeds its ${(limit / 1_000_000).toFixed(0)} MB safety limit. Nothing was exported.`)
-  return document
-}
-
 export function createChatStore(root: string) {
   const indexFile = join(root, 'index.json')
   const previousFile = join(root, 'index.previous.json')
@@ -139,6 +125,38 @@ export function createChatStore(root: string) {
   const migrationFile = join(migrationRoot, 'legacy-local-storage.json')
   const itemPath = (name: string): string => join(itemsRoot, name)
   let cached: Loaded | null = null
+
+  const storageToken = (): string => digest([indexFile, previousFile].map(file => {
+    if (!existsSync(file)) return 'missing'
+    const bytes = readRegularFileSync(file, INDEX_LIMIT).bytes
+    return `${bytes.length}:${digest(bytes)}`
+  }).join('|'))
+
+  const quarantineIndexes = (): Array<{ source: string; recovery: string }> => {
+    mkdirSync(recoveryRoot, { recursive: true, mode: 0o700 })
+    const moved: Array<{ source: string; recovery: string }> = []
+    try {
+      for (const [source, label] of [[indexFile, 'current'], [previousFile, 'previous']] as const) {
+        if (!existsSync(source)) continue
+        // Verify a bounded regular file before moving it. Linked or enormous
+        // indexes require manual inspection and are never silently replaced.
+        readRegularFileSync(source, INDEX_LIMIT)
+        const recovery = join(recoveryRoot, `index-before-import-${label}-${Date.now()}-${randomUUID()}.json`)
+        renameSync(source, recovery); moved.push({ source, recovery })
+      }
+      return moved
+    } catch (error) {
+      for (const entry of [...moved].reverse()) {
+        try { renameSync(entry.recovery, entry.source) } catch { /* original error remains authoritative */ }
+      }
+      throw error
+    }
+  }
+
+  const restoreQuarantinedIndexes = (moved: Array<{ source: string; recovery: string }>): void => {
+    try { rmSync(indexFile, { force: true }); rmSync(previousFile, { force: true }) } catch { /* best effort before exact names are restored */ }
+    for (const entry of [...moved].reverse()) renameSync(entry.recovery, entry.source)
+  }
 
   const readFrom = (file: string): { snapshot: ChatStoreSnapshot; index: ChatIndex } => {
     noLinkedPath(root)
@@ -291,7 +309,7 @@ export function createChatStore(root: string) {
 
     // Keep every file named by either atomic index. Other immutable generations
     // are incomplete staging or superseded streaming snapshots, not chat history.
-    if (!before.recovered) {
+    if (!before.recovered && before.index) {
       const keep = new Set(index.items.map(item => item.file))
       try {
         const previous = parseIndex(readRegularFileSync(previousFile, INDEX_LIMIT).bytes)
@@ -330,6 +348,53 @@ export function createChatStore(root: string) {
   }
 
   return {
+    previewRecovery(document: ChatRecoveryDocument): ChatRecoveryImportPlan {
+      let before: Loaded
+      let repair = false, storageProblem = ''
+      try {
+        before = load(); cached = before
+      } catch (error) {
+        repair = true; cached = null; storageProblem = (error as Error).message
+        before = { index: null, recovered: false, snapshot: { initialized: false, revision: 0, chats: [], currentChat: '' } }
+      }
+      const merge = mergeChatRecovery(before.snapshot.chats, before.snapshot.currentChat, before.snapshot.initialized, document)
+      const prepared = prepare(merge.chats, merge.currentChat)
+      return {
+        prepared,
+        merge,
+        repair,
+        expectedInitialized: before.snapshot.initialized,
+        expectedRevision: before.snapshot.revision,
+        storageToken: storageToken(),
+        ...(storageProblem ? { storageProblem } : {}),
+      }
+    },
+    importRecovery(plan: ChatRecoveryImportPlan): ChatStoreSnapshot {
+      if (storageToken() !== plan.storageToken) throw Error('Conversation storage changed while the recovery import was being reviewed. Nothing was imported; review it again.')
+      if (!plan.repair) {
+        const before = load()
+        if (before.snapshot.initialized !== plan.expectedInitialized || before.snapshot.revision !== plan.expectedRevision) {
+          throw Error('Conversation storage changed while the recovery import was being reviewed. Nothing was imported; review it again.')
+        }
+        cached = commit(plan.prepared, before)
+        return cached.snapshot
+      }
+
+      let becameReadable = false
+      try { load(); becameReadable = true } catch { /* the reviewed repair path remains necessary */ }
+      if (becameReadable) throw Error('Conversation storage became readable while the recovery import was being reviewed. Nothing was imported; review it again.')
+      const moved = quarantineIndexes()
+      const before: Loaded = { index: null, recovered: false, snapshot: { initialized: false, revision: 0, chats: [], currentChat: '' } }
+      try {
+        cached = commit(plan.prepared, before)
+        return cached.snapshot
+      } catch (error) {
+        cached = null
+        try { restoreQuarantinedIndexes(moved) }
+        catch { throw Error(`Recovery import failed and the previous index names could not be restored automatically. Their exact copies remain in the recovery folder. ${(error as Error).message}`) }
+        throw Error(`${(error as Error).message} The previous damaged indexes were restored; nothing was imported.`)
+      }
+    },
     read(): ChatStoreSnapshot {
       cached = load()
       return cached.snapshot

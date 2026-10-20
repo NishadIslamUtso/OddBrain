@@ -10,6 +10,7 @@ button[role=switch]{border-radius:999px}
 :focus-visible{outline:2px solid var(--ob-focus);outline-offset:3px;box-shadow:none}
 .ob-app-root,.ob-shell-host,.ob-desktop{height:100%;width:100%;min-width:0;min-height:0}
 .ob-app-root{position:relative;overflow:hidden}
+.ob-app-root>.ob-shell-host,.ob-app-root>.ob-settings-host{height:auto;flex:1 1 auto}
 .ob-shell-host[hidden]{display:none!important}
 .ob-desktop{display:flex;flex-direction:column;background:var(--color-bg);color:var(--color-ink);font:13px/1.5 var(--font-sans);overflow:hidden}
 .ob-titlebar{height:44px;min-height:44px;display:flex;align-items:center;gap:10px;padding:0 14px;border-bottom:1px solid var(--color-line);background:var(--ob-header-bg)}

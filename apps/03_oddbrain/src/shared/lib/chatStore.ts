@@ -38,6 +38,8 @@ export type ChatStoreBridge = {
   write: (input: ChatStoreWrite) => Promise<ChatStoreAnswer>
   /** Export the visible library plus the exact legacy strings through a native save dialog. */
   exportRecovery: (input: ChatStoreMigration) => Promise<ChatStorageAction>
+  /** Select, preview and explicitly merge an app-owned recovery export. Existing chats are never silently replaced. */
+  importRecovery: () => Promise<ChatStorageAction>
   /** Open the private app-chat folder. The renderer never supplies a path. */
   openLocation: () => Promise<ChatStorageAction>
 }

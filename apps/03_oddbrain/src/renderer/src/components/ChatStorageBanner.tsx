@@ -1,30 +1,43 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { ChatState } from '@/state/useChats'
 
-/** Storage health stays visible on every screen; a chat-only notice is too easy to miss. */
-export default function ChatStorageBanner({ chats }: { chats: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'openStorageLocation'> }) {
-  const [working, setWorking] = useState<'retry' | 'export' | 'open' | ''>(''), [answer, setAnswer] = useState(''), [showProgress, setShowProgress] = useState(chats.storage.state === 'loading')
-  useEffect(() => {
-    if (chats.storage.state === 'loading') { setShowProgress(true); return }
-    if (chats.storage.state !== 'saving') { setShowProgress(false); return }
-    const timer = setTimeout(() => setShowProgress(true), 250)
-    return () => clearTimeout(timer)
-  }, [chats.storage.state])
-  if (chats.storage.state === 'ready' || (chats.storage.state === 'saving' && !showProgress)) return null
-  const act = async (kind: 'retry' | 'export' | 'open'): Promise<void> => {
+type StorageControls = Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'importRecovery' | 'openStorageLocation'>
+type Action = 'retry' | 'export' | 'import' | 'open'
+
+/** Storage failures stay visible on every screen without covering the composer. */
+export default function ChatStorageBanner({ chats }: { chats: StorageControls }) {
+  const [working, setWorking] = useState<Action | ''>(''), [answer, setAnswer] = useState('')
+  // Routine checkpoints never claim screen space. Pre-dispatch commits have
+  // their own composer status; this strip is for startup and actionable faults.
+  if ((chats.storage.state === 'ready' || chats.storage.state === 'saving') && !answer) return null
+  const act = async (kind: Action): Promise<void> => {
     if (working) return
     setWorking(kind); setAnswer('')
     try {
       if (kind === 'retry') setAnswer(await chats.retryStorage() ? 'Conversation storage is working again.' : 'Conversation storage still needs attention.')
       else {
-        const result = kind === 'export' ? await chats.exportRecovery() : await chats.openStorageLocation()
+        const result = kind === 'export'
+          ? await chats.exportRecovery()
+          : kind === 'import'
+            ? await chats.importRecovery()
+            : await chats.openStorageLocation()
         setAnswer(result.answer)
       }
     } finally { setWorking('') }
   }
   const attention = chats.storage.state === 'attention'
-  return <aside className={`fixed bottom-3 left-1/2 z-[80] w-[min(720px,calc(100vw-24px))] -translate-x-1/2 rounded-xl border px-3 py-2 shadow-xl ${attention ? 'border-warn/60 bg-bg' : 'border-line bg-card'}`} role={attention ? 'alert' : 'status'} aria-label="Conversation storage status">
-    <div className="flex flex-wrap items-center gap-2"><strong className="text-[12px] text-ink">{chats.storage.state === 'loading' ? 'Opening conversations…' : chats.storage.state === 'saving' ? 'Saving conversation…' : 'Conversation storage needs attention'}</strong>{attention ? <><button type="button" className="ob-small-button" disabled={!!working} onClick={() => void act('retry')}>{working === 'retry' ? 'Retrying…' : 'Retry'}</button><button type="button" className="ob-small-button" disabled={!!working} onClick={() => void act('export')}>{working === 'export' ? 'Exporting…' : 'Export recovery data'}</button><button type="button" className="ob-small-button" disabled={!!working} onClick={() => void act('open')}>{working === 'open' ? 'Opening…' : 'Open storage folder'}</button></> : null}</div>
+  const loading = chats.storage.state === 'loading'
+  return <aside className={`relative z-[80] w-full shrink-0 border-b px-3 py-2 ${attention ? 'border-warn/60 bg-bg' : 'border-line bg-card'}`} role={attention ? 'alert' : 'status'} aria-label="Conversation storage status">
+    <div className="flex flex-wrap items-center gap-2">
+      <strong className="text-[12px] text-ink">{attention ? 'Conversation storage needs attention' : loading ? chats.storage.message : 'Conversation storage'}</strong>
+      {attention ? <>
+        <button type="button" className="ob-small-button" disabled={!!working} onClick={() => void act('retry')}>{working === 'retry' ? 'Retrying…' : 'Retry storage'}</button>
+        <button type="button" className="ob-small-button" disabled={!!working} onClick={() => void act('export')}>{working === 'export' ? 'Exporting…' : 'Export recovery'}</button>
+        <button type="button" className="ob-small-button" disabled={!!working} onClick={() => void act('import')}>{working === 'import' ? 'Importing…' : 'Import recovery'}</button>
+        <button type="button" className="ob-small-button" disabled={!!working} onClick={() => void act('open')}>{working === 'open' ? 'Opening…' : 'Open storage folder'}</button>
+      </> : null}
+      {!attention && answer ? <button type="button" className="ob-small-button ml-auto" onClick={() => setAnswer('')}>Dismiss</button> : null}
+    </div>
     {attention ? <p className="mt-1 text-[11.5px] leading-relaxed text-muted">{chats.storage.message}</p> : null}
     {answer ? <p className="mt-1 text-[11.5px] text-muted">{answer}</p> : null}
   </aside>

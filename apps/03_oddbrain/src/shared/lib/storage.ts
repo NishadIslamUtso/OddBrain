@@ -47,6 +47,7 @@ export function normalizeChats(value: unknown): Chat[] {
       throw new Error('Invalid chat history.')
     }
     if (chat.messages !== undefined && !Array.isArray(chat.messages)) throw new Error('Invalid message history. Original storage must not be replaced.')
+    if (chat.recoveredFrom !== undefined && (!chat.recoveredFrom || typeof chat.recoveredFrom.exportedAt !== 'string' || chat.recoveredFrom.exportedAt.length > 64 || !Number.isFinite(Date.parse(chat.recoveredFrom.exportedAt)) || typeof chat.recoveredFrom.originalChatId !== 'string' || !chat.recoveredFrom.originalChatId || chat.recoveredFrom.originalChatId.length > 1_024 || typeof chat.recoveredFrom.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(chat.recoveredFrom.sha256))) throw new Error('Invalid chat recovery provenance. Original storage must not be replaced.')
     const messages: Message[] = Array.isArray(chat.messages) ? chat.messages : []
     const bad = messages.some(
       message =>

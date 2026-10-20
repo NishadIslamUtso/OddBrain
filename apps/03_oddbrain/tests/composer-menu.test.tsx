@@ -38,7 +38,7 @@ test('busy work queues text but keeps exact files for a later send', async () =>
   await act(() => root.render(<Composer value="Use this picture" onChange={change} onSend={send} onStop={stop} busy notice="" attachments={[{ id: 'image-1', name: 'photo.png', kind: 'image', data: 'AA==' }]} />))
   const button = container.querySelector('[aria-label="Files cannot be queued"]') as HTMLButtonElement
   expect(button.disabled).toBe(true)
-  expect(container.textContent).toContain('Files send after current work.')
+  expect(container.textContent).toContain('Exact files can’t enter the text queue. Remove them to queue text, or wait.')
   await key('Enter'); expect(send).not.toHaveBeenCalled()
 })
 test('attachment picker accepts broad formats and all chat tools remain reachable', async () => {

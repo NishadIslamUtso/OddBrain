@@ -18,7 +18,7 @@ test('launch belongs to the process, not each recreated renderer or quick window
   const quick = app.slice(app.indexOf('function QuickMode'), app.indexOf('export default function App'))
   assert.doesNotMatch(quick, /<LaunchOverlay/)
   assert.match(quick, /await engine\.send\(prompt\)/)
-  assert.match(quick, /else setProblem\(answer\.answer\)/)
+  assert.match(quick, /else \{ setQueueSuccess\(false\); setProblem\(answer\.answer\) \}/)
   assert.doesNotMatch(quick, /setDraft\(''\)/, 'a refused send never discards the draft')
 })
 test('read-only export asset has fixed developer/packaged paths and fails honestly', async () => {

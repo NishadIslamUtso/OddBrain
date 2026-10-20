@@ -234,6 +234,7 @@ const api = {
     migrate: (input: ChatStoreMigration) => ipcRenderer.invoke('chats:migrate', input),
     write: (input: ChatStoreWrite) => ipcRenderer.invoke('chats:write', input),
     exportRecovery: (input: ChatStoreMigration) => ipcRenderer.invoke('chats:export-recovery', input),
+    importRecovery: () => ipcRenderer.invoke('chats:import-recovery'),
     openLocation: () => ipcRenderer.invoke('chats:open-location'),
   } satisfies ChatStoreBridge,
   transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), image: (id: string, imageId: string) => ipcRenderer.invoke('transcripts:image', id, imageId), attachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:attachment', id, attachmentId), recover: (chatIds: string[], knownTranscriptIds: string[], before?: string) => ipcRenderer.invoke('transcripts:recover', chatIds, knownTranscriptIds, before), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },

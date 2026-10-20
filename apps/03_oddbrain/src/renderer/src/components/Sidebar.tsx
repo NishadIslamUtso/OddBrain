@@ -328,11 +328,11 @@ function ChatRow({
         <button
           type="button"
           onClick={() => onOpen(chat.id)}
-          title={chat.title}
+          title={chat.recoveredFrom ? `${chat.title} · recovered from export ${chat.recoveredFrom.exportedAt}` : chat.title}
           className={`min-w-0 flex-1 truncate px-2 py-1.5 text-left text-[12.5px] ${active ? 'text-ink' : 'text-muted group-hover:text-ink'}`}
         >
           {chat.pinned ? <PinMark /> : null}
-          {chat.title}
+          {chat.title}{chat.recoveredFrom ? <span className="text-[10.5px] text-muted"> · recovered</span> : null}
         </button>
         <button
           type="button"

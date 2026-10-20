@@ -84,7 +84,7 @@ import { searchChats } from '@shared/lib/search'
 function QuickMode(): React.JSX.Element {
   const engine = useEngine()
   const [draft, setDraft] = useState('')
-  const [problem, setProblem] = useState('')
+  const [problem, setProblem] = useState(''), [queueSuccess, setQueueSuccess] = useState(false)
   // The gate is the TURN, not the process: the session stays alive between
   // turns on purpose, and a living idle process accepts the next ask. Work in
   // another window uses the same durable text queue instead of deadening input.
@@ -93,20 +93,20 @@ function QuickMode(): React.JSX.Element {
     const text = draft.trim()
     if (!text) return
     const pendingBrief = peekSeed(), prompt = pendingBrief ? buildSeededPrompt(pendingBrief, text) : text
-    if (prompt.length > 20000) { setProblem('The prompt and queued brief exceed the engine limit. Nothing was sent.'); return }
+    if (prompt.length > 20000) { setQueueSuccess(false); setProblem('The prompt and queued brief exceed the engine limit. Nothing was sent.'); return }
     try {
       if (machineBusy) {
         await engine.enqueue(prompt)
         consumeSeed(pendingBrief); setDraft(current => current.trim() === text ? '' : current)
-        setProblem('Saved to the queue. It runs after the active work finishes.')
+        setQueueSuccess(true); setProblem('Saved to the queue. It runs after the active work finishes.')
         return
       }
       const answer = await engine.send(prompt)
-      if (answer.ok) { consumeSeed(pendingBrief); setDraft(current => current.trim() === text ? '' : current); setProblem('') }
+      if (answer.ok) { consumeSeed(pendingBrief); setDraft(current => current.trim() === text ? '' : current); setQueueSuccess(false); setProblem('') }
       else if (answer.answer.startsWith('The engine is already working') || answer.answer.startsWith('An engine is already working')) {
-        await engine.enqueue(prompt); consumeSeed(pendingBrief); setDraft(current => current.trim() === text ? '' : current); setProblem('Saved to the queue. It runs after the active work finishes.')
-      } else setProblem(answer.answer)
-    } catch (error) { setProblem((error as Error).message || 'The request could not be saved. Your draft is unchanged.') }
+        await engine.enqueue(prompt); consumeSeed(pendingBrief); setDraft(current => current.trim() === text ? '' : current); setQueueSuccess(true); setProblem('Saved to the queue. It runs after the active work finishes.')
+      } else { setQueueSuccess(false); setProblem(answer.answer) }
+    } catch (error) { setQueueSuccess(false); setProblem((error as Error).message || 'The request could not be saved. Your draft is unchanged.') }
   }
   return (
     <div className="flex h-screen flex-col bg-bg px-3 py-2.5">
@@ -144,7 +144,7 @@ function QuickMode(): React.JSX.Element {
           {machineBusy ? 'Queue' : 'Send'}
         </button>
       </div>
-      {problem ? <p className="mt-2 text-[12px] text-warn" role="status">{problem}</p> : null}
+      {problem ? <p className={`mt-2 text-[12px] ${queueSuccess ? 'text-muted' : 'text-warn'}`} role="status">{problem}</p> : null}
     </div>
   )
 }
@@ -619,7 +619,10 @@ export default function App() {
       ...(!resume ? { history: pendingBrief ? [] : (chat?.messages || []).filter(m => m.origin !== 'import' && (!m.status || m.status === 'complete')).map(m => ({ id: m.id, role: m.role, content: m.content })) } : {}) }
     if (!await chats.commit(previous => previous.some(entry => entry.id === chatId)
       ? previous.map(entry => entry.id === chatId ? { ...entry, projectId } : entry)
-      : [{ id: chatId, title: plain.replace(/\s+/g, ' ').slice(0, 80) || 'New chat', date: 'Today', projectId, messages: [] }, ...previous])) return
+      : [{ id: chatId, title: plain.replace(/\s+/g, ' ').slice(0, 80) || 'New chat', date: 'Today', projectId, messages: [] }, ...previous])) {
+      setNotice('Not sent—conversation storage must be working first. Your draft and attachments are unchanged; use the recovery controls above, then retry.')
+      return
+    }
     chats.open(chatId)
     const answer = await engineStore().send(
       order,
@@ -666,7 +669,7 @@ export default function App() {
   const openChat = (id: string): void => { chats.open(id); setView('chat') }
   useEffect(() => { const open = (event: Event) => { const id = (event as CustomEvent<string>).detail; if (chats.chats.some(c => c.id === id)) { chats.open(id); setView('chat'); setPendingProject(null) } }; window.addEventListener('app:open-chat', open); return () => window.removeEventListener('app:open-chat', open) }, [chats])
   const newChat = (): void => { chats.create(); setView('chat'); setSettingsOpen(false); setPendingProject(null); setNotice(''); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label=Message]')?.focus()) }
-  const items: ShellItem[] = view === 'projects' ? projects.map(p => ({ id: p.id, title: p.name, detail: p.folder, open: () => { setProjectFocus(p.id); setView('projects') } })) : view === 'artifacts' ? library.items.map(item => ({ id: item.id, title: item.title, detail: item.type.toUpperCase(), open: () => { setArtifactFocus(item.id); setView('artifacts') } })) : chats.chats.map(c => ({ id: c.id, title: c.title, detail: c.date, open: () => openChat(c.id) }))
+  const items: ShellItem[] = view === 'projects' ? projects.map(p => ({ id: p.id, title: p.name, detail: p.folder, open: () => { setProjectFocus(p.id); setView('projects') } })) : view === 'artifacts' ? library.items.map(item => ({ id: item.id, title: item.title, detail: item.type.toUpperCase(), open: () => { setArtifactFocus(item.id); setView('artifacts') } })) : chats.chats.map(c => ({ id: c.id, title: c.title, detail: c.recoveredFrom ? `${c.date || 'Older'} · recovered copy` : c.date, open: () => openChat(c.id) }))
   const commands: CommandItem[] = [{ id: 'memory-inbox', title: 'Memory inbox', detail: 'Review interpretations, people and your life story', run: () => window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' })) }, ...screenCommands(setView), ...chats.chats.slice(0, 6).map(c => ({ id: 'chat-' + c.id, title: c.title, detail: 'Conversation', run: () => openChat(c.id) })), ...SECTIONS.map(section => ({ id: 'settings-' + section.id, title: section.id === 'models' ? 'Models & API keys' : section.id === 'connectors' ? 'Apps & extensions' : section.title, detail: section.id === 'maps' ? 'Vault' : 'Settings', run: () => section.id === 'maps' ? window.dispatchEvent(new Event('app:capture-sources')) : openSettings(section.id) }))]
   const [sourceRequest, setSourceRequest] = useState<{ path: string; root: string; title?: string } | null>(null)
   useEffect(() => {
@@ -681,7 +684,7 @@ export default function App() {
     return { items: (reply.hits as import('@shared/lib/recall').RecallHit[]).map(hit => ({ id: 'recall:' + hit.id, title: hit.title, detail: `${hit.kind === 'confirmed' ? 'Confirmed memory' : hit.kind === 'conversation' ? 'Original conversation' : 'Saved file'} · ${hit.speaker}${hit.date ? ' · ' + hit.date : ''} — ${hit.text}`, run: () => window.dispatchEvent(new CustomEvent('app:open-source', { detail: { path: hit.path, title: hit.title } })) })), notice: [...(reply.notices || []), reply.hits.length ? 'Word matches, not an AI answer. Open a result to read its source.' : 'No saved records matched these words. Try names, dates or a phrase from the conversation.'].join(' ') }
   }, [vault.path])
   const searchCommands = (query: string): CommandItem[] => searchChats(chats.chats, query).map(result => ({ id: 'chat-' + result.chat.id, title: result.chat.title, detail: result.matches[0]?.snippet || 'Conversation', run: () => openChat(result.chat.id) }))
-  if (!welcomed) return <LookContext value={look}><LookActions value={updateLook}><div className="ob-app-root"><FirstRunView onFinish={() => setWelcomed(true)} onName={name => setProfile({ ...profile, name })} /></div><LaunchOverlay enabled={appearance.startupAnimation} /></LookActions></LookContext>
+  if (!welcomed) return <LookContext value={look}><LookActions value={updateLook}><div className="ob-app-root flex h-full flex-col"><ChatStorageBanner chats={chats} /><div className="min-h-0 flex-1"><FirstRunView onFinish={() => setWelcomed(true)} onName={name => setProfile({ ...profile, name })} /></div></div><LaunchOverlay enabled={appearance.startupAnimation} /></LookActions></LookContext>
 
   return <LookContext value={look}><LookActions value={updateLook}>
     <div className="ob-app-root flex h-full flex-col bg-bg text-ink">

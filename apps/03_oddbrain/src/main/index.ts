@@ -116,7 +116,9 @@ import { createProjectRuleReview, houseRulesFile as nativeHouseRulesFile } from 
 import { DEFAULT_HOUSE_RULES, instructionBlock, type HouseRules } from '../shared/lib/houseRules'
 import { newProject, type Project } from '../shared/lib/projects'
 import { scanTextHazards } from '../shared/lib/textHazards'
-import { chatRecoveryDocument, createChatStore } from './chats/store'
+import { createChatStore } from './chats/store'
+import { CHAT_RECOVERY_FILE_LIMIT, chatRecoveryDocument, parseChatRecoveryDocument } from './chats/recovery'
+import { readRegularFileSync } from './safeFile'
 import type { ChatStoreMigration, ChatStoreSnapshot, ChatStoreWrite } from '../shared/lib/chatStore'
 
 /**
@@ -340,6 +342,39 @@ function registerBridges(): void {
       } finally { closeSync(fd) }
       return { ok: true, answer: `Chat recovery data exported to ${chosen.filePath}`, path: chosen.filePath }
     } catch (error) { return { ok: false, answer: `${(error as Error).message || 'Chat recovery data could not be exported.'} The live chat store was not changed.` } }
+  })
+  handle('chats:import-recovery', async () => {
+    try {
+      const chosen = await dialog.showOpenDialog({ title: 'Import OddBrain chat recovery data', properties: ['openFile'], filters: [{ name: 'OddBrain chat recovery JSON', extensions: ['json'] }] })
+      if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, answer: 'Import cancelled. Nothing was changed.' }
+      const selected = chosen.filePaths[0]
+      noLinkedPath(selected)
+      const document = parseChatRecoveryDocument(readRegularFileSync(selected, CHAT_RECOVERY_FILE_LIMIT).bytes)
+      const plan = chatStore.previewRecovery(document)
+      if (plan.repair && document.chats.length === 0) return { ok: false, answer: 'An empty recovery export cannot replace unreadable chat indexes. Nothing was changed.' }
+      if (!plan.repair && plan.merge.imported === 0) return { ok: true, answer: `All ${plan.merge.identical.toLocaleString()} chat(s) from this recovery export are already present. Nothing was changed.` }
+      const lines = [
+        `Recovery export: ${document.exportedAt}`,
+        `Chats in file: ${document.chats.length.toLocaleString()}`,
+        `New recovered chats: ${plan.merge.imported.toLocaleString()}`,
+        `Already present: ${plan.merge.identical.toLocaleString()}`,
+        `ID conflicts kept as separate recovered copies: ${plan.merge.conflicts.toLocaleString()}`,
+        `Final library: ${plan.merge.chats.length.toLocaleString()} chat(s)`,
+      ]
+      if (plan.repair) lines.push('', 'The current chat indexes cannot be read. Their exact files will be moved into the private recovery folder before this import becomes active. Existing item files will be retained.', plan.storageProblem || '')
+      else lines.push('', 'Existing chats are never replaced. Exact repeats are skipped; conflicting versions are kept as separate recovered copies.')
+      const confirmation = await dialog.showMessageBox({
+        type: plan.repair ? 'warning' : 'question',
+        buttons: ['Cancel', plan.repair ? 'Preserve damaged indexes and import' : 'Import recovered chats'],
+        defaultId: 0,
+        cancelId: 0,
+        message: plan.repair ? 'Repair app-chat storage from this recovery export?' : 'Merge this recovery export into app chats?',
+        detail: lines.join('\n'),
+      })
+      if (confirmation.response !== 1) return { ok: false, answer: 'Import cancelled. Nothing was changed.' }
+      const snapshot = chatStore.importRecovery(plan)
+      return { ok: true, answer: `${plan.merge.imported.toLocaleString()} recovered chat(s) imported${plan.merge.conflicts ? `; ${plan.merge.conflicts.toLocaleString()} ID conflict(s) were kept as separate copies` : ''}. The library now contains ${snapshot.chats.length.toLocaleString()} chat(s).` }
+    } catch (error) { return { ok: false, answer: `${(error as Error).message || 'Chat recovery data could not be imported.'} The selected recovery file was not changed.` } }
   })
   handle('chats:open-location', async () => {
     try {
