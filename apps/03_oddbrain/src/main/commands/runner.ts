@@ -32,7 +32,9 @@ type Scope = { cwd: string; authority: string; stableAuthority?: string; busy?: 
 type Lease = { recheck(): void; release(): void }
 export function createCommandRunner(options: {
   root: string
-  scope(): Scope
+  scope(request?: ShellRequest): Scope
+  /** True only for a folder this app created as an isolated checkout. */
+  isolated?(path: string): boolean
   acquire(request: ShellRequest, authority: string, signal: AbortSignal): Promise<Lease>
   spawnProcess?: typeof spawn
   deadlineMs?: number
@@ -47,7 +49,12 @@ export function createCommandRunner(options: {
     if (saved.archived || saved.platform !== process.platform || saved.digest !== request.source.digest || saved.name !== request.source.name || saved.command !== request.command || saved.cwd !== request.cwd) throw Error('Saved command was archived, changed or belongs to another OS. Review the current command explicitly; nothing was run.')
   }
   const reviews = new Map<number, ReturnType<typeof createChatShellReview>>()
-  let active: { owner: number; controller: AbortController; id: string | null } | null = null
+  type Active = { owner: number; controller: AbortController; id: string | null; cwd: string }
+  // Up to two runs, and only when every run but the first is in an isolated checkout
+  // this app created. The selected folder never runs two commands at once.
+  const CAP = 2
+  const active = new Set<Active>()
+  const isolated = (path: string) => { try { return options.isolated?.(path) === true } catch { return false } }
   const directory = (id: string) => { if (!ID.test(id)) throw Error('Invalid command record ID.'); const dir = join(options.root, id); noLinkedPath(dir); return dir }
   const file = (id: string) => join(directory(id), 'record.json')
   const readRecord = (id: string): CommandRecord => {
@@ -58,11 +65,17 @@ export function createCommandRunner(options: {
     if (value.outputComplete && (value.state !== 'finished' || value.exitCode === null || !/^[a-f0-9]{64}$/.test(value.stdoutHash || '') || !/^[a-f0-9]{64}$/.test(value.stderrHash || ''))) throw Error('Command completion metadata is incomplete. Originals were retained.')
     return value
   }
-  const observed = (record: CommandRecord) => active?.id !== record.id && ['starting', 'running'].includes(record.state) ? { ...record, state: 'interrupted' as const, outputComplete: false, note: 'No final result is recorded and this app has no active handle for this run. It may have been interrupted before or during execution; escaped descendants may have continued. Nothing was automatically retried.' } : record
+  const activeIds = () => new Set([...active].map(run => run.id).filter((id): id is string => typeof id === 'string'))
+  const observed = (record: CommandRecord) => !activeIds().has(record.id) && ['starting', 'running'].includes(record.state) ? { ...record, state: 'interrupted' as const, outputComplete: false, note: 'No final result is recorded and this app has no active handle for this run. It may have been interrupted before or during execution; escaped descendants may have continued. Nothing was automatically retried.' } : record
   const inspect = (request: ShellRequest) => {
     checkSource(request)
-    const scope = options.scope()
-    if (!scope.allowed || active) throw Error(active ? 'Another app command is preparing or running.' : scope.explanation)
+    const scope = options.scope(request)
+    const wanted = typeof request.cwd === 'string' && isAbsolute(request.cwd) ? resolve(request.cwd) : ''
+    const sameFolder = wanted ? [...active].find(run => run.cwd === wanted) : undefined
+    const refusal = sameFolder ? 'Another app command is already running in this folder. Nothing was started; one folder runs one command at a time.'
+      : active.size && !isolated(wanted) ? 'Another app command is running. The selected folder runs one command at a time; review this one against an isolated checkout to run it beside the other.'
+      : active.size >= CAP ? `Another app command is already running. ${CAP} are the most this app runs at once; wait for a result before reviewing more.` : ''
+    if (!scope.allowed || refusal) throw Error(refusal || scope.explanation)
     if (!isAbsolute(request.cwd) || resolve(request.cwd) !== resolve(scope.cwd)) throw Error('Use the app’s selected working folder. Mentioning another path does not authorize it.')
     noLinkedPath(request.cwd)
     const folder = statSync(request.cwd)
@@ -76,7 +89,6 @@ export function createCommandRunner(options: {
     return { scope, execution, stamp, stableStamp }
   }
   type Checked = ReturnType<typeof inspect>
-  type Active = { owner: number; controller: AbortController; id: string | null }
   const runOne = async (request: ShellRequest, checked: Checked, own: Active, lease: Lease, outputLimit = limit, recorded?: (id: string) => void): Promise<ShellResult> => {
       const controller = own.controller, expected = checked.stamp
       controller.signal.throwIfAborted(); lease.recheck()
@@ -157,10 +169,10 @@ export function createCommandRunner(options: {
   const execute = async (owner: number, request: ShellRequest, expected: string): Promise<ShellResult> => {
     const checked = inspect(request)
     if (checked.stamp !== expected) throw Error('Command authority, folder or environment changed. Review again; nothing was run.')
-    const own: Active = { owner, controller: new AbortController(), id: null }; active = own
+    const own: Active = { owner, controller: new AbortController(), id: null, cwd: resolve(request.cwd) }; active.add(own)
     let lease: Lease | undefined
     try { lease = await options.acquire(request, checked.scope.authority, own.controller.signal); return await runOne(request, checked, own, lease) }
-    finally { lease?.release(); if (active === own) active = null }
+    finally { lease?.release(); active.delete(own) }
   }
   /** Main-only capability. No IPC exposes run(); workflow approval owns it. */
   const plan = (input: ShellRequest[]) => {
@@ -175,7 +187,7 @@ export function createCommandRunner(options: {
         consumed = true; signal.throwIfAborted()
         const fresh = requests.map(request => inspect(request))
         if (sha(JSON.stringify(fresh.map(entry => entry.stamp))) !== fingerprint) throw Error('Workflow authority or targets changed. Review again.')
-        const own: Active = { owner, controller: new AbortController(), id: null }; active = own
+        const own: Active = { owner, controller: new AbortController(), id: null, cwd: resolve(requests[0].cwd) }; active.add(own)
         const abort = () => own.controller.abort(signal.reason)
         signal.addEventListener('abort', abort, { once: true }); if (signal.aborted) abort()
         const timer = setTimeout(() => own.controller.abort('Workflow time budget reached'), 900_000)
@@ -191,7 +203,7 @@ export function createCommandRunner(options: {
             if (result.runId) { const record = readRecord(result.runId); remaining -= record.stdoutBytes + record.stderrBytes }
             if (result.interrupted || !result.outputComplete || result.exitCode !== 0) return
           }
-        } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); lease?.release(); if (active === own) active = null }
+        } finally { clearTimeout(timer); signal.removeEventListener('abort', abort); lease?.release(); active.delete(own) }
       },
     }
   }
@@ -214,23 +226,30 @@ export function createCommandRunner(options: {
   }
   return {
     plan,
-    readiness: () => ({ ...options.scope(), busy: !!active || options.scope().busy === true }),
-    running: () => active !== null,
-    context() { const scope = options.scope(); return { cwd: scope.cwd, allowed: scope.allowed && !active, explanation: active ? 'An app command is preparing or running.' : scope.explanation || COMMAND_DISCLOSURE, activeId: active?.id || null } },
+    readiness: () => ({ ...options.scope(), busy: active.size > 0 || options.scope().busy === true }),
+    running: () => active.size > 0,
+    context() {
+      const scope = options.scope(), runs = [...active].filter(run => typeof run.id === 'string')
+      return { cwd: scope.cwd, allowed: scope.allowed && active.size < CAP, explanation: active.size ? 'An app command is preparing or running.' : scope.explanation || COMMAND_DISCLOSURE, activeId: runs.at(-1)?.id || null, activeCount: active.size }
+    },
     // Ordinary IPC cannot forge saved-command provenance.
     preview: (owner: number, request: ShellRequest) => service(owner).preview({ command: request?.command, cwd: request?.cwd }),
     saved: (before?: string) => library.list(before),
     save(input: { name: string; command: string; cwd: string }) {
-      const scope = options.scope()
-      if (typeof input?.cwd !== 'string' || !isAbsolute(input.cwd) || resolve(input.cwd) !== resolve(scope.cwd)) throw Error('Save commands for the selected working folder, not an unapproved path.')
+      const scope = options.scope({ command: input?.command, cwd: input?.cwd })
+      if (typeof input?.cwd !== 'string' || !isAbsolute(input.cwd) || resolve(input.cwd) !== resolve(scope.cwd)) throw Error('Save commands for the selected working folder or an isolated checkout, not an unapproved path.')
       commandSpec(input.command); noLinkedPath(input.cwd); if (!statSync(input.cwd).isDirectory()) throw Error('Choose a working directory.')
       return library.save({ name: input.name, command: input.command, cwd: scope.cwd, platform: process.platform })
     },
     archiveSaved: (id: string, archived: boolean) => library.archive(id, archived),
     previewSaved(owner: number, id: string) { const saved = library.read(id); return service(owner).preview({ command: saved.command, cwd: saved.cwd, source: { id: saved.id, name: saved.name, digest: saved.digest } }) },
     decide: (owner: number, token: string, decision: 'allow' | 'deny') => service(owner).decide(token, decision),
-    cancel(owner?: number) { const requested = !!active && (owner === undefined || active.owner === owner); if (requested) active!.controller.abort(); return { requested, answer: requested ? 'Stop requested. Wait for the process result; escaped/background descendants are not certified stopped.' : owner === undefined ? 'No app command is active.' : 'No command owned by this window is active.' } },
-    forget(owner: number) { reviews.get(owner)?.revoke(); reviews.delete(owner); if (active?.owner === owner) active.controller.abort() },
+    cancel(owner?: number) {
+      const runs = [...active].filter(run => owner === undefined || run.owner === owner)
+      runs.forEach(run => run.controller.abort())
+      return { requested: runs.length > 0, answer: runs.length ? 'Stop requested for every app command this action covers. Wait for each process result; escaped/background descendants are not certified stopped.' : owner === undefined ? 'No app command is active.' : 'No command owned by this window is active.' }
+    },
+    forget(owner: number) { reviews.get(owner)?.revoke(); reviews.delete(owner); [...active].filter(run => run.owner === owner).forEach(run => run.controller.abort()) },
     history(before = '') {
       if (before && !ID.test(before)) throw Error('Invalid command-history cursor.')
       noLinkedPath(options.root); if (!existsSync(options.root)) return { records: [], next: '', notice: '' }

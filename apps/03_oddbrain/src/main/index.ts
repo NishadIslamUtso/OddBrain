@@ -4,6 +4,7 @@ import type { ScheduleInput } from '../shared/lib/schedules'
 import { createWorkflowService } from './workflows/service'
 import type { WorkflowStep } from '../shared/lib/workflows'
 import { createCommandRunner, COMMAND_DISCLOSURE } from './commands/runner'
+import { createWorktreeService } from './worktrees/service'
 import type { ShellRequest } from '../shared/lib/commands'
 import { createWorkQueue } from './engine/workQueue'
 import { snapshotNativeArtifacts, collectNativeArtifacts } from './engine/nativeArtifacts'
@@ -23,6 +24,8 @@ import { restartIdleConnection } from './engine/restart'
 import { createTurnArchive } from './turnArchive'
 import { dispatchRecordedTurn } from './recordedDispatch'
 import { createSourceChecks } from './research/service'
+import { fetchWebSource } from './research/sourceFetch'
+import type { ResearchReply } from '../shared/lib/research'
 import { effortTarget, selectedEffort, type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
 import { checkEffortSelection, createCapabilityInspector } from './engine/nativeCapabilities'
 import type { ThinkingMode } from '../shared/lib/engine'
@@ -308,6 +311,8 @@ function registerBridges(): void {
   const permissionTickets = createPermissionTickets(() => engine?.current() || null)
   let nativeWork = 0
   let activeTranscript: { transcriptId: string; chatId?: string; prompt: string } | undefined
+  /** One page fetch per window; closing the window or the app aborts its request. */
+  const researchJobs = new Map<number, AbortController>()
   let preparing: { owner: number; controller: AbortController } | undefined
   const catalogReviews = new Map<number, ReturnType<typeof createCatalogInstallReview>>()
   const mcpReviews = new Map<number, ReturnType<typeof createMcpReview>>()
@@ -318,7 +323,7 @@ function registerBridges(): void {
   const sessionMemory = createSessionMemory(join(app.getPath('userData'), 'engine-sessions.json'))
   const turnArchive = createTurnArchive(join(app.getPath('userData'), 'turn-transcripts'))
   const transcriptAnswer = <T,>(read: () => T) => { try { return { ok: true as const, value: read() } } catch { return { ok: false as const, error: 'The transcript could not be read. Its original file has not been changed.' } } }
-  handle('transcripts:list', (_event, before: string = '') => transcriptAnswer(() => turnArchive.list(before)))
+  handle('transcripts:list', (_event, before: string = '', chatId: string = '') => transcriptAnswer(() => turnArchive.list(before, chatId)))
   handle('transcripts:read', (_event, id: string) => transcriptAnswer(() => turnArchive.read(id)))
   handle('transcripts:raw', (_event, id: string) => transcriptAnswer(() => turnArchive.raw(id)))
   // The preserved picture bytes. The expected size and digest come from the
@@ -337,29 +342,49 @@ function registerBridges(): void {
     throw Error('Unknown marketplace engine.')
   }
   const commandSessions = new WeakMap<object, number>(); let commandSessionSerial = 0
-  const commandScope = (reserved = false) => {
+  let commandRunning: () => boolean = () => false
+  const worktrees = createWorktreeService({ root: join(app.getPath('userData'), 'worktrees'), folder: () => resolve(settings.engine.workspace || vaultRoot()), busy: () => commandRunning() })
+  // One command at a time in the selected folder; a second only in an isolated
+  // checkout this app created (see createCommandRunner's cap and checks).
+  let commandLeases = 0
+  const commandScope = (reserved = false, request?: ShellRequest) => {
     const child = engine?.current()
     if (child && !commandSessions.has(child)) commandSessions.set(child, ++commandSessionSerial)
-    const cwd = resolve(settings.engine.workspace || vaultRoot())
+    const checkout = request?.cwd && typeof request.cwd === 'string' ? worktrees.check(request.cwd) : { ok: false }
+    const cwd = checkout.ok ? checkout.path! : resolve(settings.engine.workspace || vaultRoot())
+    const parallel = checkout.ok
     const authority = JSON.stringify([cwd, settings.engine, settings.permissions, child ? commandSessions.get(child) : null, engine?.currentTarget(), nativeWork, workDispatchGeneration])
+    const blocked = !!engine?.turnBusy() || foregroundApiRequests > 0
+    const occupied = (dispatchingWork || commandLeases > 0) && !reserved && !parallel
+    const atCap = commandLeases >= 2 && !reserved
     const explanation = !settings.permissions.manualCommands ? 'Enable Reviewed OS commands in Settings → Agent access first. This is separate from native engine tool approval.'
       : settings.engine.approval === 'plan' ? 'Arbitrary OS commands are disabled while the engine is in Plan mode. Choose a non-plan mode explicitly before reviewing a command.'
-      : engine?.turnBusy() || (dispatchingWork && !reserved) || foregroundApiRequests > 0 ? 'Wait for active work before running an app command.' : COMMAND_DISCLOSURE
-    return { cwd, authority, stableAuthority: JSON.stringify([cwd, settings.engine.approval, settings.permissions]), busy: !!engine?.turnBusy() || (dispatchingWork && !reserved) || foregroundApiRequests > 0, allowed: settings.permissions.manualCommands === true && settings.engine.approval !== 'plan' && !engine?.turnBusy() && (!dispatchingWork || reserved) && foregroundApiRequests === 0, explanation }
+      : blocked || occupied || atCap ? 'Wait for active work before running an app command.' : COMMAND_DISCLOSURE
+    return { cwd, authority, stableAuthority: JSON.stringify([cwd, settings.engine.approval, settings.permissions]), busy: blocked || occupied || atCap, allowed: settings.permissions.manualCommands === true && settings.engine.approval !== 'plan' && !blocked && !occupied && !atCap, explanation }
   }
-  const commandRunner = createCommandRunner({ root: join(app.getPath('userData'), 'command-runs'), scope: () => commandScope(),
+  const commandRunner = createCommandRunner({ root: join(app.getPath('userData'), 'command-runs'), scope: request => commandScope(false, request),
+    isolated: path => worktrees.check(path).ok,
     acquire: async (request, authority, signal) => {
-      const initial = commandScope()
-      if (!initial.allowed || initial.authority !== authority || resolve(request.cwd) !== initial.cwd) throw Error('Command authority changed before reservation. Nothing was run.')
+      const initial = commandScope(false, request)
+      if (!initial.allowed || initial.authority !== authority || resolve(request.cwd) !== resolve(initial.cwd)) throw Error('Command authority changed before reservation. Nothing was run.')
+      commandLeases++
       dispatchingWork = true
       try {
         memoryOrganizer?.cancel(); await automation?.cancel(); signal.throwIfAborted()
-        const recheck = () => { const current = commandScope(true); if (!current.allowed || current.authority !== authority) throw Error('Command access, engine, session or working folder changed. Nothing was run.'); signal.throwIfAborted() }
+        const recheck = () => { const current = commandScope(true, request); if (!current.allowed || current.authority !== authority) throw Error('Command access, engine, session or working folder changed. Nothing was run.'); signal.throwIfAborted() }
         recheck()
-        return { recheck, release: () => { dispatchingWork = false; workDispatchGeneration++ } }
-      } catch (error) { dispatchingWork = false; workDispatchGeneration++; throw error }
+        return { recheck, release: () => {
+          commandLeases = Math.max(0, commandLeases - 1)
+          if (commandLeases === 0) { dispatchingWork = false; workDispatchGeneration++ }
+        } }
+      } catch (error) {
+        commandLeases = Math.max(0, commandLeases - 1)
+        if (commandLeases === 0) { dispatchingWork = false; workDispatchGeneration++ }
+        throw error
+      }
     },
   })
+  commandRunning = () => commandRunner.running()
   const workflows = createWorkflowService(join(app.getPath('userData'), 'workflows'), commandRunner)
   const scheduleSigner = createApprovalSigner(join(app.getPath('userData'), 'workflow-approval-key.json'), {
     available: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
@@ -370,10 +395,10 @@ function registerBridges(): void {
   })
   scheduler.start()
 
-  app.on('before-quit', () => { scheduler.dispose(); workflows.cancel(); commandRunner.cancel() })
+  app.on('before-quit', () => { scheduler.dispose(); workflows.cancel(); commandRunner.cancel(); for (const job of researchJobs.values()) job.abort() })
   const owners = new Set<number>()
   const track = (sender: Electron.WebContents): number => {
-    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { scheduler.forget(sender.id); workflows.forget(sender.id); commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
+    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { scheduler.forget(sender.id); workflows.forget(sender.id); commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); researchJobs.get(sender.id)?.abort(); researchJobs.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
     return sender.id
   }
   handle('schedules:list', () => scheduler.list())
@@ -399,6 +424,21 @@ function registerBridges(): void {
   handle('research:preview', (event, input: { transcriptId: string; chatId: string; questionStart: string; urls: string[] }) => sourceChecks.preview(track(event.sender), input))
   handle('research:decide', (event, token: string, decision: 'allow' | 'deny') => sourceChecks.decide(track(event.sender), token, decision))
   handle('research:read', (_event, transcriptId: string) => sourceChecks.read(transcriptId))
+  // One page the owner names, fetched once and kept as a source. This writes no
+  // summary and asks no model; a private or non-https destination is refused by
+  // the shared rule and again after resolving the host.
+  handle('research:fetch', async (event, url: unknown): Promise<ResearchReply> => {
+    const service = createVaultService({ vaultPath: vaultRoot() })
+    if (!service.available()) return { ok: false, answer: 'No vault is selected, so a fetched page has nowhere to go. Choose the vault in Settings first.' }
+    const controller = new AbortController()
+    researchJobs.set(event.sender.id, controller)
+    try {
+      return await fetchWebSource(url, { capture: data => service.capture(data) }, controller.signal)
+    } finally {
+      if (researchJobs.get(event.sender.id) === controller) researchJobs.delete(event.sender.id)
+    }
+  })
+  handle('research:cancel', event => { researchJobs.get(event.sender.id)?.abort() })
   handle('commands:preview-saved', (event, id: string) => commandRunner.previewSaved(track(event.sender), id))
   handle('commands:context', () => commandRunner.context())
   handle('commands:preview', (event, request: ShellRequest) => commandRunner.preview(track(event.sender), request))
@@ -407,6 +447,9 @@ function registerBridges(): void {
   handle('commands:history', (_event, before?: string) => commandRunner.history(before))
   handle('commands:read', (_event, id: string) => commandRunner.read(id))
   handle('commands:output', (_event, id: string, stream: 'stdout' | 'stderr') => commandRunner.output(id, stream))
+  handle('worktrees:list', () => worktrees.list())
+  handle('worktrees:create', () => worktrees.create())
+  handle('worktrees:remove', (_event, id: string, discardChanges: boolean) => worktrees.remove(id, discardChanges))
   const marketAnswer = async <T,>(run: () => Promise<T>) => { try { return { ok: true as const, value: await run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
   handle('media:authorize-recording', (event, expected: { provider: string; model: string }) => mediaService!.authorizeRecording(track(event.sender), expected))
   handle('media:read', () => mediaService!.read())
@@ -2165,7 +2208,15 @@ function runSmoke(window: BrowserWindow): void {
         } catch (probeError) {
           scrollLine = `SCROLL FAILED ${(probeError as Error).message}`
         }
-        const image = await window.webContents.capturePage()
+        // A loaded Linux runner can hand back an unpainted frame; ask for two
+        // frames and retry once within a bound. A window that is really blank
+        // still fails, and the console gate above is unchanged.
+        let image = await window.webContents.capturePage()
+        if (image.isEmpty()) {
+          await window.webContents.executeJavaScript('new Promise(r => requestAnimationFrame(() => requestAnimationFrame(r)))', true).catch(() => {})
+          await new Promise(resolve => setTimeout(resolve, 750))
+          image = await window.webContents.capturePage()
+        }
         if (smokeOut) writeFileSync(smokeOut, image.toPNG())
         const bounds = window.getBounds()
         const title = window.getTitle()

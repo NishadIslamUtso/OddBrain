@@ -5,16 +5,23 @@ import { downloadText } from '../lib/downloadText'
 import { downloadBytes } from '@shared/lib/zip'
 import CopyText from './CopyText'
 
-export default function TranscriptHistory({ initialId = '' }: { initialId?: string } = {}) {
+export default function TranscriptHistory({ initialId = '', chatId = '' }: { initialId?: string; chatId?: string } = {}) {
   const [entries, setEntries] = useState<TranscriptHeader[]>([]), [next, setNext] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [selected, setSelected] = useState<Transcript | null>(null)
   const [query, setQuery] = useState('')
+  // When opened from a conversation, start with that conversation's own turns.
+  const [thisChatOnly, setThisChatOnly] = useState(Boolean(chatId))
+  const scope = thisChatOnly && chatId ? chatId : '', previousChat = useRef(chatId)
   const generation = useRef(0), mounted = useRef(true)
   useEffect(() => { mounted.current = true; void load(); return () => { mounted.current = false; generation.current++ } }, [])
   useEffect(() => { if (initialId) void read(initialId) }, [initialId])
-  async function load(before = '') {
+  useEffect(() => {
+    if (previousChat.current === chatId) return
+    previousChat.current = chatId; setThisChatOnly(Boolean(chatId)); void load('', chatId)
+  }, [chatId])
+  async function load(before = '', only = scope) {
     const own = ++generation.current; setBusy(true)
     try {
-      const reply = await bridge.transcripts.list(before)
+      const reply = await bridge.transcripts.list(before, only)
       if (!mounted.current || own !== generation.current) return
       if (!reply.ok) throw Error(reply.error)
       setEntries(old => before ? [...old, ...reply.value.entries] : reply.value.entries); setNext(reply.value.next); setNotice(reply.value.notice)
@@ -61,6 +68,7 @@ export default function TranscriptHistory({ initialId = '' }: { initialId?: stri
   const markdown = selected ? transcriptMarkdown(selected) : ''
   return <section aria-label="Full engine transcripts">
     <p className="ob-control-scope">Text recorded by this app from now on, including tool activity and engine-supplied thinking. Older journal summaries cannot be expanded. Picture bytes are shown only when this record actually preserved them; older records keep just the count. Native tool summaries may be abbreviated. Records live in app storage, not the vault: export them for a separate backup. Opening a record does not resume or run anything.</p>
+    {chatId && <p className="ob-control-scope">{scope ? 'Showing only this conversation’s recorded turns.' : 'Showing every recorded turn, not only this conversation’s.'} <button type="button" className="ob-small-button" disabled={busy} onClick={() => { const next = !thisChatOnly; setThisChatOnly(next); void load('', next && chatId ? chatId : '') }}>{scope ? 'Show every transcript' : 'Show only this conversation'}</button></p>}
     <button type="button" disabled={busy} className="ob-small-button" onClick={() => void load()}>Refresh transcripts</button>
     <label>Find loaded transcript titles<input type="search" value={query} onChange={event => setQuery(event.target.value)} /></label><p>Search applies only to loaded titles, not all original text or native sessions. Load older transcripts for more titles.</p>
     {entries.length ? <ul>{entries.filter(entry => entry.title.toLocaleLowerCase().includes(query.toLocaleLowerCase())).map(e => <li key={e.id}><button type="button" disabled={busy} className="ob-text-button" onClick={() => void read(e.id)}>{e.title}</button><p className="ob-control-scope">{e.at} · {e.engine} · {e.model || 'Engine default'}</p></li>)}</ul> : <p>{busy ? 'Reading transcripts…' : 'No transcript titles loaded.'}</p>}

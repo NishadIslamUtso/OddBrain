@@ -817,7 +817,7 @@ export default function App() {
           onInferenceChange={setInference}
           />
       </div></div> : null}
-      <TurnJournal />
+      <TurnJournal chatId={chats.currentChat} />
     </div>
     <LaunchOverlay enabled={appearance.startupAnimation} />
   </LookActions></LookContext>

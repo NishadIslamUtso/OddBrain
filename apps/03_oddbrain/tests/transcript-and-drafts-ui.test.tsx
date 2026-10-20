@@ -68,3 +68,16 @@ test('late transcript reads cannot update an unmounted history view', async () =
   await act(async () => finish({ ok: true, value: { entries: [{ id: 'x', title: 'Old response' }], next: '', notice: '' } }))
   expect(host.textContent).toBe('Another view')
 })
+
+test('a conversation’s transcript view lists only its own turns, and widening it is an explicit choice', async () => {
+  const header = { chatId: 'chat-a', id: 'fixture', at: '2026-10-19T00:00:00Z', title: 'Recorded task', engine: 'agy', model: '', workspace: '/work', pictures: 0 }
+  fixture.list.mockResolvedValue({ ok: true, value: { entries: [header], next: '', notice: '' } })
+  await act(async () => root.render(<TranscriptHistory chatId="chat-a" />))
+  expect(fixture.list).toHaveBeenCalledWith('', 'chat-a')
+  expect(host.textContent).toContain('Showing only this conversation’s recorded turns')
+  await click('Show every transcript')
+  expect(fixture.list).toHaveBeenLastCalledWith('', '')
+  expect(host.textContent).toContain('Showing every recorded turn')
+  await click('Show only this conversation')
+  expect(fixture.list).toHaveBeenLastCalledWith('', 'chat-a')
+})

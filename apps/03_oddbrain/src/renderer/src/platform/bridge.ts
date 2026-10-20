@@ -1,6 +1,7 @@
 import type { WorkflowBridge } from '@shared/lib/workflows'
 import type { ScheduleBridge } from '@shared/lib/schedules'
 import type { CommandBridge } from '@shared/lib/commands'
+import type { WorktreeBridge } from '@shared/lib/worktrees'
 import type { WorkQueueBridge } from '@shared/lib/workQueue'
 import type { McpReview, NativeMcpInventory } from '@shared/lib/mcpReview'
 import type { SkillDraft, SkillInventory, SkillFile, CatalogSkillReview } from '@shared/lib/installedSkills'
@@ -8,6 +9,7 @@ import type { NativeConversation, NativeSessionLink, NativeContextTarget } from 
 import type { FileReview, FileDecision } from '@shared/lib/changeReview'
 import type { TranscriptBridge } from '@shared/lib/transcripts'
 import type { SourceCheckBridge } from '@shared/lib/sourceCheck'
+import type { ResearchReply } from '@shared/lib/research'
 import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
 import type { ThinkingMode } from '@shared/lib/engine'
 import type { MemoryBridge } from '@shared/lib/memoryWorkspace'
@@ -61,7 +63,11 @@ import type {
 /** What the preload script exposes today. It grows as the main process does. */
 export type DesktopBridge = {
   transcripts: TranscriptBridge
-  research: SourceCheckBridge
+  research: SourceCheckBridge & {
+    /** Fetch one page the owner names and keep it as a sourced vault page. */
+    fetch: (url: string) => Promise<ResearchReply>
+    cancel: () => Promise<void>
+  }
   media: MediaBridge
   marketplace: MarketplaceBridge
   memoryWorkspace: MemoryBridge
@@ -103,6 +109,7 @@ export type DesktopBridge = {
   }
   workflows: WorkflowBridge
   schedules: ScheduleBridge
+  worktrees: WorktreeBridge
   commands: CommandBridge
   projects: {
     attach: (projectId: string) => Promise<import('@shared/lib/projects').ProjectReference[]>
@@ -318,7 +325,7 @@ const demoBridge: DesktopBridge = {
     dictate: async () => ({ ok: false, name: 'Dictation', error: 'Offline Windows dictation requires the desktop app.' }), cancel: async () => {},
   },
   transcripts: { raw: async () => ({ ok: false as const, error: 'Original transcripts require the desktop app.' }), list: async () => ({ ok: false, error: 'Native transcripts require the desktop app. Sample chats remain separate.' }), read: async () => ({ ok: false, error: 'Native transcripts require the desktop app.' }), media: async () => ({ ok: false as const, error: 'Preserved pictures live in the desktop app. This preview has no machine storage to read.' }) },
-  research: { preview: async () => { throw Error('Checking sources requires the desktop app. No address was requested.') }, decide: async () => { throw Error('Checking sources requires the desktop app.') }, read: async () => ({ records: [], notice: 'Source-check receipts require the desktop app.' }) },
+  research: { preview: async () => { throw Error('Checking sources requires the desktop app. No address was requested.') }, decide: async () => { throw Error('Checking sources requires the desktop app.') }, read: async () => ({ records: [], notice: 'Source-check receipts require the desktop app.' }), fetch: async () => ({ ok: false, answer: 'Fetching a page into the vault requires the desktop app. No address was requested.' }), cancel: async () => {} },
   marketplace: { inspect: unavailableMarket, sources: async () => [], browse: unavailableMarket, probe: unavailableMarket, installed: unavailableMarket, plan: unavailableMarket, confirm: unavailableMarket, cancel: async () => {} },
   automation: demoAutomation,
   memoryWorkspace: demoMemoryWorkspace,
@@ -467,6 +474,7 @@ artifacts: {
       written: [],
     }),
   },
+  worktrees: { list: async () => ({ worktrees: [], problem: 'Isolated checkouts require the desktop app.' }), create: async () => ({ ok: false, answer: 'Creating an isolated checkout requires the desktop app. Nothing was created.' }), remove: async () => ({ ok: false, answer: 'Removing an isolated checkout requires the desktop app. Nothing was removed.' }) },
   workflows: { list: async () => ({ items: [], next: '', notice: 'Workflow files require the desktop app.' }), save: async () => { throw Error('Saving workflows requires the desktop app.') }, archive: async () => { throw Error('Workflow files require the desktop app.') }, preview: async () => { throw Error('Workflow execution requires the desktop app.') }, decide: async () => { throw Error('Workflow execution requires the desktop app.') }, cancel: async () => ({ requested: false, answer: 'No workflow runs in this preview.' }), runs: async () => ({ records: [], next: '', notice: 'Workflow history requires the desktop app.' }), readRun: async () => { throw Error('Workflow history requires the desktop app.') } },
   schedules: { list: async () => ({ items: [], notice: 'Schedules require the running desktop app and OS-protected approval storage.' }), preview: async () => { throw Error('Recurring command approval requires the desktop app.') }, decide: async () => { throw Error('Schedules cannot run in a browser preview.') }, pause: async () => { throw Error('Schedules require the desktop app.') }, inbox: async () => ({ items: [], next: '', notice: 'The scheduled-work inbox requires the desktop app.' }), acknowledge: async () => { throw Error('The scheduled-work inbox requires the desktop app.') } },
   commands: { saved: async () => ({ items: [], next: '', notice: 'Saved OS commands require the desktop app.' }), save: async () => { throw Error('Saving OS commands requires the desktop app.') }, archiveSaved: async () => { throw Error('Saved OS commands require the desktop app.') }, previewSaved: async () => { throw Error('Saved OS commands require the desktop app.') }, context: async () => ({ cwd: '', allowed: false, explanation: 'OS command execution requires the desktop app. This browser preview cannot run commands.', activeId: null }), preview: async () => { throw Error('OS command execution requires the desktop app. Nothing was run.') }, decide: async () => { throw Error('OS command execution requires the desktop app.') }, cancel: async () => ({ requested: false, answer: 'No app command is running in this preview.' }), history: async () => ({ records: [], next: '', notice: 'Command records are available in the desktop app.' }), read: async () => { throw Error('Command records require the desktop app.') }, output: async () => { throw Error('Command output requires the desktop app.') } },

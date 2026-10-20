@@ -702,3 +702,25 @@ The live copy of a finished turn already went into the chat; a window that close
 Node 24.22.0: typecheck passed; **1,537 tests / 211 files / zero skips**, including 7 `tests/turn-recovery.test.ts` cases (finished-turn restore, idempotence, foreign/running/anonymous records, older-turn refusal, newer-turn placement, interrupted state, per-start limit). Electron/web builds and all **13 serial app browser suites** passed. The boot wiring itself has no dedicated browser harness because the preview bridge refuses native transcripts; the pure reconciliation and the existing transcript view are the tested parts.
 
 Limits: this recovers turns that exist in this app's own archive. It does not import native Claude/agy session history, does not reconstruct a chat that was never saved at all, and does not restore attachment binaries into chat messages (preserved pictures remain in Transcript history). Only the newest transcript page is scanned per start.
+
+## Adopting the parallel branch's verified work — 2026-10-20
+
+`arena/495d260c-oddbrain` (`5ef0a82`) was reviewed commit by commit and its non-duplicated work was taken onto this branch, rather than merged wholesale, because four of its six commits describe features this branch already implements with a different design.
+
+### Taken
+
+- **Isolated Git checkouts** (`bc2f2c8`): `src/shared/lib/worktrees.ts`, `src/main/worktrees/service.ts`, `worktrees:*` IPC, `ShellReview` controls and the runner's `CAP = 2` with a request-aware `commandScope`. A checkout is created detached, recorded as JSON, refused when the source tree is dirty, and disclosed as "the folder is separate, permissions are not" — a worktree is not a sandbox. Removal requires an explicit discard answer. Added here on top: a checkout whose `.git` marker is gone is refused by path rather than trusted by name, and removal is refused while a command is still running.
+- **Fetch one named page into the vault** (`9ec7052`): `src/shared/lib/research.ts`, `src/main/research/sourceFetch.ts`, `research:fetch` / `research:cancel`, and the Sources input in `MemoryMap`. https only, public hosts only, re-resolved after every redirect, three redirects, 2 MB / 300,000 characters, readable text types only, no retries, no model call, and a blacklisted destination wins. This is complementary to the source-check receipt added here: one verifies links an answer wrote, the other keeps a page the owner names.
+- **Per-conversation transcript scope** (`882f0bd`, UI half): `transcripts.list(before, chatId)`, `TranscriptHistory`'s "only this conversation" toggle and `TurnJournal`'s `chatId`. The recovery half was not taken because `src/renderer/src/state/recovery.ts` here already restores recorded turns at boot, with an added guard that refuses to insert a turn older than the chat's newest message.
+- **Smoke capture retry** (`5ef0a82`) and the **Windows test budgets** from `c0ef58e`, applied to this branch's own test files.
+
+### Not taken, and why
+
+- **Picture bytes in turn records** (`4e7ab82`): this branch already writes the exact bytes before dispatch through `src/main/turnMedia.ts` (exclusive `0600`, link refusal, digest re-verified on every read, count-only older records labelled honestly). Their design stores the same bytes differently, with an 8 MB per-turn budget this branch does not impose; two on-disk layouts for one feature would be worse than either.
+- **Recovery helpers** (`882f0bd`, logic half): duplicate of the existing boot reconciliation.
+
+### Verification
+
+Node 24.22.0: typecheck passed; **1,564 tests / 213 files passed, 2 skipped** (named Windows-only cases); Electron and web builds passed (offline preview 623,375 bytes); all **13 serial browser suites** passed with `errors: []`. The adopted code also passed unchanged in a detached checkout of `5ef0a82` (49/49 across its six new test files). New here: 9 `tests/worktrees.test.ts` cases, 3 `tests/parallel-commands.test.ts`, 7 `tests/command-review-ui.test.tsx`, 9 `tests/research-fetch.test.ts`, 4 `tests/research-ui.test.tsx`, plus the chat-scoped list cases in `tests/turn-archive.test.ts` and `tests/transcript-and-drafts-ui.test.tsx`.
+
+Limits carried over: a worktree shares the repository and the user's permissions, so it isolates files, not authority; a fetched page is evidence of what the server returned, not of truth or currency; the transcript scope narrows a page of records, not the whole archive.

@@ -219,8 +219,15 @@ const marketplaceApi: MarketplaceBridge = {
   confirm: (token, engine) => ipcRenderer.invoke('market:confirm', token, engine), cancel: engine => ipcRenderer.invoke('market:cancel', engine),
 }
 const api = {
-  transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id), media: (id: string, index: number) => ipcRenderer.invoke('transcripts:media', id, index) },
-  research: { preview: (input: { transcriptId: string; chatId: string; questionStart: string; urls: string[] }) => ipcRenderer.invoke('research:preview', input), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('research:decide', token, decision), read: (transcriptId: string) => ipcRenderer.invoke('research:read', transcriptId) },
+  transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), list: (before?: string, chatId?: string) => ipcRenderer.invoke('transcripts:list', before, chatId), read: (id: string) => ipcRenderer.invoke('transcripts:read', id), media: (id: string, index: number) => ipcRenderer.invoke('transcripts:media', id, index) },
+  research: {
+    preview: (input: { transcriptId: string; chatId: string; questionStart: string; urls: string[] }) => ipcRenderer.invoke('research:preview', input),
+    decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('research:decide', token, decision),
+    read: (transcriptId: string) => ipcRenderer.invoke('research:read', transcriptId),
+    /** One page the owner names, fetched once and kept as a sourced vault page. */
+    fetch: (url: string): Promise<import('../shared/lib/research').ResearchReply> => ipcRenderer.invoke('research:fetch', url),
+    cancel: (): Promise<void> => ipcRenderer.invoke('research:cancel'),
+  },
   media: mediaApi, marketplace: marketplaceApi,
   automation: automationApi,
   memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,
@@ -253,6 +260,7 @@ const api = {
     },
   },
   workflows: { list: (before?: string) => ipcRenderer.invoke('workflows:list', before), save: (input: { name: string; cwd: string; steps: WorkflowStep[] }) => ipcRenderer.invoke('workflows:save', input), archive: (id: string, archived: boolean) => ipcRenderer.invoke('workflows:archive', id, archived), preview: (id: string) => ipcRenderer.invoke('workflows:preview', id), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('workflows:decide', token, decision), cancel: () => ipcRenderer.invoke('workflows:cancel'), runs: (before?: string) => ipcRenderer.invoke('workflows:runs', before), readRun: (id: string) => ipcRenderer.invoke('workflows:read-run', id) },
+  worktrees: { list: () => ipcRenderer.invoke('worktrees:list'), create: () => ipcRenderer.invoke('worktrees:create'), remove: (id: string, discardChanges: boolean) => ipcRenderer.invoke('worktrees:remove', id, discardChanges) },
   schedules: { list: () => ipcRenderer.invoke('schedules:list'), preview: (input: ScheduleInput) => ipcRenderer.invoke('schedules:preview', input), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('schedules:decide', token, decision), pause: (id: string) => ipcRenderer.invoke('schedules:pause', id), inbox: (before?: string) => ipcRenderer.invoke('schedules:inbox', before), acknowledge: (id: string) => ipcRenderer.invoke('schedules:acknowledge', id) },
   commands: { saved: (before?: string) => ipcRenderer.invoke('commands:saved', before), save: (input: { name: string; command: string; cwd: string }) => ipcRenderer.invoke('commands:save', input), archiveSaved: (id: string, archived: boolean) => ipcRenderer.invoke('commands:archive-saved', id, archived), previewSaved: (id: string) => ipcRenderer.invoke('commands:preview-saved', id), context: () => ipcRenderer.invoke('commands:context'), preview: (request: ShellRequest) => ipcRenderer.invoke('commands:preview', request), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('commands:decide', token, decision), cancel: () => ipcRenderer.invoke('commands:cancel'), history: (before?: string) => ipcRenderer.invoke('commands:history', before), read: (id: string) => ipcRenderer.invoke('commands:read', id), output: (id: string, stream: 'stdout' | 'stderr') => ipcRenderer.invoke('commands:output', id, stream) },
   projects: {

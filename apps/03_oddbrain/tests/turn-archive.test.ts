@@ -95,3 +95,13 @@ test('a truncated UTF-8 final write preserves complete Unicode records; invalid 
  writeFileSync(file, Buffer.concat([good, Buffer.from('{"event":{"kind":"text","text":"'),Buffer.from([0xff]),Buffer.from('"}}\n')]))
  expect(()=>archive.read(id)).toThrow()
 })
+
+test('a conversation’s own recorded turns can be listed apart from every other chat', () => {
+  const root = folder(), archive = createTurnArchive(root)
+  const first = archive.begin({ ...input, chatId: 'chat-one' }), second = archive.begin({ ...input, chatId: 'chat-two' }), loose = archive.begin(input)
+  expect(archive.list('', 'chat-one').entries.map(entry => entry.id)).toEqual([first])
+  expect(archive.list('', 'chat-two').entries.map(entry => entry.id)).toEqual([second])
+  expect(archive.list('', 'chat-missing').entries).toEqual([])
+  expect(archive.list().entries.map(entry => entry.id)).toEqual([loose, second, first].sort().reverse())
+  expect(() => archive.list('', '../chat')).toThrow('Invalid conversation identifier')
+})
