@@ -1,6 +1,8 @@
 import { newId } from '@shared/lib/storage'
 import { branchChat, chatNotesStore, emptyChatNotes } from '@shared/lib/chatContext'
 import { recordNativeTranscript } from '@shared/lib/nativeChat'
+import type { Transcript } from '@shared/lib/transcripts'
+import { recoverRecordedTurns } from './state/recovery'
 import type { NativeConversation } from '@shared/lib/nativeConversation'
 import { publishExtensionAppearance } from './lib/extensionAppearance'
 import { sampleEnabled, workspaceKey } from '@shared/lib/sampleWorkspace'
@@ -167,6 +169,36 @@ export default function App() {
   // warning they will learn to dismiss without reading.
 
   const chats = useChats(setNotice)
+  // A turn can finish while the window is closing, or the browser copy can be
+  // lost. On boot, recorded turns missing from a saved chat are restored from
+  // this app's own archive — once, idempotently, and never for a running record.
+  const recoveredOnce = useRef(false)
+  useEffect(() => {
+    if (recoveredOnce.current || isDemo || !bridge.transcripts.list) return
+    recoveredOnce.current = true
+    let cancelled = false
+    void (async () => {
+      try {
+        const page = await bridge.transcripts.list('')
+        if (!page.ok || cancelled) return
+        const records: Transcript[] = []
+        for (const header of page.value.entries.filter(entry => entry.chatId).slice(0, 20)) {
+          if (cancelled) return
+          const reply = await bridge.transcripts.read(header.id)
+          if (reply.ok && reply.value.state !== 'running') records.push(reply.value)
+        }
+        if (!records.length || cancelled) return
+        let count = 0
+        const saved = chats.commit(previous => {
+          const result = recoverRecordedTurns(previous, records)
+          count = result.recovered.length
+          return result.chats
+        })
+        if (count) setNotice(saved ? `${count} recorded turn(s) were missing from saved chats and have been restored from Full transcripts.` : 'Recorded turns were found, but the saved chat copy could not be updated. Their originals remain in Full transcripts.')
+      } catch { /* the transcript view stays available; nothing is claimed */ }
+    })()
+    return () => { cancelled = true }
+  }, [])
   // The app's own notice channel: pieces of the window (dictation, media) speak
   // here when a machine cannot do something, instead of a button lying.
   useEffect(() => {

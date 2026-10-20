@@ -688,3 +688,17 @@ The backlog item "sourced research" is addressed at the part that can be honest 
 Node 24.22.0: typecheck passed; **1,530 tests / 210 files / zero skips** including 9 `tests/source-check.test.ts` cases (planner refusals, owner/expiry/single-use, sequential fetch arguments, digest and size, redirect-to-private refusal, oversized and empty bodies, timeout, refused-link receipts, restart reads, damaged receipts, validation) and 5 `tests/source-check-ui.test.tsx` cases (no request before review, deny, spent review, earlier receipts). Electron/web builds passed. All **13 serial app browser suites** passed with real Chromium; `check-ui-productivity.cjs` additionally drives the panel in the real renderer with mocked research IPC and closes it cleanly.
 
 Limits: this checks links an answer already wrote. It adds no search engine, no crawling, no ranking and no automatic research prompt; a receipt does not show that the model read the page or that the page supports the claim. DNS-level rebinding, per-site robots policy, authenticated or paywalled pages and JavaScript-rendered content are not handled. Receipts are not embedded in chat Markdown or transcript exports. No native engine research tool was verified here; signed-in target-machine acceptance is still outstanding.
+
+## Restoring recorded turns into saved chats after a restart — 2026-10-20
+
+The live copy of a finished turn already went into the chat; a window that closed before that copy, or lost browser storage, left the recorded turn only in Full transcripts. Boot now reconciles the two.
+
+- `src/renderer/src/state/recovery.ts` restores a recorded turn only when its record names an existing saved chat, the record is finished (a running record keeps streaming in the live view instead), the chat does not already hold that record's messages, and the record is not older than the chat's newest message. The last rule prevents silently reordering a conversation.
+- Message identifiers are the record's own, so running the reconciliation twice cannot duplicate a turn. An interrupted record is restored as visibly `stopped`, never as a completed answer. A record that cannot be placed stays in Full transcripts.
+- App boot fetches the newest transcript page, reads at most twenty records that name a chat, restores at most twenty turns, and reports the count in the existing notice line. A failed chat write reports that the originals remain in Full transcripts instead of claiming success. Nothing is sent to an engine and no native history is imported.
+
+### Verification and limits
+
+Node 24.22.0: typecheck passed; **1,537 tests / 211 files / zero skips**, including 7 `tests/turn-recovery.test.ts` cases (finished-turn restore, idempotence, foreign/running/anonymous records, older-turn refusal, newer-turn placement, interrupted state, per-start limit). Electron/web builds and all **13 serial app browser suites** passed. The boot wiring itself has no dedicated browser harness because the preview bridge refuses native transcripts; the pure reconciliation and the existing transcript view are the tested parts.
+
+Limits: this recovers turns that exist in this app's own archive. It does not import native Claude/agy session history, does not reconstruct a chat that was never saved at all, and does not restore attachment binaries into chat messages (preserved pictures remain in Transcript history). Only the newest transcript page is scanned per start.
