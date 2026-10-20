@@ -64,6 +64,7 @@ import { createVaultService, resolveVaultRoot } from './vault/service'
 import { searchVault } from './vault/recall'
 import { estimateModelTokens, parseContextOverflow } from '../shared/lib/modelContext'
 import { WORKING_NOTES_PROPOSAL_GUIDANCE } from '../shared/lib/workingNotesProposal'
+import { VAULT_SEARCH_PROPOSAL_GUIDANCE } from '../shared/lib/retrievalProposal'
 import { canonicalStructureRoot, conflictWasSettled, normalizeSettledConflicts, settleStructureConflict, validStructureRelative, type SettledStructureConflict } from './vault/settled'
 import { createKeyStore, type KeyStore } from './cloud/keys'
 import { createCloudClient, type CloudClient } from './cloud/client'
@@ -856,7 +857,7 @@ function registerBridges(): void {
         }
         auth = { provider: 'anthropic', apiKey: key }
       }
-      const appInstructions = `${instructionBlock(usedEngine.id, usedEngine.model, effectiveRules(), settings.memoryFolder || '')}\n## Chat Working Notes proposals\n\n${WORKING_NOTES_PROPOSAL_GUIDANCE}\n`
+      const appInstructions = `${instructionBlock(usedEngine.id, usedEngine.model, effectiveRules(), settings.memoryFolder || '')}\n## Chat Working Notes proposals\n\n${WORKING_NOTES_PROPOSAL_GUIDANCE}\n\n## Bounded vault follow-up proposals\n\n${VAULT_SEARCH_PROPOSAL_GUIDANCE}\n`
       const envelopeReserve = estimateModelTokens(`OddBrain app instructions (not additional tool permissions):\n${appInstructions}\n\n`)
       const preparationContext = context?.contextProfile?.capacityTokens !== null && context?.contextProfile?.capacityTokens !== undefined
         ? { ...context, contextProfile: { ...context.contextProfile, outputReserveTokens: Math.min(10_000_000, context.contextProfile.outputReserveTokens + envelopeReserve) } }

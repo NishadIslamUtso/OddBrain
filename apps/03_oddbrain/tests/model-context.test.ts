@@ -57,6 +57,8 @@ describe('context packing and transparent overflow recovery', () => {
 
   it('validates durable receipts', () => {
     expect(estimateModelTokens('hello')).toBeGreaterThan(0)
-    expect(validModelContextReceipt({ model: 'm', capacity: { source: 'unknown', tokens: null, mode: 'auto' }, estimate: { inputTokens: 4, exact: false, method: 'estimate' }, includedMessages: 2, omitted: [], attempts: 1, overflowRetry: false, note: 'No clipping.' })).toBe(true)
+    const receipt = { model: 'm', capacity: { source: 'unknown', tokens: null, mode: 'auto' }, estimate: { inputTokens: 4, exact: false, method: 'estimate' }, includedMessages: 2, omitted: [], attempts: 1, overflowRetry: false, workingNotes: 'none', note: 'No clipping.' }
+    expect(validModelContextReceipt(receipt)).toBe(true)
+    expect(validModelContextReceipt({ ...receipt, attempts: 3 })).toBe(false)
   })
 })

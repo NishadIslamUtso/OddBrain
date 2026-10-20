@@ -393,6 +393,7 @@ export default function App() {
     inference,
     contextProfiles,
     setContextProfiles,
+    workingNotes: chatId => chatNotesStore(localStorage, workspaceKey('oddbrain.chat-notes.v1'), chatId).read()?.value.working,
     // Where finished conversations are kept. In the browser preview there is no
     // vault behind the interface, so nothing is attempted and no failed request
     // appears in the console — the preview stays quiet, as it must.

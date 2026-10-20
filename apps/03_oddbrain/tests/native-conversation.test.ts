@@ -13,6 +13,7 @@ import { dispatchRecordedTurn } from '../src/main/recordedDispatch'
 import { recordNativeTranscript } from '../src/shared/lib/nativeChat'
 import { createPermissionTickets } from '../src/main/engine/permissionTickets'
 import { checkNativeConversation } from '../src/shared/lib/nativeConversation'
+import { vaultFollowupDraft } from '../src/shared/lib/retrievalProposal'
 const roots: string[] = []
 const root = () => { const p = mkdtempSync(join(tmpdir(), 'oddbrain-native-chat-')); roots.push(p); return p }
 afterEach(() => roots.splice(0).forEach(p => rmSync(p, { recursive: true, force: true })))
@@ -46,6 +47,24 @@ describe('owner-selected project context', () => {
     expect(recall).toHaveBeenCalledOnce()
     expect(result.prompt).toContain('The vehicle invoice was paid.')
     expect(result.receipt.sources).toContainEqual(expect.objectContaining({ title: 'Vehicle invoice', role: 'untrusted-reference', coverage: expect.stringContaining('owner-approved non-excluded vault scope') }))
+  })
+  test('runs a bounded owner-sent second-pass search and receipts each exact query', async () => {
+    const recall = vi.fn((query: string) => ({ ok: true as const, incomplete: false, notices: [], hits: [
+      { id: `${query}:one`, kind: 'file' as const, title: `${query} first`, text: `${query} evidence one`, path: `Notes/${query}-1.md`, date: '', speaker: 'Saved file' },
+      { id: `${query}:two`, kind: 'file' as const, title: `${query} second`, text: `${query} evidence two`, path: `Notes/${query}-2.md`, date: '', speaker: 'Saved file' },
+      { id: `${query}:three`, kind: 'file' as const, title: `${query} third`, text: `${query} evidence three`, path: `Notes/${query}-3.md`, date: '', speaker: 'Saved file' },
+    ] }))
+    const f = fixture(recall), prompt = vaultFollowupDraft({ queries: ['launch notes', 'provider outage'], reason: 'Need exact dates' })
+    const result = await f.service.prepare({ ...f.input, vaultSearch: true }, f.dir, prompt, '', new AbortController().signal)
+    expect(recall.mock.calls.map(call => call[0])).toEqual(['launch notes', 'provider outage'])
+    expect(result.receipt.retrieval).toEqual(expect.objectContaining({ mode: 'owner-confirmed-follow-up', queries: ['launch notes', 'provider outage'], excerptsFound: 4, excerptsIncluded: 4 }))
+    expect(result.receipt.sources.filter(source => source.id.startsWith('vault:'))).toHaveLength(4)
+  })
+  test('a model-proposed follow-up cannot expand vault authority', async () => {
+    const recall = vi.fn(() => ({ ok: true as const, incomplete: false, notices: [], hits: [] }))
+    const f = fixture(recall), prompt = vaultFollowupDraft({ queries: ['private notes'], reason: '' })
+    await expect(f.service.prepare(f.input, f.dir, prompt, '', new AbortController().signal)).rejects.toThrow(/not approved for this chat/)
+    expect(recall).not.toHaveBeenCalled()
   })
   test('does not treat mentioning a folder as vault-search approval', async () => {
     const recall = vi.fn(() => ({ ok: true as const, incomplete: false, notices: [], hits: [] }))

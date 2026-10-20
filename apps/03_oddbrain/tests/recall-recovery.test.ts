@@ -37,6 +37,10 @@ describe('read-only cross-source recall and recovery', () => {
     expect(results.hits[0].text).toContain('unconfirmed')
     expect(results.hits[0].path).toBe(p.source.path)
     expect(results.hits[0].date).toBe('')
+    expect(results.catalogue?.groups).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'Notes', entries: 1 }),
+      expect.objectContaining({ path: '02 Sources', entries: expect.any(Number) }),
+    ]))
     h.store.act({ type: 'review', id: p.id, decision: 'retract', expectedRevision: h.store.read().revision })
     expect(searchVault(h.vault.files(), 'orange toolbox').hits.some(h => h.kind === 'confirmed')).toBe(false)
   })

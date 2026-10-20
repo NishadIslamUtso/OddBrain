@@ -35,6 +35,7 @@ export type ModelContextReceipt = {
   omitted: Array<{ id: string; reason: 'model-context-budget' | 'provider-overflow' }>
   attempts: number
   overflowRetry: boolean
+  workingNotes?: 'included-draft' | 'omitted-draft' | 'none'
   note: string
 }
 
@@ -158,5 +159,5 @@ export function validModelContextReceipt(value: unknown): value is ModelContextR
     !!v.capacity && ['reported', 'observed', 'owner', 'unknown'].includes(v.capacity.source) && ['auto', 'manual'].includes(v.capacity.mode) && (v.capacity.tokens === null || integer(v.capacity.tokens, MIN_CAPACITY, MAX_CAPACITY) !== undefined) &&
     !!v.estimate && v.estimate.exact === false && Number.isSafeInteger(v.estimate.inputTokens) && v.estimate.inputTokens >= 0 && typeof v.estimate.method === 'string' && v.estimate.method.length <= 500 &&
     Number.isSafeInteger(v.includedMessages) && v.includedMessages >= 0 && Array.isArray(v.omitted) && v.omitted.length <= 10_000 && v.omitted.every(row => row && typeof row.id === 'string' && ['model-context-budget', 'provider-overflow'].includes(row.reason)) &&
-    Number.isSafeInteger(v.attempts) && v.attempts >= 1 && v.attempts <= 4 && typeof v.overflowRetry === 'boolean' && typeof v.note === 'string' && v.note.length <= 2_000
+    Number.isSafeInteger(v.attempts) && v.attempts >= 1 && v.attempts <= 2 && typeof v.overflowRetry === 'boolean' && (v.workingNotes === undefined || ['included-draft', 'omitted-draft', 'none'].includes(v.workingNotes)) && typeof v.note === 'string' && v.note.length <= 2_000
 }

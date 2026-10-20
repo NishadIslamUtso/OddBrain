@@ -1,5 +1,6 @@
 export type RecallHit = { id: string; kind: 'conversation' | 'confirmed' | 'file'; title: string; text: string; path: string; date: string; speaker: string }
-export type RecallReply = { ok: boolean; hits: RecallHit[]; incomplete: boolean; notices: string[] }
+export type RecallCatalogue = { entriesSeen: number; groups: Array<{ path: string; entries: number }>; capped: boolean }
+export type RecallReply = { ok: boolean; hits: RecallHit[]; incomplete: boolean; notices: string[]; catalogue?: RecallCatalogue }
 const fold = (text: string): string => text.toLowerCase().replace(/\s+/g, ' ').trim()
 /** Quoted runs stay together; unquoted words remain literal AND terms. */
 export function recallTerms(query: string): string[] {

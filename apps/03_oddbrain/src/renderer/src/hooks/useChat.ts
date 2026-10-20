@@ -1,4 +1,4 @@
-import { branchChat } from '@shared/lib/chatContext'
+import { branchChat, type WorkingNotes } from '@shared/lib/chatContext'
 import { useRef, useState } from 'react'
 import type {
   Artifact,
@@ -24,7 +24,8 @@ import { wantsChart } from '@shared/lib/chart'
 import { resolveInference, type InferenceSettings } from '@shared/lib/inference'
 import { readStored } from '@shared/lib/storage'
 import { parseCloudModel } from '@shared/lib/providers'
-import { WORKING_NOTES_PROPOSAL_GUIDANCE } from '@shared/lib/workingNotesProposal'
+import { draftWorkingNotesContext, WORKING_NOTES_PROPOSAL_GUIDANCE } from '@shared/lib/workingNotesProposal'
+import { VAULT_SEARCH_PROPOSAL_GUIDANCE } from '@shared/lib/retrievalProposal'
 import {
   modelContextKey,
   packModelContext,
@@ -81,6 +82,7 @@ export type UseChatOptions = {
   inference?: InferenceSettings | string
   contextProfiles?: ModelContextOverrides
   setContextProfiles?: (value: ModelContextOverrides | ((previous: ModelContextOverrides) => ModelContextOverrides)) => void
+  workingNotes?: (chatId: string) => WorkingNotes | undefined
   /** Where a finished conversation goes to be kept. Defaults to doing nothing,
    *  which is what happens until the vault service exists — see capture() below. */
   capture?: (chat: Chat) => Promise<void>
@@ -108,6 +110,7 @@ export default function useChat({
   inference,
   contextProfiles = {},
   setContextProfiles,
+  workingNotes: readWorkingNotes,
   capture: captureTo,
 }: UseChatOptions) {
   const [busyChatId, setBusyChatId] = useState<string | null>(null)
@@ -361,8 +364,11 @@ export default function useChat({
         .filter((value): value is number => typeof value === 'number' && value > 0)
         .reduce<number | null>((smallest, value) => smallest === null ? value : Math.min(smallest, value), null)
       let profile = resolveModelContext({ key, label: selectedModel, reportedTokens: reportedLimit, override: contextProfiles[key] })
+      const workingNotesContext = draftWorkingNotesContext(readWorkingNotes?.(chat.id))
+      const hasWorkingNotes = Boolean(workingNotesContext)
       const items: PackedContextMessage[] = [
-        { id: 'system', required: true, message: { role: 'system', content: `${systemPrompt(requested, wantsChart(userMessage.content))}\n\nWorking Notes proposals:\n${WORKING_NOTES_PROPOSAL_GUIDANCE}` } },
+        { id: 'system', required: true, message: { role: 'system', content: `${systemPrompt(requested, wantsChart(userMessage.content))}\n\nWorking Notes proposals:\n${WORKING_NOTES_PROPOSAL_GUIDANCE}\n\nBounded vault follow-up proposals:\n${VAULT_SEARCH_PROPOSAL_GUIDANCE}` } },
+        ...(hasWorkingNotes ? [{ id: 'working-notes', message: { role: 'user' as const, content: workingNotesContext } }] : []),
         ...converted.map((message, index) => ({ id: eligible[index]?.id || `message-${index}`, required: index === converted.length - 1, message })),
       ]
       let packed = packModelContext(items, profile)
@@ -420,6 +426,7 @@ export default function useChat({
         omitted,
         attempts,
         overflowRetry,
+        workingNotes: !hasWorkingNotes ? 'none' : active.some(item => item.id === 'working-notes') ? 'included-draft' : 'omitted-draft',
         note: overflowRetry ? 'The provider rejected the larger request before generation. OddBrain reported it, removed lower-priority history, and retried without changing stored messages.' : omitted.length ? 'Lower-priority stored messages were not sent to stay within this model profile. Stored history was not changed.' : 'No stored conversation message was omitted by OddBrain.',
       }
       final.contextReceipt = contextReceipt

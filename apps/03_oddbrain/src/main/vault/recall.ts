@@ -18,8 +18,21 @@ export function searchVault(files: VaultFiles, query: string): RecallReply {
     return files.read(path)
   }
   const ranked: Array<{ hit: RecallHit; score: number }> = []
+  const catalogueGroups = new Map<string, number>()
+  let catalogueEntries = 0, catalogueCapped = false
+  const catalogue = (path: string): void => {
+    catalogueEntries += 1
+    const parts = path.replace(/\\/g, '/').split('/').filter(Boolean)
+    for (let depth = 1; depth <= Math.min(2, parts.length); depth++) {
+      const group = parts.slice(0, depth).join('/')
+      if (catalogueGroups.has(group)) catalogueGroups.set(group, catalogueGroups.get(group)! + 1)
+      else if (catalogueGroups.size < 100) catalogueGroups.set(group, 1)
+      else catalogueCapped = true
+    }
+  }
   const add = (hit: RecallHit) => {
     if (!recallMatches(`${hit.title} ${hit.text} ${hit.speaker} ${hit.date}`, terms)) return
+    catalogue(hit.path)
     ranked.push({ score: recallScore(hit.title, hit.text, terms), hit: { ...hit, text: recallSnippet(hit.text, terms) } })
     ranked.sort((a, b) => b.score - a.score)
     const groups = new Map<string, number>()
@@ -79,5 +92,5 @@ export function searchVault(files: VaultFiles, query: string): RecallReply {
       add({ id: path, kind: 'file', title: path.split('/').at(-1)!, text, path, date: '', speaker: 'Saved file; not automatically verified' })
     } catch { notices.add('Some saved files could not be read.') }
   }
-  return { ok: true, hits: ranked.map(row => row.hit), incomplete: notices.size > 0, notices: [...notices] }
+  return { ok: true, hits: ranked.map(row => row.hit), incomplete: notices.size > 0, notices: [...notices], catalogue: { entriesSeen: catalogueEntries, groups: [...catalogueGroups].map(([path, entries]) => ({ path, entries })).sort((a, b) => a.path.localeCompare(b.path)), capped: catalogueCapped } }
 }
