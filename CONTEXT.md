@@ -804,3 +804,14 @@ Continuing from `1519cd4`. After the leak/incident review the owner asked a shar
 - The panel describes layers; it cannot enumerate the vendor's system prompt, and it does not claim to. A vendor may change its prompt at any time without this app noticing.
 - The house-rules digest is of the file on disk, which the owner and the engine can both change; it proves what was there when the panel was read, not what was there during an earlier turn.
 - This is transparency, not a defence against extraction. The actual defence remains: no secret ever enters a layer, and a transcript is treated as readable by anyone who gets it.
+
+### Follow-up: the intermittent Windows failure was real, and it had a name — 2026-10-20
+
+One Windows job in each pair of runs kept going red on the Tests step, with nothing in the app changed. The junit artifact cannot be fetched from this sandbox (`EOF` from the Azure blob host), so `apps/03_oddbrain/scripts/name-windows-failures.cjs` now reads the junit file the test step wrote and emits one `::error title=<file> › <test>::<message>` per failing case; `.github/workflows/checks.yml` runs it with `if: always()`. Missing file is a `::warning::` and exit 0, so the reporting step can never fail the job by itself.
+
+That named the failure in one run: the pre-existing command-runner fixtures in `tests/command-runner.test.ts` and `tests/workflows.test.ts` used a **5-second command deadline** sized for a warm Linux shell. A cold Windows PowerShell start on a loaded runner is seconds, not milliseconds, so commands were killed by the deadline (`interrupted` where the test expected `failed`/`succeeded`), and the 5-second vitest default then reported `Test timed out in 5000ms` on top. Nothing about parallel-commands was at fault.
+
+- Both fixtures now run with `deadlineMs: 60_000` and `vi.setConfig({ testTimeout: 60_000, hookTimeout: 60_000 })` — still bounded, just sized for the slowest supported shell.
+- Teardown in `tests/command-runner.test.ts`, `tests/workflows.test.ts` and `tests/parallel-commands.test.ts` retries `rmSync` (`maxRetries: 5, retryDelay: 100`) and swallows a final failure, because Windows can hold a handle on a just-closed git file and a cleanup error must not mask the test's own result. Nothing is asserted differently; the safety cases are untouched.
+
+Result: `e46bc8f` is **green on both `linux` and `windows` in two consecutive runs**, which is the bar this branch set before calling the flake closed. Locally the full suite stayed at 1,545 passed / 2 skipped.
