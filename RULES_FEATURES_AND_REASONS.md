@@ -139,6 +139,6 @@ Owner-data writes use immutable revisions or atomic replacement with a complete 
 
 ## Release and verification
 
-Pull requests run Node 24 typechecking, security policy checks, tests, builds, browser coverage policy, and native smoke checks on Linux and Windows. Windows installer CI builds and launches the packaged executable, checks Electron fuses and final contents, records hashes for the executable, app archive, and smoke screenshot, produces an SBOM, and attests provenance. Public tagged releases additionally require valid Authenticode signatures.
+Pull requests run Node 24 typechecking, security policy checks, builds, and native smoke checks on Linux and Windows. The automated test suite was removed on 2026-10-21 and must be rebuilt; automated checks alone never constituted owner acceptance. Windows installer CI builds and launches the packaged executable, checks Electron fuses and final contents, records hashes for the executable, app archive, and smoke screenshot, produces an SBOM, and attests provenance. Public tagged releases additionally require valid Authenticode signatures.
 
 A green check proves only its assertions. Real Windows 11 acceptance remains the final product evidence.

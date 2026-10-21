@@ -91,7 +91,7 @@ The durable evidence map preserves source identity, complete selected-audio cove
 
 The UI progressively shows evidence, AI library proposals, exact edit plans, validation, Apply, Stop, Undo/Redo, shared history, and rendered frame capture. Motion/audio inspection and export still use Kdenlive’s own monitor/render controls; OddBrain does not yet expose a safe reviewed short-preview/render control to the AI. Local kits now include title/lower-third artwork, shapes, gradients, two caption families, a LUT and native recipe data for titles, transitions, effects, reframing and ducking. These are reviewable source recipes, not pre-rendered proprietary templates.
 
-**Acceptance limit:** mocked protocol tests and local type/tests prove the app-side contract only. A real Windows 11 build of the separate native Kdenlive fork, a real project, FFmpeg/yt-dlp/OCR/transcription runtimes, timeline edits, preview/audio inspection, export verification and packaged installer still require owner-machine acceptance. PR #12 must not be treated as complete on test totals alone.
+**Acceptance limit:** removed/ad-hoc protocol checks and local typecheck/build prove the app-side contract only. A real Windows 11 build of the separate native Kdenlive fork, a real project, FFmpeg/yt-dlp/OCR/transcription runtimes, timeline edits, preview/audio inspection, export verification and packaged installer still require owner-machine acceptance. PR #12 must not be treated as complete on test totals alone.
 
 ### Models and reasoning controls
 
@@ -175,16 +175,16 @@ Run from `apps/03_oddbrain/`:
 
 ```sh
 npm run typecheck
-npm test -- --maxWorkers=2
 npm run build
 npm run build:web
+npm run security:policy
 npm run smoke       # requires a working native Electron environment
 npm run dist:win    # Windows packaging; CI can produce the installer artifact
 ```
 
-Browser tests need an installed Chromium and `ODDBRAIN_BROWSER_OPTIONS` pointing to its Playwright launch-options JSON. UI suites also need their preview servers; see the scripts and [verification scope](CONTEXT.md#verification-scope). Report browser/platform skips explicitly.
+The automated test suite (Vitest, Playwright UI checks and the Electron automation harness) was intentionally removed on 2026-10-21 because it no longer described the current app and had become unreliable. Test sources remain in Git history before commit `ba66c9d`. The suite must be rebuilt against current behaviour; no test result should be inferred from the previous totals. Typecheck, production builds, security-policy checks and native smoke remain the current automated gates.
 
-Current source baseline, historical test results, independently verified faults and other-branch audit evidence are recorded in [CONTEXT.md](CONTEXT.md#independent-audit-of-other-agents-claims). Passing automated checks does not establish real-account or target-laptop acceptance.
+Passing automated checks does not establish real-account or target-laptop acceptance. Real Windows 11/Kdenlive/MCP/FFmpeg/yt-dlp/OCR/transcription verification remains an owner-machine gate.
 
 ## License
 
