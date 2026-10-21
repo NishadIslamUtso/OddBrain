@@ -57,7 +57,9 @@ export async function providerDecode(input: MediaInput, prefs: MediaPreferences,
     const file = format.kind === 'image' ? { type: 'input_image', image_url: `data:${format.mime};base64,${data.toString('base64')}` } : { type: 'input_file', filename: input.name, file_data: `data:application/pdf;base64,${data.toString('base64')}` }
     body = JSON.stringify({ model, max_output_tokens: 4096, input: [{ role: 'user', content: [{ type: 'input_text', text: instruction }, file] }] })
   } else throw Error('The selected provider has no verified adapter for this operation. Nothing was sent and no other provider was chosen.')
-  const response = await fetchImpl(url, { method: 'POST', headers, body, redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]) })
+  // This is the exact provider/model named on the owner-clicked upload button;
+  // no file reaches this call through local processing or automatic fallback.
+  const response = await fetchImpl(url, { method: 'POST', headers, body, redirect: 'error', signal: AbortSignal.any([signal, AbortSignal.timeout(120_000)]) }) // lgtm[js/file-access-to-http]
   const raw = await boundedResponse(response)
   if (!response.ok) throw Error(`${provider} refused this request (HTTP ${response.status}). Check the selected model, format, access and quota. It was not retried.`)
   const result = JSON.parse(raw)

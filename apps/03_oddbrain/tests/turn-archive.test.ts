@@ -115,8 +115,9 @@ test('large retained originals save through a verified stream without renderer b
   const id = archive.begin({ ...input, attachments: [{ id: 'selected-source', name: 'large-source.bin', mime: 'application/octet-stream', path: source, bytes: bytes.length, sha256 }] })
   expect(() => archive.attachment(id, 'attachment-1')).toThrow('renderer-memory')
   expect(archive.saveAttachment(id, 'attachment-1', saved)).toMatchObject({ bytes: bytes.length, sha256 })
-  expect(statSync(saved).size).toBe(bytes.length)
-  expect(createHash('sha256').update(readFileSync(saved)).digest('hex')).toBe(sha256)
+  const savedBytes = readFileSync(saved)
+  expect(savedBytes.length).toBe(bytes.length)
+  expect(createHash('sha256').update(savedBytes).digest('hex')).toBe(sha256)
   expect(readdirSync(root).some(name => name.startsWith('.oddbrain-save-'))).toBe(false)
 })
 test('older count-only image records stay honest about unavailable bytes', () => {

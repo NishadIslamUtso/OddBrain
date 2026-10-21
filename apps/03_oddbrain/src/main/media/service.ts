@@ -1,6 +1,5 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { existsSync } from 'node:fs'
-import { lstat, mkdir, open, readFile, rename, rm, stat, statfs } from 'node:fs/promises'
+import { link, lstat, mkdir, open, readFile, rm, stat, statfs } from 'node:fs/promises'
 import { basename, dirname, join } from 'node:path'
 import { freemem, tmpdir } from 'node:os'
 import { readRecoverableJson, writeRecoverableJson } from '../recoverableJson'
@@ -19,12 +18,13 @@ const same = (a: Awaited<ReturnType<typeof stat>>, b: Awaited<ReturnType<typeof 
 const clock = (seconds: number): string => `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor(seconds % 3600 / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
 
 async function copyOrHashStable(path: string, destination: string | null, signal: AbortSignal): Promise<{ bytes: number; sha256: string }> {
-  const namedBefore = await lstat(path)
-  if (!namedBefore.isFile() || namedBefore.isSymbolicLink() || namedBefore.size < 1) throw Error('The selected source is empty, linked, or not a regular file.')
-  const input = await open(path, 'r'), output = destination ? await open(destination, 'wx', 0o600) : null
+  // Open first, then validate the name against that descriptor. All bytes come
+  // from the descriptor, so replacing the path cannot redirect this read.
+  const input = await open(path, 'r'); let output: Awaited<ReturnType<typeof open>> | null = null
   try {
-    const before = await input.stat()
-    if (!same(namedBefore, before)) throw Error('The selected source changed before it could be read.')
+    const before = await input.stat(), namedBefore = await lstat(path)
+    if (!before.isFile() || before.size < 1 || namedBefore.isSymbolicLink() || !same(namedBefore, before)) throw Error('The selected source is empty, linked, or changed before it could be read.')
+    output = destination ? await open(destination, 'wx', 0o600) : null
     const hash = createHash('sha256'), buffer = Buffer.allocUnsafe(1024 * 1024)
     let position = 0
     while (true) {
@@ -95,11 +95,16 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
       identity = await copyOrHashStable(path, temporary, signal)
       try {
         const folder = join(sourceRoot, identity.sha256), destination = join(folder, safeName(input.name)); await mkdir(folder, { recursive: true, mode: 0o700 })
-        if (existsSync(destination)) {
+        try {
+          // Same-volume hard-link creation is atomic and never overwrites an
+          // existing immutable source. The temporary name is removed after.
+          await link(temporary, destination); await rm(temporary, { force: true })
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
           const existing = await copyOrHashStable(destination, null, signal)
           if (existing.bytes !== identity.bytes || existing.sha256 !== identity.sha256) throw Error('A conflicting private source copy already exists. It was preserved for review.')
           await rm(temporary, { force: true })
-        } else await rename(temporary, destination)
+        }
         usePath = destination
       } catch (error) { try { await rm(temporary, { force: true }) } catch {}; throw error }
     } else identity = await copyOrHashStable(path, null, signal)
@@ -119,16 +124,29 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
     return { path: usePath, source: { handle, sha256: identity.sha256, bytes: identity.bytes, storage: input.storage, consequence }, ...(jobId ? { jobId } : {}) }
   }
   const decodeLocalPath = async (name: string, path: string, source: MediaSourceHandle, range: MediaRange | undefined, signal: AbortSignal): Promise<MediaResult> => {
-    const headHandle = await open(path, 'r'); const head = Buffer.alloc(1024 * 1024)
-    let read = 0
-    try { read = (await headHandle.read(head, 0, head.length, 0)).bytesRead } finally { await headHandle.close() }
-    const format = mediaKind(head.subarray(0, read))
-    if (format.mime === 'video/mp4' && head.subarray(0, read).includes(Buffer.from('pssh'))) throw Error('This media appears DRM-protected. Decryption is not supported.')
-    if (format.kind === 'document' || format.kind === 'image') {
-      const memoryBudget = Math.max(16 * 1024 * 1024, Math.floor(freemem() / 4))
-      if (source.bytes > memoryBudget) throw Error(`This document decoder needs one private memory buffer, but the current safe memory budget is ${memoryBudget.toLocaleString()} bytes. Choose a page-range export or retry with more free memory; nothing was clipped.`)
-      const bytes = await readFile(path)
-      const result = await (options.decode || decodeInWorker)(name, bytes, signal, range)
+    const sourceFile = await open(path, 'r'), head = Buffer.alloc(1024 * 1024)
+    let read = 0, documentBytes: Buffer | null = null, format!: ReturnType<typeof mediaKind>
+    try {
+      const before = await sourceFile.stat(), namedBefore = await lstat(path)
+      if (!before.isFile() || before.size !== source.bytes || namedBefore.isSymbolicLink() || !same(namedBefore, before)) throw Error('The selected source changed before decoding. Reattach it; nothing was used.')
+      read = (await sourceFile.read(head, 0, head.length, 0)).bytesRead; format = mediaKind(head.subarray(0, read))
+      if (format.mime === 'video/mp4' && head.subarray(0, read).includes(Buffer.from('pssh'))) throw Error('This media appears DRM-protected. Decryption is not supported.')
+      if (format.kind === 'document' || format.kind === 'image') {
+        const memoryBudget = Math.max(16 * 1024 * 1024, Math.floor(freemem() / 4))
+        if (source.bytes > memoryBudget) throw Error(`This document decoder needs one private memory buffer, but the current safe memory budget is ${memoryBudget.toLocaleString()} bytes. Choose a page-range export or retry with more free memory; nothing was clipped.`)
+        documentBytes = Buffer.allocUnsafe(source.bytes); let position = 0
+        while (position < documentBytes.length) {
+          if (signal.aborted) throw Error('Cancelled.')
+          const part = await sourceFile.read(documentBytes, position, Math.min(1024 * 1024, documentBytes.length - position), position)
+          if (!part.bytesRead) break
+          position += part.bytesRead
+        }
+        const after = await sourceFile.stat(), namedAfter = await lstat(path)
+        if (position !== source.bytes || !same(before, after) || !same(after, namedAfter) || createHash('sha256').update(documentBytes).digest('hex') !== source.sha256) throw Error('The selected source changed while decoding. No result was kept.')
+      }
+    } finally { await sourceFile.close() }
+    if (documentBytes) {
+      const result = await (options.decode || decodeInWorker)(name, documentBytes, signal, range)
       if (!result.ok) throw Error(result.error || 'Decoding failed.')
       return { ...result, source }
     }
@@ -166,6 +184,8 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
       const coverage = range ? `${clock(start)}–${clock(end)} of ${clock(details.duration)}` : `the complete ${clock(details.duration)} duration`
       const text = `${format.kind === 'video' ? 'Video' : 'Audio'} coverage: ${coverage}.\n${acoustic}\n\n${transcript.join('\n\n')}`
       const result = transcript.length ? extracted(name, text, `Local full-duration timeline for ${coverage}; speech recognition covered every audio interval. ${images.length} evenly spread visual sample(s) represent the selected duration. Visual frames are samples, not frame-by-frame interpretation.`) : { ok: true as const, name, disclosure: `${images.length} evenly spread visual samples across ${coverage}; no audio stream was present.` }
+      const confirmed = await copyOrHashStable(path, null, signal)
+      if (confirmed.bytes !== source.bytes || confirmed.sha256 !== source.sha256) throw Error('The selected source changed during media processing. No result was kept.')
       return { ...result, images, time: { read: selectedDuration, total: details.duration, unit: 'seconds' }, textComplete: !range || start === 0 && end === details.duration, source }
     } finally { await rm(temp, { recursive: true, force: true }) }
   }
