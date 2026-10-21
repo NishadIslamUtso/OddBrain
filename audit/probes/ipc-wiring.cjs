@@ -1,0 +1,16 @@
+// Static IPC wiring audit: every channel the renderer can invoke must have a main-process handler (and vice versa).
+const fs = require('fs'), path = require('path')
+const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDirectory() ? walk(path.join(d, e.name)) : [path.join(d, e.name)])
+const root = require('path').join(require('./paths.cjs').APP_ROOT, 'src')
+const preload = fs.readFileSync(root + '/preload/index.ts', 'utf8')
+const invoked = new Set([...preload.matchAll(/ipcRenderer\.invoke\(\s*['"`]([^'"`]+)['"`]/g)].map(m => m[1]))
+const listened = new Set([...preload.matchAll(/ipcRenderer\.on\(\s*['"`]([^'"`]+)['"`]/g)].map(m => m[1]))
+const mainFiles = walk(root + '/main').filter(f => /\.ts$/.test(f))
+const mainText = mainFiles.map(f => fs.readFileSync(f, 'utf8')).join('\n')
+const handled = new Set([...mainText.matchAll(/(?:\bhandle|ipcMain\.handle|ipcMain\.handleOnce)\(\s*['"`]([^'"`]+)['"`]/g)].map(m => m[1]))
+// events sent from main to renderer
+const sent = new Set([...mainText.matchAll(/\.send\(\s*['"`]([^'"`]+)['"`]/g)].map(m => m[1]))
+const noHandler = [...invoked].filter(c => !handled.has(c))
+const unused = [...handled].filter(c => !invoked.has(c))
+const noSender = [...listened].filter(c => !sent.has(c))
+console.log(JSON.stringify({ rendererInvokes: invoked.size, mainHandlers: handled.size, invokedWithoutHandler: noHandler, handlersNeverCalledFromPreload: unused, preloadListensWithNoMainSender: noSender, mainSendsNeverListened: [...sent].filter(c => !listened.has(c)) }, null, 1))

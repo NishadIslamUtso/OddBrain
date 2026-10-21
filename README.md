@@ -91,7 +91,9 @@ The durable evidence map preserves source identity, complete selected-audio cove
 
 The UI progressively shows evidence, AI library proposals, exact edit plans, validation, Apply, Stop, Undo/Redo, shared history, and rendered frame capture. Motion/audio inspection and export still use Kdenlive’s own monitor/render controls; OddBrain does not yet expose a safe reviewed short-preview/render control to the AI. Local kits now include title/lower-third artwork, shapes, gradients, two caption families, a LUT and native recipe data for titles, transitions, effects, reframing and ducking. These are reviewable source recipes, not pre-rendered proprietary templates.
 
-**Acceptance limit:** mocked protocol tests and local type/tests prove the app-side contract only. A real Windows 11 build of the separate native Kdenlive fork, a real project, FFmpeg/yt-dlp/OCR/transcription runtimes, timeline edits, preview/audio inspection, export verification and packaged installer still require owner-machine acceptance. PR #12 must not be treated as complete on test totals alone.
+**Known defects (audit 2026-10-21):** the claims above describe the design, not verified behaviour. Run against real programs, the reader's loudness, pause and scene-change measurements return nothing (an ffmpeg argument is rejected), the transcript has no word or sentence times, the AI cannot see timeline IDs or the edit-command format, OCR is not connected to the video flow, saved versions and reconnect after the editor session expires do not work, and no Windows build of the Kdenlive fork exists. Full list, proof and fix order: [`audit/AUDIT_REPORT.md`](audit/AUDIT_REPORT.md).
+
+**Acceptance limit:** type-checking and the audit probes (against a stand-in Kdenlive server, since the tests were removed on 2026-10-21) prove the app-side contract only. A real Windows 11 build of the separate native Kdenlive fork, a real project, FFmpeg/yt-dlp/OCR/transcription runtimes, timeline edits, preview/audio inspection, export verification and packaged installer still require owner-machine acceptance. PR #12 must not be treated as complete on test totals alone.
 
 ### Models and reasoning controls
 

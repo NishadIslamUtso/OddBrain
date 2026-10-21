@@ -98,3 +98,6 @@ temp/
 
 # CI failure reports (posted as commit comments, never committed)
 junit-*.xml
+
+# audit probe bundles are build output
+audit/probes/out/
