@@ -1,10 +1,10 @@
 import { Worker } from 'node:worker_threads'
 import { join } from 'node:path'
-import type { MediaResult } from '../../shared/lib/mediaBridge'
-export function decodeInWorker(name: string, bytes: Uint8Array, signal: AbortSignal): Promise<MediaResult> {
+import type { MediaRange, MediaResult } from '../../shared/lib/mediaBridge'
+export function decodeInWorker(name: string, bytes: Uint8Array, signal: AbortSignal, range?: MediaRange): Promise<MediaResult> {
   return new Promise((resolve, reject) => {
     if (signal.aborted) { reject(Error('Cancelled.')); return }
-    const worker = new Worker(join(__dirname, 'media-worker.js'), { workerData: { name, bytes }, resourceLimits: { maxOldGenerationSizeMb: 192, stackSizeMb: 4 } })
+    const worker = new Worker(join(__dirname, 'media-worker.js'), { workerData: { name, bytes, range }, resourceLimits: { maxOldGenerationSizeMb: 192, stackSizeMb: 4 } })
     let settled = false
     const finish = (error?: Error, result?: MediaResult): void => {
       if (settled) return; settled = true

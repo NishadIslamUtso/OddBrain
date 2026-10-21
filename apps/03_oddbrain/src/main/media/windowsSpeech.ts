@@ -10,7 +10,7 @@ export async function windowsRecognize(language: string, signal: AbortSignal, fi
   if (process.platform !== 'win32') throw Error('Offline System.Speech recognition requires Windows and an installed recognition language. Choose a transcription provider explicitly in Voice & files on other systems.')
   const command = join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe')
   const script = Buffer.from(speechScript(language, file), 'utf16le').toString('base64')
-  const result = (await runMediaCommand(command, ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', script], signal, file ? 120_000 : 65_000)).toString('utf8').replace(/^\uFEFF/, '').trim()
+  const result = (await runMediaCommand(command, ['-NoProfile', '-NonInteractive', '-STA', '-EncodedCommand', script], signal, file ? 15 * 60_000 : 65_000)).toString('utf8').replace(/^\uFEFF/, '').trim()
   if (!result) throw Error('No speech was recognized. Check the microphone and installed recognition language; no other provider was used.')
   return result
 }

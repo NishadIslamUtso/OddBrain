@@ -23,6 +23,7 @@ import { createZip, safeEntryName } from './zip'
 import { syncConversation } from './conversations'
 import { scanInstructionSignals, scanTextHazards } from '../../shared/lib/textHazards'
 import { searchVault } from './recall'
+import { createReviewCenter } from '../memory/reviewCenter'
 
 export type Payload = Record<string, any>
 
@@ -62,9 +63,11 @@ const noVaultMessage = (root: string): string =>
 export function createVaultService({
   vaultPath,
   clock = () => new Date(),
+  onAttachment,
 }: {
   vaultPath: string
   clock?: () => Date
+  onAttachment?: Parameters<typeof syncConversation>[4]
 }) {
   const root = resolve(vaultPath)
   const available = (): boolean => existsSync(root)
@@ -185,6 +188,15 @@ export function createVaultService({
     store.write(record, `${JSON.stringify({ month: label, at: clock().toISOString() }, null, 2)}\n`)
     return { written: !existed, relative: `${AUDIT_DIR}/${label}.md`, month: label }
   }
+
+  const reviewCenter = () => createReviewCenter(vault(), () => clock().toISOString())
+
+  /** The foundational interpretation review defaults to 60 days plus only directly linked older evidence. */
+  function interpretationReview(days: number | null = 60) { return reviewCenter().scan(days) }
+  function interpretationReviewState() { return reviewCenter().read() }
+  function interpretationReviewAction(id: string, action: 'answer' | 'keep' | 'forget-candidate' | 'dismiss' | 'reopen', answer = '') { return reviewCenter().act(id, action, answer) }
+  function interpretationReviewPacket() { return reviewCenter().packet() }
+  function interpretationReviewImport(input: { provider: string; response: string; packetSha256: string }) { return reviewCenter().import(input) }
 
   /** Snapshot, open loops, parsed follow-ups and today's journal path. */
   function today() {
@@ -860,13 +872,18 @@ export function createVaultService({
     status,
     today,
     monthlyAudit,
+    interpretationReview,
+    interpretationReviewState,
+    interpretationReviewAction,
+    interpretationReviewPacket,
+    interpretationReviewImport,
     blacklist,
     updateBlacklist,
     capture,
     conversationSync(data: Payload, captureSource: 'browser-extension' | 'oddbrain-app' | 'unknown' = 'unknown') {
       if (!data || typeof data.url !== 'string') throw new InputError('Conversation URL is required.')
       if (excluded(data.url, blacklist())) return { ok: false, skipped: true, reason: 'blacklist' }
-      return syncConversation(vault(), data, clock().toISOString(), captureSource)
+      return syncConversation(vault(), data, clock().toISOString(), captureSource, onAttachment)
     },
     links,
     onui,

@@ -18,6 +18,9 @@ const BASE = process.env.ODDBRAIN_UI_URL || 'http://127.0.0.1:5174/', QA = proce
    const records = new Map(), seen = new Set(); window.fixtureNativeRequests = []
    const project = { id: 'project-fixture', name: 'Research fixture', instruction: 'Keep source evidence separate.', goals: ['Understand sources'], references: [], folder: '', createdAt: new Date().toISOString() }
    bridge.projects.read = async () => [project]; window.dispatchEvent(new Event('app:projects-changed'))
+   bridge.workingNotes.read = async () => ({ ok: true, current: null, revisions: [], answer: '' })
+   bridge.workingNotes.migrate = async () => ({ ok: true, current: null, revisions: [], answer: '' })
+   bridge.workingNotes.fork = async () => ({ ok: true, current: null, revisions: [], answer: '' })
    bridge.engine.contextTarget = async context => ({ workspace: '/fixture/research', route: '', resume: seen.has(context.chatId) })
    bridge.engine.chatSessions = async chatId => seen.has(chatId) ? [{ engine: 'claude-code', chatId, workspace: '/fixture/research', sessionId: 'fixture-native-' + chatId }] : []
    bridge.transcripts.read = async id => records.has(id) ? { ok: true, value: records.get(id) } : { ok: false, error: 'Fixture record missing' }

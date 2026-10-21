@@ -7,6 +7,17 @@ import { mediaKind } from '../src/main/media/formats'
 import { speechScript } from '../src/main/media/windowsSpeech'
 import { attachmentsFromMedia } from '../src/renderer/src/hooks/useMediaAttachments'
 
+function twoPagePdf(first: string, second: string): Buffer {
+  const stream = (text: string) => `BT /F1 12 Tf 40 100 Td (${text}) Tj ET`
+  const one = stream(first), two = stream(second)
+  const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R 4 0 R] /Count 2 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 6 0 R >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 5 0 R >> >> /Contents 7 0 R >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', `<< /Length ${one.length} >>\nstream\n${one}\nendstream`, `<< /Length ${two.length} >>\nstream\n${two}\nendstream`]
+  let file = '%PDF-1.4\n'; const offsets: number[] = []
+  for (const [i, object] of objects.entries()) { offsets.push(Buffer.byteLength(file)); file += `${i + 1} 0 obj\n${object}\nendobj\n` }
+  const xref = Buffer.byteLength(file)
+  file += `xref\n0 8\n0000000000 65535 f \n${offsets.map(n => String(n).padStart(10, '0') + ' 00000 n \n').join('')}trailer\n<< /Size 8 /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF`
+  return Buffer.from(file)
+}
+
 function pdf(text: string): Buffer {
   const content = `BT /F1 12 Tf 40 100 Td (${text}) Tj ET`
   const objects = ['<< /Type /Catalog /Pages 2 0 R >>', '<< /Type /Pages /Kids [3 0 R] /Count 1 >>', '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>', '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>', `<< /Length ${content.length} >>\nstream\n${content}\nendstream`]
@@ -36,6 +47,12 @@ test('pdf.js asset urls keep a forward slash on Windows paths', () => {
 test('PDF extraction uses the actual parser and states page/image coverage', async () => {
   const result = await decodeDocument('example.pdf', pdf('fixture PDF words'))
   expect(result.text).toContain('fixture PDF words'); expect(result.disclosure).toContain('1 of 1 pages'); expect(result.disclosure).toContain('not interpreted')
+})
+test('PDF page ranges process complete selected pages without claiming full-document text', async () => {
+  const result = await decodeDocument('range.pdf', twoPagePdf('first page words', 'second page words'), { unit: 'pages', start: 2, end: 2 })
+  expect(result.text).toContain('second page words'); expect(result.text).not.toContain('first page words')
+  expect(result).toMatchObject({ pages: { read: 1, total: 2 }, textComplete: false })
+  expect(result.disclosure).toContain('pages 2–2 of 2')
 })
 test('OOXML Word, PowerPoint, stored spreadsheet values and ODF text decode locally', async () => {
   const word = '<w:document xmlns:w="x"><w:body><w:p><w:r><w:t>Hello &amp; welcome</w:t></w:r></w:p></w:body></w:document>'

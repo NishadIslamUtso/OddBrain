@@ -54,6 +54,16 @@ test('recovery import preserves every original revision field exactly', () => {
   expect(restored.revisions).toEqual(exported.revisions)
 })
 
+test('branch copy preserves the exact active notes and unapproved proposal difference', () => {
+  const store = new WorkingNotesStore(root())
+  const first = store.save({ chatId: 'source-chat', expected: null, notes: notes('Original') })
+  const source = store.reject({ chatId: 'source-chat', expected: first.current!.id, notes: notes('Original'), proposal: { ...notes('Proposed', ['Unsafe']), author: 'ai' as const } })
+  const branch = store.fork({ sourceChatId: 'source-chat', targetChatId: 'branch-chat', expectedSource: source.current!.id })
+  expect(branch.current).toMatchObject({ source: 'branch-copy', branchedFromRevision: source.current!.id, notes: source.current!.notes, proposal: source.current!.proposal, notApproved: source.current!.notApproved })
+  expect(branch.current?.parent).toBeNull()
+  expect(() => store.fork({ sourceChatId: 'source-chat', targetChatId: 'another-chat', expectedSource: first.current!.id })).toThrow(/changed while the branch/)
+})
+
 test('legacy migration keeps every supplied notes revision and runs only into an empty history', () => {
   const store = new WorkingNotesStore(root())
   const migrated = store.migrate('chat-legacy', [notes('Old'), notes('New')])

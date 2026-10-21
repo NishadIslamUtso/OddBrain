@@ -5,7 +5,7 @@ import { beforeEach, afterEach, expect, test, vi } from 'vitest'
 import SavedDrafts from '../src/renderer/src/ui/SavedDrafts'
 import TranscriptHistory from '../src/renderer/src/ui/TranscriptHistory'
 import { draftStash } from '../src/shared/lib/draftStash'
-const fixture = vi.hoisted(() => ({ list: vi.fn(), read: vi.fn(), image: vi.fn(), attachment: vi.fn() }))
+const fixture = vi.hoisted(() => ({ list: vi.fn(), read: vi.fn(), image: vi.fn(), attachment: vi.fn(), saveAttachment: vi.fn() }))
 vi.mock('../src/renderer/src/platform/bridge', () => ({ bridge: { transcripts: fixture } }))
 let root: Root, host: HTMLDivElement
 beforeEach(() => { Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true }); localStorage.clear(); vi.clearAllMocks(); host = document.createElement('div'); document.body.append(host); root = createRoot(host) })
@@ -44,17 +44,16 @@ test('retained transcript images require a matching main-process verification be
   expect(fixture.image).toHaveBeenCalledWith('retained', 'image-1'); expect(downloaded).toHaveBeenCalledOnce(); downloaded.mockRestore()
   expect(host.textContent).toContain('passed its recorded SHA-256 and size checks')
 })
-test('retained original files require matching transcript verification before download', async () => {
+test('retained original files use the streamed main-process save route instead of renderer bytes', async () => {
   const attachment = { id: 'attachment-1', name: 'original.pdf', mime: 'application/pdf', bytes: 2, sha256: 'b'.repeat(64) }
   const header = { id: 'source-file', at: '2026-10-19T00:00:00Z', title: 'File task', engine: 'claude-code', model: '', workspace: '/work', pictures: 0, images: [], attachments: [attachment] }
   fixture.list.mockResolvedValue({ ok: true, value: { entries: [header], next: '', notice: '' } })
   fixture.read.mockResolvedValue({ ok: true, value: { header, prompt: 'Read it', events: [{ kind: 'done', text: 'Seen' }], state: 'done', incomplete: false } })
-  fixture.attachment.mockResolvedValue({ ok: true, value: { ...attachment, data: 'AAE=', verified: true } })
-  Object.assign(URL, { createObjectURL: vi.fn(() => 'blob:source'), revokeObjectURL: vi.fn() })
+  fixture.saveAttachment.mockResolvedValue({ ok: true, answer: 'Verified original saved to chosen/original.pdf' })
   const downloaded = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => undefined)
-  await act(async () => root.render(<TranscriptHistory />)); await click('File task'); await click('Download verified original.pdf')
-  expect(fixture.attachment).toHaveBeenCalledWith('source-file', 'attachment-1'); expect(downloaded).toHaveBeenCalledOnce(); downloaded.mockRestore()
-  expect(host.textContent).toContain('passed its recorded SHA-256 and size checks')
+  await act(async () => root.render(<TranscriptHistory />)); await click('File task'); await click('Save verified original.pdf…')
+  expect(fixture.saveAttachment).toHaveBeenCalledWith('source-file', 'attachment-1'); expect(fixture.attachment).not.toHaveBeenCalled(); expect(downloaded).not.toHaveBeenCalled(); downloaded.mockRestore()
+  expect(host.textContent).toContain('Verified original saved')
 })
 test('late transcript reads cannot update an unmounted history view', async () => {
   let finish!: (value: unknown) => void

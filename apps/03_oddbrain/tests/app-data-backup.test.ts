@@ -1,4 +1,4 @@
-import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, mkdirSync, readFileSync, rmSync, statSync, truncateSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, expect, test } from 'vitest'
@@ -29,6 +29,13 @@ test('app-data backup includes selected owner domains, excludes authority secret
   expect(appDataBackupExclusions().join(' ')).toContain('installed engines/models')
 })
 
+test('streams a large private Attachment Center source through verified app-data backup and restore', () => {
+  const parent = temp(), live = join(parent, 'live'), backup = join(parent, 'backup'), restored = join(parent, 'restored'), relative = join('attachment-center', 'originals', 'fixture', 'large.bin'), bytes = 70 * 1024 * 1024
+  mkdirSync(join(live, 'attachment-center', 'originals', 'fixture'), { recursive: true }); writeFileSync(join(live, relative), ''); truncateSync(join(live, relative), bytes)
+  expect(createAppDataBackup(live, backup, {}).bytes).toBe(bytes + 2)
+  expect(restoreAppDataBackup(backup, restored).bytes).toBe(bytes + 2)
+  expect(statSync(join(restored, relative)).size).toBe(bytes)
+})
 test('tampered backup refuses restore and leaves no destination', () => {
   const parent = temp(), live = join(parent, 'live'), backup = join(parent, 'backup'), restored = join(parent, 'restored')
   mkdirSync(join(live, 'artifacts'), { recursive: true }); writeFileSync(join(live, 'artifacts', 'item.html'), '<h1>kept</h1>')

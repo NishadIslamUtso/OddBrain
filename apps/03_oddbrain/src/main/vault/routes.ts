@@ -48,6 +48,11 @@ export const VAULT_ROUTES: Record<string, string[]> = {
   '/research': ['GET'],
   '/onui': ['GET'],
   '/links': ['GET'],
+  '/review-center': ['GET'],
+  '/review-packet': ['GET'],
+  '/review-scan': ['POST'],
+  '/review-action': ['POST'],
+  '/review-import': ['POST'],
   '/capture': ['POST'],
   '/conversation-sync': ['POST'],
   '/export-zip': ['POST'],
@@ -79,6 +84,8 @@ export function handleVaultRequest(service: VaultService, request: VaultRouteReq
       if (route === '/capsules') return { status: 200, body: { capsules: service.capsules(query) } }
       if (route === '/onui') return { status: 200, body: service.onui() }
       if (route === '/links') return { status: 200, body: service.links() }
+      if (route === '/review-center') return { status: 200, body: { ok: true, ...service.interpretationReviewState() } }
+      if (route === '/review-packet') return { status: 200, body: { ok: true, ...service.interpretationReviewPacket() } }
       if (route === '/context') return { status: 200, body: service.context(query) }
       if (route === '/files') {
         // The tree the vault really has: every markdown file, relative paths,
@@ -150,6 +157,21 @@ export function handleVaultRequest(service: VaultService, request: VaultRouteReq
       if (route === '/conversation-sync') return { status: 200, body: service.conversationSync(request.body as Record<string, any>, request.captureSource || 'unknown') }
       if (route === '/capture') return { status: 200, body: service.capture(request.body as Record<string, any>, request.captureSource || 'unknown') }
       if (route === '/blacklist') return { status: 200, body: service.updateBlacklist(request.body as Record<string, any>) }
+      if (route === '/review-scan') {
+        const value = request.body as Record<string, unknown>, days = value?.days === null ? null : Number(value?.days ?? 60)
+        if (days !== null && (!Number.isInteger(days) || days < 1 || days > 3650)) throw new InputError('Choose a review range from 1 to 3,650 days, or All history.')
+        return { status: 200, body: { ok: true, ...service.interpretationReview(days) } }
+      }
+      if (route === '/review-action') {
+        const value = request.body as Record<string, unknown>, action = String(value?.action || '')
+        if (typeof value?.id !== 'string' || !['answer', 'keep', 'forget-candidate', 'dismiss', 'reopen'].includes(action)) throw new InputError('Choose a valid review item and action.')
+        return { status: 200, body: { ok: true, ...service.interpretationReviewAction(value.id, action as 'answer' | 'keep' | 'forget-candidate' | 'dismiss' | 'reopen', typeof value.answer === 'string' ? value.answer : '') } }
+      }
+      if (route === '/review-import') {
+        const value = request.body as Record<string, unknown>
+        if (typeof value?.provider !== 'string' || typeof value.response !== 'string' || typeof value.packetSha256 !== 'string') throw new InputError('Provider, response, and source packet hash are required.')
+        return { status: 200, body: { ok: true, ...service.interpretationReviewImport({ provider: value.provider, response: value.response, packetSha256: value.packetSha256 }) } }
+      }
       if (route === '/export-zip') return { status: 200, body: service.exportZip(request.body as Record<string, any>) }
       return fallback(route, request.method)
     }

@@ -2,9 +2,11 @@ import { useEffect, useState } from 'react'
 import ConnectionGraph from './ConnectionGraph'
 import MemoryWorkspace, { type MemoryTab } from './MemoryWorkspace'
 import MemorySection from './MemorySection'
+import ReviewCenter from './ReviewCenter'
+import AttachmentCenter from './AttachmentCenter'
 import { Mascot } from '../motion/Mascot'
 import type { VaultState } from '../hooks/useVault'
-const tabs = ['Memory inbox','People','Journal','Life Story','Map','Engine notes'] as const
+const tabs = ['Memory inbox','Review','Files','People','Journal','Life Story','Map','Engine notes'] as const
 /** The original graph and legacy notes remain; no new top-level destinations. */
 export default function BrainView({ vault, isDemo, onOpenVault }: { vault: VaultState; isDemo: boolean; onOpenVault: () => void }) {
   const [tab, setTab] = useState<typeof tabs[number]>('Memory inbox')
@@ -12,6 +14,6 @@ export default function BrainView({ vault, isDemo, onOpenVault }: { vault: Vault
   return <div className="ob-brain-view" aria-label="Brain">
     <header className="ob-screen-header"><Mascot motion="branch-merge" size={32} static /><h1>Brain</h1>{vault.path && <span title={vault.path}>{vault.path}</span>}<button type="button" className="ob-small-button" onClick={onOpenVault}>Open Vault</button></header>
     <div className="ob-brain-tabs" role="tablist" aria-label="Brain sections">{tabs.map(name => <button type="button" role="tab" aria-selected={tab === name} className="ob-small-button" key={name} onClick={() => setTab(name)}>{name}</button>)}</div>
-    {tab === 'Map' ? <ConnectionGraph path={vault.path} isDemo={isDemo} variant="full" /> : <div className="ob-brain-memory" role="tabpanel">{tab === 'Engine notes' ? <MemorySection /> : <MemoryWorkspace key={tab} tab={tab as MemoryTab} />}</div>}
+    {tab === 'Map' ? <ConnectionGraph path={vault.path} isDemo={isDemo} variant="full" /> : <div className="ob-brain-memory" role="tabpanel">{tab === 'Review' ? <ReviewCenter /> : tab === 'Files' ? <AttachmentCenter /> : tab === 'Engine notes' ? <MemorySection /> : <MemoryWorkspace key={tab} tab={tab as MemoryTab} />}</div>}
   </div>
 }

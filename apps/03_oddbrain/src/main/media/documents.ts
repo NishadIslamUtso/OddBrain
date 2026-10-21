@@ -4,7 +4,7 @@ import { imageSize } from 'image-size'
 import { mediaKind } from './formats'
 import { fromBuffer, type Entry, type ZipFile } from 'yauzl'
 import { XMLParser } from 'fast-xml-parser'
-import { MAX_EXTRACTED_TEXT, type MediaResult } from '../../shared/lib/mediaBridge'
+import { MAX_EXTRACTED_TEXT, type MediaRange, type MediaResult } from '../../shared/lib/mediaBridge'
 
 /**
  * A pdf.js data directory, in the one form pdf.js accepts on every platform.
@@ -89,7 +89,7 @@ export function extracted(name: string, text: string, disclosure: string): Media
   }
   return { ok: true, name, textComplete: true, segments, disclosure: `${disclosure} Full extracted text is available in ${segments.length} selectable section(s); none was attached until you choose.` }
 }
-export async function decodeDocument(name: string, bytes: Buffer): Promise<MediaResult> {
+export async function decodeDocument(name: string, bytes: Buffer, range?: MediaRange): Promise<MediaResult> {
   const ext = name.toLowerCase().split('.').pop() || ''
   if (mediaKind(bytes).kind === 'image') {
     const size = imageSize(bytes)
@@ -112,16 +112,20 @@ export async function decodeDocument(name: string, bytes: Buffer): Promise<Media
     const task = pdf.getDocument({ standardFontDataUrl: pdfAssetBase(root, 'standard_fonts'), cMapUrl: pdfAssetBase(root, 'cmaps'), cMapPacked: true, wasmUrl: pdfAssetBase(root, 'wasm'), data: new Uint8Array(bytes), useSystemFonts: false, useWorkerFetch: false, disableFontFace: true, stopAtErrors: true })
     try {
       const doc = await task.promise
-      if (doc.numPages > 200) throw Error('This PDF has more than 200 pages. Split or export the pages you need; no partial document was attached.')
-      let text = ''
-      let read = 0
-      for (let page = 1; page <= doc.numPages; page++) {
+      if (range && range.unit !== 'pages') throw Error('A PDF range must be page numbers.')
+      const first = range ? Math.max(1, Math.floor(range.start)) : 1
+      const last = range ? Math.min(doc.numPages, Math.floor(range.end)) : doc.numPages
+      if (first > last || first > doc.numPages) throw Error(`Choose PDF pages between 1 and ${doc.numPages}.`)
+      let text = '', read = 0
+      for (let page = first; page <= last; page++) {
         const content = await (await doc.getPage(page)).getTextContent()
         text += `\n[Page ${page}]\n` + content.items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join(''); read++
+        if (text.length > 500_000) throw Error(`Extracted text passed the 500,000-character review-workspace safety budget at page ${page}. Choose a smaller page range; processed pages were not reported as complete or silently clipped.`)
       }
-      if (!text.replace(/\[Page \d+\]/g, '').trim()) throw Error('This PDF has no extractable text. Use the selected vision provider for OCR, or attach an OCR export.')
-      const result = extracted(name, text, `Local PDF text extraction: ${read} of ${doc.numPages} pages. Images, diagrams and layout were not interpreted.`)
-      return { ...result, textComplete: result.textComplete === true && read === doc.numPages, pages: { read, total: doc.numPages } }
+      if (!text.replace(/\[Page \d+\]/g, '').trim()) throw Error('This PDF range has no extractable text. Use the optional owner-installed OCR adapter, a selected vision provider, or an OCR export.')
+      const coverage = first === 1 && last === doc.numPages ? `${read} of ${doc.numPages} pages` : `pages ${first}–${last} of ${doc.numPages}`
+      const result = extracted(name, text, `Local PDF text extraction: ${coverage}. Images, diagrams and layout were not interpreted.`)
+      return { ...result, textComplete: result.textComplete === true && first === 1 && last === doc.numPages, pages: { read, total: doc.numPages } }
     } finally { await task.destroy() }
   }
   if (['docx', 'xlsx', 'pptx', 'odt', 'ods', 'odp'].includes(ext)) {

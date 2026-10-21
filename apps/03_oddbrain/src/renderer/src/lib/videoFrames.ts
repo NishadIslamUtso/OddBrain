@@ -1,7 +1,8 @@
 import { framePoints } from '../../../shared/lib/media'
 /** Browser-preview fallback. Still frames only; no claim to have heard audio. */
 export async function extractFrames(file: File, count = 3): Promise<File[]> {
-  if (file.size > 50 * 1024 * 1024) throw Error(`${file.name}: video exceeds the 50 MB limit.`)
+  // Object URLs let the browser decoder read on demand; do not turn this
+  // preview fallback into another arbitrary whole-file ingestion ceiling.
   const url = URL.createObjectURL(file), video = document.createElement('video')
   const wait = (event: 'loadedmetadata' | 'seeked', begin: () => void): Promise<void> => new Promise((resolve, reject) => {
     const clean = (): void => { clearTimeout(timer); video.removeEventListener(event, done); video.removeEventListener('error', fail) }

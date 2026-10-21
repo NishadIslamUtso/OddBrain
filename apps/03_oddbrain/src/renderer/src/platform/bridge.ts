@@ -14,6 +14,9 @@ import type { EngineSourceFile } from '@shared/lib/media'
 import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
 import type { ThinkingMode } from '@shared/lib/engine'
 import type { MemoryBridge } from '@shared/lib/memoryWorkspace'
+import type { ProcessingLedgerBridge } from '@shared/lib/processingLedger'
+import type { AttachmentCenterBridge } from '@shared/lib/attachmentCenter'
+import type { FolderAccessBridge } from '@shared/lib/folderAccess'
 import { demoMemoryWorkspace } from './sampleMemory'
 import { DEFAULT_MEDIA, type MediaBridge } from '@shared/lib/mediaBridge'
 import type { MarketplaceBridge } from '@shared/lib/marketplace'
@@ -70,6 +73,9 @@ export type DesktopBridge = {
   media: MediaBridge
   marketplace: MarketplaceBridge
   memoryWorkspace: MemoryBridge
+  processing: ProcessingLedgerBridge
+  attachmentCenter: AttachmentCenterBridge
+  folderAccess: FolderAccessBridge
   automation: AutomationBridge
   extensionPair: {
     get: () => Promise<{ token: string }>
@@ -329,20 +335,39 @@ const demoBridge: DesktopBridge = {
     save: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes storage requires the installed app.' }),
     rejectProposal: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes storage requires the installed app.' }),
     migrate: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes storage requires the installed app.' }),
+    fork: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes branching requires the installed app.' }),
     exportRecovery: async () => ({ ok: false, answer: 'Working Notes recovery export requires the installed app.' }),
     importRecovery: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes recovery import requires the installed app.' }),
   },
   media: {
     authorizeRecording: async () => ({ ok: false, name: 'Microphone', error: 'Provider recording requires the desktop app.' }), onCancelled: () => () => {},
-    read: async () => ({ ...previewMedia }), update: async patch => (previewMedia = { ...previewMedia, ...patch, ffmpeg: '' }),
-    chooseDecoder: async () => ({ ...previewMedia }),
+    read: async () => ({ ...previewMedia }), update: async patch => (previewMedia = { ...previewMedia, ...patch, ffmpeg: '', ocrAdapter: '', ocrAdapterSha256: '', ocrAdapterLabel: '' }),
+    chooseDecoder: async () => ({ ...previewMedia }), chooseOcrAdapter: async () => ({ ...previewMedia }),
     decode: async input => ({ ok: false, name: input.name, error: 'Native decoding and provider uploads require the desktop app. No file was sent.' }),
+    decodeFile: async (_file, input) => ({ ok: false, name: input.name, error: 'Streamed selected-file processing requires the desktop app. No file was sent.' }),
+    releaseSource: async () => {},
     dictate: async () => ({ ok: false, name: 'Dictation', error: 'Offline Windows dictation requires the desktop app.' }), cancel: async () => {},
   },
   transcripts: { raw: async () => ({ ok: false as const, error: 'Original transcripts require the desktop app.' }), image: async () => ({ ok: false as const, error: 'Retained transcript images require the desktop app.' }), list: async () => ({ ok: false, error: 'Native transcripts require the desktop app. Sample chats remain separate.' }), read: async () => ({ ok: false, error: 'Native transcripts require the desktop app.' }) },
   marketplace: { inspect: unavailableMarket, sources: async () => [], browse: unavailableMarket, probe: unavailableMarket, installed: unavailableMarket, plan: unavailableMarket, confirm: unavailableMarket, cancel: async () => {} },
   automation: demoAutomation,
   memoryWorkspace: demoMemoryWorkspace,
+  processing: {
+    read: async () => ({ ok: false, error: 'Durable processing jobs require the installed app.' }),
+    resume: async () => ({ ok: false, error: 'Durable processing jobs require the installed app.' }),
+    setLimits: async () => ({ ok: false, error: 'Durable processing budgets require the installed app.' }),
+  },
+  attachmentCenter: {
+    read: async () => ({ ok: false, error: 'The Attachment Center requires the installed app.' }),
+    previewDelete: async () => ({ ok: false, error: 'Private-copy deletion requires the installed app.' }),
+    confirmDelete: async () => ({ ok: false, error: 'Private-copy deletion requires the installed app.' }),
+  },
+  folderAccess: {
+    read: async () => ({ ok: false, error: 'Folder Access requires the installed app.' }),
+    choose: async () => ({ ok: false, error: 'Folder Access requires the installed app.' }),
+    revoke: async () => ({ ok: false, error: 'Folder Access requires the installed app.' }),
+    list: async () => ({ ok: false, error: 'Folder Access requires the installed app.' }),
+  },
   extensionPair: {
     get: async () => ({ token: '' }),
     rotate: async () => ({ ok: false, token: '' }),

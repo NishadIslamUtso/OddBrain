@@ -6,11 +6,14 @@ import type { NativeConversation, NativeSessionLink, NativeContextTarget } from 
 import { type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
 import type { ThinkingMode } from '../shared/lib/engine'
 import type { MemoryBridge } from '../shared/lib/memoryWorkspace'
+import type { ProcessingLedgerBridge } from '../shared/lib/processingLedger'
+import type { AttachmentCenterBridge } from '../shared/lib/attachmentCenter'
+import type { FolderAccessBridge } from '../shared/lib/folderAccess'
 import type { MediaBridge } from '../shared/lib/mediaBridge'
 import type { EngineSourceFile } from '../shared/lib/media'
 import type { MarketplaceBridge } from '../shared/lib/marketplace'
 import type { AutomationBridge, AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   CloudModelsAnswer,
   CloudTestAnswer,
@@ -219,7 +222,9 @@ const mediaApi: MediaBridge = {
   authorizeRecording: expected => ipcRenderer.invoke('media:authorize-recording', expected),
   onCancelled: listener => { const fn = (): void => listener(); ipcRenderer.on('media:cancelled', fn); return () => ipcRenderer.removeListener('media:cancelled', fn) },
   read: () => ipcRenderer.invoke('media:read'), update: patch => ipcRenderer.invoke('media:update', patch),
-  chooseDecoder: () => ipcRenderer.invoke('media:decoder'), decode: input => ipcRenderer.invoke('media:decode', input),
+  chooseDecoder: () => ipcRenderer.invoke('media:decoder'), chooseOcrAdapter: () => ipcRenderer.invoke('media:ocr-adapter'), decode: input => ipcRenderer.invoke('media:decode', input),
+  decodeFile: (file, input) => ipcRenderer.invoke('media:decode-file', webUtils.getPathForFile(file), input),
+  releaseSource: handle => ipcRenderer.invoke('media:release-source', handle),
   dictate: () => ipcRenderer.invoke('media:dictate'), cancel: () => ipcRenderer.invoke('media:cancel'),
 }
 const marketplaceApi: MarketplaceBridge = {
@@ -251,13 +256,17 @@ const api = {
     save: input => ipcRenderer.invoke('working-notes:save', input),
     rejectProposal: input => ipcRenderer.invoke('working-notes:reject-proposal', input),
     migrate: input => ipcRenderer.invoke('working-notes:migrate', input),
+    fork: input => ipcRenderer.invoke('working-notes:fork', input),
     exportRecovery: chatId => ipcRenderer.invoke('working-notes:export', chatId),
     importRecovery: chatId => ipcRenderer.invoke('working-notes:import', chatId),
   } satisfies WorkingNotesBridge,
-  transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), image: (id: string, imageId: string) => ipcRenderer.invoke('transcripts:image', id, imageId), attachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:attachment', id, attachmentId), recover: (chatIds: string[], knownTranscriptIds: string[], before?: string) => ipcRenderer.invoke('transcripts:recover', chatIds, knownTranscriptIds, before), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
+  transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), image: (id: string, imageId: string) => ipcRenderer.invoke('transcripts:image', id, imageId), attachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:attachment', id, attachmentId), saveAttachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:save-attachment', id, attachmentId), recover: (chatIds: string[], knownTranscriptIds: string[], before?: string) => ipcRenderer.invoke('transcripts:recover', chatIds, knownTranscriptIds, before), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
   media: mediaApi, marketplace: marketplaceApi,
   automation: automationApi,
   memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,
+  processing: { read: () => ipcRenderer.invoke('processing:read'), resume: id => ipcRenderer.invoke('processing:resume', id), setLimits: limits => ipcRenderer.invoke('processing:set-limits', limits) } satisfies ProcessingLedgerBridge,
+  attachmentCenter: { read: () => ipcRenderer.invoke('attachments:read'), previewDelete: id => ipcRenderer.invoke('attachments:preview-delete', id), confirmDelete: token => ipcRenderer.invoke('attachments:confirm-delete', token) } satisfies AttachmentCenterBridge,
+  folderAccess: { read: () => ipcRenderer.invoke('folders:read'), choose: input => ipcRenderer.invoke('folders:choose', input), revoke: id => ipcRenderer.invoke('folders:revoke', id), list: id => ipcRenderer.invoke('folders:list', id) } satisfies FolderAccessBridge,
   app: {
     previewHtml: (): Promise<{ ok: boolean; html?: string; error?: string }> => ipcRenderer.invoke('app:preview-html'),
     claimLaunch: (): Promise<boolean> => ipcRenderer.invoke('app:claim-launch'),

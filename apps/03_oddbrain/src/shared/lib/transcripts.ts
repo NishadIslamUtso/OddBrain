@@ -22,6 +22,7 @@ export type TranscriptBridge = {
   recover?(chatIds: string[], knownTranscriptIds: string[], before?: string): Promise<TranscriptResult<TranscriptRecoveryPage>>
   image?(id: string, imageId: string): Promise<TranscriptResult<TranscriptImageDownload>>
   attachment?(id: string, attachmentId: string): Promise<TranscriptResult<TranscriptAttachmentDownload>>
+  saveAttachment?(id: string, attachmentId: string): Promise<{ ok: boolean; answer: string }>
   list(before?: string): Promise<TranscriptResult<TranscriptPage>>
   read(id: string): Promise<TranscriptResult<Transcript>>
 }
@@ -31,9 +32,9 @@ export function validTranscriptAttachments(value: unknown): value is TranscriptA
   if (!Array.isArray(value) || value.length > 8) return false
   let total = 0
   return value.every((file, index) => {
-    if (!file || typeof file !== 'object' || file.id !== `attachment-${index + 1}` || typeof file.name !== 'string' || !file.name || file.name.length > 255 || /[\x00-\x1f]/.test(file.name) || typeof file.mime !== 'string' || file.mime.length > 200 || /[\x00-\x1f]/.test(file.mime) || !Number.isSafeInteger(file.bytes) || file.bytes <= 0 || file.bytes > 50 * 1024 * 1024 || typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(file.sha256)) return false
+    if (!file || typeof file !== 'object' || file.id !== `attachment-${index + 1}` || typeof file.name !== 'string' || !file.name || file.name.length > 255 || /[\x00-\x1f]/.test(file.name) || typeof file.mime !== 'string' || file.mime.length > 200 || /[\x00-\x1f]/.test(file.mime) || !Number.isSafeInteger(file.bytes) || file.bytes <= 0 || typeof file.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(file.sha256)) return false
     total += file.bytes
-    return total <= 64 * 1024 * 1024
+    return Number.isSafeInteger(total)
   })
 }
 

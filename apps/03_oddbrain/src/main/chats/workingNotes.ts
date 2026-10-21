@@ -24,7 +24,8 @@ function safeRevision(value: unknown, expectedChatId?: string): WorkingNotesRevi
   if (!/^[a-f0-9-]{36}$/.test(row.id) || !(row.parent === null || /^[a-f0-9-]{36}$/.test(row.parent)) || typeof row.at !== 'string' || !Number.isFinite(Date.parse(row.at))) throw Error('A Working Notes revision is damaged.')
   safeChatId(row.chatId)
   if (expectedChatId !== undefined && row.chatId !== expectedChatId) throw Error('The recovery file belongs to a different conversation.')
-  if (!['owner', 'legacy-migration', 'proposal-reviewed', 'proposal-rejected', 'recovery-import'].includes(row.source)) throw Error('A Working Notes revision has an unknown source.')
+  if (!['owner', 'legacy-migration', 'proposal-reviewed', 'proposal-rejected', 'recovery-import', 'branch-copy'].includes(row.source)) throw Error('A Working Notes revision has an unknown source.')
+  if (row.branchedFromRevision !== undefined && !/^[a-f0-9-]{36}$/.test(row.branchedFromRevision)) throw Error('A Working Notes branch source is damaged.')
   const notes = checkedNotes(row.notes), proposal = row.proposal === undefined ? undefined : checkedNotes(row.proposal)
   if (row.notApproved !== undefined && (!Array.isArray(row.notApproved) || row.notApproved.some(item => typeof item !== 'string' || item.length > 10_000))) throw Error('A Working Notes review record is damaged.')
   return { ...row, notes, ...(proposal ? { proposal } : {}), ...(row.notApproved ? { notApproved: [...row.notApproved] } : {}) }
@@ -118,6 +119,22 @@ export class WorkingNotesStore {
     let expected: string | null = null, result = existing
     for (const value of values) { result = this.save({ chatId, expected, notes: checkedNotes(value) }, 'legacy-migration'); expected = result.current!.id }
     return result
+  }
+
+  /** Copy the visible current notebook state into an isolated chat without claiming hidden model state. */
+  fork(input: { sourceChatId: string; targetChatId: string; expectedSource: string | null }): WorkingNotesRead {
+    const sourceChatId = safeChatId(input.sourceChatId), targetChatId = safeChatId(input.targetChatId)
+    if (sourceChatId === targetChatId) throw Error('A Working Notes branch needs a different conversation.')
+    const source = this.read(sourceChatId), target = this.read(targetChatId)
+    if ((source.current?.id ?? null) !== input.expectedSource) throw Error('Working Notes changed while the branch was being made. Nothing was copied; try Branch again.')
+    if (target.current) throw Error('The branch already has Working Notes. Nothing was overwritten.')
+    if (!source.current) return target
+    const current = source.current
+    const revision: WorkingNotesRevision = { id: randomUUID(), parent: null, chatId: targetChatId, at: new Date().toISOString(), notes: current.notes, source: 'branch-copy', branchedFromRevision: current.id,
+      ...(current.proposal ? { proposal: current.proposal } : {}), ...(current.notApproved ? { notApproved: [...current.notApproved] } : {}) }
+    writeOnce(this.revisionFile(targetChatId, revision.id), JSON.stringify(revision))
+    atomicWrite(this.pointer(targetChatId), revision.id)
+    return this.read(targetChatId)
   }
 
   exportValue(chatId: string): { format: 'oddbrain-working-notes-v1'; chatId: string; revisions: WorkingNotesRevision[] } {

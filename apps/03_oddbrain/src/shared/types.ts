@@ -54,13 +54,14 @@ export type Attachment = {
   seenBy?: string
   /** Plain text of a text/code attachment, already read. */
   text?: string
-  /** Composer-only handle to the exact source. Removed before a chat message is stored. */
+  /** Composer-only handles to the exact source. Removed before a chat message is stored. */
   originalFile?: File
   originalId?: string
+  originalSource?: import('./lib/mediaBridge').MediaSourceHandle
 }
 
 /** An attachment as it is kept in a message: the bytes and File handles are stored separately. */
-export type StoredAttachment = Omit<Attachment, 'data' | 'originalFile' | 'originalId'>
+export type StoredAttachment = Omit<Attachment, 'data' | 'originalFile' | 'originalId' | 'originalSource'>
 
 /** The bridge's description of an image, kept so follow-up turns still work. */
 export type BridgeRecord = {

@@ -605,15 +605,21 @@ export default function App() {
     const chatId = chat?.id || newId(), projectId = pendingProject ?? chat?.projectId ?? null
     const legacyNotesStore = chatNotesStore(localStorage, workspaceKey('oddbrain.chat-notes.v1'), chatId)
     const savedNotes = legacyNotesStore.read()?.value || emptyChatNotes()
-    let savedWorking = await bridge.workingNotes.read(chatId)
-    if (savedWorking.ok && !savedWorking.current && savedNotes.working.updatedAt) {
+    // The labelled sample workspace has no main process. Keep its existing
+    // local-only Working Notes in the sample namespace instead of turning a
+    // desktop durability requirement into a broken Send button.
+    const sampleWorkspace = isDemo && sampleEnabled()
+    let savedWorking = sampleWorkspace
+      ? { ok: true as const, current: null, revisions: [], answer: 'Sample-only Working Notes stay in this preview.' }
+      : await bridge.workingNotes.read(chatId)
+    if (!sampleWorkspace && savedWorking.ok && !savedWorking.current && savedNotes.working.updatedAt) {
       const unordered = legacyNotesStore.versions(), ordered: typeof unordered = [], remaining = new Map(unordered.map(item => [item.id, item]))
       let parent: string | null = null
       while (remaining.size) { const next = [...remaining.values()].find(item => item.parent === parent); if (!next) break; ordered.push(next); remaining.delete(next.id); parent = next.id }
       savedWorking = await bridge.workingNotes.migrate({ chatId, notes: (ordered.length === unordered.length ? ordered : unordered).map(item => item.value.working) })
     }
     if (!savedWorking.ok) { setNotice(`Not sent—Working Notes could not be loaded safely: ${savedWorking.answer}`); return }
-    const workingNotes = savedWorking.current?.notes || emptyChatNotes().working
+    const workingNotes = sampleWorkspace ? savedNotes.working : savedWorking.current?.notes || emptyChatNotes().working
     const overrides = savedNotes.overrides
     const nativeContextKey = modelContextKey(`engine:${engine.settings.id}:${engine.settings.cloudProvider || 'local'}`, engine.settings.model || 'provider default')
     const nativeProfile = resolveModelContext({ key: nativeContextKey, label: engine.settings.model || 'provider default', override: contextProfiles[nativeContextKey] })
@@ -807,16 +813,28 @@ export default function App() {
           onBranch={async messageId => {
             if (!chat) return
             try {
-              let branchId = ''
+              let branchId = '', branchedLegacy: ReturnType<typeof emptyChatNotes> | null = null
               const saved = await chats.commit(previous => {
                 const original = previous.find(c => c.id === chat.id)
                 if (!original) throw Error('The source chat is no longer saved.')
                 const branch = branchChat(original, messageId, newId); branchId = branch.id
+                const at = original.messages.findIndex(message => message.id === messageId)
+                const sourceMessages = original.messages.slice(0, at + 1), ids = new Map(sourceMessages.map((message, index) => [message.id, branch.messages[index].id]))
                 const notes = chatNotesStore(localStorage, workspaceKey('oddbrain.chat-notes.v1'), original.id).read()
-                if (notes) chatNotesStore(localStorage, workspaceKey('oddbrain.chat-notes.v1'), branch.id).save({ ...emptyChatNotes(), overrides: notes.value.overrides }, null, newId())
+                if (notes) branchedLegacy = { ...structuredClone(notes.value), pins: notes.value.pins.flatMap(id => ids.has(id) ? [ids.get(id)!] : []), recaps: notes.value.recaps.filter(recap => recap.basedOn.every(id => ids.has(id))).map(recap => ({ ...recap, id: newId(), basedOn: recap.basedOn.map(id => ids.get(id)!) })) }
                 return [branch, ...previous.map(c => c.id === original.id ? { ...c, branches: (c.branches || 0) + 1 } : c)]
               })
-              if (saved) { chats.open(branchId); setPendingProject(null); setNotice('Side-question chat saved. Its first send starts a separate native session with the copied text, not the original native session ID.') }
+              if (saved) {
+                const warnings: string[] = []
+                try { if (branchedLegacy) chatNotesStore(localStorage, workspaceKey('oddbrain.chat-notes.v1'), branchId).save(branchedLegacy, null, newId()) } catch { warnings.push('the older local context panel copy needs review') }
+                try {
+                  const sourceNotes = await bridge.workingNotes.read(chat.id)
+                  const copied = await bridge.workingNotes.fork({ sourceChatId: chat.id, targetChatId: branchId, expectedSource: sourceNotes.current?.id || null })
+                  if (!copied.ok) warnings.push('Working Notes could not be copied')
+                } catch { warnings.push('Working Notes could not be copied') }
+                chats.open(branchId); setPendingProject(null)
+                setNotice(warnings.length ? `Branch saved, but ${warnings.join(' and ')}. The source remains unchanged.` : 'Branch saved with stored messages, attachments, project, context choices, and Working Notes through this reply. It is isolated: hidden provider state and the original native session are not copied.')
+              }
             } catch (failure) { setNotice((failure as Error).message) }
           }}
           attachments={attachments}

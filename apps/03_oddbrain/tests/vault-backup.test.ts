@@ -29,6 +29,13 @@ test('changing source bytes while copying cannot produce a successful backup', (
   vi.spyOn(fs, 'readSync').mockImplementation(((...args: any[]) => { const n = (read as any)(...args); if (!changed) { changed = true; fs.writeFileSync(join(h.source, 'hello.md'), 'new data after read') } return n }) as any)
   expect(backupVault(h.source, h.backup).ok).toBe(false); expect(fs.existsSync(h.backup)).toBe(false)
 })
+test('streams a source above the former attachment-size ceilings without clipping it', () => {
+  const h = setup(), large = join(h.source, 'large-source.bin'), bytes = 70 * 1024 * 1024
+  fs.writeFileSync(large, ''); fs.truncateSync(large, bytes)
+  const made = backupVault(h.source, h.backup); expect(made).toMatchObject({ ok: true, bytes: bytes + 8 })
+  const restored = restoreVault(h.backup, h.restored); expect(restored).toMatchObject({ ok: true, bytes: bytes + 8 })
+  expect(fs.statSync(join(h.restored, 'large-source.bin')).size).toBe(bytes)
+})
 test('restore rejects extra unmanifested files and duplicate or drive-letter entries', () => {
   const h = setup(); expect(backupVault(h.source, h.backup).ok).toBe(true)
   fs.writeFileSync(join(h.backup, 'data', 'surprise.txt'), 'not recorded')

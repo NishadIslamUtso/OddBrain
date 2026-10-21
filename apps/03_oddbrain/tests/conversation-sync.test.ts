@@ -21,10 +21,10 @@ afterEach(() => {
 });
 const hash = (v: string | Buffer) =>
   createHash("sha256").update(v).digest("hex");
-function setup() {
+function setup(onAttachment?: Parameters<typeof createVaultService>[0]["onAttachment"]) {
   const root = mkdtempSync(join(tmpdir(), "ob-conversations-"));
   roots.push(root);
-  const service = createVaultService({ vaultPath: root });
+  const service = createVaultService({ vaultPath: root, onAttachment });
   const conversation = {
     provider: "ChatGPT",
     adapter: "chatgpt",
@@ -190,8 +190,9 @@ describe("incremental conversation vault", () => {
       ),
     ).toHaveLength(2);
   });
-  it("saves attachment chunks idempotently and acknowledges only the assembled exact bytes", () => {
-    const h = setup();
+  it("saves attachment chunks idempotently, indexes the verified vault original, and acknowledges only exact bytes", () => {
+    const indexed: Array<Record<string, unknown>> = []
+    const h = setup(input => { indexed.push(input) });
     h.m.attachments = [
       {
         id: "a1",
@@ -236,6 +237,8 @@ describe("incremental conversation vault", () => {
     }) as any;
     expect(readFileSync(join(h.root, result.saved.source))).toEqual(data);
     expect(result.saved.sha256).toBe(hash(data));
+    expect(result.attachment_center_indexed).toBe(true)
+    expect(indexed).toEqual([expect.objectContaining({ sha256: hash(data), name: 'voice.ogg', mime: 'audio/ogg', bytes: data.length, storage: 'in-place', origin: 'captured-conversation', locator: join(h.root, result.saved.source) })])
     const current = readFileSync(
       join(h.root, saved.source, "messages", hash(h.m.id) + ".md"),
       "utf8",

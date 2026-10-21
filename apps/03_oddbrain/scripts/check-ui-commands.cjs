@@ -92,7 +92,8 @@ const BASE = process.env.ODDBRAIN_UI_URL || 'http://127.0.0.1:5174/', QA = proce
   await page.getByRole('button', { name: 'More chat tools', exact: true }).click()
   await page.getByRole('button', { name: 'Workflows & schedules', exact: true }).click()
   panel = page.getByRole('dialog', { name: 'Command runner', exact: true })
-  await panel.getByText('Checked fixture', { exact: true }).click()
+  await panel.getByRole('button', { name: 'Refresh workflows', exact: true }).click()
+  await panel.locator('summary').filter({ hasText: 'Checked fixture · serial' }).click()
   await panel.getByRole('button', { name: 'Review workflow Checked fixture', exact: true }).click()
   assert.equal(await page.evaluate(() => workflowFixture.runs), 0)
   await panel.getByRole('button', { name: 'Allow this whole workflow once', exact: true }).click()
@@ -111,6 +112,6 @@ const BASE = process.env.ODDBRAIN_UI_URL || 'http://127.0.0.1:5174/', QA = proce
   assert.equal(await draft.inputValue(), 'Preserve this chat draft')
   report.checks.push('Workflow review requires explicit approval, displays failed/skipped steps, and keeps recurring consent separate; saving the fixture schedule never runs its workflow')
   assert.deepEqual(report.errors, [])
- } catch (error) { report.failure = error.stack; process.exitCode = 1 }
+ } catch (error) { report.failure = error.stack; report.debug = await page.locator('body').innerText(); process.exitCode = 1 }
  finally { fs.writeFileSync(path.join(QA, 'command-review-results.json'), JSON.stringify(report, null, 2)); console.log(JSON.stringify(report, null, 2)); await browser.close() }
 })().catch(error => { console.error(error); process.exitCode = 1 })

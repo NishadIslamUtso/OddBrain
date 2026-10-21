@@ -1,14 +1,15 @@
 /** Full vault bytes, not a Markdown export. Restore only into a NEW folder.
  * No extraction, overwrites, symlinks, credentials outside the vault or network.
  * Bounds and failures are explicit; partial directories are never called backups. */
-import { constants, closeSync, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs'
+import { constants, closeSync, fstatSync, fsyncSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, readSync, realpathSync, rmSync, writeFileSync, writeSync } from 'node:fs'
 import { createHash } from 'node:crypto'
 import { dirname, join, resolve, sep } from 'node:path'
-const MAX_FILES = 50000, MAX_BYTES = 2 * 1024 ** 3
+const MAX_FILES = 50000
 const MANIFEST = 'oddbrain-backup.json'
 type Entry = { path: string; bytes: number; sha256: string }
 type Manifest = { version: 1; created: string; files: Entry[] }
 export type BackupResult = { ok: true; destination: string; count: number; bytes: number } | { ok: false; answer: string }
+function durableExclusive(path: string, value: string): void { const fd = openSync(path, 'wx', 0o600); try { writeFileSync(fd, value); fsyncSync(fd) } finally { closeSync(fd) } }
 function noLinks(path: string): string {
   let current = resolve(path)
   for (;;) {
@@ -23,7 +24,7 @@ function safePath(path: unknown): string {
   return path
 }
 function inventory(root: string): Array<{ path: string; bytes: number }> {
-  const result: Array<{ path: string; bytes: number }> = []; let bytes = 0, visited = 0
+  const result: Array<{ path: string; bytes: number }> = []; let visited = 0
   const visit = (relative: string, depth: number) => {
     if (depth > 100) throw Error('The folder structure exceeds the backup safety limit.')
     for (const name of readdirSync(join(root, relative)).sort()) {
@@ -32,8 +33,7 @@ function inventory(root: string): Array<{ path: string; bytes: number }> {
       if (stat.isSymbolicLink()) throw Error('The vault contains a linked path. No complete backup was made.')
       if (stat.isDirectory()) visit(path, depth + 1)
       else if (stat.isFile()) {
-        bytes += stat.size
-        if (result.length >= MAX_FILES || bytes > MAX_BYTES) throw Error('This operation supports up to 50,000 files and 2 GiB. Use a filesystem backup for this larger vault.')
+        if (result.length >= MAX_FILES) throw Error('This operation supports up to 50,000 files per manifest. No file was omitted; use a filesystem backup for a vault with more entries.')
         result.push({ path, bytes: stat.size })
       } else throw Error('The vault contains a non-regular file. No complete backup was made.')
     }
@@ -47,7 +47,7 @@ function stream(source: string, target?: string): { bytes: number; sha256: strin
   let output: number | undefined
   try {
     const before = fstatSync(input)
-    if (!before.isFile() || before.size > MAX_BYTES) throw Error('Invalid backup file.')
+    if (!before.isFile()) throw Error('Invalid backup file.')
     if (target) { mkdirSync(dirname(target), { recursive: true, mode: 0o700 }); output = openSync(target, 'wx', 0o600) }
     const digest = createHash('sha256'), buffer = Buffer.alloc(1024 * 1024); let bytes = 0
     for (;;) {
@@ -60,6 +60,7 @@ function stream(source: string, target?: string): { bytes: number; sha256: strin
     }
     const after = fstatSync(input), pathAfter = lstatSync(source)
     if (bytes !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || pathAfter.isSymbolicLink() || pathAfter.ino !== before.ino || pathAfter.dev !== before.dev) throw Error('A file changed during the copy. Pause captures and try again.')
+    if (output !== undefined) fsyncSync(output)
     return { bytes, sha256: digest.digest('hex') }
   } finally { if (output !== undefined) closeSync(output); closeSync(input) }
 }
@@ -84,7 +85,7 @@ function manifestAt(root: string): Manifest {
     if (!Number.isSafeInteger(e.bytes) || e.bytes < 0 || typeof e.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(e.sha256) || seen.has(e.path.toLowerCase())) throw Error('The backup manifest is damaged or has conflicting file names.')
     seen.add(e.path.toLowerCase()); bytes += e.bytes
   }
-  if (bytes > MAX_BYTES) throw Error('The backup exceeds the 2 GiB safety limit.')
+  if (!Number.isSafeInteger(bytes)) throw Error('The backup byte total is not safely representable.')
   return m
 }
 export function backupVault(source: string, destination: string): BackupResult {
@@ -97,7 +98,7 @@ export function backupVault(source: string, destination: string): BackupResult {
     mkdirSync(join(target, 'data'), { mode: 0o700 })
     const entries = list.map(e => ({ path: e.path, ...stream(join(root, e.path), join(target, 'data', e.path)) }))
     check(root, entries); check(join(target, 'data'), entries)
-    writeFileSync(join(target, MANIFEST), JSON.stringify({ version: 1, created: new Date().toISOString(), files: entries }), { flag: 'wx', mode: 0o600 })
+    durableExclusive(join(target, MANIFEST), JSON.stringify({ version: 1, created: new Date().toISOString(), files: entries }))
     return { ok: true, destination: target, count: entries.length, bytes: entries.reduce((n,e) => n + e.bytes, 0) }
   } catch (e) { return failure(e, owned ? target : '') }
 }

@@ -7,6 +7,7 @@ import { InputError } from "./errors";
 import type { VaultFiles } from "./files";
 import { yamlDocument } from "./text";
 import { scanInstructionSignals, scanTextHazards, type InstructionSignalReport, type TextHazardReport } from "../../shared/lib/textHazards";
+import { hashRegularFileSync } from "../safeFile";
 
 const hash = (v: string | Uint8Array): string =>
   createHash("sha256").update(v).digest("hex");
@@ -201,6 +202,7 @@ export function syncConversation(
   data: Obj,
   now: string,
   captureSource: 'browser-extension' | 'oddbrain-app' | 'unknown' = 'unknown',
+  onAttachment?: (input: { sha256: string; name: string; mime: string; bytes: number; storage: 'in-place'; locator: string; origin: 'captured-conversation' }) => void,
 ): Obj {
   if (
     !data ||
@@ -384,6 +386,14 @@ export function syncConversation(
     );
   const media = mediaPath(base, a.id);
   const saved = readJSON(store, `${media}/saved.json`);
+  const indexAttachment = (receipt: Obj): boolean => {
+    if (!onAttachment) return false
+    try {
+      const name = String(a.name || 'Captured attachment').replace(/[\x00-\x1f]/g, '_').slice(0, 240) || 'Captured attachment'
+      onAttachment({ sha256: receipt.sha256, name, mime: receipt.mime, bytes: receipt.bytes, storage: 'in-place', locator: store.filePath(receipt.source), origin: 'captured-conversation' })
+      return true
+    } catch { return false }
+  }
   if (saved) {
     if (!store.size(saved.source))
       throw new InputError(
@@ -394,7 +404,15 @@ export function syncConversation(
       saved.projected = true;
       store.writeAtomic(`${media}/saved.json`, JSON.stringify(saved));
     }
-    return { ok: true, saved };
+    let cleaned = 0, verified = false
+    try {
+      hashRegularFileSync(store.filePath(saved.source), { bytes: saved.bytes, sha256: saved.sha256 }); verified = true
+      for (const path of store.walkFiles(`${media}/parts`, '.part', 513).files) {
+        const part = path.split('/').pop()!.replace(/\.part$/, '')
+        if (/^[a-f0-9]{64}$/.test(part)) { store.removeVerified(path, part); cleaned++ }
+      }
+    } catch { /* verified final remains authoritative; changed/unreadable fragments stay for review */ }
+    return { ok: true, saved, cleaned_parts: cleaned, attachment_center_indexed: verified && indexAttachment(saved) };
   }
   if (data.op === "media-state") {
     const parts = store.walkFiles(`${media}/parts`, '.part', 513).files.map(path => path.split('/').pop()!.replace(/\.part$/, '')).filter(part => /^[a-f0-9]{64}$/.test(part));
@@ -473,6 +491,8 @@ export function syncConversation(
   const checksum = hash(bytes);
   const source = `${media}/${checksum}.${MIME[mime] || "bin"}`;
   store.writeOnce(source, bytes);
+  try { hashRegularFileSync(store.filePath(source), { bytes: bytes.length, sha256: checksum }); }
+  catch { throw new InputError("The assembled attachment could not be verified on disk. Transfer parts were preserved for retry."); }
   const receipt = {
     source,
     bytes: bytes.length,
@@ -485,5 +505,9 @@ export function syncConversation(
   renderMessage(store, base, owner.message, metadata, owner.observed_at);
   receipt.projected = true;
   store.writeAtomic(`${media}/saved.json`, JSON.stringify(receipt));
-  return { ok: true, saved: receipt };
+  // Only verified content-addressed transfer fragments are removed. The final
+  // source and receipt are durable first; a changed fragment is preserved.
+  let cleanedParts = 0
+  for (const part of new Set(data.parts as string[])) try { store.removeVerified(`${media}/parts/${part}.part`, part); cleanedParts++ } catch { /* a changed fragment is preserved, final source stays saved */ }
+  return { ok: true, saved: receipt, cleaned_parts: cleanedParts, cleanup_pending: new Set(data.parts as string[]).size - cleanedParts, attachment_center_indexed: indexAttachment(receipt) };
 }

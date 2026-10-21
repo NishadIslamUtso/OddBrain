@@ -12,11 +12,13 @@
  * - A source file is written once. Captures are evidence, so a re-capture
  *   deduplicates instead of overwriting history.
  */
+import { createHash } from 'node:crypto'
 import {
   closeSync,
   constants,
   existsSync,
   fstatSync,
+  fsyncSync,
   lstatSync,
   mkdirSync,
   mkdtempSync,
@@ -25,6 +27,7 @@ import {
   realpathSync,
   renameSync,
   rmSync,
+  unlinkSync,
   writeFileSync,
 } from 'node:fs'
 import { dirname, resolve, sep } from 'node:path'
@@ -122,12 +125,20 @@ export function createVaultFiles(root: string, clock: () => Date) {
     const full = filePath(relative)
     try {
       const descriptor = openSync(full, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY | (constants.O_NOFOLLOW || 0), 0o600)
-      try { writeFileSync(descriptor, content) } finally { closeSync(descriptor) }
+      try { writeFileSync(descriptor, content); fsyncSync(descriptor) } finally { closeSync(descriptor) }
       return false
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === 'EEXIST') return true
       throw error
     }
+  }
+
+  /** Remove one verified transfer fragment after its assembled immutable source is durable. */
+  function removeVerified(relative: string, expectedSha256: string): void {
+    if (!/^[a-f0-9]{64}$/.test(expectedSha256)) throw new InputError('Invalid cleanup checksum.')
+    const full = filePath(relative), bytes = readRegularFileSync(full, 2_000_000).bytes
+    if (createHash('sha256').update(bytes).digest('hex') !== expectedSha256) throw new InputError('Transfer fragment changed before cleanup; it was preserved.')
+    unlinkSync(full)
   }
 
   function append(relative: string, text: string): void {
@@ -264,6 +275,7 @@ export function createVaultFiles(root: string, clock: () => Date) {
     readBytes,
     writeAtomic,
     writeOnce,
+    removeVerified,
     write,
     append,
     activity,

@@ -1,8 +1,9 @@
 import { afterEach, expect, test } from 'vitest'
-import { appendFileSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { appendFileSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { EventEmitter } from 'node:events'
+import { createHash } from 'node:crypto'
 import { createTurnArchive } from '../src/main/turnArchive'
 import { chatMarkdown, transcriptMarkdown } from '../src/shared/lib/transcripts'
 import { createEngineSocket } from '../src/main/engine/socket'
@@ -106,6 +107,17 @@ test('exact original source files are retained before dispatch and digest-checke
   if (process.platform !== 'win32') expect(statSync(join(root, `${id}.attachments`, 'attachment-1.bin')).mode & 0o777).toBe(0o600)
   writeFileSync(join(root, `${id}.attachments`, 'attachment-1.bin'), Buffer.from([0, 254, 16, 44, 100]))
   expect(() => archive.attachment(id, descriptor.id)).toThrow('integrity')
+})
+test('large retained originals save through a verified stream without renderer base64', () => {
+  const root = folder(), archive = createTurnArchive(root), source = join(root, 'large-source.bin'), saved = join(root, 'owner-copy.bin')
+  const bytes = Buffer.alloc(9 * 1024 * 1024, 0x5a), sha256 = createHash('sha256').update(bytes).digest('hex')
+  writeFileSync(source, bytes); writeFileSync(saved, 'replace only after verification')
+  const id = archive.begin({ ...input, attachments: [{ id: 'selected-source', name: 'large-source.bin', mime: 'application/octet-stream', path: source, bytes: bytes.length, sha256 }] })
+  expect(() => archive.attachment(id, 'attachment-1')).toThrow('renderer-memory')
+  expect(archive.saveAttachment(id, 'attachment-1', saved)).toMatchObject({ bytes: bytes.length, sha256 })
+  expect(statSync(saved).size).toBe(bytes.length)
+  expect(createHash('sha256').update(readFileSync(saved)).digest('hex')).toBe(sha256)
+  expect(readdirSync(root).some(name => name.startsWith('.oddbrain-save-'))).toBe(false)
 })
 test('older count-only image records stay honest about unavailable bytes', () => {
   const archive = createTurnArchive(folder()), id = archive.begin({ ...input, pictures: 1 })

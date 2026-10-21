@@ -1,4 +1,5 @@
-import { closeSync, fstatSync, lstatSync, openSync, readSync, type Stats } from 'node:fs'
+import { createHash } from 'node:crypto'
+import { closeSync, constants, fstatSync, fsyncSync, lstatSync, openSync, readSync, unlinkSync, writeSync, type Stats } from 'node:fs'
 
 export type OpenedFile = { bytes: Buffer; stat: Stats }
 
@@ -45,6 +46,52 @@ export function readRegularFileSync(path: string, limit: number): OpenedFile {
 }
 
 /** Read a bounded prefix from one already-validated regular-file handle. */
+/** Hash one stable regular file with bounded memory; size is not a read-allocation limit. */
+export function hashRegularFileSync(source: string, expected?: { bytes: number; sha256?: string }): { bytes: number; sha256: string } {
+  const input = openSync(source, 'r', 0o600)
+  try {
+    const before = fstatSync(input)
+    if (!sameNamedFile(source, before) || !before.isFile()) throw Error('Source is not a stable regular file.')
+    if (expected && before.size !== expected.bytes) throw Error('Source size changed.')
+    const hash = createHash('sha256'), buffer = Buffer.allocUnsafe(1024 * 1024); let total = 0
+    while (true) { const read = readSync(input, buffer, 0, buffer.length, null); if (!read) break; hash.update(buffer.subarray(0, read)); total += read }
+    const after = fstatSync(input), sha256 = hash.digest('hex')
+    if (total !== before.size || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || !sameNamedFile(source, after)) throw Error('Source changed while it was being hashed.')
+    if (expected?.sha256 && sha256 !== expected.sha256) throw Error('Source hash does not match.')
+    return { bytes: total, sha256 }
+  } finally { closeSync(input) }
+}
+
+/** Stream one validated regular file into a new owner-only file using bounded memory. */
+export function copyRegularFileVerifiedSync(source: string, destination: string, expected?: { bytes: number; sha256: string }): { bytes: number; sha256: string } {
+  const input = openSync(source, 'r', 0o600)
+  let output: number | null = null, created = false
+  try {
+    const before = fstatSync(input)
+    if (!sameNamedFile(source, before) || !before.isFile() || before.size < 1) throw Error('Original source is not a stable regular file.')
+    if (expected && before.size !== expected.bytes) throw Error('Original source size changed before it could be retained.')
+    output = openSync(destination, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600); created = true
+    const hash = createHash('sha256'), buffer = Buffer.allocUnsafe(1024 * 1024)
+    let total = 0
+    while (true) {
+      const read = readSync(input, buffer, 0, buffer.length, null)
+      if (!read) break
+      hash.update(buffer.subarray(0, read)); total += read
+      let written = 0
+      while (written < read) written += writeSync(output, buffer, written, read - written)
+    }
+    const after = fstatSync(input), sha256 = hash.digest('hex')
+    if (total !== before.size || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs || before.ctimeMs !== after.ctimeMs || !sameNamedFile(source, after)) throw Error('Original source changed while it was being retained.')
+    if (expected && sha256 !== expected.sha256) throw Error('Original source hash changed before it could be retained.')
+    fsyncSync(output); closeSync(output); output = null
+    return { bytes: total, sha256 }
+  } catch (error) {
+    if (output !== null) { closeSync(output); output = null }
+    if (created) try { unlinkSync(destination) } catch { /* partial destination already removed */ }
+    throw error
+  } finally { closeSync(input) }
+}
+
 export function readRegularHeadSync(path: string, limit: number): OpenedFile {
   if (!Number.isSafeInteger(limit) || limit < 1) throw Error('Invalid file read limit.')
   // The read-only descriptor cannot create a file; if that ever changes, its

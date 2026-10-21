@@ -7,8 +7,13 @@ import { fileURLToPath } from 'node:url'
 import { join, dirname } from 'node:path'
 const root = fileURLToPath(new URL('..', import.meta.url))
 const result = await build({
-  configFile: join(root, 'vite.web.config.ts'), base: './', publicDir: false,
-  build: { write: false, emptyOutDir: false, sourcemap: false, cssCodeSplit: false, minify: 'esbuild',
+  // Everything is inlined below, so a stable absolute build base avoids Vite
+  // deriving an importer URL from `about:blank` inside offline viewers.
+  configFile: join(root, 'vite.web.config.ts'), base: '/', publicDir: false,
+  build: { write: false, emptyOutDir: false, sourcemap: false, cssCodeSplit: false, minify: 'esbuild', modulePreload: false,
+    // Dynamic imports are already inlined. Disabling module-preload avoids a
+    // generated `new URL(..., document.baseURI)` that is invalid in viewer
+    // wrappers whose base is `about:blank`.
     rollupOptions: { input: join(root, 'src/renderer/src/main.tsx'), output: { format: 'iife', name: 'OddBrainPreview', inlineDynamicImports: true } } },
 })
 const output = Array.isArray(result) ? result[0].output : result.output

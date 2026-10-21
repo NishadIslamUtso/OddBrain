@@ -36,12 +36,15 @@ import { selectEngine } from '../shared/lib/engine'
 import { configBytes, noLinkedPath, commitConfigs, preserveConfig } from './engine/configTransaction'
 import { createMemoryWorkspace } from './memory/workspace'
 import { createMemoryOrganizer } from './memory/organizer'
+import { createProcessingLedger } from './processing/ledger'
+import { createAttachmentCenter } from './attachments/center'
+import { createFolderAccess } from './folders/access'
 import type { MemoryAction } from '../shared/lib/memoryWorkspace'
 import { normalizeExtensionAppearance, type ExtensionAppearance } from '../shared/lib/extensionAppearance'
 import { createMediaService } from './media/service'
 import { createMarketplaceService } from './engine/marketplace'
 import { createAgyMarketplaceService } from './engine/agyMarketplace'
-import type { MediaInput, MediaPreferences } from '../shared/lib/mediaBridge'
+import type { MediaFileInput, MediaInput, MediaPreferences } from '../shared/lib/mediaBridge'
 import type { MarketplaceAction } from '../shared/lib/marketplace'
 import { fitWindow } from './windowBounds'
 import { inferenceAllowed } from './automation/inferencePolicy'
@@ -168,8 +171,16 @@ const API_PORT = Number(process.env.AI_ASSISTANT_API_PORT || 41979)
  */
 function runMonthlyAudit(): void {
   try {
-    const audit = createVaultService({ vaultPath: vaultRoot() }).monthlyAudit()
+    const service = currentVaultService()
+    const audit = service.monthlyAudit()
     if (audit.written) console.log(`[vault] monthly audit written: ${audit.relative}`)
+    const review = service.interpretationReviewState(), latestDate = review.runs[0]?.createdAt
+    const latestParts = latestDate ? Object.fromEntries(new Intl.DateTimeFormat('en', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit' }).formatToParts(new Date(latestDate)).map(part => [part.type, part.value])) : {}
+    const latest = latestParts.year && latestParts.month ? `${latestParts.year}-${latestParts.month}` : ''
+    if (latest !== audit.month) {
+      const scanned = service.interpretationReview(60)
+      console.log(`[vault] interpretation review checked ${scanned.runs[0]?.checked || 0} in-range item(s)`)
+    }
   } catch {
     // No vault (yet or anymore): the audit waits for a boot that has one.
   }
@@ -185,6 +196,9 @@ function vaultRoot(): string {
       userData: join(app.getPath('userData'), 'vault'),
     })
   ).root
+}
+function currentVaultService(): ReturnType<typeof createVaultService> {
+  return createVaultService({ vaultPath: vaultRoot(), onAttachment: input => { attachmentCenterService?.record(input) } })
 }
 
 /**
@@ -318,7 +332,7 @@ function waitForEngineClose(transcriptId = '', timeoutMs = 5_000): Promise<boole
       }
       if (written.length && resolve(root) === resolve(vaultRoot())) {
         try {
-          const service = createVaultService({ vaultPath: vaultRoot() })
+          const service = currentVaultService()
           service.capture({ type: 'journal', content: `Second-brain structure: added ${written.join(', ')}.` })
         } catch {
           // The files are on disk either way; a log failure is not hidden, but not fatal.
@@ -338,11 +352,35 @@ function inferencePermissions() {
 
 const capabilityInspector = createCapabilityInspector()
 let mediaService: ReturnType<typeof createMediaService> | undefined
+let attachmentCenterService: ReturnType<typeof createAttachmentCenter> | undefined
 let marketplaceService: ReturnType<typeof createMarketplaceService> | undefined
 let agyMarketplaceService: ReturnType<typeof createAgyMarketplaceService> | undefined
 function registerBridges(): void {
   const chatRoot = join(app.getPath('userData'), 'chats-v1')
   const chatStore = createChatStore(chatRoot)
+  const processingLedger = createProcessingLedger(app.getPath('userData'))
+  const attachmentCenterRoot = join(app.getPath('userData'), 'attachment-center', 'originals')
+  const attachmentCenter = createAttachmentCenter(join(app.getPath('userData'), 'attachment-center', 'index.json'), attachmentCenterRoot)
+  attachmentCenterService = attachmentCenter
+  const folderAccess = createFolderAccess(join(app.getPath('userData'), 'folder-access.json'))
+  try { processingLedger.recover() } catch (error) { console.error(`[processing] ${(error as Error).message}`) }
+  const processingAnswer = (run: () => unknown) => { try { return { ok: true as const, ledger: run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
+  handle('processing:read', () => processingAnswer(() => processingLedger.read()))
+  handle('processing:resume', (_event, id: string) => processingAnswer(() => { processingLedger.resume(id); return processingLedger.read() }))
+  handle('processing:set-limits', (_event, limits: import('../shared/lib/processingLedger').ProcessingLedger['budget']['limits']) => processingAnswer(() => processingLedger.setLimits(limits)))
+  const attachmentAnswer = (run: () => object) => { try { return { ok: true as const, ...run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
+  handle('attachments:read', () => attachmentAnswer(() => ({ state: attachmentCenter.read() })))
+  handle('attachments:preview-delete', (_event, id: string) => attachmentAnswer(() => ({ preview: attachmentCenter.previewDelete(id) })))
+  handle('attachments:confirm-delete', (_event, token: string) => attachmentAnswer(() => ({ state: attachmentCenter.confirmDelete(token), answer: 'The reviewed private Attachment Center copy was deleted. Separate turn copies, vault sources, and derived records were not changed.' })))
+  const folderAnswer = (run: () => object) => { try { return { ok: true as const, ...run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
+  handle('folders:read', () => folderAnswer(() => ({ state: folderAccess.read() })))
+  handle('folders:choose', async (_event, input: import('../shared/lib/folderAccess').FolderAccessBridge extends never ? never : { purpose: string; duration: 'session' | 'day' | 'until-revoked'; projectId?: string | null; write?: boolean; watch?: boolean; review?: boolean; cloud?: boolean; commands?: boolean }) => {
+    const selected = await dialog.showOpenDialog({ title: 'Choose one folder for this purpose', properties: ['openDirectory'] })
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, answer: 'Folder access cancelled. Nothing was granted.' }
+    return folderAnswer(() => ({ state: folderAccess.grant(selected.filePaths[0], input), answer: 'Purpose-limited folder access saved. It grants only the switches shown; it does not capture, send, run, change, or delete files.' }))
+  })
+  handle('folders:revoke', (_event, id: string) => folderAnswer(() => ({ state: folderAccess.revoke(id), answer: 'Folder access revoked. Files were not changed or deleted.' })))
+  handle('folders:list', (_event, id: string) => folderAnswer(() => folderAccess.list(id)))
   const chatAnswer = <T,>(run: () => T) => {
     try { return { ok: true as const, ...run() } }
     catch (error) {
@@ -420,6 +458,7 @@ function registerBridges(): void {
   handle('working-notes:save', (_event, input: { chatId: string; expected: string | null; notes: WorkingNotes; proposal?: WorkingNotes }) => notesAnswer(() => workingNotes.save(input)))
   handle('working-notes:reject-proposal', (_event, input: { chatId: string; expected: string | null; notes: WorkingNotes; proposal: WorkingNotes }) => notesAnswer(() => workingNotes.reject(input)))
   handle('working-notes:migrate', (_event, input: { chatId: string; notes: WorkingNotes[] }) => notesAnswer(() => workingNotes.migrate(input.chatId, input.notes)))
+  handle('working-notes:fork', (_event, input: { sourceChatId: string; targetChatId: string; expectedSource: string | null }) => notesAnswer(() => workingNotes.fork(input)))
   handle('working-notes:export', async (_event, chatId: string) => {
     try {
       const document = JSON.stringify(workingNotes.exportValue(chatId), null, 2)
@@ -485,7 +524,7 @@ function registerBridges(): void {
     join(app.getPath('userData'), 'projects.json'),
     join(app.getPath('userData'), 'project-context-grants.json'),
     undefined,
-    (query, options) => searchVault(createVaultService({ vaultPath: vaultRoot() }).files(), query, options),
+    (query, options) => searchVault(currentVaultService().files(), query, options),
   )
   // Deliberately memory-only: each app start requires fresh folder trust. A
   // changed declaration fingerprint invalidates trust within the same process.
@@ -498,8 +537,18 @@ function registerBridges(): void {
   handle('transcripts:raw', (_event, id: string) => transcriptAnswer(() => turnArchive.raw(id)))
   handle('transcripts:image', (_event, id: string, imageId: string) => transcriptAnswer(() => turnArchive.image(id, imageId)))
   handle('transcripts:attachment', (_event, id: string, attachmentId: string) => transcriptAnswer(() => turnArchive.attachment(id, attachmentId)))
+  handle('transcripts:save-attachment', async (_event, id: string, attachmentId: string) => {
+    try {
+      const descriptor = turnArchive.read(id).header.attachments?.find(file => file.id === attachmentId)
+      if (!descriptor) throw Error('That retained original is not indexed by this transcript.')
+      const chosen = await dialog.showSaveDialog({ title: 'Save verified original source', defaultPath: descriptor.name })
+      if (chosen.canceled || !chosen.filePath) return { ok: false, answer: 'Save cancelled. The retained original is unchanged.' }
+      noLinkedPath(chosen.filePath); turnArchive.saveAttachment(id, attachmentId, chosen.filePath)
+      return { ok: true, answer: `Verified original saved to ${chosen.filePath}` }
+    } catch (error) { return { ok: false, answer: `${(error as Error).message} The retained original is unchanged.` } }
+  })
   handle('transcripts:recover', (_event, chatIds: string[], knownTranscriptIds: string[], before: string = '') => transcriptAnswer(() => turnArchive.recover(chatIds, knownTranscriptIds, before)))
-  mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
+  mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), sourceRoot: attachmentCenterRoot, processing: processingLedger, onSource: input => { attachmentCenter.record({ ...input, origin: 'native-chat' }) }, onProcessed: (sha256, processor, coverage, ok) => attachmentCenter.processed(sha256, processor, coverage, ok), onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
   marketplaceService = createMarketplaceService({ file: join(app.getPath('userData'), 'marketplaces.json') })
   agyMarketplaceService = createAgyMarketplaceService({ cacheFile: join(app.getPath('home'), '.gemini', 'antigravity', 'cache', 'marketplaces', 'antigravity-plugins-official', 'marketplace.json') })
   const market = (engine: unknown) => {
@@ -581,7 +630,14 @@ function registerBridges(): void {
     if (picked.canceled || !picked.filePaths[0]) return mediaService!.read()
     return mediaService!.update({ ffmpeg: picked.filePaths[0] }, true)
   })
+  handle('media:ocr-adapter', async () => {
+    const picked = await dialog.showOpenDialog({ title: 'Choose your installed DeepSeek-OCR-2 adapter', properties: ['openFile'] })
+    if (picked.canceled || !picked.filePaths[0]) return mediaService!.read()
+    return mediaService!.configureOcrAdapter(picked.filePaths[0])
+  })
   handle('media:decode', (event, input: MediaInput) => mediaService!.decode(track(event.sender), input))
+  handle('media:decode-file', (event, path: string, input: MediaFileInput) => mediaService!.decodeFile(track(event.sender), path, input))
+  handle('media:release-source', (event, sourceHandle: string) => { mediaService!.releaseSource(track(event.sender), sourceHandle) })
   handle('media:dictate', event => mediaService!.dictate(track(event.sender)))
   handle('media:cancel', event => { mediaService!.cancel(event.sender.id) })
   handle('market:sources', (_event, engine?: unknown) => market(engine).sources())
@@ -668,7 +724,7 @@ function registerBridges(): void {
       settings = writeSettings(settingsFile, { ...settings, vaultPath: wanted.trim() })
     // Point the running service at the new folder. No restart, and the interface
     // is told the result instead of assuming it worked.
-      const next = createVaultService({ vaultPath: vaultRoot() })
+      const next = currentVaultService()
       api?.setVault(next)
       // A newly chosen folder gets the structure immediately (his rule:
       // generate the default structure anyways; conflicts land beside).
@@ -808,7 +864,7 @@ function registerBridges(): void {
         try {
           // One journal line for the whole apply — the journal is write-once
           // per day, so the apply is logged as the one event it was.
-          const service = createVaultService({ vaultPath: vaultRoot() })
+          const service = currentVaultService()
           service.capture({ type: 'journal', content: `Second-brain structure: added ${written.join(', ')}.` })
         } catch {
           // The files are on disk either way; a log failure is reported, not hidden.
@@ -851,7 +907,7 @@ function registerBridges(): void {
         rememberSettled(root, mine)
         if (resolve(root) === resolve(vaultRoot())) {
           try {
-            const service = createVaultService({ vaultPath: vaultRoot() })
+            const service = currentVaultService()
             service.capture({ type: 'journal', content: `Structure conflict settled (${action}): ${mine}.` })
           } catch {
             // The files are settled either way; a log failure is not hidden, but it is not fatal.
@@ -880,7 +936,7 @@ function registerBridges(): void {
       return { ok: false, error: `${target} could not be created.` }
     }
     settings = writeSettings(settingsFile, { ...settings, vaultPath: target })
-    const next = createVaultService({ vaultPath: vaultRoot() })
+    const next = currentVaultService()
     api?.setVault(next)
     const done = integrateVaultStructure(target)
     return { ok: true, path: target, kind: done.kind, written: done.written, conflicts: done.conflicts, differing: done.differing }
@@ -891,7 +947,7 @@ function registerBridges(): void {
   // repaired behind the owner's back. Read-only.
   handle('vault:link-check', () => {
     try {
-      return createVaultService({ vaultPath: vaultRoot() }).links()
+      return currentVaultService().links()
     } catch (error) {
       return { files: 0, checked: 0, dead: [], ambiguous: [], error: (error as Error).message }
     }
@@ -936,7 +992,11 @@ function registerBridges(): void {
       const images = checkedImages.images
       const checkedSources = engineSourceFiles(originalFiles ?? [])
       if (!checkedSources.ok) return checkedSources
-      const retainedFiles = checkedSources.files
+      const retainedFiles = checkedSources.files.map(file => {
+        if (!('handle' in file)) return file
+        const source = mediaService!.resolveSource(requestOwner, file)
+        return { id: file.id, name: file.name, mime: file.mime, path: source.path, bytes: source.bytes, sha256: source.sha256 }
+      })
       if (settings.engine.id === 'agy' && images.length) return { ok: false, answer: AGY_PICTURES_ANSWER }
       if (!engine) return { ok: false, answer: 'The engine is still waking up, try again in a moment.' }
       // The working folder is the app's decision, never the window's: the
@@ -1160,7 +1220,11 @@ function registerBridges(): void {
         if (event.kind === 'error') void hookRunner.run('turn-error').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
         if (event.kind === 'permission') void hookRunner.run('permission').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
       })
-      if (sent.transcriptId) activeTranscript = { transcriptId: sent.transcriptId, chatId: context?.chatId, prompt: text }
+      if (sent.transcriptId) {
+        activeTranscript = { transcriptId: sent.transcriptId, chatId: context?.chatId, prompt: text }
+        for (const source of retainedFiles) if ('path' in source) try { attachmentCenter.markTurn(source.sha256, sent.transcriptId) } catch { /* turn archive remains authoritative */ }
+        for (const source of checkedSources.files) if ('handle' in source) mediaService!.releaseSource(requestOwner, source.handle)
+      }
       if (!sent.ok) automation?.rejectWork()
       return sent
       } catch (error) { automation?.rejectWork(); return { ok: false, answer: (error as Error).message } } finally { preparing = undefined; dispatchingWork = overflowRetryPending }
@@ -1645,7 +1709,7 @@ function registerBridges(): void {
     if (!title || !markdown || Buffer.byteLength(markdown, 'utf8') > 8_000_000) {
       return { ok: false, answer: 'The capture is empty or exceeds 8 MB. Export the full chat as Markdown instead; nothing was shortened.' }
     }
-    const service = createVaultService({ vaultPath: vaultRoot() })
+    const service = currentVaultService()
     if (!service.available()) return { ok: false, answer: 'No vault to capture into.' }
     try {
       const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
@@ -1666,7 +1730,7 @@ function registerBridges(): void {
     if (!name || name.length > 120 || /[\\/:*?"<>|\n\r]/.test(name) || !markdown || markdown.length > 200_000) {
       return { ok: false, answer: 'That is not a name and document this app will write.' }
     }
-    const service = createVaultService({ vaultPath: vaultRoot() })
+    const service = currentVaultService()
     if (!service.available()) return { ok: false, answer: 'No vault to write the handoff into.' }
     try {
       service.files().write(`handoffs/${name}`, markdown)
@@ -1681,7 +1745,7 @@ function registerBridges(): void {
   // or another machine) takes folders of markdown as they are — nothing is
   // converted, because nothing needs converting.
   handle('vault:export-copy', (): { ok: boolean; answer: string } => {
-    const service = createVaultService({ vaultPath: vaultRoot() })
+    const service = currentVaultService()
     if (!service.available()) return { ok: false, answer: 'No vault to copy.' }
     const stamp = stampFor(new Date())
     const destination = join(app.getPath('userData'), 'exports', `vault-${stamp}`)
@@ -2701,7 +2765,7 @@ app.whenReady().then(async () => {
     for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) try { window.webContents.send('automation:changed', automation.view()) } catch {}
     app.on('before-quit', () => { void automation?.dispose() })
     memoryOrganizer = createMemoryOrganizer({
-      store: () => createMemoryWorkspace(createVaultService({ vaultPath: vaultRoot() }).files()),
+      store: () => createMemoryWorkspace(currentVaultService().files()),
       busy: () => dispatchingWork || !!engine?.turnBusy() || foregroundApiRequests > 0 || !!automation?.view().current,
       configuration: () => JSON.stringify({ engine: settings.engine, permissions: inferencePermissions(), cloud: automation?.preferences().allowCloudInference, custom: settings.cloud, keyProviders: keyStore?.ids() }),
       run: (system, prompt, preferences, signal) => reviewer!.organize(system, prompt, preferences, signal),
@@ -2715,7 +2779,7 @@ app.whenReady().then(async () => {
 
     // The vault lives in this process: no companion server to start, no port to
     // find, and the interface's /api/vault calls land on these files.
-    const vault = createVaultService({ vaultPath: vaultRoot() })
+    const vault = currentVaultService()
     console.log(
       vault.available()
         ? `[vault] ${vault.root}`

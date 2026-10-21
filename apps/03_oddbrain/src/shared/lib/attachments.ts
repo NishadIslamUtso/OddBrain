@@ -81,18 +81,21 @@ export async function persistAttachments(attachments: Attachment[]): Promise<Sto
       database.close()
     }
   }
-  return attachments.map(({ data, originalFile, originalId, ...metadata }) => metadata)
+  return attachments.map(({ data, originalFile, originalId, originalSource, ...metadata }) => metadata)
 }
 
-/** Read each explicitly attached original once for the privileged pre-dispatch archive. */
+/** Read small originals once; desktop-selected large sources use opaque main-process handles. */
 export async function originalSourceFiles(attachments: Attachment[]): Promise<import('./media').EngineSourceFile[]> {
-  const unique = new Map<string, File>()
-  for (const attachment of attachments) if (attachment.originalId && attachment.originalFile && !unique.has(attachment.originalId)) unique.set(attachment.originalId, attachment.originalFile)
-  const files: import('./media').EngineSourceFile[] = []; let total = 0
-  for (const [id, file] of unique) {
-    if (!file.size || file.size > 50 * 1024 * 1024) throw Error(`${file.name}: original file is empty or exceeds the 50 MB retention limit. Nothing was sent.`)
-    total += file.size
-    if (total > 64 * 1024 * 1024) throw Error('Original attachments exceed the 64 MB per-turn retention limit. Remove or split files; nothing was sent or shortened.')
+  const unique = new Map<string, Pick<Attachment, 'name' | 'mime' | 'originalFile' | 'originalSource'>>()
+  for (const attachment of attachments) if (attachment.originalId && !unique.has(attachment.originalId) && (attachment.originalSource || attachment.originalFile)) unique.set(attachment.originalId, attachment)
+  const files: import('./media').EngineSourceFile[] = []
+  for (const [id, source] of unique) {
+    if (source.originalSource) {
+      files.push({ id, name: source.originalFile?.name || source.name, mime: source.originalFile?.type || source.mime || '', handle: source.originalSource.handle, bytes: source.originalSource.bytes, sha256: source.originalSource.sha256, storage: source.originalSource.storage }); continue
+    }
+    const file = source.originalFile!
+    if (!file.size) throw Error(`${file.name}: the original file is empty. Nothing was sent.`)
+    if (file.size > 8 * 1024 * 1024) throw Error(`${file.name}: reattach this source in the desktop app so it can stream from disk instead of entering renderer memory. Nothing was sent.`)
     const data = new Uint8Array(await file.arrayBuffer())
     if (data.byteLength !== file.size) throw Error(`${file.name}: the original file changed while being read. Nothing was sent.`)
     files.push({ id, name: file.name, mime: file.type, data })

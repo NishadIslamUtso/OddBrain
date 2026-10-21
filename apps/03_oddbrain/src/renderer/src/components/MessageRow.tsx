@@ -12,6 +12,7 @@ import { useLook } from '../ui/LookContext'
 import InlineCharts from './InlineCharts'
 import { extractCitations } from '@shared/lib/citations'
 import { pickGerund } from '@shared/lib/gerunds'
+import { GitBranch } from 'lucide-react'
 
 /**
  * One turn in the conversation.
@@ -29,6 +30,7 @@ export default function MessageRow({
   highlightId = '',
   onRewrite,
   onRestore,
+  onBranch,
   busyArtifactId = '',
   rewriteStage = '',
   rewriteError = '',
@@ -47,6 +49,7 @@ export default function MessageRow({
     comment: string
   }) => Promise<boolean>
   onRestore: (artifact: Artifact, index: number) => void
+  onBranch?: (messageId: string) => void
   busyArtifactId?: string
   rewriteStage?: string
   rewriteError?: string
@@ -126,7 +129,7 @@ export default function MessageRow({
           </div>
         ) : null}
         {message.content ? <InlineCharts text={message.content} /> : null}
-        {message.content && message.status !== 'streaming' ? <div className="ob-message-actions"><CopyText text={message.content} label="Copy complete answer" /></div> : null}
+        {message.status === 'complete' ? <div className="ob-message-actions">{message.content ? <CopyText text={message.content} label="Copy complete answer" /> : null}{onBranch ? <button type="button" onClick={() => onBranch(message.id)} title="Start an isolated chat with everything OddBrain stored through this reply. Hidden provider state cannot be copied." className="inline-flex items-center gap-1"><GitBranch size={13}/>Branch</button> : null}</div> : null}
         {message.content && message.status !== 'streaming' ? <ReadAloudButton text={message.content} /> : null}
 
         {streaming && !message.content && !message.stage ? (

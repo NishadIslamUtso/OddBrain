@@ -26,7 +26,7 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     await page.locator('.ob-appearance-profile').getByRole('button', { name: 'Save', exact: true }).click()
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ai-assistant.profile')).name), 'Alex')
     await settings('Performance'); assert((await page.getByRole('combobox', { name: 'Memory profile' }).innerText()).includes('4 GB VRAM')); assert(!(await page.getByRole('combobox', { name: 'Memory profile' }).innerText()).includes('recommended'))
-    await close(); await view('Projects'); assert.equal(await page.locator('.ob-projects-view>div>ul>li').count(), 3)
+    await close(); await view('Projects'); const projectRows = page.locator('.ob-projects-view>div>ul>li'); await projectRows.nth(2).waitFor(); assert.equal(await projectRows.count(), 3)
     await page.screenshot({ path: path.join(output, 'samples-projects.png'), animations: 'disabled' })
     await page.getByRole('button', { name: 'New project', exact: true }).click(); await page.getByRole('textbox', { name: 'Project name' }).fill('Try a new project'); await page.getByRole('button', { name: 'Create', exact: true }).click()
     await page.getByRole('heading', { name: 'Try a new project', exact: true }).waitFor()
@@ -61,7 +61,7 @@ const options = process.env.ODDBRAIN_BROWSER_OPTIONS ? JSON.parse(fs.readFileSyn
     await page.getByRole('button', { name: 'Sample workspace', exact: true }).click(); await page.getByRole('button', { name: 'Reset sample data', exact: true }).click(); await page.getByRole('button', { name: 'Confirm', exact: true }).click(); await page.getByRole('button', { name: 'Sample workspace', exact: true }).waitFor()
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ai-assistant.profile')).name), 'Alex')
     assert.equal(await page.evaluate(() => JSON.parse(localStorage.getItem('ai-assistant.chats'))[0].id), 'private-existing')
-    await view('Projects'); assert.equal(await page.locator('.ob-projects-view>div>ul>li').count(), 3)
+    await view('Projects'); await projectRows.nth(2).waitFor(); assert.equal(await projectRows.count(), 3)
     report.checks.push('Sample/empty switching preserves separate work and drafts; reset restores only sample data and retains profile/appearance')
     await page.setViewportSize({ width: 940, height: 620 })
     for (const layout of ['Classic sidebar', 'Top bar', 'Rail + list', 'Command first', 'List + detail', 'Bento dashboard', 'Console', 'Floating window']) {

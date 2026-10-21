@@ -30,6 +30,13 @@ export const LOCAL_API_ROUTES = new Map<string, string[]>([
   ['/api/vault/research', ['GET']],
   ['/api/vault/onui', ['GET']],
   ['/api/vault/links', ['GET']],
+  // Owner-opened interpretation review. Writes only scan, record an answer, or
+  // import a provider-labelled suggestion; archive/delete are not exposed here.
+  ['/api/vault/review-center', ['GET']],
+  ['/api/vault/review-packet', ['GET']],
+  ['/api/vault/review-scan', ['POST']],
+  ['/api/vault/review-action', ['POST']],
+  ['/api/vault/review-import', ['POST']],
   // The Vault screen's file list, and one file's text for a preview.
   ['/api/vault/files', ['GET']],
   ['/api/vault/file', ['GET']],

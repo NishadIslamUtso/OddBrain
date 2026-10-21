@@ -146,7 +146,7 @@ export default function ChatView({
         <TurnStateCard chat={chat} />
         <EnginePanel chatId={chat?.id || ''} />
       </div> : <div className="ob-transcript mx-auto w-full max-w-[var(--chat-width)] px-6 py-6">
-        <div className="flex flex-col gap-7">{messages.map(message => <MessageRow key={message.id} message={message} artifacts={viewsForMessage(message.id, message.artifacts, liveArtifacts)} tokens={tokens} highlightId={highlightId} onRewrite={onRewrite} onRestore={onRestore} busyArtifactId={busyArtifactId} rewriteStage={rewriteStage} rewriteError={rewriteError} rewriteErrorFor={rewriteErrorFor} />)}</div>
+        <div className="flex flex-col gap-7">{messages.map(message => <MessageRow key={message.id} message={message} artifacts={viewsForMessage(message.id, message.artifacts, liveArtifacts)} tokens={tokens} highlightId={highlightId} onRewrite={onRewrite} onRestore={onRestore} onBranch={onBranch} busyArtifactId={busyArtifactId} rewriteStage={rewriteStage} rewriteError={rewriteError} rewriteErrorFor={rewriteErrorFor} />)}</div>
         <TurnStateCard chat={chat} />
         <div className="ob-engine-transcript">{engine.turn?.state !== 'running' && chat?.messages.some(m => m.nativeRecord?.transcriptId === engine.turn?.transcriptId) ? <details><summary>Last run details and kept files</summary><EnginePanel chatId={chat?.id || ''} /></details> : <EnginePanel chatId={chat?.id || ''} />}</div>
       </div>}

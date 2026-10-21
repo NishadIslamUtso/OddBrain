@@ -1,11 +1,11 @@
 import { validContextReceipt } from '../shared/lib/nativeConversation'
 import { validNativeArtifacts } from '../shared/lib/nativeArtifacts'
-import { closeSync, fsyncSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
-import { readRegularFileSync, readRegularHeadSync } from './safeFile'
+import { closeSync, fsyncSync, mkdirSync, openSync, readdirSync, renameSync, rmSync, statfsSync, writeFileSync } from 'node:fs'
+import { dirname, join, resolve } from 'node:path'
+import { copyRegularFileVerifiedSync, readRegularFileSync, readRegularHeadSync } from './safeFile'
 import { createHash, randomUUID } from 'node:crypto'
 import type { EngineEvent, EngineId } from '../shared/lib/engine'
-import type { EngineImage, EngineSourceFile } from '../shared/lib/media'
+import type { EngineImage, EngineInlineSourceFile } from '../shared/lib/media'
 import { validTranscriptAttachments, validTranscriptImages, type Transcript, type TranscriptAttachment, type TranscriptAttachmentDownload, type TranscriptHeader, type TranscriptImage, type TranscriptImageDownload, type TranscriptPage, type TranscriptRecoveryPage } from '../shared/lib/transcripts'
 import { noLinkedPath } from './engine/configTransaction'
 
@@ -21,6 +21,7 @@ const imageMatchesMime = (bytes: Buffer, mime: TranscriptImage['mime']): boolean
     ? bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff
     : bytes.length >= 12 && bytes.subarray(0, 4).toString('ascii') === 'RIFF' && bytes.subarray(8, 12).toString('ascii') === 'WEBP'
 export const TRANSCRIPT_LIMIT = 32_000_000
+export type RetainedSourceFile = EngineInlineSourceFile | { id: string; name: string; mime: string; path: string; bytes: number; sha256: string }
 /** Append-only per-turn records. Never trims old turns, overwrites a damaged file,
  * executes imported text, or invents successful recovery after a process crash. */
 export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
@@ -62,7 +63,7 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
     return { header, prompt, events, state, incomplete, ...(typeof request.userPrompt === 'string' ? { userPrompt: request.userPrompt } : {}) }
   }
   return {
-    begin(input: { userPrompt?: string; chatId?: string; context?: import('../shared/lib/nativeConversation').ContextReceipt; prompt: string; engine: EngineId; model: string; workspace: string; pictures: number; /** Exact validated bytes about to be dispatched. Undefined preserves compatibility with count-only legacy records. */ images?: EngineImage[]; attachments?: EngineSourceFile[] }): string {
+    begin(input: { userPrompt?: string; chatId?: string; context?: import('../shared/lib/nativeConversation').ContextReceipt; prompt: string; engine: EngineId; model: string; workspace: string; pictures: number; /** Exact validated bytes or main-resolved paths about to be retained. */ images?: EngineImage[]; attachments?: RetainedSourceFile[] }): string {
       noLinkedPath(root); mkdirSync(root, { recursive: true, mode: 0o700 })
       const id = `${Date.now()}-${randomUUID()}`
       if (input.images !== undefined && input.images.length !== input.pictures) throw Error('The retained image count does not match the dispatch. Nothing was sent.')
@@ -71,12 +72,14 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
         if (!decoded.length || decoded.length > 2 * 1024 * 1024 || !imageMatchesMime(decoded, image.mime)) throw Error(`Image ${index + 1} does not match its declared format. Nothing was sent.`)
         return { id: `image-${index + 1}`, mime: image.mime, bytes: decoded.length, sha256: createHash('sha256').update(decoded).digest('hex') }
       })
-      let attachmentBytes = 0
       const attachmentDescriptors: TranscriptAttachment[] | undefined = input.attachments?.map((file, index) => {
-        if (!(file.data instanceof Uint8Array) || !file.data.byteLength || file.data.byteLength > 50 * 1024 * 1024 || typeof file.name !== 'string' || !file.name || file.name.length > 255 || /[\x00-\x1f]/.test(file.name) || typeof file.mime !== 'string' || file.mime.length > 200 || /[\x00-\x1f]/.test(file.mime)) throw Error(`Original attachment ${index + 1} is invalid. Nothing was sent.`)
-        attachmentBytes += file.data.byteLength
-        if (index >= 8 || attachmentBytes > 64 * 1024 * 1024) throw Error('Original attachments exceed the per-turn retention limit. Nothing was sent or shortened.')
-        return { id: `attachment-${index + 1}`, name: file.name, mime: file.mime, bytes: file.data.byteLength, sha256: createHash('sha256').update(file.data).digest('hex') }
+        if (index >= 8 || typeof file.name !== 'string' || !file.name || file.name.length > 255 || /[\x00-\x1f]/.test(file.name) || typeof file.mime !== 'string' || file.mime.length > 200 || /[\x00-\x1f]/.test(file.mime)) throw Error(`Original attachment ${index + 1} is invalid. Nothing was sent.`)
+        if ('data' in file) {
+          if (!(file.data instanceof Uint8Array) || !file.data.byteLength || file.data.byteLength > 8 * 1024 * 1024) throw Error(`Original attachment ${index + 1} exceeds the bounded renderer-memory transport. Nothing was sent.`)
+          return { id: `attachment-${index + 1}`, name: file.name, mime: file.mime, bytes: file.data.byteLength, sha256: createHash('sha256').update(file.data).digest('hex') }
+        }
+        if (!file.path || !Number.isSafeInteger(file.bytes) || file.bytes < 1 || !/^[a-f0-9]{64}$/.test(file.sha256)) throw Error(`Streamed original attachment ${index + 1} is invalid. Nothing was sent.`)
+        return { id: `attachment-${index + 1}`, name: file.name, mime: file.mime, bytes: file.bytes, sha256: file.sha256 }
       })
       const header: TranscriptHeader = { id, at: new Date().toISOString(), engine: input.engine, model: input.model, workspace: input.workspace, title: (input.userPrompt ?? input.prompt).replace(/\s+/g, ' ').slice(0, 120), pictures: input.pictures, ...(descriptors !== undefined ? { images: descriptors } : {}), ...(attachmentDescriptors !== undefined ? { attachments: attachmentDescriptors } : {}), ...(input.chatId ? { chatId: input.chatId } : {}), ...(input.context ? { context: input.context } : {}) }
       const record = line({ header }) + line({ prompt: input.prompt, ...(input.userPrompt !== undefined ? { userPrompt: input.userPrompt } : {}) })
@@ -94,10 +97,17 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
         }
         if (attachmentDescriptors?.length) {
           const folder = attachmentDir(id); mkdirSync(folder, { recursive: false, mode: 0o700 }); keptAttachments = true
+          const space = statfsSync(folder), needed = attachmentDescriptors.reduce((sum, item) => sum + item.bytes, 0), available = Number(space.bavail) * Number(space.bsize)
+          if (available < needed + 64 * 1024 * 1024) throw Error(`Exact source retention needs ${needed.toLocaleString()} bytes plus working space, but that storage is not available. Nothing was sent.`)
           for (const [index, descriptor] of attachmentDescriptors.entries()) {
-            durableNewFile(attachmentPath(id, descriptor), input.attachments![index].data)
-            const saved = readRegularFileSync(attachmentPath(id, descriptor), descriptor.bytes).bytes
-            if (saved.length !== descriptor.bytes || createHash('sha256').update(saved).digest('hex') !== descriptor.sha256) throw Error(`Original attachment ${index + 1} could not be verified before dispatch.`)
+            const source = input.attachments![index], destination = attachmentPath(id, descriptor)
+            if ('data' in source) {
+              durableNewFile(destination, source.data)
+              const saved = readRegularFileSync(destination, descriptor.bytes).bytes
+              if (createHash('sha256').update(saved).digest('hex') !== descriptor.sha256) throw Error(`Original attachment ${index + 1} could not be verified before dispatch.`)
+            } else copyRegularFileVerifiedSync(source.path, destination, { bytes: descriptor.bytes, sha256: descriptor.sha256 })
+            const head = readRegularHeadSync(destination, 1)
+            if (!head.stat.isFile() || head.stat.size !== descriptor.bytes) throw Error(`Original attachment ${index + 1} could not be verified before dispatch.`)
           }
         }
         // This returns only after the request envelope and every retained source
@@ -168,7 +178,29 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
       if (digest !== descriptor.sha256 || !imageMatchesMime(bytes, descriptor.mime)) throw Error('The retained image failed its dispatch-time integrity check. Download refused.')
       return { ...descriptor, data: bytes.toString('base64'), name: `turn-${id}-${descriptor.id}${imageExtension(descriptor.mime)}`, verified: true }
     },
-    /** Return only an indexed original after its size and dispatch-time digest still match. */
+    /** Stream one indexed original to a newly chosen path without renderer memory. */
+    saveAttachment(id: string, wanted: string, destination: string): TranscriptAttachment {
+      if (!ATTACHMENT_ID.test(wanted)) throw Error('Invalid transcript attachment identifier.')
+      const descriptorBytes = readRegularFileSync(path(id), limit).bytes
+      const firstLine = descriptorBytes.subarray(0, descriptorBytes.indexOf(10) >= 0 ? descriptorBytes.indexOf(10) : descriptorBytes.length).toString('utf8')
+      const header = JSON.parse(firstLine || '{}').header as TranscriptHeader
+      if (!headerValid(header, id)) throw Error('The transcript header is damaged. Its original is unchanged.')
+      const descriptor = header.attachments?.find(file => file.id === wanted)
+      if (!descriptor) throw Error('That original file is not indexed by this transcript.')
+      const source = attachmentPath(id, descriptor)
+      if (resolve(source) === resolve(destination)) throw Error('The private retained original cannot replace itself.')
+      const staged = join(dirname(destination), `.oddbrain-save-${randomUUID()}.tmp`)
+      noLinkedPath(destination); noLinkedPath(staged)
+      try {
+        copyRegularFileVerifiedSync(source, staged, { bytes: descriptor.bytes, sha256: descriptor.sha256 })
+        noLinkedPath(destination); renameSync(staged, destination)
+      } catch (error) {
+        try { rmSync(staged, { force: true }) } catch { /* leave a private temporary copy rather than hiding the original save failure */ }
+        throw error
+      }
+      return descriptor
+    },
+    /** Return a small indexed original after its size and dispatch-time digest still match. */
     attachment(id: string, wanted: string): TranscriptAttachmentDownload {
       if (!ATTACHMENT_ID.test(wanted)) throw Error('Invalid transcript attachment identifier.')
       const descriptorBytes = readRegularFileSync(path(id), limit).bytes
@@ -177,6 +209,7 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
       if (!headerValid(header, id)) throw Error('The transcript header is damaged. Its original is unchanged.')
       const descriptor = header.attachments?.find(file => file.id === wanted)
       if (!descriptor) throw Error('That original file is not indexed by this transcript.')
+      if (descriptor.bytes > 8 * 1024 * 1024) throw Error('This original is too large for the renderer-memory download route. Use streamed Save original instead.')
       const bytes = readRegularFileSync(attachmentPath(id, descriptor), descriptor.bytes).bytes
       if (bytes.length !== descriptor.bytes) throw Error('The retained original no longer matches its recorded size. Download refused.')
       const digest = createHash('sha256').update(bytes).digest('hex')
