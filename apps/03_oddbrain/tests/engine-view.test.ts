@@ -162,16 +162,19 @@ test('a second task while one is running is refused politely', async () => {
   assert.match(second.answer, /already working/)
 })
 
-test('stop reaches the bridge and closes the turn immediately — no wedged panel', async () => {
+test('stop blocks another send until the native close is durably observed', async () => {
   const { store, fake } = freshStore()
   await store.send('x')
   await store.stop()
   assert.equal(fake.stopped, 1)
-  assert.equal(store.turn?.state, 'done', 'the person who pressed Stop never waits for the wire')
-  assert.match(store.turn?.items.at(-1)?.text ?? '', /stopped by you/)
-  // And the next task is accepted — the reviewed bug was exactly this refusal.
-  const second = await store.send('next task')
-  assert.equal(second.ok, true)
+  assert.equal(store.turn?.state, 'running', 'a stop request is not proof that the process exited')
+  assert.equal(store.stopping, true)
+  assert.match(store.turn?.items.at(-1)?.text ?? '', /Stop requested/)
+  assert.equal((await store.send('too early')).ok, false)
+  fake.listener?.({ kind: 'closed' })
+  assert.equal(store.turn?.state, 'done')
+  assert.equal(store.stopping, false)
+  assert.equal((await store.send('next task')).ok, true)
 })
 
 test('a closed engine announces itself, closing a running turn', async () => {

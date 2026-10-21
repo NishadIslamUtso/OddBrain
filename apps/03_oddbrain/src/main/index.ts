@@ -120,6 +120,10 @@ import { createChatStore } from './chats/store'
 import { CHAT_RECOVERY_FILE_LIMIT, chatRecoveryDocument, parseChatRecoveryDocument } from './chats/recovery'
 import { readRegularFileSync } from './safeFile'
 import type { ChatStoreMigration, ChatStoreSnapshot, ChatStoreWrite } from '../shared/lib/chatStore'
+import { WorkingNotesStore } from './chats/workingNotes'
+import type { WorkingNotes } from '../shared/lib/chatContext'
+import { readRecoverableJson, writeRecoverableJson } from './recoverableJson'
+import { appDataBackupExclusions, createAppDataBackup, restoreAppDataBackup } from './appDataBackup'
 
 /**
  * The main process. Everything that touches the machine lives on this side:
@@ -220,6 +224,7 @@ function stampFor(now: Date): string {
 void enginePath()
 
 let engineEventSequence = 0
+const engineCloseWaiters = new Set<(event: EngineEvent) => void>()
 function pushEngineEvent(event: EngineEvent): void {
   event = { ...event, sequence: ++engineEventSequence }
   // Stream pieces are for the live window only: a hundred of them would
@@ -230,6 +235,25 @@ function pushEngineEvent(event: EngineEvent): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('engine:event', event)
   }
+  // A close reaches here only after recordedDispatch durably appended it. Stop
+  // acknowledgements therefore cannot outrun the canonical transcript.
+  if (event.kind === 'closed') for (const settle of [...engineCloseWaiters]) settle(event)
+}
+
+function waitForEngineClose(transcriptId = '', timeoutMs = 5_000): Promise<boolean> {
+  return new Promise(resolve => {
+    let settled = false
+    const finish = (confirmed: boolean) => {
+      if (settled) return
+      settled = true; clearTimeout(timer); engineCloseWaiters.delete(onClose); resolve(confirmed)
+    }
+    const onClose = (event: EngineEvent) => {
+      if (!transcriptId || !event.transcriptId || event.transcriptId === transcriptId) finish(true)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    timer.unref?.()
+    engineCloseWaiters.add(onClose)
+  })
 }
 
 /** Everything the renderer is allowed to ask about settings and the folder. */
@@ -386,6 +410,34 @@ function registerBridges(): void {
       const error = await shell.openPath(chatRoot)
       return error ? { ok: false, answer: `The chat storage folder could not be opened: ${error}` } : { ok: true, answer: 'Opened the private app-chat storage folder.', path: chatRoot }
     } catch (error) { return { ok: false, answer: (error as Error).message || 'The chat storage folder could not be opened.' } }
+  })
+
+  const workingNotes = new WorkingNotesStore(join(app.getPath('userData'), 'working-notes-v1'))
+  const notesAnswer = (run: () => ReturnType<WorkingNotesStore['read']>) => {
+    try { return run() } catch (error) { return { ok: false as const, current: null, revisions: [], answer: (error as Error).message || 'Working Notes could not be read. Originals were kept.' } }
+  }
+  handle('working-notes:read', (_event, chatId: string) => notesAnswer(() => workingNotes.read(chatId)))
+  handle('working-notes:save', (_event, input: { chatId: string; expected: string | null; notes: WorkingNotes; proposal?: WorkingNotes }) => notesAnswer(() => workingNotes.save(input)))
+  handle('working-notes:reject-proposal', (_event, input: { chatId: string; expected: string | null; notes: WorkingNotes; proposal: WorkingNotes }) => notesAnswer(() => workingNotes.reject(input)))
+  handle('working-notes:migrate', (_event, input: { chatId: string; notes: WorkingNotes[] }) => notesAnswer(() => workingNotes.migrate(input.chatId, input.notes)))
+  handle('working-notes:export', async (_event, chatId: string) => {
+    try {
+      const document = JSON.stringify(workingNotes.exportValue(chatId), null, 2)
+      const chosen = await dialog.showSaveDialog({ title: 'Export Working Notes recovery history', defaultPath: `OddBrain-working-notes-${Date.now()}.json`, filters: [{ name: 'Working Notes recovery', extensions: ['json'] }] })
+      if (chosen.canceled || !chosen.filePath) return { ok: false, answer: 'Export cancelled. Nothing was written.' }
+      noLinkedPath(chosen.filePath)
+      const descriptor = openSync(chosen.filePath, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW || 0), 0o600)
+      try { writeFileSync(descriptor, document, 'utf8'); fsyncSync(descriptor) } finally { closeSync(descriptor) }
+      return { ok: true, answer: `Working Notes recovery exported to ${chosen.filePath}` }
+    } catch (error) { return { ok: false, answer: `${(error as Error).message} Nothing was changed.` } }
+  })
+  handle('working-notes:import', async (_event, chatId: string) => {
+    try {
+      const chosen = await dialog.showOpenDialog({ title: 'Import Working Notes recovery history', properties: ['openFile'], filters: [{ name: 'Working Notes recovery', extensions: ['json'] }] })
+      if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, current: null, revisions: [], answer: 'Import cancelled. Nothing was changed.' }
+      const bytes = readRegularFileSync(chosen.filePaths[0], 50_000_000).bytes
+      return workingNotes.importValue(chatId, JSON.parse(bytes.toString('utf8')))
+    } catch (error) { return { ok: false, current: null, revisions: [], answer: `${(error as Error).message} Nothing was imported.` } }
   })
 
   const workQueue = createWorkQueue(join(app.getPath('userData'), 'work-queue'), () => JSON.stringify(settings.engine), () => createHash('sha256').update(JSON.stringify([settings.engine, settings.permissions, automation?.preferences().allowCloudInference !== false, resolveEngineCommand(settings.engine.id), settings.engine.cloudProvider === 'anthropic' ? keyStore?.get('anthropic') || '' : ''])).digest('hex'))
@@ -970,19 +1022,31 @@ function registerBridges(): void {
       const preparationContext = context?.contextProfile?.capacityTokens !== null && context?.contextProfile?.capacityTokens !== undefined
         ? { ...context, contextProfile: { ...context.contextProfile, outputReserveTokens: Math.min(10_000_000, context.contextProfile.outputReserveTokens + envelopeReserve) } }
         : context
-      let nativeSession = engine.nextSession({ settings: usedEngine, cwd: usedEngine.workspace || vaultRoot(), chatId: context?.chatId, auth })
-      const prepared = preparationContext ? await nativeContext.prepare(preparationContext, usedEngine.workspace || vaultRoot(), text,
+      const sessionTarget = { settings: usedEngine, cwd: usedEngine.workspace || vaultRoot(), chatId: context?.chatId, auth }
+      let nativeSession = engine.nextSession(sessionTarget)
+      let prepared = preparationContext ? await nativeContext.prepare(preparationContext, usedEngine.workspace || vaultRoot(), text,
         nativeSession.state !== 'fresh', preparing.controller.signal) : undefined
+      prepared?.validate()
+      const evidenceTag = /<(?:saved_evidence|oddbrain_evidence|oddbrain_attachment_evidence)>/i.test(text)
+      const sourceBearing = evidenceTag || prepared?.receipt.sources.some(source => source.role === 'untrusted-reference') === true
+      if (sourceBearing && usedEngine.approval !== 'plan') throw Error('Quoted or retrieved source evidence is present. Use Plan mode for this analysis turn so source text can influence only the written answer, not tools or file actions. After reviewing the answer, start a separate owner-authored action turn if needed. Nothing was sent.')
+      if (sourceBearing) {
+        // Never resume or reuse hidden native context for quoted evidence. When
+        // the ordinary route was continuing, prepare again as an isolated turn
+        // so selected stored chat history is explicit in the receipt.
+        if (preparationContext && nativeSession.state !== 'fresh') prepared = await nativeContext.prepare({ ...preparationContext, continuationExpected: false }, usedEngine.workspace || vaultRoot(), text, false, preparing.controller.signal)
+        prepared?.validate()
+        nativeSession = engine.nextSession({ ...sessionTarget, toolFree: true })
+      } else {
+        // Context preparation can decode retained files asynchronously. Do not
+        // claim live/resumed/fresh based on stale process state.
+        const confirmedNativeSession = engine.nextSession(sessionTarget)
+        if ((nativeSession.state === 'fresh') !== (confirmedNativeSession.state === 'fresh')) throw Error('Native session availability changed while context was prepared. Nothing was sent; send again so the exact fresh or continuing context can be reviewed and recorded.')
+        nativeSession = confirmedNativeSession
+      }
       if (ownDispatch !== workDispatchGeneration || policy() !== usedPolicy || JSON.stringify(settings.engine) !== JSON.stringify(savedEngine) || usedCommand !== resolveEngineCommand(usedEngine.id)) throw Error('Task settings changed while reading context. Nothing was sent.')
       if (preparing.controller.signal.aborted) throw Error('Task preparation canceled. Nothing was sent.')
       if (auth && (keyStore?.get('anthropic') !== auth.apiKey || !cloudEnabled(inferencePermissions(), 'anthropic', keyStore?.has('anthropic') === true))) throw Error('Provider access changed while reading context. Nothing was sent.')
-      prepared?.validate()
-      // Context preparation can decode retained files asynchronously. Do not call
-      // a dispatch "live/resumed/fresh" or omit stored history based on stale
-      // process state if that native process changed while preparation yielded.
-      const confirmedNativeSession = engine.nextSession({ settings: usedEngine, cwd: usedEngine.workspace || vaultRoot(), chatId: context?.chatId, auth })
-      if ((nativeSession.state === 'fresh') !== (confirmedNativeSession.state === 'fresh')) throw Error('Native session availability changed while context was prepared. Nothing was sent; send again so the exact fresh or continuing context can be reviewed and recorded.')
-      nativeSession = confirmedNativeSession
       const finalLaunchInventory = inspectNativeLaunch(usedEngine.id, usedEngine.workspace || vaultRoot(), app.getPath('home'))
       if (finalLaunchInventory.digest !== launchInventory.digest || (usedEngine.approval === 'full' && !finalLaunchInventory.complete)) throw Error('Native connector, rule, hook or task configuration changed before launch. Nothing was sent; review the folder again.')
       launchInventory = finalLaunchInventory
@@ -1013,7 +1077,7 @@ function registerBridges(): void {
           chatId: context?.chatId,
           cwd: usedEngine.workspace || vaultRoot(),
           settings: usedEngine,
-          auth, images,
+          auth, images, toolFree: sourceBearing,
           checkpointDir: join(app.getPath('userData'), 'checkpoints'),
           shouldCheckpoint: () => automation?.preferences().autoKeep !== false,
           onEvent: output => {
@@ -1030,7 +1094,7 @@ function registerBridges(): void {
                 try {
                   if (ownDispatch !== workDispatchGeneration || policy() !== usedPolicy || JSON.stringify(settings.engine) !== JSON.stringify(savedEngine) || usedCommand !== resolveEngineCommand(usedEngine.id)) throw Error('Task settings changed after the provider overflow. The automatic retry was canceled.')
                   const retryProfile = observedCapacity ? { ...retryContext.contextProfile!, source: 'observed' as const, capacityTokens: observedCapacity, outputReserveTokens: Math.min(10_000_000, retryContext.contextProfile!.outputReserveTokens + envelopeReserve) } : retryContext.contextProfile!
-                  const retryPrepared = await nativeContext.prepare({ ...retryContext, contextProfile: retryProfile }, usedEngine.workspace || vaultRoot(), text, nativeSession.state !== 'fresh', retryController.signal, !observedCapacity)
+                  const retryPrepared = await nativeContext.prepare({ ...retryContext, ...(sourceBearing ? { continuationExpected: false } : {}), contextProfile: retryProfile }, usedEngine.workspace || vaultRoot(), text, sourceBearing ? false : nativeSession.state !== 'fresh', retryController.signal, !observedCapacity)
                   retryPrepared.validate()
                   const retry = finishContext(retryPrepared, retryContext.contextProfile)
                   retry.receipt.omitted = retry.receipt.omitted?.map(item => ({ ...item, reason: 'provider-overflow' as const }))
@@ -1060,21 +1124,29 @@ function registerBridges(): void {
         if (event.kind === 'permission') {
           try {
             const requestId = permissionTickets.issue(event.requestId)
-            const candidate: ReadTrustCandidate = { engine: usedEngine.id, workspace: usedEngine.workspace || vaultRoot(), tool: event.tool, file: event.file, risk: event.risk, projectId: context?.projectId || undefined, turnId: event.transcriptId || '' }
-            const eligible = readTrust.eligible(candidate)
-            let remembered: ReturnType<typeof readTrust.match>
-            try { remembered = eligible ? readTrust.match(candidate) : undefined } catch { remembered = undefined }
-            if (remembered) {
-              if (!permissionTickets.answer(requestId, true)) { engine?.stop(); event = { kind: 'error', text: 'A saved read-only approval matched, but the response could not be delivered. Stop requested; no approval is assumed.', chatId: context?.chatId, transcriptId: event.transcriptId } }
-              else {
-                const applied: EngineEvent = { kind: 'status', text: `Applied saved ${remembered.mode === 'turn' ? 'turn-folder' : remembered.mode === 'project' ? 'project-folder' : remembered.mode} Read approval: ${remembered.scope}`, chatId: context?.chatId, transcriptId: event.transcriptId }
-                automation?.ingest(applied); pushEngineEvent(applied)
-                void hookRunner.run('permission').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
-                return
-              }
+            if (sourceBearing) {
+              // Evidence may shape only the written analysis. It cannot ask the
+              // owner to approve a tool from inside the same source-bearing turn.
+              const refused = permissionTickets.answer(requestId, false)
+              if (!refused) engine?.stop()
+              event = { kind: refused ? 'status' : 'error', text: refused ? 'OddBrain refused a tool request from this source-bearing analysis turn. No tool ran. Start a separate owner-authored action request if needed.' : 'The source-bearing tool request could not be safely refused. Stop requested; no approval is assumed.', chatId: context?.chatId, transcriptId: event.transcriptId }
             } else {
-              if (eligible) pendingReads.set(requestId, { candidate, owner: requestOwner, file: eligible.file, folder: eligible.folder })
-              event = { ...event, requestId, ...(eligible ? { readScopes: { file: eligible.file, folder: eligible.folder, workspace: eligible.workspace, project: !!context?.projectId } } : {}) }
+              const candidate: ReadTrustCandidate = { engine: usedEngine.id, workspace: usedEngine.workspace || vaultRoot(), tool: event.tool, file: event.file, risk: event.risk, projectId: context?.projectId || undefined, turnId: event.transcriptId || '' }
+              const eligible = readTrust.eligible(candidate)
+              let remembered: ReturnType<typeof readTrust.match>
+              try { remembered = eligible ? readTrust.match(candidate) : undefined } catch { remembered = undefined }
+              if (remembered) {
+                if (!permissionTickets.answer(requestId, true)) { engine?.stop(); event = { kind: 'error', text: 'A saved read-only approval matched, but the response could not be delivered. Stop requested; no approval is assumed.', chatId: context?.chatId, transcriptId: event.transcriptId } }
+                else {
+                  const applied: EngineEvent = { kind: 'status', text: `Applied saved ${remembered.mode === 'turn' ? 'turn-folder' : remembered.mode === 'project' ? 'project-folder' : remembered.mode} Read approval: ${remembered.scope}`, chatId: context?.chatId, transcriptId: event.transcriptId }
+                  automation?.ingest(applied); pushEngineEvent(applied)
+                  void hookRunner.run('permission').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
+                  return
+                }
+              } else {
+                if (eligible) pendingReads.set(requestId, { candidate, owner: requestOwner, file: eligible.file, folder: eligible.folder })
+                event = { ...event, requestId, ...(eligible ? { readScopes: { file: eligible.file, folder: eligible.folder, workspace: eligible.workspace, project: !!context?.projectId } } : {}) }
+              }
             }
           } catch { engine?.stop(); event = { kind: 'error', text: 'The permission could not be bound to the active engine. Stop requested; no approval was sent.', chatId: context?.chatId, transcriptId: event.transcriptId } }
         }
@@ -1174,20 +1246,20 @@ function registerBridges(): void {
     if (picked.canceled || !picked.filePaths[0]) return { ok: false, answer: 'Nothing was picked.' }
     const file = picked.filePaths[0]
     if (!existsSync(file)) return { ok: false, answer: 'That file does not exist.' }
+    const next = { 'claude-code': binaryOverride('claude-code'), 'agy': binaryOverride('agy'), [id]: file }
+    try { writeRecoverableJson(join(app.getPath('userData'), 'engine-binaries.json'), next) }
+    catch (error) { return { ok: false, answer: `The engine path was not changed because it could not be saved recoverably: ${(error as Error).message}` } }
     setBinaryOverride(id, file)
-    try {
-      writeFileSync(join(app.getPath('userData'), 'engine-binaries.json'), JSON.stringify({ 'claude-code': binaryOverride('claude-code'), 'agy': binaryOverride('agy') }, null, 2))
-    } catch {}
     detectEngine(id, true).catch(() => {})
     return { ok: true, answer: `${id} is pointed at ${file}. Launches and detection prefer it from now on.`, path: file }
   })
 
   handle('engine:clear-binary', (_event, id: EngineId): { ok: boolean; answer: string } => {
     if (id !== 'claude-code' && id !== 'agy') return { ok: false, answer: 'Unknown engine.' }
+    const next = { 'claude-code': binaryOverride('claude-code'), 'agy': binaryOverride('agy'), [id]: '' }
+    try { writeRecoverableJson(join(app.getPath('userData'), 'engine-binaries.json'), next) }
+    catch (error) { return { ok: false, answer: `The engine path was not cleared because the change could not be saved recoverably: ${(error as Error).message}` } }
     setBinaryOverride(id, '')
-    try {
-      writeFileSync(join(app.getPath('userData'), 'engine-binaries.json'), JSON.stringify({ 'claude-code': binaryOverride('claude-code'), 'agy': binaryOverride('agy') }, null, 2))
-    } catch {}
     detectEngine(id, true).catch(() => {})
     return { ok: true, answer: `${id} is back to automatic detection.` }
   })
@@ -1228,33 +1300,29 @@ function registerBridges(): void {
   })
 
   // The battle tally: a PRIVATE local ledger of what won for this person.
-  // Real counts only, capped, never sent anywhere. No public scoreboard.
+  // Real counts only, never sent anywhere or silently evicted. No public scoreboard.
   const battleLedgerPath = (): string => join(app.getPath('userData'), 'battle-ledger.json')
   type BattleEntry = { prompt: string; winner: string; loser: string; tie: boolean; blind: boolean; at: string }
-  const readLedger = (): BattleEntry[] => {
-    try {
-      const parsed = JSON.parse(readFileSync(battleLedgerPath(), 'utf8')) as BattleEntry[]
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  }
+  const readLedger = (): BattleEntry[] => readRecoverableJson(battleLedgerPath(), value => {
+    if (!Array.isArray(value) || value.some(row => !row || typeof row !== 'object' || typeof row.prompt !== 'string' || row.prompt.length > 20_000 || typeof row.winner !== 'string' || typeof row.loser !== 'string' || typeof row.tie !== 'boolean' || typeof row.blind !== 'boolean' || typeof row.at !== 'string')) throw Error('The battle ledger is damaged.')
+    return value as BattleEntry[]
+  }, []).value
   handle('battle:record', (_event, entry: Partial<BattleEntry>): { ok: boolean; answer: string } => {
-    const prompt = typeof entry?.prompt === 'string' ? entry.prompt.slice(0, 500) : ''
-    const winner = typeof entry?.winner === 'string' ? entry.winner.slice(0, 120) : ''
-    const loser = typeof entry?.loser === 'string' ? entry.loser.slice(0, 120) : ''
+    const prompt = typeof entry?.prompt === 'string' && entry.prompt.length <= 20_000 ? entry.prompt : ''
+    const winner = typeof entry?.winner === 'string' && entry.winner.length <= 300 ? entry.winner : ''
+    const loser = typeof entry?.loser === 'string' && entry.loser.length <= 300 ? entry.loser : ''
     const tie = entry?.tie === true
     if (!prompt || (!tie && (!winner || !loser))) return { ok: false, answer: 'A tally line needs the prompt and the outcome.' }
-    const ledger = readLedger()
-    ledger.push({ prompt, winner, loser, tie, blind: entry?.blind === true, at: new Date().toISOString() })
     try {
-      writeFileSync(battleLedgerPath(), JSON.stringify(ledger.slice(-500), null, 2))
+      const ledger = readLedger()
+      ledger.push({ prompt, winner, loser, tie, blind: entry?.blind === true, at: new Date().toISOString() })
+      writeRecoverableJson(battleLedgerPath(), ledger)
       return { ok: true, answer: `Recorded. ${winner || 'A tie'} leads this prompt now.` }
     } catch (failure) {
       return { ok: false, answer: `Could not write the tally: ${(failure as Error).message}` }
     }
   })
-  handle('battle:ledger', (): { ok: boolean; entries: BattleEntry[] } => ({ ok: true, entries: readLedger().slice(-50).reverse() }))
+  handle('battle:ledger', (): { ok: boolean; entries: BattleEntry[] } => ({ ok: true, entries: readLedger().reverse() }))
 
   // Recipes: saved work orders as plain markdown the owner can read and
   // share. Shown in full before a run; the engine's own cards still gate
@@ -1287,27 +1355,22 @@ function registerBridges(): void {
   // what it does not know). A hook's failure is reported, never fatal.
   const hooksFile = (): string => join(app.getPath('userData'), 'hooks.json')
   const hookRunner = createHookRunner({
-    load: () => {
-      try {
-        const parsed = JSON.parse(readFileSync(hooksFile(), 'utf8')) as unknown
-        return Array.isArray(parsed) ? (parsed as never[]) : []
-      } catch {
-        return []
-      }
-    },
+    load: () => readRecoverableJson(hooksFile(), value => {
+      if (!Array.isArray(value)) throw Error('The hook list is damaged.')
+      return value as never[]
+    }, []).value,
     save: (hooks) => {
-      writeFileSync(hooksFile(), JSON.stringify(hooks, null, 2), 'utf8')
+      writeRecoverableJson(hooksFile(), hooks)
     },
   })
-  const readHooks = (): Array<{ id: string; name: string; event: string; command: string }> => {
-    try {
-      const parsed = JSON.parse(readFileSync(hooksFile(), 'utf8')) as Array<{ id: string; name: string; event: string; command: string }>
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  }
-  handle('hooks:list', () => ({ ok: true, hooks: readHooks() }))
+  const readHooks = (): Array<{ id: string; name: string; event: string; command: string }> => readRecoverableJson(hooksFile(), value => {
+    if (!Array.isArray(value)) throw Error('The hook list is damaged.')
+    return value as Array<{ id: string; name: string; event: string; command: string }>
+  }, []).value
+  handle('hooks:list', () => {
+    try { return { ok: true as const, hooks: readHooks() } }
+    catch (error) { return { ok: false as const, hooks: [], answer: `Hooks could not be loaded safely: ${(error as Error).message}` } }
+  })
   handle('hooks:save', (_event, hook: unknown) => hookRunner.upsert(hook as never))
   handle('hooks:remove', (_event, id: string) => hookRunner.remove(typeof id === 'string' ? id : ''))
   handle('hooks:test', (_event, command: string) => hookRunner.test(typeof command === 'string' ? command : ''))
@@ -1482,13 +1545,19 @@ function registerBridges(): void {
 
   handle('engine:restart', () => restartIdleConnection(engine, dispatchingWork))
 
-  handle('engine:stop', () => {
+  handle('engine:stop', async () => {
     workflows.cancel(); commandRunner.cancel()
     preparing?.controller.abort(); retryPreparing?.abort(); retryPreparing = undefined; overflowRetryPending = false; dispatchingWork = false; permissionTickets.clear(); pendingReads.clear(); if (readTrust.clearTurns()) announceReadTrust()
     workDispatchGeneration++
     automation?.stopWork()
+    const wasRunning = engine?.running() === true || engine?.turnBusy() === true
+    if (!wasRunning) return { ok: true, answer: 'No native process was active.' }
+    const closing = waitForEngineClose(activeTranscript?.transcriptId || '')
     engine?.stop()
-    return { ok: true }
+    const confirmed = await closing
+    return confirmed
+      ? { ok: true, answer: 'Stopped after the native process closed and the final transcript state was saved.' }
+      : { ok: false, answer: 'Stop was requested, but native process exit was not confirmed. The turn remains uncertain; inspect the process and Full transcripts before retrying.' }
   })
 
   // Bringing a brain home. The door streams progress sentences; each becomes
@@ -1640,6 +1709,27 @@ function registerBridges(): void {
     return { ok: true, answer: `${result.count} files copied and verified at ${result.destination}. ${operation === 'restore' ? 'Your current vault is unchanged. Choose this restored folder in Settings → Memory & files → Vault when ready.' : 'Keep another copy on a different drive. This is not an automatic backup schedule.'}` }
   })
 
+  handle('app-data:backup', async (_event, operation: unknown, rendererPreferences: unknown) => {
+    if (operation !== 'create' && operation !== 'restore') return { ok: false, answer: 'Choose app-data backup or restore.' }
+    try {
+      let source = app.getPath('userData')
+      if (operation === 'restore') {
+        const selected = await dialog.showOpenDialog({ title: 'Choose an OddBrain app-data backup folder', properties: ['openDirectory'] })
+        if (selected.canceled || !selected.filePaths[0]) return { ok: false, answer: 'Restore cancelled. Nothing changed.' }
+        source = selected.filePaths[0]
+      }
+      const parent = await dialog.showOpenDialog({ title: operation === 'create' ? 'Choose where to keep the app-data backup' : 'Choose where to create the verified restored app-data copy', properties: ['openDirectory', 'createDirectory'] })
+      if (parent.canceled || !parent.filePaths[0]) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+      const destination = join(parent.filePaths[0], `OddBrain-app-data-${operation === 'create' ? 'backup' : 'restored'}-${Date.now()}-${randomUUID().slice(0, 8)}`)
+      const exclusions = appDataBackupExclusions().join('; ')
+      const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', operation === 'create' ? 'Create app-data backup' : 'Restore to new folder'], defaultId: 0, cancelId: 0, message: operation === 'create' ? 'Back up selected app-private owner data?' : 'Verify and restore app data into a separate new folder?', detail: `Source: ${source}\nDestination: ${destination}\n\nIncluded: app chats, exact native transcripts, Working Notes and review differences, artifacts, projects, recipes, handoffs, reviewed command outcomes, checkpoints, review reports, and supplied non-secret interface preferences.\n\nExcluded: ${exclusions}.\n\nThe vault is a separate backup domain. Restore never replaces live app data automatically.` })
+      if (confirmation.response !== 1) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+      const preferences = operation === 'create' && rendererPreferences && typeof rendererPreferences === 'object' && !Array.isArray(rendererPreferences) ? rendererPreferences as Record<string, string> : {}
+      const result = operation === 'create' ? createAppDataBackup(source, destination, preferences) : restoreAppDataBackup(source, destination)
+      return { ok: true, answer: `${result.files.toLocaleString()} app-data file(s), ${(result.bytes / 1_000_000).toFixed(1)} MB, copied and verified at ${destination}. ${operation === 'restore' ? 'Live app data and the vault are unchanged. Review the restored folder before any manual migration.' : 'Keep it private and retain a separate verified vault backup.'}` }
+    } catch (error) { return { ok: false, answer: `${(error as Error).message} No complete backup or restore is reported.` } }
+  })
+
   // The skills the owner's engine already has — the import list.
   const skillRoots = (id: EngineId): SkillRoot[] => {
     if (id !== 'claude-code' && id !== 'agy') throw Error('Choose a known engine.')
@@ -1757,14 +1847,11 @@ function registerBridges(): void {
   // are remembered; browse reads the index; install re-checks the pinned
   // checksum against the real files and refuses a mismatch outright.
   const indexesFile = (): string => join(app.getPath('userData'), 'extensions', 'indexes.json')
-  const readIndexes = (): Array<{ kind: 'folder' | 'url'; locator: string; addedAt: string }> => {
-    try {
-      const parsed = JSON.parse(readFileSync(indexesFile(), 'utf8'))
-      return Array.isArray(parsed?.indexes) ? parsed.indexes.slice(0, 20) : []
-    } catch {
-      return []
-    }
-  }
+  const readIndexes = (): Array<{ kind: 'folder' | 'url'; locator: string; addedAt: string }> => readRecoverableJson(indexesFile(), value => {
+    const rows = (value as { indexes?: unknown })?.indexes
+    if (!Array.isArray(rows) || rows.length > 20 || rows.some(row => !row || typeof row !== 'object' || !['folder', 'url'].includes(row.kind) || typeof row.locator !== 'string' || typeof row.addedAt !== 'string')) throw Error('The extension index list is damaged or exceeds 20 entries. Nothing was omitted.')
+    return rows as Array<{ kind: 'folder' | 'url'; locator: string; addedAt: string }>
+  }, []).value
   const toSource = (kind: string, locator: string): { kind: 'folder'; path: string } | { kind: 'url'; url: string } | null => {
     const clean = String(locator ?? '').trim()
     if (!clean) return null
@@ -1790,10 +1877,10 @@ function registerBridges(): void {
     if (list.some(item => (item.kind === 'url' ? item.locator : resolve(item.locator)) === key)) {
       return { ok: true, answer: 'That index is already added.' }
     }
+    if (list.length >= 20) return { ok: false, answer: 'Twenty extension indexes are already retained. Remove one before adding another; nothing was evicted.' }
     list.push({ kind: source.kind, locator: source.kind === 'url' ? source.url : source.path, addedAt: new Date().toISOString() })
     try {
-      mkdirSync(dirname(indexesFile()), { recursive: true })
-      writeFileSync(indexesFile(), JSON.stringify({ indexes: list }, null, 2), 'utf8')
+      writeRecoverableJson(indexesFile(), { indexes: list })
       return { ok: true, answer: 'Index added.' }
     } catch {
       return { ok: false, answer: 'The index list could not be written.' }
@@ -1803,7 +1890,7 @@ function registerBridges(): void {
   handle('mods:index-remove', (_event, locator: string): { ok: boolean } => {
     const list = readIndexes().filter(item => item.locator !== String(locator ?? ''))
     try {
-      writeFileSync(indexesFile(), JSON.stringify({ indexes: list }, null, 2), 'utf8')
+      writeRecoverableJson(indexesFile(), { indexes: list })
       return { ok: true }
     } catch {
       return { ok: false }
@@ -2157,14 +2244,19 @@ try {
 try {
   const overrideFile = join(app.getPath('userData'), 'engine-binaries.json')
   if (existsSync(overrideFile)) {
-    const parsed = JSON.parse(readFileSync(overrideFile, 'utf8')) as Record<string, string>
+    const parsed = readRecoverableJson(overrideFile, value => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Engine path choices are damaged.')
+      const row = value as Record<string, unknown>
+      if (['claude-code', 'agy'].some(id => row[id] !== undefined && typeof row[id] !== 'string')) throw Error('Engine path choices are damaged.')
+      return row as Record<string, string>
+    }, {}).value
     for (const id of ['claude-code', 'agy'] as const) {
       const p = typeof parsed[id] === 'string' ? parsed[id] : ''
       if (p && existsSync(p)) setBinaryOverride(id, p)
     }
   }
-} catch {
-  /* a broken override file must never block the boot */
+} catch (error) {
+  console.warn(`[engine] saved binary paths could not be recovered: ${(error as Error).message}`)
 }
 
 const processStartedAt = performance.now()
@@ -2649,17 +2741,20 @@ app.whenReady().then(async () => {
     // the same paired extension. The extension's pairing screen shows where it
     // lives; nothing here trusts the network with it.
     let pairToken = ''
+    const pairFile = join(app.getPath('userData'), 'extension-pair.json')
     try {
-      const pairFile = join(app.getPath('userData'), 'extension-pair.json')
-      const raw = JSON.parse(readFileSync(pairFile, 'utf8')) as { token?: string }
-      if (typeof raw.token === 'string' && raw.token.length >= 32) pairToken = raw.token
-    } catch {}
+      const raw = readRecoverableJson(pairFile, value => {
+        if (!value || typeof value !== 'object' || typeof (value as { token?: unknown }).token !== 'string' || (value as { token: string }).token.length < 32) throw Error('The extension pairing record is damaged.')
+        return value as { token: string }
+      }, { token: '' }).value
+      pairToken = raw.token
+    } catch (error) { console.warn(`[extension] pairing record could not be recovered: ${(error as Error).message}`) }
     if (!pairToken) {
       pairToken = randomBytes(24).toString('hex')
       try {
-        writeFileSync(join(app.getPath('userData'), 'extension-pair.json'), JSON.stringify({ token: pairToken }), 'utf8')
-      } catch {
-        // A failed save means a fresh token next boot; the extension re-pairs. Fine.
+        writeRecoverableJson(pairFile, { token: pairToken })
+      } catch (error) {
+        console.warn(`[extension] fresh pairing token is temporary because it could not be saved: ${(error as Error).message}`)
       }
     }
     extensionApi = await startExtensionApi({
@@ -2677,12 +2772,10 @@ app.whenReady().then(async () => {
     // too — an old extension stops working the moment they rotate.
     handle('extension-pair:get', () => ({ token: pairToken }))
     handle('extension-pair:rotate', () => {
-      pairToken = randomBytes(24).toString('hex')
-      try {
-        writeFileSync(join(app.getPath('userData'), 'extension-pair.json'), JSON.stringify({ token: pairToken }), 'utf8')
-      } catch {
-        // A failed save means the rotation lives until reboot; still told below.
-      }
+      const nextToken = randomBytes(24).toString('hex')
+      try { writeRecoverableJson(pairFile, { token: nextToken }) }
+      catch { return { ok: false, token: pairToken, answer: 'The pairing secret was not rotated because the new secret could not be saved recoverably.' } }
+      pairToken = nextToken
       if (extensionApi) extensionApi.setPairToken(pairToken)
       return { ok: true, token: pairToken }
     })

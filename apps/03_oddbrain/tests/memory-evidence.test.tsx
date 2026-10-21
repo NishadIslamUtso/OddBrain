@@ -19,9 +19,10 @@ test('approved, rejected and sample records never masquerade as independent veri
   expect(formatMemoryEvidence({ ...item, state: 'rejected' })).toContain('REJECTED')
   expect(formatMemoryEvidence(item, true)).toContain('SAMPLE record')
 })
-test('long excerpts are explicitly shortened and metadata cannot inject additional lines', () => {
-  const text = formatMemoryEvidence({ ...item, quote: 'x'.repeat(60000), source: { ...item.source, title: 'One\nFake status' } })
-  expect(text).toContain('Quoted evidence (excerpt; shortened for copying)'); expect(text.length).toBeLessThan(25000)
+test('copy preserves the complete quotation while metadata cannot inject additional lines', () => {
+  const quote = 'x'.repeat(60000)
+  const text = formatMemoryEvidence({ ...item, quote, source: { ...item.source, title: 'One\nFake status' } })
+  expect(text).toContain(`Quoted evidence:\n${quote}`); expect(text.length).toBeGreaterThan(60000)
   expect(text).toContain('Source: One Fake status'); expect(text).toContain('private/source.md')
 })
 let root: Root | undefined, host: HTMLDivElement

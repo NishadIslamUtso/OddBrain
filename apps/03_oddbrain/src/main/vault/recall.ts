@@ -4,9 +4,13 @@ import { createMemoryWorkspace } from '../memory/workspace'
 import { excluded, readPatterns } from './blacklist'
 import { staleBasis } from '../../shared/lib/memoryWorkspace'
 import { localSemanticScores, recallMatches, recallScore, recallSnippet, recallTerms, type RecallHit, type RecallReply } from '../../shared/lib/recall'
+import { scanInstructionSignals, scanTextHazards } from '../../shared/lib/textHazards'
 
-/** Read-only local recall. Semantic expansion is opt-in and uses only this bounded validated corpus. */
-export function searchVault(files: VaultFiles, query: string, options: { localSemantic?: boolean } = {}): RecallReply {
+/** Read-only local recall. Semantic expansion is opt-in and uses only this bounded validated corpus.
+ * Personal recall prefers owner-confirmed records, then their raw/source peers.
+ * Research excludes interpretations at the packet-building layer and ranks direct
+ * evidence first. Pending and rejected organizer proposals are never candidates. */
+export function searchVault(files: VaultFiles, query: string, options: { localSemantic?: boolean; purpose?: 'personal' | 'research'; includeSuspicious?: boolean } = {}): RecallReply {
   const terms = recallTerms(query), hits: RecallHit[] = [], notices = new Set<string>()
   if (!terms.length || query.trim().split(/\s+/).length > 16 || query.length > 500) return { ok: false, hits, incomplete: false, notices: ['Use 1–16 search words, up to 500 characters.'] }
   const patterns = [...readPatterns(files.read('00 System/Privacy & Access.md')), ...readPatterns(files.read('00 System/Connectors/Source Scope.md'))]
@@ -32,9 +36,15 @@ export function searchVault(files: VaultFiles, query: string, options: { localSe
       else catalogueCapped = true
     }
   }
+  const priority = (kind: RecallHit['kind']): number => options.purpose === 'research'
+    ? kind === 'confirmed' ? 0 : kind === 'conversation' ? 20_000 : 10_000
+    : kind === 'confirmed' ? 30_000 : kind === 'conversation' ? 20_000 : 10_000
   const rank = (hit: RecallHit, score: number, match: 'lexical' | 'local-semantic') => {
     catalogue(hit.path)
-    ranked.push({ score, hit: { ...hit, match, text: recallSnippet(hit.text, terms) } })
+    const authority: NonNullable<RecallHit['authority']> = options.purpose === 'research'
+      ? hit.kind === 'confirmed' ? 'owner-confirmed-context' : hit.kind === 'conversation' ? 'quoted-raw-evidence' : 'quoted-file-evidence'
+      : hit.kind === 'confirmed' ? 'owner-confirmed' : hit.kind === 'conversation' ? 'raw-source' : 'saved-file'
+    ranked.push({ score: priority(hit.kind) + score, hit: { ...hit, match, authority, text: recallSnippet(hit.text, terms) } })
   }
   const add = (hit: RecallHit) => {
     const searchable = `${hit.title} ${hit.text} ${hit.speaker} ${hit.date}`
@@ -100,8 +110,20 @@ export function searchVault(files: VaultFiles, query: string, options: { localSe
     if (semanticCapped) notices.add('Local semantic expansion reached its 2,000-entry or 8 MB corpus budget. Narrow the query for a more complete pass.')
   }
   ranked.sort((a, b) => b.score - a.score)
-  const groups = new Map<string, number>(), diverse: typeof ranked = []
+  const reviewed: typeof ranked = []
   for (const row of ranked) {
+    if (row.hit.kind !== 'confirmed') {
+      const invisible = scanTextHazards(row.hit.text).total, instructions = scanInstructionSignals(row.hit.text).total
+      if ((invisible || instructions) && options.includeSuspicious !== true) {
+        notices.add(`A matching ${row.hit.kind === 'conversation' ? 'raw conversation excerpt' : 'saved-file excerpt'} was omitted because the exact excerpt contains ${invisible ? 'invisible or direction-changing text' : 'instruction-like language'}. Open the source to inspect it; it was not sent as model context.`)
+        continue
+      }
+      if (invisible || instructions) notices.add('A source packet contains suspicious text. It remains non-authoritative quoted evidence with no instruction or permission authority; inspect it before sending.')
+    }
+    reviewed.push(row)
+  }
+  const groups = new Map<string, number>(), diverse: typeof ranked = []
+  for (const row of reviewed) {
     if (row.hit.kind === 'conversation') {
       const group = row.hit.id.split('/messages/')[0], count = (groups.get(group) || 0) + 1
       groups.set(group, count)

@@ -22,6 +22,7 @@ import { digest, dhakaParts, parseFollowups, safeSegment, section, splitDocument
 import { createZip, safeEntryName } from './zip'
 import { syncConversation } from './conversations'
 import { scanInstructionSignals, scanTextHazards } from '../../shared/lib/textHazards'
+import { searchVault } from './recall'
 
 export type Payload = Record<string, any>
 
@@ -649,12 +650,29 @@ export function createVaultService({
   }
 
   function context(query: string) {
-    const entries = query ? search(listEntries().filter(entry => entry.suggestion_safe !== false && entry.status !== 'withdrawn'), query).slice(0, 5) : []
+    if (!query.trim()) return { capsules: [], entities: [], claims: [], notices: [], retrieval: 'local-priority-search' }
+    const recalled = searchVault(vault(), query, { purpose: 'personal' })
+    const entries = recalled.hits.slice(0, 5).map(hit => ({
+      id: hit.id,
+      title: hit.title,
+      background: hit.text,
+      content: hit.text,
+      sources: [hit.path],
+      status: hit.kind === 'confirmed' ? 'confirmed' : 'raw',
+      authority: hit.authority,
+      speaker: hit.speaker,
+      date: hit.date,
+      suggestion_safe: false,
+    }))
     return {
-      capsules: entries.filter(entry => entry.type === 'capsule'),
-      entities: entries.filter(entry => entry.type !== 'capsule'),
+      // Explicit companion search may review both groups. Passive typing still
+      // uses its separate opt-in capsule cache and never reaches this route.
+      capsules: entries.filter(entry => entry.status === 'confirmed'),
+      entities: entries.filter(entry => entry.status !== 'confirmed'),
       claims: [],
-      retrieval: 'local-keyword-search',
+      notices: recalled.notices,
+      incomplete: recalled.incomplete,
+      retrieval: 'local-confirmed-then-raw-search',
     }
   }
 

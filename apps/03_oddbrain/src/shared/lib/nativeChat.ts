@@ -1,5 +1,7 @@
 import type { Chat, Message } from '../types'
 import type { Transcript } from './transcripts'
+import { extractArtifacts, wantsArtifact } from './artifacts'
+import { extractCitations } from './citations'
 /** Idempotent presentation of the complete recorded answer. Tool traces and actual
  * context receipts stay linked to the full archive, never relabelled as chat text. */
 export function recordNativeTranscript(chat: Chat, record: Transcript): Chat {
@@ -24,10 +26,14 @@ export function recordNativeTranscript(chat: Chat, record: Transcript): Chat {
   const errors = record.events.filter(e => e.kind === 'error').map(e => e.text).join('\n')
   const session = record.events.filter(e => e.kind === 'session').at(-1)
   const nativeRecord = { pictures: record.header.pictures, ...(record.header.images !== undefined ? { images: record.header.images } : {}), ...(record.header.attachments !== undefined ? { attachments: record.header.attachments } : {}), artifacts: record.events.flatMap(event => event.artifacts || []), transcriptId: record.header.id, chatId: chat.id, engine: record.header.engine, sessionId: session?.kind === 'session' ? session.id : null, context: record.header.context }
-  const at = record.header.at
+  const at = record.header.at, assistantId = record.header.id + ':assistant'
+  const artifactRequested = wantsArtifact(record.userPrompt ?? record.prompt) || /```(?:html|svg)\s*\r?\n/i.test(text) || /^\s*(?:<!doctype html|<html\b)/i.test(text)
+  const artifacts = extractArtifacts(text, { requested: artifactRequested, messageId: assistantId, chatId: chat.id, title: record.header.title, createdAt: at })
+  const citations = extractCitations(text)
   const messages: Message[] = [
     { id: record.header.id + ':user', role: 'user', content: record.userPrompt ?? record.prompt, timestamp: at, nativeRecord, status: 'complete' },
-    { id: record.header.id + ':assistant', role: 'assistant', content: text, thinking, timestamp: at, nativeRecord, model: record.header.model,
+    { id: assistantId, role: 'assistant', content: text, thinking, timestamp: at, nativeRecord, model: record.header.model,
+      ...(artifacts.length ? { artifacts } : {}), ...(citations.length ? { citations } : {}),
       status: record.state === 'done' ? 'complete' : record.state === 'error' ? 'error' : 'stopped', ...(errors ? { error: errors } : {}) },
   ]
   const replacements = new Map(messages.map(m => [m.id, m]))

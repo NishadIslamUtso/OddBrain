@@ -9,7 +9,7 @@ import { resolveChatContext, workingNotesText } from '../shared/lib/chatContext'
 import type { ContextReceipt, NativeConversation } from '../shared/lib/nativeConversation'
 import { decodeInWorker } from './media/workerClient'
 import type { MediaResult } from '../shared/lib/mediaBridge'
-import { scanTextHazards } from '../shared/lib/textHazards'
+import { scanInstructionSignals, scanTextHazards } from '../shared/lib/textHazards'
 import { recallTerms, type RecallReply } from '../shared/lib/recall'
 import { estimateModelTokens } from '../shared/lib/modelContext'
 import { ownerConfirmedVaultRequest } from '../shared/lib/retrievalProposal'
@@ -132,6 +132,8 @@ export function createNativeContext(projectFile: string, grantFile: string, deco
           if (bytes.includes(0)) throw Error(`${ref.label} is not readable UTF-8 text. Nothing was sent.`)
           text = new TextDecoder('utf-8', { fatal: true }).decode(bytes)
         }
+        const hidden = scanTextHazards(text), instructions = scanInstructionSignals(text)
+        if (hidden.total || instructions.total) throw Error(`${ref.label} contains ${hidden.total ? 'invisible or direction-changing text' : 'instruction-like source text'}. It was not sent. Open the original, inspect the flagged source, and use a clean quoted excerpt instead.`)
         chars += text.length
         if (text.length > PROJECT_CONTEXT_LIMITS.perReferenceChars || chars > PROJECT_CONTEXT_LIMITS.maxChars) throw Error('Selected reference text exceeds 24,000 characters per file or 64,000 combined. Nothing was clipped or sent; choose fewer or smaller references.')
         facts[ref.path] = { readable: true, linked: false, sizeBytes: bytes.length, extractedText: text }

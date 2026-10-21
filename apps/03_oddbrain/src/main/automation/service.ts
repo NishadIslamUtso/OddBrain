@@ -68,7 +68,7 @@ export function createAutomationService(options: { file: string; runText: Runner
   const appendText = (text: string, separate: boolean) => {
     if (!work) return
     const next = (separate && work.task.answer ? '\n\n' : '') + text
-    if (!work.overflow && work.task.answer.length + next.length <= 200_000) work.task.answer += next
+    if (!work.overflow && work.task.answer.length + next.length <= 16_000) work.task.answer += next
     else { work.overflow = true; work.task.answer = ''; work.task.sourceComplete = false }
   }
   return {
@@ -104,7 +104,7 @@ export function createAutomationService(options: { file: string; runText: Runner
         const item = work; work = null
         if (event.kind === 'done' && preferences.autoReview) {
           if (item.overflow) {
-            const record = { ...baseRecord(item.task, '', 'error'), error: 'Automatic review skipped: full text exceeded the 200,000-character input limit. Nothing was shortened for a model call; inspect the original native transcript.', clipped: true }
+            const record = { ...baseRecord(item.task, '', 'error'), error: 'Automatic review skipped: the completed result exceeded the 16,000-character review limit. Nothing was shortened for a model call; inspect the original native transcript.', clipped: false }
             try { history.begin(item.task, record); recent(record) } catch (error) { storageNotice = (error as Error).message }
           } else if (item.task.answer.trim()) enqueue(item.task)
         }
@@ -114,7 +114,7 @@ export function createAutomationService(options: { file: string; runText: Runner
     stopWork() { work = null; starting = false; emit(); schedule() },
     review(input: ReviewInput): Promise<Answer> {
       if (disposed || work || starting || preferenceFault) return Promise.resolve({ ok: false, error: preferenceFault || 'Wait for current work before reviewing it.' })
-      if (typeof input?.prompt !== 'string' || typeof input?.answer !== 'string' || !input.answer.trim() || input.prompt.length > 20_000 || input.answer.length > 200_000 || input.sourceComplete === false) return Promise.resolve({ ok: false, error: 'Review needs complete supplied text up to 20,000 request / 200,000 answer characters. Nothing was clipped or sent.' })
+      if (typeof input?.prompt !== 'string' || typeof input?.answer !== 'string' || !input.answer.trim() || input.prompt.length > 8_000 || input.answer.length > 16_000 || input.sourceComplete === false) return Promise.resolve({ ok: false, error: 'Review needs complete supplied text up to 8,000 request / 16,000 result characters. Nothing was clipped or sent.' })
       if (active || queue.some(item => !item.task.automatic)) return Promise.resolve({ ok: false, error: 'A review is already running or queued.' })
       return new Promise(resolve => enqueue({ prompt: input.prompt, answer: input.answer, ...(typeof input.transcriptId === 'string' ? { transcriptId: input.transcriptId } : {}), id: id(), engine: { ...options.engine() }, automatic: false, at: new Date().toISOString() }, resolve))
     },

@@ -8,11 +8,12 @@ export type MediaPreferences = {
 export const DEFAULT_MEDIA: MediaPreferences = { provider: '', model: '', transcriptionProvider: '', transcriptionModel: '', dictation: 'local', language: 'en-US', ffmpeg: '' }
 export function normalizeMedia(raw: unknown): MediaPreferences {
   const v = (raw && typeof raw === 'object' ? raw : {}) as Partial<MediaPreferences>
-  const text = (x: unknown, max = 200): string => typeof x === 'string' && !/[\x00-\x1f]/.test(x) ? x.trim().slice(0, max) : ''
+  const text = (x: unknown, max = 200): string => typeof x === 'string' && x.length <= max && !/[\x00-\x1f]/.test(x) ? x.trim() : ''
   return { provider: text(v.provider), model: text(v.model), transcriptionProvider: text(v.transcriptionProvider), transcriptionModel: text(v.transcriptionModel), dictation: v.dictation === 'provider' ? 'provider' : 'local', language: /^[a-z]{2,3}(?:-[A-Za-z0-9]{2,8})*$/.test(v.language || '') ? v.language! : 'en-US', ffmpeg: text(v.ffmpeg, 4096) }
 }
 export type MediaInput = { name: string; mime: string; bytes: Uint8Array; route: 'local' | 'provider' | 'transcribe'; expected?: { provider: string; model: string } }
-export type MediaResult = { textComplete?: boolean; pages?: { read: number; total: number }; ok: boolean; name: string; text?: string; images?: { name: string; mime: string; data: string }[]; disclosure?: string; error?: string; fallbackAllowed?: boolean }
+export type MediaTextSegment = { id: string; label: string; text: string }
+export type MediaResult = { textComplete?: boolean; pages?: { read: number; total: number }; ok: boolean; name: string; text?: string; segments?: MediaTextSegment[]; images?: { name: string; mime: string; data: string }[]; disclosure?: string; error?: string; fallbackAllowed?: boolean }
 export type MediaBridge = {
   authorizeRecording(expected: { provider: string; model: string }): Promise<MediaResult>
   onCancelled(listener: () => void): () => void

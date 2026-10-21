@@ -81,7 +81,7 @@ function service(root: string, runText = vi.fn(async () => ({ text: 'REVIEW: evi
   return createAutomationService({ file: join(root, 'preferences.json'), runText, engine: () => DEFAULT_ENGINE, idleMs: 1, deadlineMs: 1000 })
 }
 test('more than twenty full review reports survive restart and page through history', async () => {
-  const root = dir(), first = service(root), prompt = 'Complete request '.repeat(200), answer = 'Full supplied answer '.repeat(1500)
+  const root = dir(), first = service(root), prompt = 'Complete request '.repeat(200), answer = 'Full supplied answer '.repeat(500)
   for (let i = 0; i < 24; i++) expect((await first.review({ prompt: `${i}\n${prompt}`, answer })).ok).toBe(true)
   await first.dispose()
   const runner = vi.fn(async () => ({ text: 'Must not run', model: '', clipped: false })), reopened = service(root, runner)

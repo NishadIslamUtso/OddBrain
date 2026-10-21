@@ -1,6 +1,6 @@
-import { readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs'
 import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
-import { dirname, join } from 'node:path'
+import { join } from 'node:path'
+import { readRecoverableJson, writeRecoverableJson } from '../recoverableJson'
 import { tmpdir } from 'node:os'
 import { DEFAULT_MEDIA, MAX_MEDIA_BYTES, normalizeMedia, type MediaInput, type MediaPreferences, type MediaResult } from '../../shared/lib/mediaBridge'
 import { decodeInWorker } from './workerClient'
@@ -12,7 +12,7 @@ import { runMediaCommand } from './process'
 
 export function createMediaService(options: { file: string; onCancelled?(owner: number): void; access(): MediaAccess; decode?: typeof decodeInWorker; fetchImpl?: typeof fetch }) {
   let preferences = { ...DEFAULT_MEDIA }
-  try { preferences = normalizeMedia(JSON.parse(readFileSync(options.file, 'utf8'))) } catch { /* first use */ }
+  try { preferences = readRecoverableJson(options.file, normalizeMedia, { ...DEFAULT_MEDIA }).value } catch { /* first use or unrecoverable owner file */ }
   const jobs = new Map<number, AbortController>()
   const recording = new Map<number, number>()
   const cancel = (owner: number): void => {
@@ -23,8 +23,10 @@ export function createMediaService(options: { file: string; onCancelled?(owner: 
   const cancelAll = (): void => { for (const owner of new Set([...jobs.keys(), ...recording.keys()])) cancel(owner) }
   const update = (patch: Partial<MediaPreferences>, native = false): MediaPreferences => {
     cancelAll()
-    const clean = normalizeMedia({ ...preferences, ...patch, ffmpeg: native || patch?.ffmpeg === '' ? patch.ffmpeg : preferences.ffmpeg })
-    mkdirSync(dirname(options.file), { recursive: true }); writeFileSync(options.file + '.tmp', JSON.stringify(clean), { mode: 0o600 }); renameSync(options.file + '.tmp', options.file)
+    const proposed = { ...preferences, ...patch, ffmpeg: native || patch?.ffmpeg === '' ? patch.ffmpeg : preferences.ffmpeg }
+    for (const [key, value] of Object.entries(proposed)) if (typeof value === 'string' && value.length > (key === 'ffmpeg' ? 4096 : 200)) throw Error('Media setting exceeds its saved limit. Nothing was shortened or changed.')
+    const clean = normalizeMedia(proposed)
+    writeRecoverableJson(options.file, clean)
     preferences = clean; return { ...clean }
   }
   const job = async (owner: number, name: string, run: (signal: AbortSignal) => Promise<MediaResult>): Promise<MediaResult> => {

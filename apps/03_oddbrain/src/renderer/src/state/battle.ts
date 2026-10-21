@@ -95,6 +95,7 @@ export async function runBattle(prompt: string, opponent: string): Promise<void>
   const store = engineStore()
   if (state.active) return
   if (!prompt.trim()) return
+  if (prompt.length > 20_000) { patch({ error: 'The battle prompt exceeds 20,000 characters. Nothing was shortened or sent.' }); return }
   if (!opponent.trim()) {
     patch({ error: 'Name the second brain first.' })
     return
@@ -145,7 +146,7 @@ export async function pickWinner(pick: 'a' | 'b' | 'tie'): Promise<void> {
   if (!state.a || !state.b || state.picked) return
   patch({ picked: pick, blind: false })
   const answer = await getEngineApi().battle.record({
-    prompt: state.prompt.slice(0, 500),
+    prompt: state.prompt,
     winner: pick === 'tie' ? '' : pick === 'a' ? state.a.model : state.b.model,
     loser: pick === 'tie' ? '' : pick === 'a' ? state.b.model : state.a.model,
     tie: pick === 'tie',
@@ -156,7 +157,7 @@ export async function pickWinner(pick: 'a' | 'b' | 'tie'): Promise<void> {
 
 /** Hold the prompt the owner wants fought over, before the fight begins. */
 export const stageBattlePrompt = (prompt: string): void => {
-  if (!state.active) patch({ prompt: prompt.trim().slice(0, 500) })
+  if (!state.active) patch({ prompt: prompt.trim(), error: prompt.length > 20_000 ? 'The battle prompt exceeds 20,000 characters. Nothing was shortened or sent.' : '' })
 }
 
 /** Close the card. The tally keeps what was recorded. */

@@ -1,3 +1,4 @@
+import { SECTIONS, type SectionId } from './settingsSections'
 import MachineFlagRow from './MachineFlagRow'
 import ExtensionInstall from './ExtensionInstall'
 import { SETTINGS_AREAS, areaForSection } from '../state/settingsNavigation'
@@ -147,7 +148,7 @@ function AgentAccessCard({ isDemo }: { isDemo: boolean }): ReactNode {
   )
 }
 
-export type SectionId = 'media' | 'windows' | 'maps' | 'about' | 'agents' | 'hooks' | 'memory' | 'house' | 'skills' | 'recipes' | 'extensions' | 'engine' | 'system' | 'connectors' | 'appearance' | 'models' | 'performance' | 'vault'
+export { SECTIONS, type SectionId } from './settingsSections'
 
 type Row = {
   /** What the row is called, and what the rail's search matches on. */
@@ -159,26 +160,6 @@ type Row = {
   body: ReactNode
 }
 
-export const SECTIONS: readonly { id: SectionId; title: string; group: string; resettable?: boolean }[] = [
-  { id: 'appearance', title: 'Appearance', group: 'Your space', resettable: true },
-  { id: 'windows', title: 'Windows & shortcuts', group: 'Your space' },
-  { id: 'engine', title: 'Engine', group: 'Models & runtime' },
-  { id: 'models', title: 'Models & API keys', group: 'Models & runtime' },
-  { id: 'performance', title: 'Performance', group: 'Models & runtime', resettable: true },
-  { id: 'agents', title: 'Agent access', group: 'Access & connections', resettable: true },
-  { id: 'connectors', title: 'Connectors', group: 'Access & connections' },
-  { id: 'extensions', title: 'Plugins', group: 'Access & connections' },
-  { id: 'media', title: 'Voice & attachments', group: 'Files & memory' },
-  { id: 'vault', title: 'Vault', group: 'Files & memory' },
-  { id: 'memory', title: 'Memory', group: 'Files & memory' },
-  { id: 'maps', title: 'Capture sources', group: 'Files & memory' },
-  { id: 'house', title: 'House rules', group: 'Agent behavior' },
-  { id: 'skills', title: 'Skills', group: 'Agent behavior' },
-  { id: 'recipes', title: 'Recipes', group: 'Agent behavior' },
-  { id: 'hooks', title: 'Hooks', group: 'Agent behavior' },
-  { id: 'system', title: 'System', group: 'Application' },
-  { id: 'about', title: 'About & help', group: 'Application' },
-]
 const COMPOSED_SECTIONS = new Set<SectionId>(['appearance', 'maps', 'engine', 'connectors', 'extensions', 'media', 'house', 'skills', 'recipes', 'hooks', 'memory', 'vault'])
 
 /** Four glyphs, drawn here rather than pulled from a font or a package. */
@@ -314,6 +295,27 @@ function Switch({
       />
     </button>
   )
+}
+
+function AppDataBackupControls(): React.JSX.Element {
+  const [busy, setBusy] = useState(''), [notice, setNotice] = useState('')
+  const safePreferences = (): Record<string, string> => {
+    const kept: Record<string, string> = {}
+    for (let index = 0; index < localStorage.length; index++) {
+      const key = localStorage.key(index); if (!key || key.includes('read-trust') || key.startsWith('oddbrain.sample.')) continue
+      if (!key.startsWith('ai-assistant.') && !key.startsWith('oddbrain.') && !['ai_assistant_prompts', 'claude_exact_skills'].includes(key)) continue
+      const value = localStorage.getItem(key); if (value !== null) kept[key] = value
+    }
+    return kept
+  }
+  const run = async (operation: 'create' | 'restore'): Promise<void> => {
+    if (busy) return
+    setBusy(operation); setNotice('')
+    try { const answer = await bridge.appData.backup(operation, operation === 'create' ? safePreferences() : {}); setNotice(answer.answer) }
+    catch { setNotice('The app-data operation failed. No complete backup or restore is reported.') }
+    finally { setBusy('') }
+  }
+  return <div><p className="text-[12px] leading-relaxed text-muted">A verified app-data backup is separate from the vault. It includes app chats, native transcripts, Working Notes and review differences, artifacts, projects, recipes, handoffs, reviewed outcomes, and non-secret interface preferences.</p><p className="mt-1 text-[11.5px] text-muted">It excludes credentials, pairing secrets, saved access grants, engine sessions, installed engines/models, caches, schedule/queue attempts, and external files. Restore creates a separate folder; it never replaces live data automatically.</p><div className="ob-inline-actions mt-2"><button type="button" disabled={!!busy} onClick={() => void run('create')}>{busy === 'create' ? 'Backing up…' : 'Back up app data'}</button><button type="button" disabled={!!busy} onClick={() => void run('restore')}>{busy === 'restore' ? 'Verifying…' : 'Restore app data to new folder'}</button></div>{notice ? <p className="ob-inline-note" role="status">{notice}</p> : null}</div>
 }
 
 function ChatStorageControls({ storage }: { storage: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'importRecovery' | 'openStorageLocation'> }): React.JSX.Element {
@@ -703,7 +705,10 @@ export default function SettingsView({
           </div>
         ),
       },
-      ...(!isDemo ? [{ label: 'App-chat storage', terms: 'chat conversation storage recovery export import restore merge retry folder backup', body: <ChatStorageControls storage={chatStorage} /> }] : []),
+      ...(!isDemo ? [
+        { label: 'App-data backup', terms: 'backup restore app private data transcripts working notes artifacts projects preferences', body: <AppDataBackupControls /> },
+        { label: 'App-chat storage', terms: 'chat conversation storage recovery export import restore merge retry folder backup', body: <ChatStorageControls storage={chatStorage} /> },
+      ] : []),
       ...(isDemo
         ? [
             {

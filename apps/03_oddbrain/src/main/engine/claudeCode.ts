@@ -50,6 +50,8 @@ export type StartSessionInput = {
   settings: EngineSettings
   /** Pictures for THIS task, already validated by the door. */
   images?: Array<{ mime: string; data: string }>
+  /** Isolated evidence analysis: no tool registry and no native resume. */
+  toolFree?: boolean
   /** Where kept copies go, when the app asked for checkpoints at all. */
   checkpointDir?: string
   /** Read at each approval: a live session must honor Auto-keep changes. */
@@ -89,7 +91,7 @@ export type EngineStartInput = Omit<StartSessionInput, 'spawnProcess'>
  * permission flags are the difference between "the app gates every tool" and
  * "the CLI does whatever it likes" — see the header comment.
  */
-export function engineArguments(model: string, approval: ApprovalMode = 'ask', resumeId = ''): string[] {
+export function engineArguments(model: string, approval: ApprovalMode = 'ask', resumeId = '', toolFree = false): string[] {
   const args = [
     '--output-format', 'stream-json',
     '--input-format', 'stream-json',
@@ -100,8 +102,9 @@ export function engineArguments(model: string, approval: ApprovalMode = 'ask', r
     '--permission-mode', PERMISSION_MODE[approval],
     '--permission-prompt-tool', 'stdio',
   ]
+  if (toolFree) args.push('--tools', '', '--strict-mcp-config', '--mcp-config', '{"mcpServers":{}}', '--setting-sources', '')
   if (model) args.push('--model', model)
-  if (resumeId) args.push('--resume', resumeId)
+  if (resumeId && !toolFree) args.push('--resume', resumeId)
   return args
 }
 
@@ -186,7 +189,7 @@ export function brainEnvironment(baseUrl: string, apiKey?: string): Record<strin
 }
 
 export function startClaudeCodeSession(input: StartSessionInput): EngineSession {
-  const args = engineArguments(input.settings.model, input.settings.approval, input.resumeId)
+  const args = engineArguments(input.settings.model, input.settings.approval, input.resumeId, input.toolFree === true)
   const effort = selectedEffort(input.settings)
   if (effort !== 'default') args.push('--effort', effort)
 

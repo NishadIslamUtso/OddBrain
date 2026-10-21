@@ -118,14 +118,17 @@ function oddExtractPage(mode = "page") {
       error:
         "No readable text was found. Try selecting a passage, or use Page structure.",
     };
-  const truncated = text.length > 60000;
+  if (text.length > 60000)
+    return {
+      ok: false,
+      error: "This page text exceeds the 60,000-character capture limit. Select a smaller passage; nothing was shortened or saved.",
+    };
   return {
     ok: true,
     url: location.href,
     title: document.title,
-    content: text.slice(0, 60000),
-    completeness:
-      completeness + (truncated ? ", limited to 60,000 characters" : ""),
+    content: text,
+    completeness,
     type: "web_page",
   };
 }

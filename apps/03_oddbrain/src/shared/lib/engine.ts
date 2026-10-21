@@ -154,7 +154,7 @@ export function normalizeEngine(raw: unknown): EngineSettings {
   const value = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const id = ENGINES.includes(value.id as EngineId) ? (value.id as EngineId) : DEFAULT_ENGINE.id
   const text = (input: unknown, fallback: string, limit: number): string => {
-    const trimmed = typeof input === 'string' ? input.trim().slice(0, limit) : ''
+    const trimmed = typeof input === 'string' && input.length <= limit ? input.trim() : ''
     return trimmed || fallback
   }
   const model = text(value.model, DEFAULT_ENGINE.model, 300)
@@ -164,7 +164,7 @@ export function normalizeEngine(raw: unknown): EngineSettings {
     // older builds carry it. It migrates to the honest empty choice.
     model: MODEL_PATTERN.test(model) && model !== 'gemma4:cloud' ? model : '',
     baseUrl: text(value.baseUrl, DEFAULT_ENGINE.baseUrl, 2048),
-    workspace: typeof value.workspace === 'string' ? value.workspace.trim().slice(0, 4096) : '',
+    workspace: typeof value.workspace === 'string' && value.workspace.length <= 4096 ? value.workspace.trim() : '',
     approval: APPROVAL_MODES.includes(value.approval as ApprovalMode)
       ? (value.approval as ApprovalMode)
       : 'ask',

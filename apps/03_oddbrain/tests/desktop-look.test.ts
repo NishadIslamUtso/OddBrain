@@ -111,7 +111,7 @@ test('quiz, verdicts, shortlist and notes remain functional persistent choices',
 })
 test('all native provider-key controls stay byte-for-byte intact across the settings move', () => {
   // Pin real behavior directly. No replacement key forms or fake saves.
-  const current = readFileSync(resolve('src/renderer/src/components/SettingsView.tsx'), 'utf8').replace(/\r\n/g, '\n')
+  const current = (readFileSync(resolve('src/renderer/src/components/SettingsView.tsx'), 'utf8') + '\n' + readFileSync(resolve('src/renderer/src/components/settingsSections.ts'), 'utf8')).replace(/\r\n/g, '\n')
   const providerStart = current.indexOf('          ...providers.map(provider => ({')
   const providerBlock = current.slice(providerStart, current.indexOf('          ...(providersError', providerStart))
   assert.equal(createHash('sha256').update(providerBlock).digest('hex'), 'faf8c2006bca3bce1bfb09a30dbbe5df0bb76b87b7106612453897596b1bc023')

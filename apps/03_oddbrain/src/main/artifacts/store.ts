@@ -123,7 +123,7 @@ export function validId(id: unknown): id is string {
 
 function cleanTitle(value: unknown, fallback: string): string {
   const text = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : ''
-  return (text || fallback).slice(0, MAX_TITLE)
+  return text || fallback
 }
 
 function isKind(value: unknown): value is ArtifactKind {
@@ -165,7 +165,7 @@ function normalizeRecord(raw: unknown): ArtifactRecord | null {
     versions.push({
       file: candidate.file,
       savedAt: isoOr(candidate.savedAt, nowIso()),
-      ...(typeof candidate.note === 'string' && candidate.note ? { note: candidate.note.slice(0, 300) } : {}),
+      ...(typeof candidate.note === 'string' && candidate.note ? { note: candidate.note } : {}),
     })
   }
   // A record whose files all failed validation is not a record.
@@ -183,8 +183,8 @@ function normalizeRecord(raw: unknown): ArtifactRecord | null {
     current,
     versions,
   }
-  if (typeof value.chatId === 'string' && value.chatId) record.chatId = value.chatId.slice(0, 64)
-  if (typeof value.messageId === 'string') record.messageId = value.messageId.slice(0, 64)
+  if (typeof value.chatId === 'string' && value.chatId) record.chatId = value.chatId
+  if (typeof value.messageId === 'string') record.messageId = value.messageId
   return record
 }
 
@@ -398,7 +398,7 @@ function writeVersion(root: string, record: ArtifactRecord, content: string, sav
       next++
     }
   }
-  record.versions.push({ file, savedAt, ...(note ? { note: note.slice(0, 300) } : {}) })
+  record.versions.push({ file, savedAt, ...(note ? { note: note } : {}) })
   record.current = record.versions.length - 1
 }
 
@@ -412,6 +412,9 @@ export function save(root: string, input: SaveInput): ItemAnswer {
   if (!input || typeof input !== 'object' || typeof input.content !== 'string' || !input.content.trim()) {
     return { ok: false, error: 'There is nothing to save: the artifact is empty.' }
   }
+  if (typeof input.title === 'string' && input.title.trim().replace(/\s+/g, ' ').length > MAX_TITLE) return { ok: false, error: `Artifact title exceeds ${MAX_TITLE} characters. Nothing was shortened or saved.` }
+  if (typeof input.note === 'string' && input.note.length > 300) return { ok: false, error: 'Artifact version note exceeds 300 characters. Nothing was shortened or saved.' }
+  if ((typeof input.chatId === 'string' && input.chatId.length > 500) || (typeof input.messageId === 'string' && input.messageId.length > 500)) return { ok: false, error: 'Artifact provenance identity exceeds 500 characters. Nothing was shortened or saved.' }
   const bytes = Buffer.byteLength(input.content, 'utf8')
   if (bytes > MAX_CONTENT_BYTES) {
     return { ok: false, error: `That document is ${Math.round(bytes / 1_000_000)} MB, past the 4 MB a version may hold.` }
@@ -458,8 +461,8 @@ export function save(root: string, input: SaveInput): ItemAnswer {
     current: 0,
     versions: [],
   }
-  if (typeof input.chatId === 'string' && input.chatId) record.chatId = input.chatId.slice(0, 64)
-  if (typeof input.messageId === 'string' && input.messageId) record.messageId = input.messageId.slice(0, 64)
+  if (typeof input.chatId === 'string' && input.chatId) record.chatId = input.chatId
+  if (typeof input.messageId === 'string' && input.messageId) record.messageId = input.messageId
   writeVersion(root, record, input.content, at, input.note)
   index.items.push(record)
   writeIndex(root, index)
@@ -481,6 +484,7 @@ export function rename(root: string, id: unknown, title: unknown): ItemAnswer {
   if (!validId(id)) return { ok: false, error: 'That is not an id this app made.' }
   const clean = typeof title === 'string' ? title.trim() : ''
   if (!clean) return { ok: false, error: 'A title cannot be empty.' }
+  if (clean.replace(/\s+/g, ' ').length > MAX_TITLE) return { ok: false, error: `Artifact title exceeds ${MAX_TITLE} characters. Nothing was shortened.` }
   const { index } = readIndex(root)
   const record = index.items.find(item => item.id === id)
   if (!record) return { ok: false, error: 'That artifact is not in the library any more.' }
@@ -568,8 +572,8 @@ export function adopt(root: string, records: unknown): { ok: true; adopted: numb
       current: 0,
       versions: [],
     }
-    if (typeof row.chatId === 'string' && row.chatId) record.chatId = row.chatId.slice(0, 64)
-    if (typeof row.messageId === 'string' && row.messageId) record.messageId = row.messageId.slice(0, 64)
+    if (typeof row.chatId === 'string' && row.chatId) record.chatId = row.chatId
+    if (typeof row.messageId === 'string' && row.messageId) record.messageId = row.messageId
     try {
       writeVersion(root, record, row.content, record.createdAt)
       index.items.push(record)

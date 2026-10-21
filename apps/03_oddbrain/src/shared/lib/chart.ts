@@ -47,10 +47,12 @@ export function parseChartSpec(source = ''): ChartParseResult {
     if (spec.values.some(value => value < 0)) return { error: 'Pie chart values cannot be negative.' }
     if (!spec.values.some(value => value > 0)) return { error: 'Pie chart needs at least one positive value.' }
   }
+  if (spec.title !== undefined && (typeof spec.title !== 'string' || spec.title.length > 80)) return { error: 'Chart title must be at most 80 characters. Nothing was shortened.' }
+  if (spec.labels.some(label => typeof label !== 'string' || label.length > 40)) return { error: 'Every chart label must be text of at most 40 characters. Nothing was shortened.' }
   return {
     type: spec.type as ChartSpec['type'],
-    title: typeof spec.title === 'string' ? spec.title.slice(0, 80) : '',
-    labels: spec.labels.map(label => String(label).slice(0, 40)),
+    title: spec.title || '',
+    labels: [...spec.labels] as string[],
     values: spec.values,
   }
 }

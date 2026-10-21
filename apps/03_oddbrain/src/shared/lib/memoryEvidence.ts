@@ -1,7 +1,7 @@
 import type { MemoryProposal } from './memoryWorkspace'
 
-const line = (value: string) => value.replace(/[\r\n\u2028\u2029]/g, ' ').slice(0, 1000) + (value.length > 1000 ? ' [shortened]' : '')
-const section = (label: string, text: string, limit: number) => `${label}${text.length > limit ? ' (excerpt; shortened for copying)' : ''}:\n${text.slice(0, limit)}`
+const line = (value: string) => value.replace(/[\r\n\u2028\u2029]/g, ' ')
+const section = (label: string, text: string) => `${label}:\n${text}`
 /** A plain-text handoff, not an approval or an instruction to another model. */
 export function formatMemoryEvidence(item: MemoryProposal, sample = false): string {
   const state = item.state === 'approved' ? 'Confirmed by the user; not independently verified' : item.state === 'pending' ? 'UNVERIFIED — awaiting user review' : 'REJECTED — do not treat as a confirmed fact'
@@ -14,9 +14,9 @@ export function formatMemoryEvidence(item: MemoryProposal, sample = false): stri
     `Wording: ${item.authored === 'ai' ? `AI (${line(item.model)})` : 'Edited by the user'}`,
     `Event date: ${line(item.date) || 'Unknown'}`,
     `Observed: ${line(item.source.observed) || 'Unknown'} (not necessarily the event date)`,
-    section('Interpretation', item.text, 20000),
-    section('Qualification', item.uncertainty || 'None recorded; this is not a certainty guarantee.', 2000),
-    section('Quoted evidence', item.quote, 20000),
+    section('Interpretation', item.text),
+    section('Qualification', item.uncertainty || 'None recorded; this is not a certainty guarantee.'),
+    section('Quoted evidence', item.quote),
     `Source: ${line(item.source.title)} · ${line(item.source.provider)}`,
     `Speaker / role: ${line(item.source.speaker)} / ${line(item.source.role)}`,
     `Conversation: ${line(item.source.conversation)} · message: ${line(item.source.message)}`,

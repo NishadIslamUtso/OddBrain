@@ -19,7 +19,7 @@ import { startAgySession } from './agy'
 
 export type EngineAnswer = { ok: boolean; answer: string; transcriptId?: string }
 export type NativeSessionState = { state: 'live' | 'resumed' | 'fresh'; detail: string }
-type SessionTarget = Pick<EngineStartInput, 'settings' | 'cwd' | 'chatId' | 'auth'>
+type SessionTarget = Pick<EngineStartInput, 'settings' | 'cwd' | 'chatId' | 'auth' | 'toolFree'>
 
 export type EngineSocket = {
   /** Which provider's key the LIVE process was launched with, if any. */
@@ -81,6 +81,7 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
   let sessionProvider: string | null = null
   let sessionCommand: string | null = null
   let sessionApproval: string | null = null
+  let sessionToolFree: boolean | null = null
   // What the living process was LAUNCHED with: a flag or a base URL that
   // changed under it would only apply on the next start, silently.
   let sessionThinking: string | null = null
@@ -101,10 +102,10 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
     // The socket owns the busy flag: a finished or failed task frees the
     // engine for the next one. Everything else is forwarded untouched.
     if (event.kind === 'done' || event.kind === 'error') busy = false
-    if (event.kind === 'session') {
+    if (event.kind === 'session' && !input.toolFree) {
       // Persisted per workspace, so the next launch of the app can continue
-      // this conversation where it left off. (The live process is tracked by
-      // `session` itself; the memory matters only after the process is gone.)
+      // this conversation where it left off. Isolated evidence analysis never
+      // replaces that owner conversation's resume link.
       try { memory.save(sessionKey(input.settings.id, input.cwd, input.chatId), event.id) }
       catch {
         input.onEvent(event) // retain the complete observed ID in the durable turn record
@@ -121,11 +122,13 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
     sessionModel !== input.settings.model ||
     sessionProvider !== input.settings.cloudProvider ||
     sessionApproval !== input.settings.approval ||
+    sessionToolFree !== (input.toolFree === true) ||
     sessionThinking !== selectedEffort(input.settings) ||
     sessionBaseUrl !== input.settings.baseUrl ||
     sessionKeyFingerprint !== authFingerprint(input.auth?.apiKey) ||
     currentCwd !== input.cwd || currentChatId !== input.chatId || sessionEngine !== input.settings.id
   const nextSession = (input: SessionTarget): NativeSessionState => {
+    if (input.toolFree) return { state: 'fresh', detail: 'Started an isolated tool-free process without a native resume link; selected stored chat context is supplied explicitly.' }
     if (session?.isRunning() && !gearChanged(input)) return { state: 'live', detail: 'Reused the already-running native process with the same engine, folder, model and permission gear.' }
     const resumeId = memory.load(sessionKey(input.settings.id, input.cwd, input.chatId))
     return resumeId
@@ -158,6 +161,15 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       // its own documented stream (live signed-in acceptance remains separate). An engine that is
       // missing from the machine says so honestly at spawn time — the branch
       // below routes to the right adapter by the setting, nothing else.
+      // Source-bearing analysis is isolated per turn: it cannot inherit a
+      // process, tool registry, or native conversation from any earlier scope.
+      if (input.toolFree && session) {
+        generation += 1
+        session.stop()
+        session = null
+        sessionEngine = null
+        busy = false
+      }
       // A different engine was picked: the old process is not asked to speak
       // the other's wire — it is set aside and the chosen engine starts fresh.
       if (session && sessionEngine && input.settings.id !== sessionEngine) {
@@ -196,7 +208,7 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       // (or the engine) closed, continue it — the owner's conversation is not
       // lost just because a process ended.
       let resumeId: string
-      try { resumeId = memory.load(sessionKey(input.settings.id, input.cwd, input.chatId)) }
+      try { resumeId = input.toolFree ? '' : memory.load(sessionKey(input.settings.id, input.cwd, input.chatId)) }
       catch { return { ok: false, answer: 'Saved sessions could not be read. The original index is retained; no message was sent or fresh session silently substituted.' } }
       activeInput = input
       session = start({ ...input, resumeId })
@@ -206,6 +218,7 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       sessionProvider = input.settings.cloudProvider
       sessionCommand = command
       sessionApproval = input.settings.approval
+      sessionToolFree = input.toolFree === true
       sessionThinking = selectedEffort(input.settings)
       sessionBaseUrl = input.settings.baseUrl
       sessionKeyFingerprint = authFingerprint(input.auth?.apiKey)
@@ -244,6 +257,7 @@ export function createEngineSocket(memory: SessionMemory = noSessionMemory): Eng
       sessionProvider = null
       sessionCommand = null
       sessionApproval = null
+      sessionToolFree = null
       sessionThinking = null
       sessionBaseUrl = null
       sessionKeyFingerprint = null

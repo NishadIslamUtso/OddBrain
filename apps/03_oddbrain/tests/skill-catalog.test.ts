@@ -114,7 +114,7 @@ test('the door refuses names outside the catalog and reports network or archive 
 
 test('the face lists the catalog and installs through the guarded IPC door', () => {
   const read = (relative: string): string => readFileSync(`${process.cwd()}/${relative}`, 'utf8')
-  assert.match(read('src/renderer/src/components/SettingsView.tsx'), /id: 'skills'/)
+  assert.match(read('src/renderer/src/components/settingsSections.ts'), /id: 'skills'/)
   assert.match(read('src/renderer/src/components/SkillsCatalogSection.tsx'), /planCatalog/)
   assert.match(read('src/main/index.ts'), /skills:plan-catalog/)
   assert.match(read('src/preload/index.ts'), /skills:plan-catalog/)

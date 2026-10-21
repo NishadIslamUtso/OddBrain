@@ -9,6 +9,9 @@ import ArtifactCard from './ArtifactCard'
 import BrainMark from './BrainMark'
 import CopyText from '../ui/CopyText'
 import { useLook } from '../ui/LookContext'
+import InlineCharts from './InlineCharts'
+import { extractCitations } from '@shared/lib/citations'
+import { pickGerund } from '@shared/lib/gerunds'
 
 /**
  * One turn in the conversation.
@@ -78,6 +81,13 @@ export default function MessageRow({
   }
 
   const streaming = message.status === 'streaming'
+  const displayContent = message.content.replace(/```chart\s*\r?\n[\s\S]*?```/gi, '').trim()
+  const citations = message.citations?.length ? message.citations : extractCitations(message.content)
+  const workingWord = pickGerund(() => {
+    let value = 0
+    for (const character of message.id) value = (value * 31 + character.charCodeAt(0)) >>> 0
+    return value / 0x1_0000_0000
+  })
   // The owner's rule: collapsed unless he opened one — and then ALWAYS open.
   const [thinkingOpen, setThinkingOpenState] = useState(thinkingOpenNow())
   useEffect(() => {
@@ -110,16 +120,17 @@ export default function MessageRow({
           <p className="mb-2 text-[12px] text-muted">{message.stage}</p>
         ) : null}
 
-        {message.content && (look.streamReplies || !streaming) ? (
+        {displayContent && (look.streamReplies || !streaming) ? (
           <div className="whitespace-pre-wrap break-words text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
-            {message.content}
+            {displayContent}
           </div>
         ) : null}
-        {message.content && message.status !== 'streaming' ? <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div> : null}
+        {message.content ? <InlineCharts text={message.content} /> : null}
+        {message.content && message.status !== 'streaming' ? <div className="ob-message-actions"><CopyText text={message.content} label="Copy complete answer" /></div> : null}
         {message.content && message.status !== 'streaming' ? <ReadAloudButton text={message.content} /> : null}
 
         {streaming && !message.content && !message.stage ? (
-          <p className="text-[13px] text-muted">Thinking…</p>
+          <p className="text-[13px] text-muted">{workingWord}…</p>
         ) : null}
         {streaming && message.content && look.streamReplies ? (
           <span className="caret ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 bg-accent" />
@@ -143,12 +154,13 @@ export default function MessageRow({
           </ul>
         ) : null}
 
-        {message.citations && message.citations.length > 0 ? (
-          <ul className="mt-3 flex flex-wrap gap-1.5">
-            {message.citations.map(citation => (
+        {citations.length > 0 ? (
+          <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Sources linked in this answer">
+            {citations.map(citation => (
               <li key={citation.id}>
                 <a
                   href={citation.url}
+                  rel="noreferrer"
                   className="rounded-md border border-line px-2 py-1 text-[11px] text-muted hover:border-accent/50 hover:text-ink"
                 >
                   {citation.label}

@@ -43,10 +43,11 @@ describe("page previews exclude secrets and preserve plain text", () => {
     expect(result.content).toBe("oose this af");
     expect(result.content).not.toContain("SECRET");
   });
-  it("reports truncation rather than claiming complete capture", () => {
+  it("refuses an oversized page rather than claiming a clipped capture is complete", () => {
     document.body.innerHTML = "<article>" + "a".repeat(61000) + "</article>";
     const result = oddExtractPage("page");
-    expect(result.content).toHaveLength(60000);
-    expect(result.completeness).toContain("limited");
+    expect(result.ok).toBe(false);
+    expect(result.error).toContain("nothing was shortened or saved");
+    expect(result.content).toBeUndefined();
   });
 });

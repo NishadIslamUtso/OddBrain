@@ -49,7 +49,7 @@ const exactExcerpt = (text: string, terms: string[]) => {
 
 /** Build a reviewable citation packet only from already-saved, privacy-checked originals. No model or network call. */
 export function researchSavedSources(files: VaultFiles, input: string): ResearchPacket {
-  const query = String(input || '').trim(), recalled = searchVault(files, query)
+  const query = String(input || '').trim(), recalled = searchVault(files, query, { purpose: 'research', includeSuspicious: true })
   const notices = new Set(recalled.notices)
   if (!recalled.ok) return { ok: false, query, sources: [], packet: '', incomplete: recalled.incomplete, notices: recalled.notices, retrieval: 'local-saved-source-search' }
   const terms = recallTerms(query), sources: ResearchSource[] = [], seen = new Set<string>()

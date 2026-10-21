@@ -93,6 +93,8 @@ export type EngineState = {
   pull: PullState
   /** Whether the engine process is alive on this machine, as last reported. */
   alive: boolean
+  /** A stop was requested; the turn stays active until a durable close event arrives. */
+  stopping: boolean
   /**
    * Live engine activity seen from ANOTHER window: this window has no turn of
    * its own, but the machine's engine is clearly working. Read-only by design
@@ -173,6 +175,7 @@ const state: EngineState = {
   detection: { loading: false, engines: [] },
   pull: { active: false, name: '', status: '', fraction: null, error: '' },
   alive: false,
+  stopping: false,
   ambient: { busy: false, note: '', updatedAt: null },
   totals: { turns: 0, inTokens: 0, outTokens: 0, costUsd: 0 },
   line: [],
@@ -231,7 +234,7 @@ const afterTurnClosed = (turn: EngineTurn): void => {
 
 /** The line: parked work orders, run in order when the engine is free. */
 const drainLine = (): void => {
-  if (lineHeld() || sending || draining || state.ambient.busy || state.turn?.state === 'running') return
+  if (lineHeld() || sending || draining || state.stopping || state.ambient.busy || state.turn?.state === 'running') return
   const next = state.line.find(item => item.status === 'queued' && item.eligible)
   if (!next) return
   draining = true
@@ -274,7 +277,7 @@ const ingest = (event: EngineEvent): void => {
   }
   // The engine's existence is not a per-turn fact: even with no task under
   // way, a closed engine must dim its light.
-  if (event.kind === 'closed') state.alive = false
+  if (event.kind === 'closed') { state.alive = false; state.stopping = false }
   if (event.kind === 'done' || event.kind === 'error') {
     repeats.key = ''
     repeats.count = 0
@@ -431,6 +434,9 @@ const store: EngineStore = {
   get alive() {
     return state.alive
   },
+  get stopping() {
+    return state.stopping
+  },
   get ambient() {
     return state.ambient
   },
@@ -533,8 +539,8 @@ const store: EngineStore = {
   },
 
   async send(prompt: string, pictures: Array<{ mime: string; data: string }> = [], conversation?: NativeConversation, queuedId?: string, originalFiles: EngineSourceFile[] = []): Promise<{ ok: boolean; answer: string; transcriptId?: string }> {
-    if (sending || state.ambient.busy || state.turn?.state === 'running') {
-      return { ok: false, answer: 'The engine is already working on the last task.' }
+    if (sending || state.stopping || state.ambient.busy || state.turn?.state === 'running') {
+      return { ok: false, answer: state.stopping ? 'Stop is still being confirmed. Inspect the final status before sending anything else.' : 'The engine is already working on the current task.' }
     }
     // Hydrate BEFORE the first send, not beside it: a cold window that sends
     // immediately must go out with the real engine and folder, not defaults.
@@ -542,7 +548,7 @@ const store: EngineStore = {
     try {
     await store.init()
     if (own !== sendGeneration) return { ok: false, answer: 'Send canceled before dispatch. Your draft was not sent.' }
-    if (store.turn?.state === 'running') return { ok: false, answer: 'The engine is already working on the last task.' }
+    if (state.stopping || store.turn?.state === 'running') return { ok: false, answer: state.stopping ? 'Stop is still being confirmed. Inspect the final status before sending anything else.' : 'The engine is already working on the current task.' }
     repeats.key = ''
     repeats.count = 0
     const turn: EngineTurn = { chatId: conversation?.chatId, prompt, engine: state.settings.id, model: state.settings.model, items: [], permissions: [], state: 'running', sessionId: null, usage: null, pictures: pictures.length }
@@ -704,16 +710,25 @@ const store: EngineStore = {
   },
 
   async stop(): Promise<void> {
+    if (state.stopping) return
     sendGeneration++
-    await getEngineApi().stop()
-    // Belt and suspenders: the 'closed' event also closes the turn, but the
-    // person who pressed Stop should never wait for a wire to agree.
-    state.alive = false
     const turn = state.turn
-    if (turn?.state === 'running') {
-      turn.items.push({ kind: 'status', text: 'stopped by you' })
-      turn.state = 'done'
-      turn.permissions = []
+    state.stopping = true
+    if (turn?.state === 'running') turn.items.push({ kind: 'status', text: 'Stop requested… waiting for the native process and final transcript record.' })
+    emit()
+    try {
+      const answer = await getEngineApi().stop()
+      if (!answer.ok && state.turn?.state === 'running') {
+        state.turn.items.push({ kind: 'status', text: answer.answer || 'Stop exit is uncertain. Inspect Full transcripts and active processes before retrying.' })
+        emit()
+      }
+      // A dispatched turn closes only through its durable `closed` event.
+      // During cold initialization there was no native process to wait for, so
+      // the stop acknowledgement itself completes the cancellation.
+      if (turn?.state !== 'running') { state.stopping = false; emit() }
+    } catch {
+      if (state.turn?.state === 'running') state.turn.items.push({ kind: 'status', text: 'The stop request response was lost. Exit is uncertain; inspect Full transcripts and active processes before retrying.' })
+      else state.stopping = false
       emit()
     }
   },
@@ -772,6 +787,7 @@ export function resetEngineForTests(): void {
   state.detection = { loading: false, engines: [] }
   state.pull = { active: false, name: '', status: '', fraction: null, error: '' }
   state.alive = false
+  state.stopping = false
   state.ambient = { busy: false, note: '', updatedAt: null }
   emit()
 }

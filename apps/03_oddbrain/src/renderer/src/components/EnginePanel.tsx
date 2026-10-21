@@ -169,16 +169,17 @@ export default function EnginePanel({ chatId }: { chatId?: string } = {}) {
         <details className="ob-task-meta"><summary>Task details</summary><p>
           Engine · {turn.engine || engine.settings.id} · {modelLabel(turn.model ?? engine.settings.model)}
           {' · ' + (engine.settings.workspace ? engine.settings.workspace.split(/[\\/]/).filter(Boolean).at(-1) : 'vault')}
-          {turn.state === 'running' ? ` · ${PHASE_LABEL[phase]}…` : turn.state === 'error' ? ' · stopped' : ' · done'}
+          {turn.state === 'running' ? engine.stopping ? ' · stopping…' : ` · ${PHASE_LABEL[phase]}…` : turn.state === 'error' ? ' · stopped' : ' · done'}
           {` · ${formatTotals(engine.totals)}`}
                 </p></details>
         {turn.state === 'running' ? (
           <button
             type="button"
+            disabled={engine.stopping}
             onClick={() => void engine.stop()}
-            className="ml-auto flex items-center gap-1 rounded-lg border border-line px-2 py-0.5 text-[11px] text-muted hover:text-ink"
+            className="ml-auto flex items-center gap-1 rounded-lg border border-line px-2 py-0.5 text-[11px] text-muted hover:text-ink disabled:opacity-60"
           >
-            <Square size={10} /> Stop
+            <Square size={10} /> {engine.stopping ? 'Stopping…' : 'Stop'}
           </button>
         ) : (
           <button

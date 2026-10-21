@@ -14,9 +14,10 @@ test('chart blocks validate strictly and reject unsafe or malformed data', () =>
   assert.match(parseChartSpec(tooMany).error, /1 to 24/)
   assert.match(parseChartSpec('{"type":"pie","labels":["a","b"],"values":[-1,2]}').error, /negative/)
   assert.match(parseChartSpec('{"type":"pie","labels":["a"],"values":[0]}').error, /positive/)
-  const long = parseChartSpec(JSON.stringify({ type: 'line', title: 'T'.repeat(200), labels: ['L'.repeat(90)], values: [1] }))
-  assert.equal(long.title.length, 80)
-  assert.equal(long.labels[0].length, 40)
+  const longTitle = parseChartSpec(JSON.stringify({ type: 'line', title: 'T'.repeat(200), labels: ['L'], values: [1] }))
+  assert.match(longTitle.error, /Nothing was shortened/)
+  const longLabel = parseChartSpec(JSON.stringify({ type: 'line', title: 'T', labels: ['L'.repeat(90)], values: [1] }))
+  assert.match(longLabel.error, /Nothing was shortened/)
 })
 
 test('bar and line geometry stay inside the drawing area; pie slices sum to a full circle', () => {

@@ -2,9 +2,11 @@
 
 A local-first Windows desktop assistant with chat, projects, artifacts, a Markdown vault and a browser companion. It connects to separately installed engines and keeps source conversations distinct from AI interpretations and user-confirmed memory.
 
-**Development status:** recoverable browser capture is implemented. Cross-source keyword search, grouped review, People timelines and verified full-vault folder backups are implemented. Natural-language recall and real-account/target-laptop acceptance remain unfinished. The independently verified reliability repairs have been integrated with regression coverage. This is not a fully accepted or signed release.
+**Development status:** active pre-release. Durable app chats and native transcripts, separate raw/confirmed memory, main-owned Working Notes, quoted-evidence recall, artifacts, projects, browser capture, verified vault/app-data backups, and Windows CI are implemented. Full Node 24 verification and real Windows 11 owner acceptance are still required. This is not a signed release.
 
-[Project context, requirements, known issues and verification →](CONTEXT.md)
+- [Current rules, features, and reasons](RULES_FEATURES_AND_REASONS.md)
+- [Future plan and explicit non-goals](FUTURE_PLAN.md)
+- [Historical context pointer](CONTEXT.md)
 
 ## Repository
 
@@ -15,9 +17,11 @@ A local-first Windows desktop assistant with chat, projects, artifacts, a Markdo
 | `vault/Brain/` | Starter vault, templates and engine rulebooks. |
 | `apps/03_oddbrain/store/packs/` | Installable skills and prompts. |
 | `.github/workflows/` | Linux/Windows checks and Windows installer build. |
-| `CONTEXT.md` | The single maintained project-context document. |
+| `RULES_FEATURES_AND_REASONS.md` | Current product rules, implemented feature boundaries, and rationale. |
+| `FUTURE_PLAN.md` | Approved direction that is not a current capability. |
+| `CONTEXT.md` | Pointer to the retired historical diary retained in Git. |
 
-Runtime Markdown, skill files and legal notices remain in their required locations; they are not additional project handovers.
+Runtime Markdown, skill files and legal notices remain in their required locations; they are not project handovers.
 
 ## Run from source
 
@@ -55,9 +59,9 @@ In **Memory inbox**, select related suggestions, inspect their wording and quota
 
 ### Backup and recovery
 
-In **Vault → Vault-only backup & restore**, choose **Back up vault only**. This includes captured source conversations, saved attachment bytes and the review database, unlike Markdown export. It does **not** include the app’s typed chat library. Export or import app-chat recovery data separately under **Settings → System → App-chat storage**. Keep both copies private and on another drive when possible.
+In **Vault → Vault-only backup & restore**, choose **Back up vault only** for captured sources, attachment bytes, confirmed memory, and review history. In **Settings → System → App-data backup**, create a separate verified copy of selected private app chats, transcripts, Working Notes, artifacts, projects, and non-secret preferences. App-chat and Working Notes recovery exports remain narrower repair tools.
 
-**Restore vault into a new folder** checks file hashes and never replaces the active vault. After checking the restored copy, choose it under **Settings → Memory & files → Vault**. The current limit is 50,000 files / 2 GiB; larger or linked vaults need a filesystem backup. App chats, installed models, app credentials and unsent browser queues are outside this vault backup. It is a manual snapshot, not a scheduled backup service.
+Vault and app-data restore each create and verify a new folder; neither replaces live data automatically. App-data backup excludes credentials, pairing secrets, access grants, engine sessions, installed engines/models, caches, schedule/queue attempts, and unselected external files. Keep both backup domains private and preferably on another drive.
 
 ## Appearance and AI sources
 

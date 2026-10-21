@@ -2,8 +2,7 @@ import { packageSource } from '../../shared/lib/packageInspection'
 import { inspectPackage } from './packageInspection'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import { readFileSync, mkdirSync, writeFileSync, renameSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { readRecoverableJson, writeRecoverableJson } from '../recoverableJson'
 import { resolveEngineCommand, enginePath } from './enginePath'
 import { childEnvironment, killTree } from '../media/process'
 import { boundedResponse } from '../network/boundedResponse'
@@ -61,7 +60,10 @@ export function createMarketplaceService(options: { file: string; fetchImpl?: ty
   const jobs = new Map<number, AbortController>()
   const command = options.command || (() => resolveEngineCommand('claude-code'))
   const run = options.run || runMarketplace
-  const sources = (): string[] => { try { const data = JSON.parse(readFileSync(options.file, 'utf8')); return Array.isArray(data) ? data.filter(v => { try { return !!repository(v) } catch { return false } }).slice(0, 50) : [] } catch { return [] } }
+  const sources = (): string[] => readRecoverableJson(options.file, value => {
+    if (!Array.isArray(value) || value.length > 50) throw Error('Saved marketplaces are damaged or exceed 50 entries. Nothing was omitted.')
+    return value.map(repository)
+  }, []).value
   const cancel = (owner: number): void => { jobs.get(owner)?.abort(); for (const [key, plan] of plans) if (plan.owner === owner) plans.delete(key) }
   // Hold one operation lease across every await, not just each child command.
   // Otherwise cancel during a source check can be followed by a fresh mutation.
@@ -107,8 +109,10 @@ export function createMarketplaceService(options: { file: string; fetchImpl?: ty
       signal.throwIfAborted()
       catalogs.delete(repo); catalogs.set(repo, catalog)
       if (catalogs.size > 50) catalogs.delete(catalogs.keys().next().value!)
-      const saved = [...new Set([...sources(), repo])].slice(-50)
-      mkdirSync(dirname(options.file), { recursive: true }); writeFileSync(options.file + '.tmp', JSON.stringify(saved)); renameSync(options.file + '.tmp', options.file)
+      const before = sources()
+      if (!before.includes(repo) && before.length >= 50) throw Error('Fifty marketplace sources are retained. Remove one before saving another; nothing was evicted.')
+      const saved = [...new Set([...before, repo])]
+      writeRecoverableJson(options.file, saved)
       return catalog
     }),
     plan: (owner: number, repo: string, action: MarketplaceAction, plugin?: string): Promise<MarketplacePlan> => operation(owner, async signal => {

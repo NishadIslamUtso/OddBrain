@@ -9,8 +9,8 @@
  * The reader never throws. An unreadable or damaged file means "nothing chosen
  * yet", because a lost preference must never cost somebody a launch.
  */
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'node:fs'
-import { dirname } from 'node:path'
+import { existsSync, statSync } from 'node:fs'
+import { readRecoverableJson, writeRecoverableJson } from './recoverableJson'
 import { DEFAULT_PERMISSIONS, normalizePermissions, type Permissions } from '../shared/lib/permissions'
 import { DEFAULT_ENGINE, normalizeEngine, type EngineSettings } from '../shared/lib/engine'
 
@@ -51,22 +51,18 @@ export const EMPTY_SETTINGS: AppSettings = {
 
 export function readSettings(file: string): AppSettings {
   try {
-    if (!existsSync(file)) return { ...EMPTY_SETTINGS }
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>
-    const cloud = (parsed.cloud && typeof parsed.cloud === 'object' ? parsed.cloud : {}) as Record<string, unknown>
-    const text = (value: unknown, limit: number): string =>
-      typeof value === 'string' ? value.trim().slice(0, limit) : ''
-    return {
-      vaultPath:
-        typeof parsed.vaultPath === 'string' && parsed.vaultPath.length <= 4096 ? parsed.vaultPath : '',
-      cloud: {
-        baseUrl: text(cloud.baseUrl, 2048),
-        model: text(cloud.model, 300),
-      },
-      ...(typeof parsed.memoryFolder === 'string' && parsed.memoryFolder.length <= 4096 && !/[\r\n]/.test(parsed.memoryFolder) ? { memoryFolder: parsed.memoryFolder } : {}),
-      permissions: normalizePermissions(parsed.permissions),
-      engine: normalizeEngine(parsed.engine),
-    }
+    return readRecoverableJson(file, value => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Settings are damaged.')
+      const parsed = value as Record<string, unknown>
+      const cloud = (parsed.cloud && typeof parsed.cloud === 'object' ? parsed.cloud : {}) as Record<string, unknown>
+      const text = (field: unknown, limit: number): string => typeof field === 'string' && field.length <= limit ? field.trim() : ''
+      return {
+        vaultPath: typeof parsed.vaultPath === 'string' && parsed.vaultPath.length <= 4096 ? parsed.vaultPath : '',
+        cloud: { baseUrl: text(cloud.baseUrl, 2048), model: text(cloud.model, 300) },
+        ...(typeof parsed.memoryFolder === 'string' && parsed.memoryFolder.length <= 4096 && !/[\r\n]/.test(parsed.memoryFolder) ? { memoryFolder: parsed.memoryFolder } : {}),
+        permissions: normalizePermissions(parsed.permissions), engine: normalizeEngine(parsed.engine),
+      }
+    }, { ...EMPTY_SETTINGS }).value
   } catch {
     return { ...EMPTY_SETTINGS }
   }
@@ -74,22 +70,21 @@ export function readSettings(file: string): AppSettings {
 
 export function writeSettings(file: string, settings: AppSettings): AppSettings {
   const cloud = settings.cloud || { baseUrl: '', model: '' }
+  if (typeof settings.vaultPath === 'string' && settings.vaultPath.length > 4096) throw Error('Vault path exceeds 4,096 characters. Nothing was shortened or saved.')
+  if (String(cloud.baseUrl || '').length > 2048 || String(cloud.model || '').length > 300) throw Error('Cloud endpoint or model name exceeds its saved limit. Nothing was shortened or saved.')
+  if (settings.engine && ([settings.engine.model, settings.engine.baseUrl, settings.engine.workspace].some((value, index) => typeof value === 'string' && value.length > [300, 2048, 4096][index]))) throw Error('Engine settings exceed their saved limits. Nothing was shortened or saved.')
   const clean: AppSettings = {
-    vaultPath: typeof settings.vaultPath === 'string' ? settings.vaultPath.trim().slice(0, 4096) : '',
+    vaultPath: typeof settings.vaultPath === 'string' ? settings.vaultPath.trim() : '',
     cloud: {
-      baseUrl: String(cloud.baseUrl || '').trim().slice(0, 2048),
-      model: String(cloud.model || '').trim().slice(0, 300),
+      baseUrl: String(cloud.baseUrl || '').trim(),
+      model: String(cloud.model || '').trim(),
     },
     ...(typeof settings.memoryFolder === 'string' && settings.memoryFolder && settings.memoryFolder.length <= 4096 && !/[\r\n]/.test(settings.memoryFolder) ? { memoryFolder: settings.memoryFolder } : {}),
     permissions: normalizePermissions(settings.permissions),
     engine: normalizeEngine(settings.engine),
   }
-  mkdirSync(dirname(file), { recursive: true })
-  // Write beside the file and rename over it: a crash mid-write cannot leave a
-  // half-written settings file for the next launch to guess at.
-  const temporary = `${file}.tmp`
-  writeFileSync(temporary, `${JSON.stringify(clean, null, 2)}\n`, 'utf8')
-  renameSync(temporary, file)
+  // Keep one complete prior generation so a crash or damaged write can recover.
+  writeRecoverableJson(file, clean)
   return clean
 }
 

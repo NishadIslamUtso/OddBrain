@@ -62,11 +62,12 @@ test('image decoding creates a bounded JPEG and discloses the first-frame limita
   expect(Buffer.from(result.images![0].data, 'base64').length).toBeLessThan(2 * 1024 * 1024)
   expect(attachmentsFromMedia(result, bytes.length)[0].extraction).toContain('first frame')
 })
-test('bounded excerpts are explicit and extraction disclosures survive attachment conversion', () => {
-  const result = extracted('long.txt', 'x'.repeat(20_000), 'Local text.')
-  expect(result.text?.length).toBe(12000); expect(result.disclosure).toContain('12,000 of 20,000')
-  const attachment = attachmentsFromMedia(result, 20000)[0]
-  expect(attachment.text).toBe(result.text); expect(attachment.extraction).toBe(result.disclosure)
+test('large extraction is offered as complete selectable sections and is never clipped into an attachment', () => {
+  const source = 'x'.repeat(20_000), result = extracted('long.txt', source, 'Local text.')
+  expect(result.text).toBeUndefined(); expect(result.textComplete).toBe(true); expect(result.disclosure).toContain('selectable section')
+  expect(result.segments?.map(segment => segment.text).join('')).toBe(source)
+  expect(result.segments?.every(segment => segment.text.length <= 6_000)).toBe(true)
+  expect(attachmentsFromMedia(result, 20000)).toEqual([])
 })
 test('media signatures do not promote an HTML page or playlist based on a file name', () => {
   expect(mediaKind(Buffer.from('#EXTM3U\nhttps://attacker.test/movie'))).toEqual({ kind: 'document', mime: 'application/octet-stream' })

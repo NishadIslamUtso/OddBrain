@@ -75,17 +75,31 @@ jobs:
               throw "$target does not have a valid Authenticode publisher signature (status: $($signature.Status))."
             }
           }
-      - name: Launch the packaged Windows app
+      - name: Launch the packaged Windows app and retain visible evidence
         working-directory: apps/03_oddbrain
         shell: pwsh
         run: |
           $exe = (Resolve-Path 'dist/win-unpacked/OddBrain.exe').Path
-          $process = Start-Process -FilePath $exe -ArgumentList '--smoke' -PassThru
+          $smoke = (Join-Path (Resolve-Path 'dist').Path 'packaged-smoke.png')
+          $process = Start-Process -FilePath $exe -ArgumentList @('--smoke', "--smoke-out=$smoke") -PassThru
           if (-not $process.WaitForExit(60000)) {
             Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
             throw 'Packaged OddBrain.exe did not finish its smoke check within 60 seconds.'
           }
           if ($process.ExitCode -ne 0) { throw "Packaged OddBrain.exe smoke check exited $($process.ExitCode)." }
+          if (-not (Test-Path $smoke) -or (Get-Item $smoke).Length -lt 1024) { throw 'Packaged smoke did not produce a usable window screenshot.' }
+          $os = Get-CimInstance Win32_OperatingSystem
+          $evidence = [ordered]@{
+            sourceCommit = $env:GITHUB_SHA
+            osCaption = $os.Caption
+            osVersion = $os.Version
+            executable = (Get-FileHash $exe -Algorithm SHA256).Hash.ToLower()
+            appAsar = (Get-FileHash 'dist/win-unpacked/resources/app.asar' -Algorithm SHA256).Hash.ToLower()
+            screenshot = (Get-FileHash $smoke -Algorithm SHA256).Hash.ToLower()
+            screenshotBytes = (Get-Item $smoke).Length
+            processExitCode = $process.ExitCode
+          }
+          $evidence | ConvertTo-Json | Out-File -Encoding utf8 'dist/windows-smoke-evidence.json'
       - name: Generate dependency SBOM
         working-directory: apps/03_oddbrain
         shell: pwsh
@@ -124,6 +138,8 @@ jobs:
             ${{ steps.package.outputs.subject }}
             ${{ steps.package.outputs.checksum }}
             apps/03_oddbrain/dist/oddbrain-sbom.cdx.json
+            apps/03_oddbrain/dist/packaged-smoke.png
+            apps/03_oddbrain/dist/windows-smoke-evidence.json
           retention-days: 30
           if-no-files-found: error
 
@@ -150,4 +166,4 @@ jobs:
           if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate) {
             throw "Public release blocked: Authenticode is not valid (status: $($signature.Status))."
           }
-          gh release create "$env:GITHUB_REF_NAME" --generate-notes --title "OddBrain $env:GITHUB_REF_NAME" $installer.FullName "$($installer.FullName).sha256" release/oddbrain-sbom.cdx.json
+          gh release create "$env:GITHUB_REF_NAME" --generate-notes --title "OddBrain $env:GITHUB_REF_NAME" $installer.FullName "$($installer.FullName).sha256" release/oddbrain-sbom.cdx.json release/windows-smoke-evidence.json

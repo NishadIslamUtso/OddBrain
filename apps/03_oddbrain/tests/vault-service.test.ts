@@ -390,7 +390,9 @@ test('capsules keep every version on disk while the library shows the newest', (
   assert.equal(library[0].version, 2)
   assert.match(library[0].background, /Updated blue/)
 
-  assert.equal(service.context('blue').capsules.length, 1)
+  assert.equal(service.context('blue').capsules.length, 0, 'unreviewed capsules do not enter confirmed recall')
+  assert.equal(service.context('blue').entities.length, 2, 'both immutable capsule versions remain visible only as raw saved-file evidence')
+  assert.equal(service.context('blue').entities.every((entry: any) => entry.authority === 'saved-file'), true)
   assert.equal(service.context('unrelated').capsules.length, 0)
   assert.equal(existsSync(join(root, String(first.source))), true, 'the earlier version stays in the vault')
 })
@@ -415,7 +417,7 @@ test('every route answers, and a wrong request is told what is wrong', (t) => {
   assert.ok(call('/today').body.journalPath)
   assert.deepEqual(call('/blacklist').body.excluded_patterns, ['bank.com/*'])
   assert.deepEqual(call('/capsules').body.capsules, [])
-  assert.equal(call('/context').body.retrieval, 'local-keyword-search')
+  assert.equal(call('/context').body.retrieval, 'local-priority-search')
 
   const captured = call('/capture', 'POST', conversation())
   assert.equal(captured.status, 200)

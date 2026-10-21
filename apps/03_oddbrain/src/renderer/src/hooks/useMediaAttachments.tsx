@@ -2,11 +2,11 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import type { Attachment } from '@shared/types'
 import { newId } from '@shared/lib/storage'
 import { readAttachment } from '@shared/lib/attachments'
-import { DEFAULT_MEDIA, MAX_MEDIA_BYTES, type MediaInput, type MediaPreferences, type MediaResult } from '@shared/lib/mediaBridge'
+import { DEFAULT_MEDIA, MAX_EXTRACTED_TEXT, MAX_MEDIA_BYTES, type MediaInput, type MediaPreferences, type MediaResult, type MediaTextSegment } from '@shared/lib/mediaBridge'
 import { bridge, isDemo } from '../platform/bridge'
 import { extractFrames } from '../lib/videoFrames'
 
-type Source = { id: string; file: File; attachments: string[]; note: string; failed: boolean; fallback: boolean }
+type Source = { id: string; file: File; attachments: string[]; note: string; failed: boolean; fallback: boolean; segments?: MediaTextSegment[]; selected?: string[] }
 export function attachmentsFromMedia(result: MediaResult, size: number): Attachment[] {
   if (!result.ok) throw Error(result.error || 'The file could not be decoded.')
   const disclosure = result.disclosure || 'Extraction coverage was not supplied.'
@@ -47,6 +47,10 @@ export default function useMediaAttachments(attachments: Attachment[], setAttach
         const bytes = new Uint8Array(await source.file.arrayBuffer()); if (ticket !== generation.current) return
         const result = await bridge.media.decode({ name: source.file.name, mime: source.file.type, bytes, route, expected })
         if (!result.ok) { if (ticket === generation.current) setSources(old => old.map(s => s.id === source.id ? { ...s, failed: true, note: (result.error || 'Could not decode the file.') + (s.attachments.length ? ' Previous extraction is still attached; remove it if you do not want to send it.' : ''), fallback: result.fallbackAllowed !== false } : s)); return }
+        if (result.segments?.length) {
+          setSources(old => old.map(s => s.id === source.id ? { ...s, failed: false, note: result.disclosure || 'Choose document sections to attach.', segments: result.segments, selected: [] } : s))
+          return
+        }
         added = attachmentsFromMedia(result, source.file.size); description = result.disclosure || ''
       }
       if (ticket !== generation.current) return
@@ -63,6 +67,17 @@ export default function useMediaAttachments(attachments: Attachment[], setAttach
     locked.current = true; setBusy(true)
     try { await process(source, route) } finally { locked.current = false; setBusy(false) }
   }
+  const attachSelected = (source: Source): void => {
+    const chosen = (source.segments || []).filter(segment => source.selected?.includes(segment.id))
+    if (!chosen.length) { setSources(old => old.map(item => item.id === source.id ? { ...item, note: 'Choose at least one complete document section.' } : item)); return }
+    const text = chosen.map(segment => `${segment.label}\n${segment.text}`).join('\n\n')
+    if (text.length > MAX_EXTRACTED_TEXT) { setSources(old => old.map(item => item.id === source.id ? { ...item, note: `The selected complete sections total ${text.length.toLocaleString()} characters, above the ${MAX_EXTRACTED_TEXT.toLocaleString()}-character attachment limit. Choose fewer sections; nothing was shortened.` } : item)); return }
+    const remaining = current.current.filter(file => !source.attachments.includes(file.id))
+    if (remaining.length >= 4) { setSources(old => old.map(item => item.id === source.id ? { ...item, note: 'Four attachment slots are already used. Remove one before attaching this selection.' } : item)); return }
+    const attachment: Attachment = { id: newId(), name: source.file.name, kind: 'text', mime: 'text/plain', size: source.file.size, text, extraction: `Owner selected ${chosen.map(segment => segment.label).join(', ')} from the complete local extraction. Unselected sections were omitted whole.`, originalId: source.id, originalFile: source.file }
+    replace([...remaining, attachment])
+    setSources(old => old.map(item => item.id === source.id ? { ...item, attachments: [attachment.id], note: `${chosen.length} complete section(s) attached. Other sections remain available and were not shortened.` } : item))
+  }
   const addFiles = async (files: File[]): Promise<void> => {
     if (locked.current) { notice('Wait for the current import or cancel it before adding more files.'); return }
     if (sources.length + files.length > 8) { notice('At most eight original files can wait here. Discard a source before adding more.'); return }
@@ -76,7 +91,9 @@ export default function useMediaAttachments(attachments: Attachment[], setAttach
   const clear = (): void => { generation.current++; setSources([]); void bridge.media.cancel() }
   const cancel = (): void => { generation.current++; void bridge.media.cancel(); setSources(old => old.map(s => s.note === 'Decoding locally…' ? { ...s, failed: true, note: 'Cancelled. Original file retained; retry or discard it.' } : s)) }
   const controls = sources.length ? <details className="ob-file-imports px-4 py-2 text-[12px]" open={busy || sources.some(s => s.failed)}><summary>File processing · {sources.length} source{sources.length === 1 ? '' : 's'}{busy ? ' · working' : ''}</summary><div className="max-h-[150px] overflow-y-auto space-y-3 py-2">
-    {sources.map(source => <section key={source.id}><strong>{source.file.name}</strong><p className={source.failed ? 'text-warn' : 'text-muted'}>{source.note}</p><div className="ob-inline-actions"><button type="button" disabled={busy} onClick={() => void run(source, 'local')}>Retry locally</button>
+    {sources.map(source => <section key={source.id}><strong>{source.file.name}</strong><p className={source.failed ? 'text-warn' : 'text-muted'}>{source.note}</p>
+      {source.segments?.length ? <fieldset className="ob-control-scope"><legend>Choose complete sections</legend><div className="max-h-[120px] overflow-y-auto">{source.segments.map(segment => <label key={segment.id} className="block"><input type="checkbox" checked={source.selected?.includes(segment.id) === true} disabled={busy} onChange={event => setSources(old => old.map(item => item.id === source.id ? { ...item, selected: event.target.checked ? [...(item.selected || []), segment.id] : (item.selected || []).filter(id => id !== segment.id) } : item))} /> {segment.label} · {segment.text.length.toLocaleString()} characters</label>)}</div><button type="button" disabled={busy || !source.selected?.length} onClick={() => attachSelected(source)}>Attach selected sections</button></fieldset> : null}
+      <div className="ob-inline-actions"><button type="button" disabled={busy} onClick={() => void run(source, 'local')}>Retry locally</button>
       {source.fallback && prefs.provider && prefs.model ? <button type="button" disabled={busy || isDemo} onClick={() => void run(source, 'provider')}>Upload to {prefs.provider} / {prefs.model}</button> : null}
       {source.fallback && prefs.transcriptionProvider && prefs.transcriptionModel && (/^(audio|video)\//.test(source.file.type) || /\.(mp3|wav|flac|m4a|mp4|webm|ogg|mov|mkv)$/i.test(source.file.name)) ? <button type="button" disabled={busy || isDemo} onClick={() => void run(source, 'transcribe')}>Transcribe with {prefs.transcriptionProvider} / {prefs.transcriptionModel}</button> : null}
       <button type="button" disabled={busy} onClick={() => { replace(current.current.filter(a => !source.attachments.includes(a.id))); setSources(old => old.filter(s => s.id !== source.id)) }}>Discard source</button></div>

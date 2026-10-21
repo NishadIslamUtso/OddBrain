@@ -21,6 +21,7 @@ import type { ApprovalMode, EngineAvailability, EngineEvent, EngineId, EngineMod
 import type { HouseRules } from '../shared/lib/houseRules'
 import type { Project } from '../shared/lib/projects'
 import type { ChatStoreBridge, ChatStoreMigration, ChatStoreWrite } from '../shared/lib/chatStore'
+import type { WorkingNotesBridge } from '../shared/lib/workingNotesStore'
 import type { ReadTrustBridge } from '../shared/lib/readTrust'
 import type {
   AdoptInput,
@@ -195,7 +196,7 @@ const engineApi = {
   answer: (requestId: string, allow: boolean): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('engine:answer', requestId, allow),
   /** Make the engine stop. */
-  stop: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('engine:stop'),
+  stop: (): Promise<{ ok: boolean; answer?: string }> => ipcRenderer.invoke('engine:stop'),
   /** Watch the engine live. Returns the unsubscribe function. */
   onEvent: (listener: (event: EngineEvent) => void): (() => void) => {
     const channel = (_outer: unknown, event: EngineEvent): void => listener(event)
@@ -242,6 +243,17 @@ const api = {
     importRecovery: () => ipcRenderer.invoke('chats:import-recovery'),
     openLocation: () => ipcRenderer.invoke('chats:open-location'),
   } satisfies ChatStoreBridge,
+  appData: {
+    backup: (operation: 'create' | 'restore', rendererPreferences: Record<string, string> = {}) => ipcRenderer.invoke('app-data:backup', operation, rendererPreferences),
+  },
+  workingNotes: {
+    read: chatId => ipcRenderer.invoke('working-notes:read', chatId),
+    save: input => ipcRenderer.invoke('working-notes:save', input),
+    rejectProposal: input => ipcRenderer.invoke('working-notes:reject-proposal', input),
+    migrate: input => ipcRenderer.invoke('working-notes:migrate', input),
+    exportRecovery: chatId => ipcRenderer.invoke('working-notes:export', chatId),
+    importRecovery: chatId => ipcRenderer.invoke('working-notes:import', chatId),
+  } satisfies WorkingNotesBridge,
   transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), image: (id: string, imageId: string) => ipcRenderer.invoke('transcripts:image', id, imageId), attachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:attachment', id, attachmentId), recover: (chatIds: string[], knownTranscriptIds: string[], before?: string) => ipcRenderer.invoke('transcripts:recover', chatIds, knownTranscriptIds, before), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
   media: mediaApi, marketplace: marketplaceApi,
   automation: automationApi,

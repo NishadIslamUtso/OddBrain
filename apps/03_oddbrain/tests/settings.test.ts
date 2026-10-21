@@ -76,18 +76,16 @@ test('a damaged settings file is treated as empty, never as a failed launch', (t
   assert.equal(readFileSync(file, 'utf8'), '{ this is not json')
 })
 
-test('a hand-edited endpoint is capped, never trusted, and never a launch failure', (t) => {
+test('an oversized endpoint choice is refused rather than clipped, and hand damage is not trusted', (t) => {
   const dir = tempDir('oddbrain-settings-')
   t.after(() => rmSync(dir, { recursive: true, force: true }))
   const file = join(dir, 'settings.json')
 
-  writeSettings(file, {
+  assert.throws(() => writeSettings(file, {
     vaultPath: '',
     cloud: { baseUrl: 'https://example.test/v1', model: 'x'.repeat(5000) },
-  })
-  const stored = readSettings(file)
-  assert.equal(stored.cloud.baseUrl, 'https://example.test/v1')
-  assert.equal(stored.cloud.model.length, 300, 'the model id is capped rather than stored whole')
+  }), /Nothing was shortened or saved/)
+  assert.deepEqual(readSettings(file), EMPTY_SETTINGS)
 
   // A cloud object of the wrong shape degrades to empty, field by field.
   writeFileSync(file, JSON.stringify({ vaultPath: '/tmp', cloud: 'nonsense' }), 'utf8')

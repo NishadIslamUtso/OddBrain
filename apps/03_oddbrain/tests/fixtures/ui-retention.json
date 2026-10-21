@@ -1051,7 +1051,7 @@
       "originalAction": "code-all",
       "feature": "sessions",
       "nativeSources": [
-        "components/CodeView.tsx",
+        "components/ProjectsView.tsx",
         "components/ProjectsView.tsx",
         "components/BrainStructureSection.tsx"
       ],
@@ -1062,7 +1062,7 @@
       "originalAction": "workspace",
       "feature": "sessions",
       "nativeSources": [
-        "components/CodeView.tsx",
+        "components/ProjectsView.tsx",
         "components/ProjectsView.tsx",
         "components/BrainStructureSection.tsx"
       ],
@@ -1073,7 +1073,7 @@
       "originalAction": "vault-folder",
       "feature": "sessions",
       "nativeSources": [
-        "components/CodeView.tsx",
+        "components/ProjectsView.tsx",
         "components/ProjectsView.tsx",
         "components/BrainStructureSection.tsx"
       ],
@@ -1084,7 +1084,7 @@
       "originalAction": "folder-save",
       "feature": "sessions",
       "nativeSources": [
-        "components/CodeView.tsx",
+        "components/ProjectsView.tsx",
         "components/ProjectsView.tsx",
         "components/BrainStructureSection.tsx"
       ],
@@ -1095,7 +1095,7 @@
       "originalAction": "resume-session",
       "feature": "sessions",
       "nativeSources": [
-        "components/CodeView.tsx",
+        "components/ProjectsView.tsx",
         "components/ProjectsView.tsx",
         "components/BrainStructureSection.tsx"
       ],
@@ -1106,7 +1106,7 @@
       "originalAction": "link-session-file",
       "feature": "sessions",
       "nativeSources": [
-        "components/CodeView.tsx",
+        "components/ProjectsView.tsx",
         "components/ProjectsView.tsx",
         "components/BrainStructureSection.tsx"
       ],
@@ -1117,7 +1117,7 @@
       "originalAction": "session-file-save",
       "feature": "sessions",
       "nativeSources": [
-        "components/CodeView.tsx",
+        "components/ProjectsView.tsx",
         "components/ProjectsView.tsx",
         "components/BrainStructureSection.tsx"
       ],
@@ -1128,7 +1128,7 @@
       "originalAction": "copy-file",
       "feature": "sessions",
       "nativeSources": [
-        "components/CodeView.tsx",
+        "components/ProjectsView.tsx",
         "components/ProjectsView.tsx",
         "components/BrainStructureSection.tsx"
       ],
@@ -1139,7 +1139,7 @@
       "originalAction": "finish-session",
       "feature": "sessions",
       "nativeSources": [
-        "components/CodeView.tsx",
+        "components/ProjectsView.tsx",
         "components/ProjectsView.tsx",
         "components/BrainStructureSection.tsx"
       ],
@@ -1150,7 +1150,7 @@
       "originalAction": "session-finish-confirm",
       "feature": "sessions",
       "nativeSources": [
-        "components/CodeView.tsx",
+        "components/ProjectsView.tsx",
         "components/ProjectsView.tsx",
         "components/BrainStructureSection.tsx"
       ],

@@ -8,6 +8,7 @@ import type { NativeConversation, NativeSessionLink, NativeContextTarget } from 
 import type { FileReview, FileDecision } from '@shared/lib/changeReview'
 import type { TranscriptBridge } from '@shared/lib/transcripts'
 import type { ChatStoreBridge } from '@shared/lib/chatStore'
+import type { WorkingNotesBridge } from '@shared/lib/workingNotesStore'
 import type { ReadTrustBridge } from '@shared/lib/readTrust'
 import type { EngineSourceFile } from '@shared/lib/media'
 import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
@@ -63,6 +64,8 @@ import type {
 /** What the preload script exposes today. It grows as the main process does. */
 export type DesktopBridge = {
   chats: ChatStoreBridge
+  appData: { backup: (operation: 'create' | 'restore', rendererPreferences?: Record<string, string>) => Promise<{ ok: boolean; answer: string }> }
+  workingNotes: WorkingNotesBridge
   transcripts: TranscriptBridge
   media: MediaBridge
   marketplace: MarketplaceBridge
@@ -319,6 +322,15 @@ const demoBridge: DesktopBridge = {
     exportRecovery: async () => ({ ok: false, answer: 'Chat recovery export requires the installed app.' }),
     importRecovery: async () => ({ ok: false, answer: 'Chat recovery import requires the installed app.' }),
     openLocation: async () => ({ ok: false, answer: 'Chat storage folders require the installed app.' }),
+  },
+  appData: { backup: async () => ({ ok: false, answer: 'App-data backup requires the installed app.' }) },
+  workingNotes: {
+    read: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes storage requires the installed app.' }),
+    save: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes storage requires the installed app.' }),
+    rejectProposal: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes storage requires the installed app.' }),
+    migrate: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes storage requires the installed app.' }),
+    exportRecovery: async () => ({ ok: false, answer: 'Working Notes recovery export requires the installed app.' }),
+    importRecovery: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes recovery import requires the installed app.' }),
   },
   media: {
     authorizeRecording: async () => ({ ok: false, name: 'Microphone', error: 'Provider recording requires the desktop app.' }), onCancelled: () => () => {},
@@ -601,7 +613,7 @@ export type EngineBridge = {
   }
   readTrust: ReadTrustBridge
   answer: (requestId: string, allow: boolean) => Promise<{ ok: boolean }>
-  stop: () => Promise<{ ok: boolean }>
+  stop: () => Promise<{ ok: boolean; answer?: string }>
   onEvent: (listener: (event: EngineEvent) => void) => () => void
 }
 

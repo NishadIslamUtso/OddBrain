@@ -1,4 +1,4 @@
-export type RecallHit = { id: string; kind: 'conversation' | 'confirmed' | 'file'; title: string; text: string; path: string; date: string; speaker: string; match?: 'lexical' | 'local-semantic' }
+export type RecallHit = { id: string; kind: 'conversation' | 'confirmed' | 'file'; title: string; text: string; path: string; date: string; speaker: string; match?: 'lexical' | 'local-semantic'; authority?: 'owner-confirmed' | 'owner-confirmed-context' | 'raw-source' | 'saved-file' | 'quoted-raw-evidence' | 'quoted-file-evidence' }
 export type RecallCatalogue = { entriesSeen: number; groups: Array<{ path: string; entries: number }>; capped: boolean }
 export type RecallReply = { ok: boolean; hits: RecallHit[]; incomplete: boolean; notices: string[]; catalogue?: RecallCatalogue; semantic?: { mode: 'off' | 'local-distributional-v1'; candidates: number; capped: boolean } }
 const fold = (text: string): string => text.toLowerCase().replace(/\s+/g, ' ').trim()

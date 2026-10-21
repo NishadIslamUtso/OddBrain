@@ -76,8 +76,18 @@ export async function readDocumentZip(bytes: Buffer): Promise<Record<string, str
 export function extracted(name: string, text: string, disclosure: string): MediaResult {
   const trimmed = text.trim()
   if (!trimmed) throw Error('No text could be extracted. This may be scanned, empty, encrypted or use an unsupported encoding.')
-  const clipped = trimmed.length > MAX_EXTRACTED_TEXT
-  return { ok: true, name, textComplete: !clipped, text: trimmed.slice(0, MAX_EXTRACTED_TEXT), disclosure: disclosure + (clipped ? ` Only the first ${MAX_EXTRACTED_TEXT.toLocaleString('en-US')} of ${trimmed.length.toLocaleString('en-US')} extracted characters are attached; the rest was not read by the engine.` : '') }
+  if (trimmed.length > 500_000) throw Error('Extracted text exceeds 500,000 characters. Split or export a smaller document; nothing was shortened or attached.')
+  if (trimmed.length <= MAX_EXTRACTED_TEXT) return { ok: true, name, textComplete: true, text: trimmed, disclosure }
+  const parts = /^\[Page \d+\]/m.test(trimmed) ? trimmed.split(/(?=^\[Page \d+\])/m).filter(Boolean) : [trimmed]
+  const segments: NonNullable<MediaResult['segments']> = []
+  for (const part of parts) {
+    const page = part.match(/^\[Page (\d+)\]/)?.[1]
+    for (let start = 0; start < part.length; start += 6_000) {
+      const text = part.slice(start, start + 6_000)
+      segments.push({ id: `segment-${segments.length + 1}`, label: page ? `Page ${page}${part.length > 6_000 ? ` · part ${Math.floor(start / 6_000) + 1}` : ''}` : `Characters ${start + 1}–${start + text.length}`, text })
+    }
+  }
+  return { ok: true, name, textComplete: true, segments, disclosure: `${disclosure} Full extracted text is available in ${segments.length} selectable section(s); none was attached until you choose.` }
 }
 export async function decodeDocument(name: string, bytes: Buffer): Promise<MediaResult> {
   const ext = name.toLowerCase().split('.').pop() || ''
@@ -102,10 +112,10 @@ export async function decodeDocument(name: string, bytes: Buffer): Promise<Media
     const task = pdf.getDocument({ standardFontDataUrl: pdfAssetBase(root, 'standard_fonts'), cMapUrl: pdfAssetBase(root, 'cmaps'), cMapPacked: true, wasmUrl: pdfAssetBase(root, 'wasm'), data: new Uint8Array(bytes), useSystemFonts: false, useWorkerFetch: false, disableFontFace: true, stopAtErrors: true })
     try {
       const doc = await task.promise
-      const count = Math.min(doc.numPages, 50)
+      if (doc.numPages > 200) throw Error('This PDF has more than 200 pages. Split or export the pages you need; no partial document was attached.')
       let text = ''
       let read = 0
-      for (let page = 1; page <= count && text.length < 80_000; page++) {
+      for (let page = 1; page <= doc.numPages; page++) {
         const content = await (await doc.getPage(page)).getTextContent()
         text += `\n[Page ${page}]\n` + content.items.map(item => 'str' in item ? item.str + (item.hasEOL ? '\n' : ' ') : '').join(''); read++
       }

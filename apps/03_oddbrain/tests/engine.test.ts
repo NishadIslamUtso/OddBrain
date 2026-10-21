@@ -382,6 +382,14 @@ test('the launch arguments are a pure function of the model', () => {
   assert.equal(engineArguments('').includes('--model'), false)
 })
 
+test('quoted-evidence launches disable tools, settings sources, MCP, and native resume', () => {
+  const args = engineArguments('m', 'plan', 'do-not-resume', true)
+  assert.deepEqual(args.slice(args.indexOf('--tools'), args.indexOf('--tools') + 2), ['--tools', ''])
+  assert.equal(args.includes('--strict-mcp-config'), true)
+  assert.deepEqual(args.slice(args.indexOf('--setting-sources'), args.indexOf('--setting-sources') + 2), ['--setting-sources', ''])
+  assert.equal(args.includes('--resume'), false)
+})
+
 test('the throttle maps to the engine\u2019s own official modes, ask unchanged', () => {
   // The default stays exactly what always ran: manual (the CLI's alias for ask-first).
   assert.equal(engineArguments('m').includes('manual'), true)
@@ -559,6 +567,21 @@ test('the socket: swapping the brain mid-conversation resumes the same session u
   const third = socket.send('and again', { ...base, settings: { ...DEFAULT_ENGINE, model: 'brain-b' } })
   assert.ok(third.ok, third.answer)
   assert.equal(children.length, 2, 'the new brain, unchanged, is reused')
+  children[1]!.stdout.emit('data', Buffer.from(doneLine, 'utf8'))
+
+  const evidence = socket.send('analyze quoted evidence', { ...base, settings: { ...DEFAULT_ENGINE, model: 'brain-b', approval: 'plan' }, toolFree: true })
+  assert.ok(evidence.ok, evidence.answer)
+  assert.equal(children.length, 3, 'evidence analysis gets its own process')
+  assert.equal(started[2]!.args.includes('--resume'), false, 'evidence analysis never inherits the native conversation')
+  assert.equal(started[2]!.args.includes('--tools'), true, 'the isolated process has no tool registry')
+  children[2]!.stdout.emit('data', Buffer.from(JSON.stringify({ type: 'system', subtype: 'init', session_id: 'source-only' }) + '\n', 'utf8'))
+  children[2]!.stdout.emit('data', Buffer.from(doneLine, 'utf8'))
+  assert.equal([...remembered.values()].includes('source-only'), false, 'an evidence-only session cannot replace the owner conversation resume link')
+
+  const afterEvidence = socket.send('owner action', { ...base, settings: { ...DEFAULT_ENGINE, model: 'brain-b' } })
+  assert.ok(afterEvidence.ok, afterEvidence.answer)
+  assert.equal(children.length, 4)
+  assert.ok(started[3]!.args.includes('--resume') && started[3]!.args.includes('sess-77'), 'the owner conversation resumes its original link after isolated evidence')
   socket.stop()
 })
 
