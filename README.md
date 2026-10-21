@@ -182,7 +182,7 @@ npm run smoke       # requires a working native Electron environment
 npm run dist:win    # Windows packaging; CI can produce the installer artifact
 ```
 
-The automated test suite (Vitest, Playwright UI checks and the Electron automation harness) was intentionally removed on 2026-10-21 because it no longer described the current app and had become unreliable. Test sources remain in Git history before commit `ba66c9d`. The suite must be rebuilt against current behaviour; no test result should be inferred from the previous totals. Typecheck, production builds, security-policy checks and native smoke remain the current automated gates.
+The automated test suite (Vitest, Playwright UI checks and the Electron automation harness) was intentionally removed on 2026-10-21. The owner reported many failures, so it was not a trustworthy signal and will be rebuilt against current behaviour. Test sources remain in Git history at commit `ba66c9d` and were removed in `7c93c0f`. No test result should be inferred from the previous totals. Typecheck, production builds, security-policy checks and native smoke remain the current automated gates.
 
 Passing automated checks does not establish real-account or target-laptop acceptance. Real Windows 11/Kdenlive/MCP/FFmpeg/yt-dlp/OCR/transcription verification remains an owner-machine gate.
 
