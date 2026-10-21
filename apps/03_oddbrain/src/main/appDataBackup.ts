@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto'
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { dirname, join, relative, resolve, sep } from 'node:path'
+import { readRegularFileSync } from './safeFile'
 
 const MANIFEST = 'oddbrain-app-data-backup.json'
 const MAX_FILES = 50_000
@@ -28,9 +29,8 @@ function selectedFiles(root: string): string[] {
 }
 function writeExclusive(path: string, bytes: Buffer | string): void { mkdirSync(dirname(path), { recursive: true, mode: 0o700 }); writeFileSync(path, bytes, { flag: 'wx', mode: 0o600 }) }
 function manifestAt(folder: string): Manifest {
-  const manifestPath = join(folder, MANIFEST), stat = lstatSync(manifestPath)
-  if (!stat.isFile() || stat.isSymbolicLink() || stat.size > MAX_MANIFEST_BYTES) throw Error('This is not a supported OddBrain app-data backup.')
-  const parsed = JSON.parse(readFileSync(manifestPath, 'utf8')) as Manifest
+  const manifestPath = join(folder, MANIFEST)
+  const parsed = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readRegularFileSync(manifestPath, MAX_MANIFEST_BYTES).bytes)) as Manifest
   if (parsed?.format !== 'oddbrain-app-data-backup-v1' || !Array.isArray(parsed.files) || parsed.files.length > MAX_FILES || !Array.isArray(parsed.excluded)) throw Error('This is not a supported OddBrain app-data backup.')
   const names = new Set<string>(); let total = 0
   for (const entry of parsed.files) {
@@ -45,10 +45,8 @@ function verify(folder: string, manifest: Manifest): void {
   for (const entry of manifest.files) {
     const file = resolve(folder, 'data', ...entry.path.split('/'))
     if (!inside(resolve(folder, 'data'), file)) throw Error('Backup path escaped its data folder.')
-    const stat = lstatSync(file); if (!stat.isFile() || stat.isSymbolicLink()) throw Error(`Backup entry is not a regular file: ${entry.path}`)
-    if (stat.size !== entry.bytes || stat.size > MAX_BYTES) throw Error(`Backup verification failed: ${entry.path}`)
-    const bytes = readFileSync(file)
-    if (sha(bytes) !== entry.sha256) throw Error(`Backup verification failed: ${entry.path}`)
+    const opened = readRegularFileSync(file, MAX_BYTES)
+    if (opened.stat.size !== entry.bytes || sha(opened.bytes) !== entry.sha256) throw Error(`Backup verification failed: ${entry.path}`)
   }
 }
 
@@ -63,10 +61,9 @@ export function createAppDataBackup(root: string, destination: string, rendererP
     let total = 0
     for (const path of files) {
       const source = resolve(root, ...path.split('/')); if (!inside(root, source)) throw Error('App-data path escaped its root.')
-      const stat = lstatSync(source); total += stat.size
-      if (!stat.isFile() || stat.isSymbolicLink() || !Number.isSafeInteger(total) || total > MAX_BYTES) throw Error('Selected app-private data exceeds 2 GB or contains an unsupported entry. Nothing was shortened.')
-      const bytes = readFileSync(source)
-      if (bytes.length !== stat.size) throw Error(`App data changed during backup: ${path}. Nothing incomplete was kept.`)
+      const opened = readRegularFileSync(source, MAX_BYTES), bytes = opened.bytes
+      total += opened.stat.size
+      if (!Number.isSafeInteger(total) || total > MAX_BYTES) throw Error('Selected app-private data exceeds 2 GB or contains an unsupported entry. Nothing was shortened.')
       writeExclusive(resolve(destination, 'data', ...path.split('/')), bytes)
       entries.push({ path, bytes: bytes.length, sha256: sha(bytes) })
     }
@@ -91,8 +88,11 @@ export function restoreAppDataBackup(source: string, destination: string): { fil
     for (const entry of manifest.files) {
       const from = resolve(source, 'data', ...entry.path.split('/')), to = resolve(destination, ...entry.path.split('/'))
       if (!inside(destination, to)) throw Error('Restore path escaped its new folder.')
-      mkdirSync(dirname(to), { recursive: true, mode: 0o700 }); copyFileSync(from, to); total += entry.bytes
-      const bytes = readFileSync(to); if (bytes.length !== entry.bytes || sha(bytes) !== entry.sha256) throw Error(`Restored copy could not be verified: ${entry.path}`)
+      const opened = readRegularFileSync(from, MAX_BYTES)
+      if (opened.stat.size !== entry.bytes || sha(opened.bytes) !== entry.sha256) throw Error(`Backup verification failed during restore: ${entry.path}`)
+      writeExclusive(to, opened.bytes); total += entry.bytes
+      const restored = readRegularFileSync(to, MAX_BYTES)
+      if (restored.stat.size !== entry.bytes || sha(restored.bytes) !== entry.sha256) throw Error(`Restored copy could not be verified: ${entry.path}`)
     }
     writeExclusive(join(destination, MANIFEST), JSON.stringify(manifest, null, 2))
     return { files: manifest.files.length, bytes: total }

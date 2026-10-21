@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
-import { closeSync, constants, existsSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from 'node:fs'
+import { closeSync, constants, existsSync, fsyncSync, mkdirSync, openSync, renameSync, unlinkSync, writeFileSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { readRegularFileSync } from './safeFile'
 
 const MAX_SMALL_STORE = 8_000_000
 
@@ -19,22 +20,15 @@ function atomic(file: string, data: string | Buffer): void {
 }
 
 function boundedBytes(file: string): Buffer {
-  if (statSync(file).size > MAX_SMALL_STORE) throw Error('Store exceeds the 8 MB recovery limit.')
-  return readFileSync(file)
+  return readRegularFileSync(file, MAX_SMALL_STORE).bytes
 }
 
 function bounded(file: string): string {
   return new TextDecoder('utf-8', { fatal: true }).decode(boundedBytes(file))
 }
 
-function preserveDamaged(file: string): void {
-  const size = statSync(file).size
-  if (size > MAX_SMALL_STORE) {
-    // Avoid reading an attacker-sized file merely to name its recovery copy.
-    renameSync(file, `${file}.damaged-oversized-${randomUUID()}`)
-    return
-  }
-  const bytes = boundedBytes(file), recovery = `${file}.damaged-${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}`
+function preserveDamaged(file: string, bytes: Buffer): void {
+  const recovery = `${file}.damaged-${createHash('sha256').update(bytes).digest('hex').slice(0, 16)}`
   if (!existsSync(recovery)) atomic(recovery, bytes)
 }
 
@@ -53,9 +47,11 @@ export function readRecoverableJson<T>(file: string, validate: (value: unknown) 
   catch (failure) {
     const previous = `${file}.previous`
     if (!existsSync(previous)) throw failure
-    // Validate the prior generation before changing the damaged current file.
+    // Refuse recovery of attacker-sized/non-regular current files. Their bytes
+    // stay untouched; bounded ordinary damage is copied exactly before repair.
+    const damaged = boundedBytes(file)
     const prior = bounded(previous), value = validate(JSON.parse(prior))
-    preserveDamaged(file)
+    preserveDamaged(file, damaged)
     atomic(file, prior)
     return { value, recovered: true }
   }
