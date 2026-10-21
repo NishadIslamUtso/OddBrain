@@ -1,6 +1,6 @@
 import { validContextReceipt } from '../shared/lib/nativeConversation'
 import { validNativeArtifacts } from '../shared/lib/nativeArtifacts'
-import { appendFileSync, closeSync, fsyncSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, fsyncSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readRegularFileSync, readRegularHeadSync } from './safeFile'
 import { createHash, randomUUID } from 'node:crypto'
@@ -43,10 +43,6 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
   const durableNewFile = (file: string, data: string | Uint8Array): void => {
     const fd = openSync(file, 'wx', 0o600)
     try { writeFileSync(fd, data); fsyncSync(fd) } finally { closeSync(fd) }
-  }
-  const syncFile = (file: string): void => {
-    const fd = openSync(file, 'r')
-    try { fsyncSync(fd) } finally { closeSync(fd) }
   }
   const parseRecord = (id: string, bytes: Buffer): Transcript => {
     const completeAt = bytes.lastIndexOf(10) + 1
@@ -121,11 +117,13 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
       if (next > limit) { active.delete(id); throw Error('Transcript size limit reached. Engine stop requested; the recorded prefix is retained, not marked complete.') }
       const terminal = ['done', 'error', 'closed'].includes(event.kind)
       try {
-        const file = path(id)
-        appendFileSync(file, bytes, 'utf8')
-        // Streaming deltas stay cheap; terminal state is synchronized so a
-        // successful/failed outcome is not only sitting in a volatile cache.
-        if (terminal) syncFile(file)
+        const fd = openSync(path(id), 'a')
+        try {
+          writeFileSync(fd, bytes, 'utf8')
+          // Streaming deltas stay cheap; terminal state is synchronized on the
+          // same writable handle so Windows and POSIX share the durability path.
+          if (terminal) fsyncSync(fd)
+        } finally { closeSync(fd) }
       } catch { active.delete(id); throw Error('The transcript could not be saved. Engine stop requested; keep the visible response before closing.') }
       if (terminal) active.delete(id)
       else active.set(id, next)
