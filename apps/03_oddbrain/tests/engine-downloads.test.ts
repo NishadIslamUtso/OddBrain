@@ -5,6 +5,7 @@ import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, writeFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import {
   ENGINE_DOWNLOADS,
   MAX_DOWNLOAD_BYTES,
@@ -26,56 +27,58 @@ test('the endpoint table is official, exact and https', () => {
   const claude = ENGINE_DOWNLOADS['claude-code']
   const ollama = ENGINE_DOWNLOADS.ollama
   const agy = ENGINE_DOWNLOADS.agy
-  assert.equal(claude?.windows, 'https://claude.ai/install.ps1', 'Anthropic\u2019s own native installer')
-  assert.equal(ollama?.windows, 'https://ollama.com/download/ollama-windows-amd64.zip', 'the headless runtime zip, no desktop app')
+  assert.equal(claude?.kind, 'page', 'a changing bootstrap script is not staged as trusted code')
+  assert.equal(claude?.page, 'https://github.com/anthropics/claude-code/releases/latest')
+  assert.equal(ollama?.windows, 'https://github.com/ollama/ollama/releases/download/v0.40.7/ollama-windows-amd64.zip', 'the versioned headless runtime zip')
+  assert.match(ollama?.sha256 || '', /^[a-f0-9]{64}$/, 'the executable archive has an independent compile-time identity')
   assert.equal(agy?.kind, 'page', 'no invented URL for agy')
   assert.equal(agy?.page, 'https://antigravity.google')
-  for (const info of [claude, ollama]) {
-    assert.ok(info && isOfficialUrl(info === claude ? 'claude-code' : 'ollama', info.windows), 'each endpoint passes its own gate')
-  }
+  assert.ok(ollama && isOfficialUrl('ollama', ollama.windows))
 })
 
 test('the URL gate refuses everything but the exact official address', () => {
-  assert.equal(isOfficialUrl('claude-code', 'http://claude.ai/install.ps1'), false, 'no plain http')
+  assert.equal(isOfficialUrl('claude-code', 'https://claude.ai/install.ps1'), false, 'Claude Code has no in-app executable downloader')
   assert.equal(isOfficialUrl('claude-code', 'https://mirror.example/claude/install.ps1'), false, 'no mirrors')
-  assert.equal(isOfficialUrl('claude-code', 'https://claude.ai/install.sh'), false, 'the wrong platform file is not the Windows one')
-  assert.equal(isOfficialUrl('ollama', 'https://ollama.com/download/ollama-windows-amd64.exe'), false, 'not the desktop installer either')
+  assert.equal(isOfficialUrl('ollama', 'https://ollama.com/download/ollama-windows-amd64.zip'), false, 'moving aliases are not executable identities')
+  assert.equal(isOfficialUrl('ollama', 'https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip'), false, 'latest is not pinned')
   assert.equal(isOfficialUrl('agy', 'https://antigravity.google/anything'), false, 'agy has no downloader to abuse')
   assert.equal(isOfficialUrl('nonsense', 'https://claude.ai/install.ps1'), false)
 })
 
-test('a download stages into the app\u2019s own folder with a full record', async () => {
+test('a digest-pinned download stages into the app\u2019s own folder with a full record', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dl-'))
+  const archive = createZip([{ name: 'ollama.exe', content: new TextEncoder().encode('fixture runtime') }])
+  const sha256 = createHash('sha256').update(archive).digest('hex')
   const ticks: Array<{ phase: string; got: number }> = []
   const manager = createDownloadManager({
     root,
+    trustedDigests: { ollama: sha256 },
     fetchImpl: async () => ({
       ok: true,
       status: 200,
-      headers: { get: (name) => (name === 'content-length' ? '11' : null) },
-      arrayBuffer: async () => new TextEncoder().encode('hello brain').buffer,
+      headers: { get: (name) => (name === 'content-length' ? String(archive.length) : null) },
+      arrayBuffer: async () => archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.length),
     }),
     onTick: (tick) => ticks.push({ phase: tick.phase, got: tick.got }),
   })
-  const answer = await manager.start('claude-code')
+  const answer = await manager.start('ollama')
   assert.equal(answer.ok, true, answer.answer)
-  const staged = await readFile(join(root, 'claude-code', 'install.ps1'), 'utf8')
-  assert.equal(staged, 'hello brain')
-  const record = JSON.parse(await readFile(join(root, 'claude-code', 'install-record.json'), 'utf8'))
-  assert.equal(record.endpoint, 'https://claude.ai/install.ps1')
-  assert.match(record.sha256, /^[a-f0-9]{64}$/, 'the digest is recorded, not guessed')
+  assert.equal(await readFile(join(root, 'ollama', 'app', 'ollama.exe'), 'utf8'), 'fixture runtime')
+  const record = JSON.parse(await readFile(join(root, 'ollama', 'install-record.json'), 'utf8'))
+  assert.equal(record.endpoint, ENGINE_DOWNLOADS.ollama?.windows)
+  assert.equal(record.sha256, sha256)
   assert.ok(ticks.some(t => t.phase === 'staged'), 'the card hears the stages')
   const status = await manager.status()
-  assert.equal(status['claude-code']?.engine, 'claude-code')
+  assert.equal(status.ollama?.engine, 'ollama')
   await rm(root, { recursive: true, force: true })
 })
 
 test('refusals: a dying endpoint, an oversized offer, an empty reply', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dl2-'))
   const dead = createDownloadManager({ root, fetchImpl: async () => { throw new Error('no route') } })
-  const deadAnswer = await dead.start('claude-code')
+  const deadAnswer = await dead.start('ollama')
   assert.equal(deadAnswer.ok, false)
-  assert.match(deadAnswer.answer, /Could not reach claude\.ai/)
+  assert.match(deadAnswer.answer, /Could not reach github\.com/)
   const big = createDownloadManager({
     root,
     fetchImpl: async () => ({
@@ -83,7 +86,7 @@ test('refusals: a dying endpoint, an oversized offer, an empty reply', async () 
       headers: { get: (name) => (name === 'content-length' ? String(MAX_DOWNLOAD_BYTES + 1) : null) },
     }),
   })
-  const bigAnswer = await big.start('claude-code')
+  const bigAnswer = await big.start('ollama')
   assert.match(bigAnswer.answer, /cap/)
   const empty = createDownloadManager({
     root,
@@ -93,9 +96,9 @@ test('refusals: a dying endpoint, an oversized offer, an empty reply', async () 
       arrayBuffer: async () => new ArrayBuffer(0),
     }),
   })
-  const emptyAnswer = await empty.start('claude-code')
+  const emptyAnswer = await empty.start('ollama')
   assert.match(emptyAnswer.answer, /sent nothing/)
-  const error = await createDownloadManager({ root, fetchImpl: async () => ({ ok: false, status: 404, headers: { get: () => null } }) }).start('claude-code')
+  const error = await createDownloadManager({ root, fetchImpl: async () => ({ ok: false, status: 404, headers: { get: () => null } }) }).start('ollama')
   assert.match(error.answer, /answered 404/)
   const agy = await createDownloadManager({ root }).start('agy')
   assert.match(agy.answer, /antigravity\.google/, 'agy refuses with the official page, never an invented URL')
@@ -110,6 +113,7 @@ test('a zip unpacks into the app\u2019s engines folder, round-trip through the e
   ])
   const manager = createDownloadManager({
     root,
+    trustedDigests: { ollama: createHash('sha256').update(archive).digest('hex') },
     fetchImpl: async () => ({
       ok: true,
       headers: { get: () => String(archive.length) },
@@ -200,27 +204,18 @@ test('a runtime already answering is never started twice', async () => {
   assert.equal(existsSync(join(root, 'ollama', 'serve.pid')), false, 'no process was started')
 })
 
-test('the staged installer runs only on Windows, and the command is shown in full', async () => {
+test('engines without an independently verified artifact stay on their official pages', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dl4-'))
-  const manager = createDownloadManager({
-    root,
-    fetchImpl: async () => ({
-      ok: true,
-      headers: { get: () => '4' },
-      arrayBuffer: async () => new TextEncoder().encode('test').buffer,
-    }),
-  })
-  const early = manager.runInstaller('claude-code')
-  assert.equal(early.ok, false, 'nothing staged, nothing runs')
-  await manager.start('claude-code')
-  const here = manager.runInstaller('claude-code', 'linux')
-  assert.equal(here.ok, false)
-  assert.match(here.answer, /Windows/)
-  const win = manager.runInstaller('claude-code', 'win32')
-  assert.equal(win.ok, true)
-  assert.deepEqual(win.command, ['powershell', '-ExecutionPolicy', 'Bypass', '-File', join(root, 'claude-code', 'install.ps1')])
-  const other = manager.runInstaller('ollama', 'win32')
-  assert.equal(other.ok, false, 'a zip has no installer to run')
+  let fetched = false
+  const manager = createDownloadManager({ root, fetchImpl: async () => { fetched = true; throw Error('must not fetch') } })
+  for (const engine of ['claude-code', 'agy']) {
+    const answer = await manager.start(engine)
+    assert.equal(answer.ok, false)
+    assert.match(answer.answer, /no verified direct endpoint/)
+  }
+  assert.equal(fetched, false)
+  assert.equal(manager.runInstaller('claude-code', 'win32').ok, false)
+  assert.equal(manager.executeInstaller('claude-code', 'win32').ok, false)
   await rm(root, { recursive: true, force: true })
 })
 
@@ -228,44 +223,31 @@ test('a redirect may not outrank the endpoint pin', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dl6-'))
   const manager = createDownloadManager({
     root,
-    fetchImpl: async () => ({
-      ok: false,
-      status: 302,
-      headers: { get: (name) => (name === 'location' ? 'https://mirror.example/steal.ps1' : null) },
-    }),
-    onTick: () => undefined,
+    fetchImpl: async () => ({ ok: false, status: 302, headers: { get: name => name === 'location' ? 'https://mirror.example/steal.zip' : null } }),
   })
-  const answer = await manager.start('claude-code')
+  const answer = await manager.start('ollama')
   assert.equal(answer.ok, false, answer.answer)
   assert.match(answer.answer, /redirect/)
-  assert.equal(existsSync(join(root, 'claude-code')), false, 'nothing staged from a hijacked hop')
+  assert.equal(existsSync(join(root, 'ollama')), false, 'nothing staged from a hijacked hop')
   await rm(root, { recursive: true, force: true })
 })
 
-test('the publisher\u2019s own redirect is followed — the pin follows the publisher', async () => {
+test('an allowed release-asset redirect is followed but still must match the digest pin', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dl7-'))
-  const hops: string[] = []
+  const archive = createZip([{ name: 'ollama.exe', content: new TextEncoder().encode('redirect fixture') }])
+  const digest = createHash('sha256').update(archive).digest('hex'), hops: string[] = []
   const manager = createDownloadManager({
     root,
-    fetchImpl: async (url) => {
+    trustedDigests: { ollama: digest },
+    fetchImpl: async url => {
       hops.push(url)
-      if (url === 'https://claude.ai/install.ps1') {
-        // The REAL chain, verified live 2026-10-17: claude.ai hands the
-        // script to its own download host.
-        return { ok: false, status: 302, headers: { get: (name) => (name === 'location' ? 'https://downloads.claude.ai/claude-code-releases/bootstrap.ps1' : null) } }
-      }
-      return {
-        ok: true,
-        status: 200,
-        headers: { get: (name) => (name === 'content-length' ? '11' : null) },
-        arrayBuffer: async () => new TextEncoder().encode('hello brain').buffer,
-      }
+      if (url === ENGINE_DOWNLOADS.ollama?.windows) return { ok: false, status: 302, headers: { get: name => name === 'location' ? 'https://release-assets.githubusercontent.com/asset-id' : null } }
+      return { ok: true, status: 200, headers: { get: name => name === 'content-length' ? String(archive.length) : null }, arrayBuffer: async () => archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.length) }
     },
-    onTick: () => undefined,
   })
-  const answer = await manager.start('claude-code')
+  const answer = await manager.start('ollama')
   assert.equal(answer.ok, true, answer.answer)
-  assert.deepEqual(hops, ['https://claude.ai/install.ps1', 'https://downloads.claude.ai/claude-code-releases/bootstrap.ps1'])
+  assert.deepEqual(hops, [ENGINE_DOWNLOADS.ollama?.windows, 'https://release-assets.githubusercontent.com/asset-id'])
   await rm(root, { recursive: true, force: true })
 })
 
@@ -276,55 +258,35 @@ test('an allowed hop that then points somewhere strange is still refused', async
     root,
     fetchImpl: async () => {
       hop += 1
-      if (hop === 1) return { ok: false, status: 302, headers: { get: (name) => (name === 'location' ? 'https://downloads.claude.ai/one' : null) } }
-      return { ok: false, status: 302, headers: { get: (name) => (name === 'location' ? 'https://mirror.example/two' : null) } }
+      if (hop === 1) return { ok: false, status: 302, headers: { get: name => name === 'location' ? 'https://release-assets.githubusercontent.com/one' : null } }
+      return { ok: false, status: 302, headers: { get: name => name === 'location' ? 'https://mirror.example/two' : null } }
     },
-    onTick: () => undefined,
   })
-  const answer = await manager.start('claude-code')
+  const answer = await manager.start('ollama')
   assert.equal(answer.ok, false)
   assert.match(answer.answer, /redirect/)
   await rm(root, { recursive: true, force: true })
 })
 
-test('the host rule: publisher hosts pass, user-info tricks and strangers do not', () => {
-  assert.equal(isOfficialDownloadHost('claude-code', 'https://downloads.claude.ai/claude-code-releases/bootstrap.ps1'), true)
-  assert.equal(isOfficialDownloadHost('claude-code', 'https://claude.ai/install.ps1'), true)
-  assert.equal(isOfficialDownloadHost('ollama', 'https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip'), true)
+test('the host rule: only version-source and publisher asset hosts pass', () => {
+  assert.equal(isOfficialDownloadHost('claude-code', 'https://github.com/anthropics/claude-code/releases/latest'), false, 'page-only engines have no download host')
+  assert.equal(isOfficialDownloadHost('ollama', ENGINE_DOWNLOADS.ollama!.windows), true)
+  assert.equal(isOfficialDownloadHost('ollama', 'https://release-assets.githubusercontent.com/x'), true)
   assert.equal(isOfficialDownloadHost('ollama', 'https://objects.githubusercontent.com/x'), true)
-  assert.equal(isOfficialDownloadHost('claude-code', 'https://mirror.example/steal.ps1'), false)
-  assert.equal(isOfficialDownloadHost('claude-code', 'https://downloads.claude.ai@evil.example/x'), false, 'user-info never passes')
-  assert.equal(isOfficialDownloadHost('claude-code', 'http://downloads.claude.ai/x'), false, 'no plain http')
-  assert.equal(isOfficialDownloadHost('nonsense', 'https://claude.ai/x'), false)
+  assert.equal(isOfficialDownloadHost('ollama', 'https://mirror.example/steal.zip'), false)
+  assert.equal(isOfficialDownloadHost('ollama', 'https://github.com@evil.example/x'), false, 'user-info never passes')
+  assert.equal(isOfficialDownloadHost('ollama', 'http://github.com/x'), false, 'no plain http')
 })
 
-test('the run button\u2019s door: the staged installer executes only when told, and says so', async () => {
+test('digest mismatch refuses before archive parsing, staging or execution', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dl8-'))
-  const spawned: Array<{ command: string; args: string[] }> = []
-  const manager = createDownloadManager({
-    root,
-    fetchImpl: async () => ({
-      ok: true,
-      status: 200,
-      headers: { get: (name) => (name === 'content-length' ? '11' : null) },
-      arrayBuffer: async () => new TextEncoder().encode('hello brain').buffer,
-    }),
-    spawnImpl: ((command: string, args: string[]) => {
-      spawned.push({ command, args })
-      return { pid: 4321 }
-    }) as never,
-    onTick: () => undefined,
-  })
-  const early = await manager.executeInstaller('claude-code', 'win32')
-  assert.equal(early.ok, false, 'nothing staged, nothing runs')
-  await manager.start('claude-code')
-  const posix = await manager.executeInstaller('claude-code', 'linux')
-  assert.equal(posix.ok, false)
-  assert.match(posix.answer, /Windows/)
-  const win = await manager.executeInstaller('claude-code', 'win32')
-  assert.equal(win.ok, true, win.answer)
-  assert.deepEqual(spawned[0]?.command, 'powershell')
-  assert.deepEqual(spawned[0]?.args, ['-ExecutionPolicy', 'Bypass', '-File', join(root, 'claude-code', 'install.ps1')])
+  const offered = createZip([{ name: 'ollama.exe', content: new TextEncoder().encode('wrong bytes') }])
+  const manager = createDownloadManager({ root, fetchImpl: async () => ({ ok: true, headers: { get: () => String(offered.length) }, arrayBuffer: async () => offered.buffer.slice(offered.byteOffset, offered.byteOffset + offered.length) }) })
+  const answer = await manager.start('ollama')
+  assert.equal(answer.ok, false)
+  assert.match(answer.answer, /pinned SHA-256/)
+  assert.equal(existsSync(join(root, 'ollama', 'app')), false)
+  assert.deepEqual(await manager.status(), {})
   await rm(root, { recursive: true, force: true })
 })
 
@@ -339,18 +301,16 @@ test('checksum lines and the size cap are pure', () => {
 
 test('removal forgets the engine and its record together', async () => {
   const root = await mkdtemp(join(tmpdir(), 'dl5-'))
+  const archive = createZip([{ name: 'ollama.exe', content: new TextEncoder().encode('removable') }])
   const manager = createDownloadManager({
     root,
-    fetchImpl: async () => ({
-      ok: true,
-      headers: { get: () => '4' },
-      arrayBuffer: async () => new TextEncoder().encode('test').buffer,
-    }),
+    trustedDigests: { ollama: createHash('sha256').update(archive).digest('hex') },
+    fetchImpl: async () => ({ ok: true, headers: { get: () => String(archive.length) }, arrayBuffer: async () => archive.buffer.slice(archive.byteOffset, archive.byteOffset + archive.length) }),
   })
-  await manager.start('claude-code')
-  const gone = await manager.remove('claude-code')
+  assert.equal((await manager.start('ollama')).ok, true)
+  const gone = await manager.remove('ollama')
   assert.equal(gone.ok, true)
   const status = await manager.status()
-  assert.equal(status['claude-code'], undefined, 'the record left with the folder')
+  assert.equal(status.ollama, undefined, 'the record left with the folder')
   await rm(root, { recursive: true, force: true })
 })

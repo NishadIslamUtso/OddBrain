@@ -50,6 +50,11 @@ test('storage attention stays visible and exposes all recovery actions', async (
     })
     expect(action).toHaveBeenCalledOnce()
   }
+  await act(() => [...host.querySelectorAll('button')].find(button => button.textContent === 'Minimize')!.click())
+  expect(host.textContent).toContain(chats.storage.message)
+  expect(host.textContent).not.toContain('Export recovery')
+  await act(() => [...host.querySelectorAll('button')].find(button => button.textContent === 'Show recovery controls')!.click())
+  expect(host.textContent).toContain('Export recovery')
 })
 
 test('routine checkpoint saving never takes layout space', async () => {

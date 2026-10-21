@@ -1,7 +1,9 @@
 import { workingNotesText, type WorkingNotes } from './chatContext'
 
 export type WorkingNotesProposal = Partial<Omit<WorkingNotes, 'findings'>> & { findings?: WorkingNotes['findings'] }
-const HEAD = /^#{2,4}\s+Working Notes update\s*$/im
+// Explicit Markdown heading only; tolerate presentation differences without ever
+// interpreting an ordinary prose phrase as a memory proposal.
+const HEAD = /^#{1,6}[ \t]+Working[ -]Notes?(?:[ \t]+(?:update|proposal|draft))?[ \t]*[:.!-]?[ \t]*$/im
 const LIMIT = 80
 const clip = (value: string, max = 2_000): string => value.trim().slice(0, max)
 
@@ -9,23 +11,23 @@ const clip = (value: string, max = 2_000): string => value.trim().slice(0, max)
 export function parseWorkingNotesProposal(text: string): WorkingNotesProposal | null {
   const match = HEAD.exec(String(text || ''))
   if (!match) return null
-  const section = text.slice(match.index + match[0].length).split(/^#{1,4}\s+/m, 1)[0].slice(0, 20_000)
+  const section = text.slice(match.index + match[0].length).split(/^#{1,6}[ \t]+/m, 1)[0].slice(0, 20_000)
   const proposal: WorkingNotesProposal = {}
   const add = <K extends 'plan' | 'decisions' | 'constraints' | 'openQuestions' | 'uncertainties' | 'nextActions'>(key: K, value: string): void => {
     const list = (proposal[key] || []) as string[]
     if (list.length < LIMIT) proposal[key] = [...list, clip(value)] as WorkingNotesProposal[K]
   }
   for (const line of section.split(/\r?\n/)) {
-    const item = /^\s*[-*]\s*(Objective|Plan|Decision|Constraint|Question|Uncertainty|Finding|Next(?: action)?):\s*(.+)$/i.exec(line)
+    const item = /^\s*[-*]\s*(Objectives?|Plans?|Decisions?|Constraints?|Open questions?|Questions?|Uncertaint(?:y|ies)|Findings?|Next(?: actions?| steps?)?):\s*(.+)$/i.exec(line)
     if (!item) continue
     const kind = item[1].toLowerCase(), value = clip(item[2])
     if (!value) continue
-    if (kind === 'objective') proposal.objective = value
-    else if (kind === 'plan') add('plan', value)
-    else if (kind === 'decision') add('decisions', value)
-    else if (kind === 'constraint') add('constraints', value)
-    else if (kind === 'question') add('openQuestions', value)
-    else if (kind === 'uncertainty') add('uncertainties', value)
+    if (kind.startsWith('objective')) proposal.objective = value
+    else if (kind.startsWith('plan')) add('plan', value)
+    else if (kind.startsWith('decision')) add('decisions', value)
+    else if (kind.startsWith('constraint')) add('constraints', value)
+    else if (kind.includes('question')) add('openQuestions', value)
+    else if (kind.startsWith('uncertaint')) add('uncertainties', value)
     else if (kind.startsWith('next')) add('nextActions', value)
     else {
       const ids = [...value.matchAll(/\[source:([^\]]{1,300})\]/gi)].map(found => found[1].trim()).filter(Boolean).slice(0, 20)

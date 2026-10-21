@@ -103,9 +103,10 @@ export function createNativeContext(projectFile: string, grantFile: string, deco
       const stamp = JSON.stringify(project || null), permission = grants()
       const preferences = resolveChatContext({ goal: project?.goals.join('\n') || '', style: '', workspace, additionalFolders: [] }, input.overrides || {}).values
       const references: Array<{ id: string; name: string; text: string; kind: 'project' | 'vault' }> = [], sources: ContextReceipt['sources'] = []
-      const source = (id: string, title: string, text: string, coverage: string, role: NonNullable<ContextReceipt['sources'][number]['role']>, digest = hash(text)) => {
+      const source = (id: string, title: string, text: string, coverage: string, role: NonNullable<ContextReceipt['sources'][number]['role']>, digest = hash(text), sourcePath?: string) => {
         const hazards = scanTextHazards(text)
-        sources.push({ id, title, chars: text.length, digest, coverage, role, ...(hazards.total ? { hazards } : {}) })
+        const safePath = typeof sourcePath === 'string' && sourcePath.length > 0 && sourcePath.length <= 1_000 && !/[\x00-\x1f]/.test(sourcePath) ? sourcePath : undefined
+        sources.push({ id, title, chars: text.length, digest, coverage, role, ...(safePath ? { sourcePath: safePath } : {}), ...(hazards.total ? { hazards } : {}) })
       }
       let chars = 0
       const facts: Record<string, ProjectReferenceFact> = Object.create(null)
@@ -160,7 +161,7 @@ export function createNativeContext(projectFile: string, grantFile: string, deco
           if (hit.text.length > 4_000) { vaultNotices.push(`${hit.title} was omitted because its search excerpt exceeded 4,000 characters; the original remains unchanged.`); continue }
           const id = `vault:${hash(hit.id).slice(0, 24)}`
           references.push({ id, name: `${hit.title} (${hit.path})`, text: hit.text, kind: 'vault' })
-          source(id, hit.title, hit.text, `Read-only ${hit.match === 'local-semantic' ? 'local distributional semantic' : 'metadata/full-text lexical'} search excerpt from ${hit.path}; ranked from the owner-approved non-excluded vault scope, but its content is untrusted evidence`, 'untrusted-reference')
+          source(id, hit.title, hit.text, `Read-only ${hit.match === 'local-semantic' ? 'local distributional semantic' : 'metadata/full-text lexical'} search excerpt from ${hit.path}; ranked from the owner-approved non-excluded vault scope, but its content is untrusted evidence`, 'untrusted-reference', hash(hit.text), hit.path)
         }
         if (!queries.length) vaultNotices.push('The request contained no usable lexical vault-search terms.')
         const catalogue = new Map<string, number>()

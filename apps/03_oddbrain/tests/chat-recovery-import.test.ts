@@ -3,8 +3,8 @@ import { afterEach, expect, test } from 'vitest'
 import { mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createChatStore } from '../src/main/chats/store'
-import { chatRecoveryDocument, parseChatRecoveryDocument } from '../src/main/chats/recovery'
+import { CHAT_COUNT_LIMIT, createChatStore } from '../src/main/chats/store'
+import { RECOVERY_CHAT_LIMIT, chatRecoveryDocument, parseChatRecoveryDocument } from '../src/main/chats/recovery'
 import type { Chat } from '../src/shared/types'
 
 const roots: string[] = []
@@ -56,6 +56,20 @@ test('unreadable indexes are preserved before an explicitly reviewed recovery be
   const preserved = readdirSync(join(folder, 'recovery')).filter(name => name.startsWith('index-before-import-'))
   expect(preserved).toHaveLength(2)
   for (const item of oldItems) expect(readdirSync(join(folder, 'items'))).toContain(item)
+})
+
+test('live and recovery limits agree, and an explicitly reviewed empty export can repair unreadable indexes', () => {
+  expect(CHAT_COUNT_LIMIT).toBe(RECOVERY_CHAT_LIMIT)
+  const folder = root(), store = createChatStore(folder), original = chat('old', 'retained item')
+  store.migrate({ chats: [original], currentChat: 'old', rawChats: JSON.stringify([original]), rawCurrentChat: JSON.stringify('old') })
+  writeFileSync(join(folder, 'index.json'), '{damaged-current')
+  writeFileSync(join(folder, 'index.previous.json'), '{damaged-previous')
+  const plan = store.previewRecovery(recovery([]))
+  expect(plan.repair).toBe(true)
+  const saved = store.importRecovery(plan)
+  expect(saved).toMatchObject({ initialized: true, chats: [], currentChat: '' })
+  expect(readdirSync(join(folder, 'recovery')).filter(name => name.startsWith('index-before-import-'))).toHaveLength(2)
+  expect(readdirSync(join(folder, 'items')).length).toBeGreaterThan(0)
 })
 
 test('a changed live store invalidates a reviewed import plan', () => {

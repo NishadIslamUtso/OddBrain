@@ -5,11 +5,9 @@ import { validateHook, hookSlug, hookStatusLine, HOOK_EVENTS, type AppHook } fro
 import { createHookRunner, type HookStore } from '../src/main/hooks'
 
 /**
- * Hooks: the owner's own commands at the engine's moments. Real processes in
- * these tests — a hook that hangs is stopped and said to be stopped, one
- * that fails is reported, and the shelf is capped. Packs can never
- * contribute a hook: the pack format simply has no such contribution, and
- * the test holds that line.
+ * Hooks: owner-authored event reminders whose commands still go through the
+ * one-use OS-command review. Events never execute a process. The shelf stays
+ * bounded and packs cannot contribute a hook.
  */
 
 const read = (path: string): string => readFileSync(new URL(path, import.meta.url), 'utf8')
@@ -36,27 +34,18 @@ test('a hook is validated: name, moment, command; the id is its slug', () => {
   assert.deepEqual([...HOOK_EVENTS], ['turn-done', 'turn-error', 'permission'])
 })
 
-test('a hook really runs, and success is said in the story', async () => {
+test('an event reports matching hooks without exercising command authority', async () => {
   const store = memoryStore()
   const runner = createHookRunner(store)
   const set = runner.upsert({ name: 'Say done', event: 'turn-done', command: 'printf hook-ran' })
   assert.ok(set.ok)
   const lines = await runner.run('turn-done')
   assert.equal(lines.length, 1)
-  assert.match(lines[0] ?? '', /Hook "Say done" ran, exit 0/)
-  assert.match(lines[0] ?? '', /hook-ran/, 'the command\u2019s own words are reported')
-  assert.equal((await runner.run('turn-error')).length, 0, 'hooks only run at their moment')
-})
-
-test('a failing hook is reported, never fatal; a hanging hook is stopped and said so', async () => {
-  const store = memoryStore()
-  const runner = createHookRunner(store, 300)
-  await runner.upsert({ name: 'Broken', event: 'turn-error', command: 'node -e "process.exit(2)"' })
-  await runner.upsert({ name: 'Sleepy', event: 'turn-error', command: 'node -e "setTimeout(() => {}, 30000)"' })
-  const lines = await runner.run('turn-error')
-  assert.equal(lines.length, 2)
-  assert.match(lines[0] ?? '', /ended with exit 2/)
-  assert.match(lines[1] ?? '', /did not finish in .* and was stopped/)
+  assert.match(lines[0] ?? '', /did not run automatically/)
+  assert.match(lines[0] ?? '', /review and allow/i)
+  assert.doesNotMatch(lines[0] ?? '', /hook-ran/, 'process output cannot exist because no process ran')
+  assert.equal((await runner.run('turn-error')).length, 0, 'hooks only report at their moment')
+  assert.equal((await runner.test('printf bypass')).ok, false, 'the legacy direct-execution endpoint fails closed')
 })
 
 test('the shelf: upsert replaces by id, remove removes, twenty is the cap', async () => {

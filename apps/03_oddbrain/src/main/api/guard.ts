@@ -82,6 +82,26 @@ export function protectLocalApi(
       `This local API operation is not enabled (${request.method || 'GET'} ${pathname}). No model downloads, deletes, shell or cloud actions are exposed.`
     )
   }
+  // A browser-controlled Host name can resolve to 127.0.0.1 after a DNS
+  // rebinding. Same-origin comparison alone would then bless that hostile name
+  // and expose this unauthenticated local service. The authority itself must be
+  // a literal loopback name, except for an explicitly enabled Arena preview.
+  const host = header(request.headers.host).split(',')[0].trim()
+  const forwarded = process.env.ALLOW_PREVIEW_ORIGINS === '1'
+    ? header(request.headers['x-forwarded-host']).split(',')[0].trim()
+    : ''
+  const authority = forwarded || host
+  let authorityUrl: URL
+  try {
+    authorityUrl = new URL(`http://${authority}`)
+  } catch {
+    return deny(403, 'The local API requires a valid loopback Host header.')
+  }
+  const previewHost = process.env.ALLOW_PREVIEW_ORIGINS === '1' && authorityUrl.hostname.endsWith('.e2b.app')
+  if (!previewHost && !['127.0.0.1', 'localhost', '[::1]'].includes(authorityUrl.hostname)) {
+    return deny(403, 'The local API accepts only a literal loopback Host. DNS aliases are refused.')
+  }
+
   const originHeader = header(request.headers.origin)
   if (originHeader) {
     let origin: URL
@@ -96,11 +116,8 @@ export function protectLocalApi(
     // Strict same-origin by default. A forwarded/preview host is only trusted
     // when ALLOW_PREVIEW_ORIGINS=1 is set explicitly, for running the dev server
     // behind a tunnel or a hosted preview.
-    const host = header(request.headers['x-forwarded-host'] || request.headers.host)
-      .split(',')[0]
-      .trim()
-    const preview = process.env.ALLOW_PREVIEW_ORIGINS === '1' && origin.hostname.endsWith('.e2b.app')
-    if (!preview && origin.host !== host) {
+    const preview = previewHost && origin.hostname.endsWith('.e2b.app')
+    if (!preview && origin.host !== authority) {
       return deny(403, 'Cross-origin API requests are not authorized.')
     }
   }

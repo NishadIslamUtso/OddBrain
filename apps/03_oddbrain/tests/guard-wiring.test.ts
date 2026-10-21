@@ -19,9 +19,10 @@ test('every created window is pinned and locked — the quick window and the mai
   const pinned = main.match(/pinOwnOrigins\(/g)?.length ?? 0
   const locked = main.match(/lockNavigation\(/g)?.length ?? 0
   assert.equal(pinned, 2, `pinOwnOrigins must be called exactly for the main and quick windows, found ${pinned}`)
-  // Three windows: main, quick ask, and the artifact pop-out - each gets
-  // the navigation lock; a missing or extra one means a window escaped review.
-  assert.equal(locked, 3, `lockNavigation must guard main + quick + pop-out, found ${locked}`)
+  // Four windows: main, quick ask, artifact pop-out and hidden PDF renderer.
+  // Model-authored windows pass false so they cannot launch external pages.
+  assert.equal(locked, 4, `lockNavigation must guard main + quick + pop-out + PDF, found ${locked}`)
+  assert.equal(main.match(/lockNavigation\(win\.webContents, false\)/g)?.length ?? 0, 2, 'both artifact windows use strict no-navigation mode')
 })
 
 test('the packaged file fallbacks pin their exact page — the offline window keeps working IPC', () => {

@@ -46,7 +46,7 @@ describe('owner-selected project context', () => {
     const result = await f.service.prepare({ ...f.input, vaultSearch: true }, f.dir, 'What happened with the car bill?', '', new AbortController().signal)
     expect(recall).toHaveBeenCalledOnce()
     expect(result.prompt).toContain('The vehicle invoice was paid.')
-    expect(result.receipt.sources).toContainEqual(expect.objectContaining({ title: 'Vehicle invoice', role: 'untrusted-reference', coverage: expect.stringContaining('owner-approved non-excluded vault scope') }))
+    expect(result.receipt.sources).toContainEqual(expect.objectContaining({ title: 'Vehicle invoice', role: 'untrusted-reference', sourcePath: 'Projects/Car.md', coverage: expect.stringContaining('owner-approved non-excluded vault scope') }))
   })
   test('uses optional local semantic expansion only when the owner enabled it and receipts semantic evidence', async () => {
     const recall = vi.fn((_query: string, options?: { localSemantic?: boolean }) => ({ ok: true as const, incomplete: false, notices: [], semantic: { mode: 'local-distributional-v1' as const, candidates: 2, capped: false }, hits: [{ id: 'file:semantic', kind: 'file' as const, title: 'Related terms', text: 'Distributionally related evidence.', path: 'Notes/Related.md', date: '', speaker: 'Saved file', match: 'local-semantic' as const }] }))

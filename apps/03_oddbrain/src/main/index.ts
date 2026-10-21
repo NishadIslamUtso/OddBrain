@@ -326,9 +326,14 @@ function registerBridges(): void {
       return { ok: false as const, error: failure.message || 'Conversation storage failed. Original files were not replaced.', ...(failure.snapshot ? { snapshot: failure.snapshot } : {}) }
     }
   }
-  handle('chats:read', () => chatAnswer(() => ({ snapshot: chatStore.read() })))
+  handle('chats:read', event => chatAnswer(() => ({ snapshot: chatStore.read((done, total) => {
+    if (!event.sender.isDestroyed()) event.sender.send('chats:load-progress', { done, total })
+  }) })))
   handle('chats:migrate', (_event, input: ChatStoreMigration) => chatAnswer(() => chatStore.migrate(input)))
-  handle('chats:write', (_event, input: ChatStoreWrite) => chatAnswer(() => ({ snapshot: chatStore.write(input) })))
+  handle('chats:write', (_event, input: ChatStoreWrite) => chatAnswer(() => {
+    const snapshot = chatStore.write(input)
+    return { receipt: { initialized: true as const, revision: snapshot.revision, currentChat: snapshot.currentChat, ...(snapshot.notice ? { notice: snapshot.notice } : {}) } }
+  }))
   handle('chats:export-recovery', async (_event, input: ChatStoreMigration) => {
     try {
       const document = chatRecoveryDocument(input)
@@ -351,8 +356,7 @@ function registerBridges(): void {
       noLinkedPath(selected)
       const document = parseChatRecoveryDocument(readRegularFileSync(selected, CHAT_RECOVERY_FILE_LIMIT).bytes)
       const plan = chatStore.previewRecovery(document)
-      if (plan.repair && document.chats.length === 0) return { ok: false, answer: 'An empty recovery export cannot replace unreadable chat indexes. Nothing was changed.' }
-      if (!plan.repair && plan.merge.imported === 0) return { ok: true, answer: `All ${plan.merge.identical.toLocaleString()} chat(s) from this recovery export are already present. Nothing was changed.` }
+      if (!plan.repair && plan.merge.imported === 0) return { ok: true, answer: `All ${plan.merge.identical.toLocaleString()} chat(s) from this recovery export are already present. Nothing was changed.`, snapshot: { initialized: plan.expectedInitialized, revision: plan.expectedRevision, chats: plan.merge.chats, currentChat: plan.merge.currentChat } }
       const lines = [
         `Recovery export: ${document.exportedAt}`,
         `Chats in file: ${document.chats.length.toLocaleString()}`,
@@ -361,11 +365,11 @@ function registerBridges(): void {
         `ID conflicts kept as separate recovered copies: ${plan.merge.conflicts.toLocaleString()}`,
         `Final library: ${plan.merge.chats.length.toLocaleString()} chat(s)`,
       ]
-      if (plan.repair) lines.push('', 'The current chat indexes cannot be read. Their exact files will be moved into the private recovery folder before this import becomes active. Existing item files will be retained.', plan.storageProblem || '')
+      if (plan.repair) lines.push('', document.chats.length === 0 ? 'This is an explicitly empty recovery export. The unreadable indexes will be preserved, then the active library will be repaired to zero chats. Existing item files will be retained for forensic recovery.' : 'The current chat indexes cannot be read. Their exact files will be moved into the private recovery folder before this import becomes active. Existing item files will be retained.', plan.storageProblem || '')
       else lines.push('', 'Existing chats are never replaced. Exact repeats are skipped; conflicting versions are kept as separate recovered copies.')
       const confirmation = await dialog.showMessageBox({
         type: plan.repair ? 'warning' : 'question',
-        buttons: ['Cancel', plan.repair ? 'Preserve damaged indexes and import' : 'Import recovered chats'],
+        buttons: ['Cancel', plan.repair ? (document.chats.length === 0 ? 'Preserve damaged indexes and use empty library' : 'Preserve damaged indexes and import') : 'Import recovered chats'],
         defaultId: 0,
         cancelId: 0,
         message: plan.repair ? 'Repair app-chat storage from this recovery export?' : 'Merge this recovery export into app chats?',
@@ -373,7 +377,7 @@ function registerBridges(): void {
       })
       if (confirmation.response !== 1) return { ok: false, answer: 'Import cancelled. Nothing was changed.' }
       const snapshot = chatStore.importRecovery(plan)
-      return { ok: true, answer: `${plan.merge.imported.toLocaleString()} recovered chat(s) imported${plan.merge.conflicts ? `; ${plan.merge.conflicts.toLocaleString()} ID conflict(s) were kept as separate copies` : ''}. The library now contains ${snapshot.chats.length.toLocaleString()} chat(s).` }
+      return { ok: true, answer: `${plan.merge.imported.toLocaleString()} recovered chat(s) imported${plan.merge.conflicts ? `; ${plan.merge.conflicts.toLocaleString()} ID conflict(s) were kept as separate copies` : ''}. The library now contains ${snapshot.chats.length.toLocaleString()} chat(s).`, snapshot }
     } catch (error) { return { ok: false, answer: `${(error as Error).message || 'Chat recovery data could not be imported.'} The selected recovery file was not changed.` } }
   })
   handle('chats:open-location', async () => {
@@ -1446,7 +1450,7 @@ function registerBridges(): void {
       // navigation locked (the PDF window below does the same).
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
     })
-    lockNavigation(win.webContents)
+    lockNavigation(win.webContents, false)
     void win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(payload.html))
     return { ok: true }
   })
@@ -1459,7 +1463,10 @@ function registerBridges(): void {
       const dir = join(vaultRoot(), 'Artifacts PDF')
       mkdirSync(dir, { recursive: true })
       const target = join(dir, safe)
-      const win = new BrowserWindow({ show: false, width: 820, height: 1160, webPreferences: { sandbox: true } })
+      const win = new BrowserWindow({ show: false, width: 820, height: 1160, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
+      // PDF source is model-authored too. It may render and print, but it may not
+      // navigate this hidden window or launch a browser as a side effect.
+      lockNavigation(win.webContents, false)
       try {
         await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(payload.html))
         const bytes = await win.webContents.printToPDF({ printBackground: true })

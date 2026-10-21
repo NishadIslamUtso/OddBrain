@@ -6,7 +6,7 @@ import type { Chat } from '../../shared/types'
 export const CHAT_RECOVERY_FORMAT = 'oddbrain-chat-recovery-export'
 export const CHAT_RECOVERY_VERSION = 1
 export const CHAT_RECOVERY_FILE_LIMIT = 768_000_000
-const RECOVERY_CHAT_LIMIT = 21_000
+export const RECOVERY_CHAT_LIMIT = 21_000
 const ID_LIMIT = 1_024
 
 export type ChatRecoveryDocument = {

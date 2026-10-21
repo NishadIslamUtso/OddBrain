@@ -26,16 +26,28 @@ export type ChatStoreWrite = {
   expectedRevision: number
 }
 
+export type ChatStoreWriteReceipt = {
+  initialized: true
+  revision: number
+  currentChat: string
+  notice?: string
+}
+
 export type ChatStoreAnswer =
   | { ok: true; snapshot: ChatStoreSnapshot; migrated?: boolean }
   | { ok: false; error: string; snapshot?: ChatStoreSnapshot }
 
-export type ChatStorageAction = { ok: boolean; answer: string; path?: string }
+export type ChatStoreWriteAnswer =
+  | { ok: true; receipt: ChatStoreWriteReceipt }
+  | { ok: false; error: string; snapshot?: ChatStoreSnapshot }
+
+export type ChatStorageAction = { ok: boolean; answer: string; path?: string; snapshot?: ChatStoreSnapshot }
 
 export type ChatStoreBridge = {
   read: () => Promise<ChatStoreAnswer>
+  onLoadProgress?: (listener: (progress: { done: number; total: number }) => void) => () => void
   migrate: (input: ChatStoreMigration) => Promise<ChatStoreAnswer>
-  write: (input: ChatStoreWrite) => Promise<ChatStoreAnswer>
+  write: (input: ChatStoreWrite) => Promise<ChatStoreWriteAnswer>
   /** Export the visible library plus the exact legacy strings through a native save dialog. */
   exportRecovery: (input: ChatStoreMigration) => Promise<ChatStorageAction>
   /** Select, preview and explicitly merge an app-owned recovery export. Existing chats are never silently replaced. */

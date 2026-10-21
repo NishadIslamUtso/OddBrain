@@ -34,7 +34,6 @@ import VaultView from './components/VaultView'
 import { resolveSavedView, migrateHistoryLocation } from './state/viewRoute'
 import useArtifactLibrary, { adoptionRecords } from './state/artifactLibrary'
 import type { ArtifactSummary } from '../../main/artifacts/store'
-import useChat from './hooks/useChat'
 import useArtifactRewrite from './hooks/useArtifactRewrite'
 import useModels from './hooks/useModels'
 import type { Attachment } from '@shared/types'
@@ -64,9 +63,8 @@ import type { ContextModelChoice } from './components/ModelContextProfiles'
  * The app.
  *
  * One screen so far: the conversation. Everything the interface shows comes from
- * the shared modules — the model list from Ollama's own metadata, search from the
- * library's search, the transcript from the chat hook — so there is no second
- * implementation of anything to drift out of step.
+ * the shared modules — model metadata, saved search and the native transcript
+ * archive — so there is no second chat-send implementation to drift out of step.
  */
 
 /** The quick window's whole surface: the engine's card, one box, nothing else. */
@@ -205,6 +203,8 @@ export default function App() {
    * enforces them: this is a copy of the record, never the record itself.
    */
   const [permissions, setPermissions] = useState<Permissions>(DEFAULT_PERMISSIONS)
+  const permissionsRef = useRef(permissions)
+  permissionsRef.current = permissions
   const [permissionsRevision, setPermissionsRevision] = useState(0)
   const models = useModels(model, setModel, permissions)
   const [contextProfiles, setContextProfiles] = usePersistentState(
@@ -311,14 +311,6 @@ export default function App() {
     }
   }, [permissionsRevision])
 
-  const navigate = useCallback(
-    (chatId: string) => {
-      setPendingProject(null)
-      chats.open(chatId)
-    },
-    [chats],
-  )
-
   const engine = useEngine()
   const learnedNativeCapacity = useRef('')
   useEffect(() => {
@@ -346,6 +338,14 @@ export default function App() {
     if (engine.settings.model) choices.push({ key: modelContextKey(`engine:${engine.settings.id}:${engine.settings.cloudProvider || 'local'}`, engine.settings.model), label: `${engine.settings.id} selected · ${engine.settings.model}` })
     return choices
   }, [models.models, models.model, models.capabilities.contextWindowTokens, engine.models.entries, engine.settings.id, engine.settings.model, engine.settings.cloudProvider])
+  const captureCompletedChat = useCallback((completed: import('@shared/types').Chat): void => {
+    for (const record of adoptionRecords(completed.messages, completed.id)) {
+      void bridge.artifacts.save({ id: record.id, title: record.title, type: record.type, content: record.content, chatId: record.chatId, messageId: record.messageId })
+    }
+    if (!isDemo && permissionsRef.current.keepConversations) {
+      void vaultPost('/capture', conversationCapture(completed)).catch(() => setNotice('The chat is saved in OddBrain, but its optional vault conversation copy could not be updated.'))
+    }
+  }, [])
   const commitNativeChat = useRef(chats.commit), nativeRecorded = useRef(new Set<string>()), nativeRecoveryStarted = useRef(false)
   commitNativeChat.current = chats.commit
   useEffect(() => {
@@ -384,54 +384,21 @@ export default function App() {
     void bridge.transcripts.read(id).then(async reply => {
       if (!reply.ok) throw Error(reply.error)
       if (reply.value.state === 'running') { nativeRecorded.current.delete(id); return }
-      const saved = await commitNativeChat.current(previous => previous.map(chat => chat.id === turn.chatId ? recordNativeTranscript(chat, reply.value) : chat))
+      let completed: import('@shared/types').Chat | undefined
+      const saved = await commitNativeChat.current(previous => previous.map(chat => {
+        if (chat.id !== turn.chatId) return chat
+        completed = recordNativeTranscript(chat, reply.value)
+        return completed
+      }))
       if (!saved) setNotice('The native turn is in Full transcripts, but this chat copy could not be saved. Export the transcript before closing.')
+      else if (completed) captureCompletedChat(completed)
     }).catch(() => { nativeRecorded.current.delete(id); setNotice('This turn could not be copied into saved chat history. Its original record is kept in Full transcripts.') })
-  }, [engine.turn?.transcriptId, engine.turn?.state])
+  }, [engine.turn?.transcriptId, engine.turn?.state, captureCompletedChat])
 
-  const chatApi = useChat({
-    chats: chats.chats,
-    setChats: chats.setChats,
-    currentChat: chats.currentChat,
-    navigate,
-    models,
-    // The vision bridge is chosen from models that reported vision support. That
-    // choice lives in Settings, which is not built yet — so nothing is claimed
-    // here, and attaching an image says plainly what is missing.
-    vision: { bridgeModel: '' },
-    notify: setNotice,
-    // What Settings > Performance chose. Left alone it is the 4 GB profile:
-    // the one that cannot overflow a small card.
-    inference,
-    contextProfiles,
-    setContextProfiles,
-    workingNotes: chatId => chatNotesStore(localStorage, workspaceKey('oddbrain.chat-notes.v1'), chatId).read()?.value.working,
-    // Where finished conversations are kept. In the browser preview there is no
-    // vault behind the interface, so nothing is attempted and no failed request
-    // appears in the console — the preview stays quiet, as it must.
-    // Nothing is attempted when keeping conversations is switched off, so nothing
-    // fails and no request appears anywhere: the switch is the whole behaviour.
-    capture: isDemo
-      ? undefined
-      : chat => {
-          // The library is the app's own record, and it is fed every time a turn
-          // ends. `save` reports `unchanged` for a document that has not moved,
-          // so a chat that produced nothing new writes nothing.
-          for (const record of adoptionRecords(chat.messages, chat.id)) {
-            void bridge.artifacts.save({
-              id: record.id,
-              title: record.title,
-              type: record.type,
-              content: record.content,
-              chatId: record.chatId,
-              messageId: record.messageId,
-            })
-          }
-          if (!permissions.keepConversations) return Promise.resolve(undefined)
-          return vaultPost('/capture', conversationCapture(chat)).then(() => undefined)
-        },
-  })
-
+  /* Native engine dispatch is the single chat send path. The removed legacy
+   * useChat mount never sent a turn and exposed only a permanently empty live
+   * artifact value; final/native artifact observations remain transcript-backed. */
+  /* legacy chat pipeline removed */
   const artifacts = useMemo(
     () => chatArtifacts(chat?.messages || []),
     [chat?.messages]
@@ -789,7 +756,6 @@ export default function App() {
           onStop={() => void engine.stop()}
           busy={engine.turn?.state === 'running' || engine.ambient.busy}
           preparing={preparingSend}
-          live={chatApi.live}
           highlightId={highlight}
           notice={notice}
           profileName={profile.name}

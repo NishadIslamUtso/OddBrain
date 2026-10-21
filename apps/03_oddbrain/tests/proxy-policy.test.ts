@@ -18,6 +18,7 @@ function request(
   method = 'GET',
   headers: Record<string, string> = {}
 ): { status: number; body: string; forwarded: boolean } {
+  headers = { host: '127.0.0.1:41979', ...headers }
   let status = 200
   let body = ''
   let forwarded = false
@@ -67,7 +68,7 @@ test('ordinary local and preview same-origin JSON writes pass the boundary', () 
   else process.env.ALLOW_PREVIEW_ORIGINS = wasSet
 })
 
-test('cross-origin and opaque-origin requests do not get forwarded', () => {
+test('cross-origin, opaque-origin and DNS-rebinding requests do not get forwarded', () => {
   for (const origin of ['https://evil.example', 'null']) {
     const result = request('/api/vault/capture', 'POST', {
       host: '127.0.0.1:5173',
@@ -76,6 +77,13 @@ test('cross-origin and opaque-origin requests do not get forwarded', () => {
     })
     assert.equal(result.status, 403, `${origin} must not reach a local service`)
   }
+  const rebound = request('/api/vault/files', 'GET', {
+    host: 'attacker-controlled.example:41979',
+    origin: 'http://attacker-controlled.example:41979',
+  })
+  assert.equal(rebound.status, 403)
+  assert.equal(rebound.forwarded, false, 'a same-origin DNS name that resolves to loopback is still hostile')
+  assert.equal(request('/api/vault/files', 'GET', { host: '' }).forwarded, false, 'HTTP API requests need an authority')
 })
 
 test('form CSRF and non-JSON writes are rejected', () => {

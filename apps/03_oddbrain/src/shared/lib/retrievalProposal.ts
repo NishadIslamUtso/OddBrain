@@ -1,7 +1,9 @@
 export type VaultStage = { number: number; total: number; goal: string }
 export type VaultSearchProposal = { queries: string[]; reason: string; stage?: VaultStage }
 
-const REQUEST_HEADING = /^#{2,4}\s+Vault search request\s*$/im
+// Heading remains mandatory and visible. Formatting/case and narrowly equivalent
+// wording are tolerated; unlabeled answer prose is never interpreted as a search.
+const REQUEST_HEADING = /^#{1,6}[ \t]+Vault[ \t]+(?:search|retrieval|follow-up[ \t]+search)[ \t]+(?:request|proposal)[ \t]*[:.!-]?[ \t]*$/im
 const OWNER_MARKER = '[OddBrain owner-confirmed vault follow-up]'
 const clean = (value: string): string => value.trim().replace(/\s+/g, ' ').slice(0, 500)
 
@@ -9,14 +11,14 @@ const clean = (value: string): string => value.trim().replace(/\s+/g, ' ').slice
 export function parseVaultSearchProposal(text: string): VaultSearchProposal | null {
   const match = REQUEST_HEADING.exec(String(text || ''))
   if (!match) return null
-  const section = text.slice(match.index + match[0].length).split(/^#{1,4}\s+/m, 1)[0].slice(0, 5_000)
+  const section = text.slice(match.index + match[0].length).split(/^#{1,6}[ \t]+/m, 1)[0].slice(0, 5_000)
   const queries: string[] = []
   let reason = '', stageNumber = 0, stageTotal = 0, stageGoal = ''
   for (const line of section.split(/\r?\n/)) {
-    const query = /^\s*[-*]\s*Query:\s*(.+)$/i.exec(line)
-    const why = /^\s*[-*]\s*(?:Why|Reason):\s*(.+)$/i.exec(line)
-    const stage = /^\s*[-*]\s*Stage:\s*(\d+)\s+of\s+(\d+)\s*$/i.exec(line)
-    const goal = /^\s*[-*]\s*Stage goal:\s*(.+)$/i.exec(line)
+    const query = /^\s*[-*]\s*(?:Search[ \t]+)?Quer(?:y|ies):\s*(.+)$/i.exec(line)
+    const why = /^\s*[-*]\s*(?:Why|Reason|Rationale):\s*(.+)$/i.exec(line)
+    const stage = /^\s*[-*]\s*Stage:\s*(\d+)\s+(?:of|\/)\s*(\d+)\s*$/i.exec(line)
+    const goal = /^\s*[-*]\s*Stage[ \t]+(?:goal|objective):\s*(.+)$/i.exec(line)
     if (query && queries.length < 3) {
       const value = clean(query[1])
       if (value && !queries.includes(value)) queries.push(value)

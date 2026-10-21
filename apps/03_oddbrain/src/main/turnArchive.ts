@@ -1,6 +1,6 @@
 import { validContextReceipt } from '../shared/lib/nativeConversation'
 import { validNativeArtifacts } from '../shared/lib/nativeArtifacts'
-import { appendFileSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { appendFileSync, closeSync, fsyncSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { readRegularFileSync, readRegularHeadSync } from './safeFile'
 import { createHash, randomUUID } from 'node:crypto'
@@ -40,6 +40,14 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
     const file = join(attachmentDir(id), attachment.id + '.bin'); noLinkedPath(file); return file
   }
   const line = (value: unknown) => JSON.stringify(value) + '\n'
+  const durableNewFile = (file: string, data: string | Uint8Array): void => {
+    const fd = openSync(file, 'wx', 0o600)
+    try { writeFileSync(fd, data); fsyncSync(fd) } finally { closeSync(fd) }
+  }
+  const syncFile = (file: string): void => {
+    const fd = openSync(file, 'r')
+    try { fsyncSync(fd) } finally { closeSync(fd) }
+  }
   const parseRecord = (id: string, bytes: Buffer): Transcript => {
     const completeAt = bytes.lastIndexOf(10) + 1
     let incomplete = completeAt !== bytes.length
@@ -83,7 +91,7 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
           const folder = imageDir(id); mkdirSync(folder, { recursive: false, mode: 0o700 }); keptImages = true
           for (const [index, descriptor] of descriptors.entries()) {
             const decoded = Buffer.from(input.images![index].data, 'base64')
-            writeFileSync(imagePath(id, descriptor), decoded, { flag: 'wx', mode: 0o600 })
+            durableNewFile(imagePath(id, descriptor), decoded)
             const saved = readRegularFileSync(imagePath(id, descriptor), descriptor.bytes).bytes
             if (saved.length !== descriptor.bytes || createHash('sha256').update(saved).digest('hex') !== descriptor.sha256) throw Error(`Image ${index + 1} could not be verified before dispatch.`)
           }
@@ -91,12 +99,14 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
         if (attachmentDescriptors?.length) {
           const folder = attachmentDir(id); mkdirSync(folder, { recursive: false, mode: 0o700 }); keptAttachments = true
           for (const [index, descriptor] of attachmentDescriptors.entries()) {
-            writeFileSync(attachmentPath(id, descriptor), input.attachments![index].data, { flag: 'wx', mode: 0o600 })
+            durableNewFile(attachmentPath(id, descriptor), input.attachments![index].data)
             const saved = readRegularFileSync(attachmentPath(id, descriptor), descriptor.bytes).bytes
             if (saved.length !== descriptor.bytes || createHash('sha256').update(saved).digest('hex') !== descriptor.sha256) throw Error(`Original attachment ${index + 1} could not be verified before dispatch.`)
           }
         }
-        writeFileSync(path(id), record, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
+        // This returns only after the request envelope and every retained source
+        // byte have crossed the OS durability boundary. Dispatch happens later.
+        durableNewFile(path(id), record)
       } catch (error) {
         if (keptImages) { try { rmSync(imageDir(id), { recursive: true, force: true }) } catch { /* orphaned private bytes remain unreferenced rather than dispatching */ } }
         if (keptAttachments) { try { rmSync(attachmentDir(id), { recursive: true, force: true }) } catch { /* orphaned private bytes remain unreferenced rather than dispatching */ } }
@@ -109,8 +119,15 @@ export function createTurnArchive(root: string, limit = TRANSCRIPT_LIMIT) {
       if (size === undefined) return
       const bytes = line({ event }), next = size + Buffer.byteLength(bytes)
       if (next > limit) { active.delete(id); throw Error('Transcript size limit reached. Engine stop requested; the recorded prefix is retained, not marked complete.') }
-      try { appendFileSync(path(id), bytes, 'utf8') } catch { active.delete(id); throw Error('The transcript could not be saved. Engine stop requested; keep the visible response before closing.') }
-      if (['done', 'error', 'closed'].includes(event.kind)) active.delete(id)
+      const terminal = ['done', 'error', 'closed'].includes(event.kind)
+      try {
+        const file = path(id)
+        appendFileSync(file, bytes, 'utf8')
+        // Streaming deltas stay cheap; terminal state is synchronized so a
+        // successful/failed outcome is not only sitting in a volatile cache.
+        if (terminal) syncFile(file)
+      } catch { active.delete(id); throw Error('The transcript could not be saved. Engine stop requested; keep the visible response before closing.') }
+      if (terminal) active.delete(id)
       else active.set(id, next)
     },
     list(before = ''): TranscriptPage {

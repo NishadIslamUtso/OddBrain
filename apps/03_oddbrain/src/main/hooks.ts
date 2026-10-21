@@ -1,51 +1,30 @@
 /**
- * The hook runner: real commands, really run, really bounded. A hook that
- * hangs is stopped and SAID to be stopped; a hook that fails is reported
- * where the turn's story is read — never swallowed, never fatal to the
- * engine's work. The command runs as-is (no templating, no engine output
- * piped in): hooks react to moments, they do not touch the work.
+ * Hook definitions are event reminders, not standing command authority.
+ *
+ * An earlier implementation called exec() directly when an engine event arrived.
+ * That bypassed the app's one-use OS-command review. Events now report which
+ * hook is ready; execution goes through the ordinary command runner in the Hooks
+ * pane, with its exact script, folder, shell, expiry and fresh Allow press.
  */
-import { exec } from 'node:child_process'
-import { HOOK_TIMEOUT_MS, hookStatusLine, validateHook, type AppHook, type HookEvent } from '../shared/lib/hooks'
+import { validateHook, type AppHook, type HookEvent } from '../shared/lib/hooks'
 
 export type HookStore = {
   load(): AppHook[]
   save(hooks: AppHook[]): void
 }
 
-export type HookOutcome = { name: string; exit: number | null; ms: number; out: string }
-
-export function createHookRunner(store: HookStore, timeoutMs = HOOK_TIMEOUT_MS) {
-  const runOne = (command: string): Promise<HookOutcome> =>
-    new Promise((resolve) => {
-      const started = Date.now()
-      exec(command, { timeout: timeoutMs, windowsHide: true }, (error, stdout, stderr) => {
-        const ms = Date.now() - started
-        // A stopped hook is not a failed one: killed says the timeout won.
-        const killed = (error as { killed?: boolean } | null)?.killed === true
-        const code = typeof error?.code === 'number' ? error.code : error ? -1 : 0
-        const exit = killed ? null : code
-        const out = `${stdout}${stderr}`.slice(0, 400)
-        resolve({ name: '', exit, ms, out })
-      })
-    })
-
+export function createHookRunner(store: HookStore, _legacyTimeoutMs?: number) {
   return {
-    /** Every hook bound to this moment, run in order; the story lines come back. */
-    run: async (moment: HookEvent): Promise<string[]> => {
-      const hooks = store.load().filter(hook => hook.event === moment)
-      const lines: string[] = []
-      for (const hook of hooks) {
-        const outcome = await runOne(hook.command)
-        lines.push(hookStatusLine(hook.name, outcome.exit, outcome.ms, outcome.out))
-      }
-      return lines
-    },
-    /** The pane's "Run once": try a command without binding it to anything. */
-    test: async (command: string): Promise<{ ok: boolean; answer: string }> => {
-      const outcome = await runOne(command)
-      return { ok: outcome.exit === 0, answer: hookStatusLine('the command', outcome.exit, outcome.ms, outcome.out) }
-    },
+    /** Report matching hooks without granting or exercising command authority. */
+    run: async (moment: HookEvent): Promise<string[]> =>
+      store.load()
+        .filter(hook => hook.event === moment)
+        .map(hook => `Hook "${hook.name}" is ready but did not run automatically. Review and allow its exact command once in Settings → Hooks.`),
+    /** Kept as a fail-closed compatibility endpoint for older renderer builds. */
+    test: async (_command: string): Promise<{ ok: boolean; answer: string }> => ({
+      ok: false,
+      answer: 'Direct hook execution is off. Prepare the command review and allow it once in Settings → Hooks.',
+    }),
     /** Add or replace by id, through the same validation as the door. */
     upsert: (input: Partial<AppHook>): { ok: boolean; answer: string } => {
       const checked = validateHook(input)
@@ -54,7 +33,7 @@ export function createHookRunner(store: HookStore, timeoutMs = HOOK_TIMEOUT_MS) 
       if (hooks.length >= 20) return { ok: false, answer: 'Twenty hooks is the shelf. Remove one first.' }
       hooks.push(checked.hook)
       store.save(hooks)
-      return { ok: true, answer: `Hook "${checked.hook.name}" set on ${checked.hook.event}.` }
+      return { ok: true, answer: `Hook "${checked.hook.name}" set on ${checked.hook.event}. It will still need a fresh command review each time.` }
     },
     remove: (id: string): { ok: boolean; answer: string } => {
       const hooks = store.load()

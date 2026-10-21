@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { mkdtemp, mkdir, readFile, writeFile, rm, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { createHash } from 'node:crypto'
 import { createZip } from '../src/main/vault/zip'
 import { downloadToFile } from '../src/main/engine/downloadStream'
 import { unpackRuntime, RUNTIME_ZIP_LIMITS, runtimeEntryName } from '../src/main/engine/runtimeArchive'
@@ -82,14 +83,15 @@ test('Windows archive aliases, traversal and special paths are refused on every 
 test('the manager streams a runtime, emits extraction progress and records only success', async () => fixture(async root => {
   const zip = createZip([{ name: 'ollama.exe', content: 'a runtime fixture' }])
   const phases: string[] = []
-  const manager = createDownloadManager({ root, fetchImpl: async () => ({ ok: true, body: (async function* () { yield zip.subarray(0, 20); yield zip.subarray(20) })() }), onTick: tick => phases.push(tick.phase) })
+  const manager = createDownloadManager({ root, trustedDigests: { ollama: createHash('sha256').update(zip).digest('hex') }, fetchImpl: async () => ({ ok: true, body: (async function* () { yield zip.subarray(0, 20); yield zip.subarray(20) })() }), onTick: tick => phases.push(tick.phase) })
   const result = await manager.start('ollama')
   assert.equal(result.ok, true, result.answer)
   assert(phases.includes('extracting')); assert.equal(phases.at(-1), 'staged')
   assert.equal(await readFile(join(root, 'ollama', 'app', 'ollama.exe'), 'utf8'), 'a runtime fixture')
   assert.equal((await manager.status()).ollama?.engine, 'ollama')
   const badRoot = join(root, 'bad')
-  const bad = createDownloadManager({ root: badRoot, fetchImpl: async () => ({ ok: true, body: (async function* () { yield Buffer.from('corrupt') })() }) })
+  const corrupt = Buffer.from('corrupt')
+  const bad = createDownloadManager({ root: badRoot, trustedDigests: { ollama: createHash('sha256').update(corrupt).digest('hex') }, fetchImpl: async () => ({ ok: true, body: (async function* () { yield corrupt })() }) })
   assert.equal((await bad.start('ollama')).ok, false)
   assert.deepEqual(await bad.status(), {})
 }))

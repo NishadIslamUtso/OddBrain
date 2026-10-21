@@ -72,6 +72,8 @@ export function createDownloadManager(options: {
   probe?: () => Promise<boolean>
   /** Overridable for tests — how the app starts an installer it was told to run. */
   spawnImpl?: typeof spawn
+  /** Test-only fixture pins. Production always uses the compile-time table. */
+  trustedDigests?: Record<string, string>
 }): DownloadManager {
   const root = options.root
   const doFetch: FetchLike = options.fetchImpl ?? (async (url) => {
@@ -180,6 +182,9 @@ export function createDownloadManager(options: {
       temporary = target + '.part-' + randomUUID()
       const result = await downloadToFile(reply, temporary, MAX_DOWNLOAD_BYTES,
         (got, total) => onTick({ engine, got, total, phase: 'downloading' }))
+      const expectedDigest = options.trustedDigests?.[engine] ?? info.sha256 ?? ''
+      if (!/^[a-f0-9]{64}$/.test(expectedDigest)) throw Error('This executable download has no compile-time SHA-256 pin. Nothing was staged or run.')
+      if (result.sha256 !== expectedDigest) throw Error(`The downloaded bytes did not match the pinned SHA-256 for ${engine}. Nothing was staged, unpacked or run.`)
       if (info.kind === 'zip') {
         let last = 0
         const unpacked = await unpackRuntime(temporary, join(root, engine, 'app'), (got, total) => {
@@ -192,8 +197,8 @@ export function createDownloadManager(options: {
       const record: InstallRecord = { engine, file: target, endpoint: info.windows, sha256: result.sha256, at: new Date().toISOString() }
       await writeRecords(engine, record)
       const answer = info.kind === 'zip'
-        ? 'Downloaded from the official endpoint and unpacked into the app\u2019s own engines folder. (The file\u2019s SHA-256 is recorded below; the official source is pinned by URL.)'
-        : 'Staged. Running the official installer is a separate permission, shown in full before it runs.'
+        ? 'Downloaded from the versioned official endpoint, matched the compile-time SHA-256 pin, and unpacked into the app\u2019s own engines folder.'
+        : 'Staged only after matching its compile-time SHA-256 pin. Running the installer is a separate permission, shown in full before it runs.'
       onTick({ engine, got: result.bytes, total: result.bytes, phase: 'staged', answer })
       return { ok: true, answer }
       } catch (failure) {

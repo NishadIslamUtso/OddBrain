@@ -231,6 +231,11 @@ const marketplaceApi: MarketplaceBridge = {
 const api = {
   chats: {
     read: () => ipcRenderer.invoke('chats:read'),
+    onLoadProgress: listener => {
+      const wrapped = (_event: Electron.IpcRendererEvent, progress: { done: number; total: number }) => listener(progress)
+      ipcRenderer.on('chats:load-progress', wrapped)
+      return () => { ipcRenderer.removeListener('chats:load-progress', wrapped) }
+    },
     migrate: (input: ChatStoreMigration) => ipcRenderer.invoke('chats:migrate', input),
     write: (input: ChatStoreWrite) => ipcRenderer.invoke('chats:write', input),
     exportRecovery: (input: ChatStoreMigration) => ipcRenderer.invoke('chats:export-recovery', input),

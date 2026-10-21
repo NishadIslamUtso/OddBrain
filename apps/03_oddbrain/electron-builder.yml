@@ -12,9 +12,9 @@
 #   administrator rights; and it lets the person choose the folder, because an app
 #   that writes notes into a vault is an app whose owner will have opinions about
 #   where it lives.
-# - No code-signing certificate is configured, and that is stated rather than
-#   left to be discovered: an unsigned installer makes Windows show the "unknown
-#   publisher" warning. Signing needs a certificate this project does not have.
+# - The protected release job supplies CSC_LINK and CSC_KEY_PASSWORD and blocks
+#   public/tagged output unless Authenticode verifies. Ordinary branch builds may
+#   remain unsigned test artifacts; they are never published as releases.
 appId: com.oddbrain.desktop
 productName: OddBrain
 copyright: Copyright © 2026 NishadIslamUtso
@@ -100,9 +100,12 @@ win:
   # The .ico carries every size Windows asks for (16 → 256) instead of one big
   # PNG it has to scale, which is how a taskbar icon goes blurry.
   icon: resources/icon.ico
-  # A person running this on Windows will see "Windows protected your PC" until
-  # the project has a signing certificate. There is no certificate, so nothing
-  # here pretends otherwise — the README says what to expect.
+  # electron-builder signs whenever the protected job supplies CSC_LINK and
+  # CSC_KEY_PASSWORD. The release job separately refuses an absent/invalid
+  # Authenticode signature before uploading anything publicly.
+  signAndEditExecutable: true
+  signingHashAlgorithms:
+    - sha256
 
 nsis:
   installerIcon: resources/icon.ico

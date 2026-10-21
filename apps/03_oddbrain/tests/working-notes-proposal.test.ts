@@ -10,6 +10,11 @@ describe('visible Working Notes proposals', () => {
       findings: [{ text: 'Provider cap is 8192', sourceIds: ['vault:abc'] }], nextActions: ['Run tests'],
     })
   })
+  it('accepts safe Markdown heading and label variants but still rejects unlabeled prose', () => {
+    expect(parseWorkingNotesProposal('# WORKING-NOTES PROPOSAL:\n* Objectives: Keep both revisions\n* Open questions: Which copy?\n* Next steps: Review it')).toEqual({ objective: 'Keep both revisions', openQuestions: ['Which copy?'], nextActions: ['Review it'] })
+    expect(parseWorkingNotesProposal('The working notes update should say:\n- Decision: hidden in prose')).toBeNull()
+    expect(parseWorkingNotesProposal('####### Working Notes update\n- Decision: too deep')).toBeNull()
+  })
   it('builds model-neutral quoted context only for non-empty notes', () => {
     expect(draftWorkingNotesContext(emptyWorkingNotes())).toBe('')
     const text = draftWorkingNotesContext({ ...emptyWorkingNotes(), objective: 'Finish review', author: 'ai' })

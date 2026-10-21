@@ -31,7 +31,7 @@ const DELTA_VERSION = 1
 const INDEX_LIMIT = 8_000_000
 export const CHAT_LIMIT = 64_000_000
 export const CHAT_TOTAL_LIMIT = 512_000_000
-export const CHAT_COUNT_LIMIT = 20_000
+export const CHAT_COUNT_LIMIT = 21_000
 const CHAT_STORED_TOTAL_LIMIT = CHAT_TOTAL_LIMIT * 2
 const DELTA_DEPTH_LIMIT = 64
 const DELTA_EXTRA_LIMIT = 16_000_000
@@ -282,11 +282,12 @@ export function createChatStore(root: string) {
     return { chat, record: { text, files, storedBytes } }
   }
 
-  const readFrom = (file: string): { snapshot: ChatStoreSnapshot; index: ChatIndex; records: Map<string, StoredChat> } => {
+  const readFrom = (file: string, progress?: (done: number, total: number) => void): { snapshot: ChatStoreSnapshot; index: ChatIndex; records: Map<string, StoredChat> } => {
     noLinkedPath(root)
     const index = parseIndex(readRegularFileSync(file, INDEX_LIMIT).bytes)
     const chats: Chat[] = [], records = new Map<string, StoredChat>()
-    let total = 0, storedTotal = 0
+    let total = 0, storedTotal = 0, done = 0
+    progress?.(0, index.items.length)
     for (const item of index.items) {
       const loaded = readItem(item)
       total += item.bytes; storedTotal += loaded.record.storedBytes
@@ -294,6 +295,8 @@ export function createChatStore(root: string) {
       if (storedTotal > CHAT_STORED_TOTAL_LIMIT) throw Error('Conversation record chains exceed their bounded read budget. Original files are unchanged.')
       chats.push(loaded.chat)
       records.set(item.id, item.id === index.currentChat ? loaded.record : { files: loaded.record.files, storedBytes: loaded.record.storedBytes })
+      done += 1
+      if (done === index.items.length || done % 25 === 0) progress?.(done, index.items.length)
     }
     return {
       index,
@@ -307,17 +310,17 @@ export function createChatStore(root: string) {
     }
   }
 
-  const load = (): Loaded => {
+  const load = (progress?: (done: number, total: number) => void): Loaded => {
     noLinkedPath(root)
     if (!existsSync(indexFile) && !existsSync(previousFile)) {
       return { index: null, recovered: false, records: new Map(), snapshot: { initialized: false, revision: 0, chats: [], currentChat: '' } }
     }
     try {
-      const current = readFrom(indexFile)
+      const current = readFrom(indexFile, progress)
       return { ...current, recovered: false }
     } catch (currentError) {
       try {
-        const previous = readFrom(previousFile)
+        const previous = readFrom(previousFile, progress)
         return {
           ...previous,
           recovered: true,
@@ -409,7 +412,10 @@ export function createChatStore(root: string) {
         const previousText = previousRecord.text || (previousChat ? JSON.stringify(previousChat) : '')
         // A legacy snapshot that normalizes differently is compacted once rather
         // than using a delta against bytes the renderer never saw.
-        if (Buffer.byteLength(previousText) === previous.bytes && digest(previousText) === previous.sha256) {
+        const cachedAuthenticatedText = Boolean(previousRecord.text)
+        if (cachedAuthenticatedText || (Buffer.byteLength(previousText) === previous.bytes && digest(previousText) === previous.sha256)) {
+          // readItem already authenticated cached text against the immutable
+          // chain. Re-hashing it on every streaming write was pure CPU churn.
           const delta = deltaDocument(previous, previousText, entry.text, contentHash, entry.bytes)
           const deltaBytes = Buffer.byteLength(delta)
           const candidateStored = previousRecord.storedBytes + deltaBytes
@@ -449,7 +455,7 @@ export function createChatStore(root: string) {
       currentChat: prepared.currentChat,
       items,
     }
-    // The private index is compact so the 20,000-chat bound remains real even
+    // The private index is compact so the 21,000-chat bound remains real even
     // with authenticated delta-head metadata.
     const text = `${JSON.stringify(index)}\n`
     if (Buffer.byteLength(text) > INDEX_LIMIT) throw Error('The conversation index exceeds its safe size. The active index was not replaced.')
@@ -559,8 +565,8 @@ export function createChatStore(root: string) {
         throw Error(`${(error as Error).message} The previous damaged indexes were restored; nothing was imported.`)
       }
     },
-    read(): ChatStoreSnapshot {
-      cached = load()
+    read(progress?: (done: number, total: number) => void): ChatStoreSnapshot {
+      cached = load(progress)
       return cached.snapshot
     },
     migrate(input: ChatStoreMigration): { snapshot: ChatStoreSnapshot; migrated: boolean } {

@@ -29,6 +29,24 @@ const streamingWriteInterval = (chats: Chat[], current: string): number => {
   return characters > 1_000_000 ? 2_000 : characters > 250_000 ? 1_000 : WRITE_INTERVAL_MS
 }
 
+/** Preserve both sides of a revision conflict without replaying a stale library. */
+export function mergeChatConflict(remote: import('@shared/lib/chatStore').ChatStoreSnapshot, local: Chat[], localCurrent: string): { chats: Chat[]; currentChat: string; copies: number } {
+  const merged = [...remote.chats], remoteById = new Map(remote.chats.map(chat => [chat.id, chat]))
+  const used = new Set(remote.chats.map(chat => chat.id)), remapped = new Map<string, string>()
+  let copies = 0
+  for (const chat of local) {
+    const authoritative = remoteById.get(chat.id)
+    if (!authoritative) { merged.push(chat); used.add(chat.id); continue }
+    if (JSON.stringify(authoritative) === JSON.stringify(chat)) continue
+    let id = newId()
+    while (used.has(id)) id = newId()
+    used.add(id); remapped.set(chat.id, id); copies += 1
+    merged.push({ ...chat, id, title: `${chat.title || 'Untitled'} — conflict copy`, updatedAt: Date.now() })
+  }
+  const selected = remapped.get(localCurrent) || localCurrent
+  return { chats: merged, currentChat: merged.some(chat => chat.id === selected) ? selected : remote.currentChat, copies }
+}
+
 export type ChatStorageHealth = { state: 'loading' | 'ready' | 'saving' | 'attention'; message: string }
 
 export type ChatState = {
@@ -81,14 +99,17 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
   const [chats, setChatValue] = useState<Chat[]>(initial.current.chats.value)
   const [currentChat, setCurrentValue] = useState(initial.current.current.value)
   const [ready, setReady] = useState(isDemo)
-  const [storage, setStorage] = useState<ChatStorageHealth>(isDemo ? { state: 'ready', message: 'Browser preview storage' } : { state: 'loading', message: 'Opening conversation storage…' })
+  const [storage, setStorageValue] = useState<ChatStorageHealth>(isDemo ? { state: 'ready', message: 'Browser preview storage' } : { state: 'loading', message: 'Opening conversation storage…' })
+  const storageRef = useRef(storage)
+  storageRef.current = storage
+  const updateStorage = useCallback((next: ChatStorageHealth) => { storageRef.current = next; setStorageValue(next) }, [])
   const chatsRef = useRef(chats), currentRef = useRef(currentChat)
   const revision = useRef(0), nativeReady = useRef(isDemo), loadGeneration = useRef(0)
   const savedObjects = useRef(new Map<string, Chat>())
   const queuedChats = useRef<Array<SetStateAction<Chat[]>>>([])
   const queuedCurrent = useRef<Array<SetStateAction<string>>>([])
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const writes = useRef<Promise<void>>(Promise.resolve())
+  const writes = useRef<Promise<void>>(Promise.resolve()), writeEpoch = useRef(0)
   const storageAction = useRef(false)
   const gate = useRef<ReadyGate | null>(null)
   if (!gate.current) gate.current = readyGate()
@@ -113,8 +134,12 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
       }
     }
     let outcome = false
+    const epoch = writeEpoch.current
     const operation = writes.current.then(async () => {
-      setStorage({ state: 'saving', message: 'Saving conversation…' })
+      // A conflict invalidates every already-queued stale full ordering. Only an
+      // explicit retry built from the merged refs may write after that point.
+      if (epoch !== writeEpoch.current) return
+      updateStorage({ state: 'saving', message: 'Saving conversation…' })
       try {
         const answer = await bridge.chats.write({
           order: nextChats.map(chat => chat.id),
@@ -123,27 +148,35 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
           expectedRevision: revision.current,
         })
         if (!answer.ok) {
+          let conflictNote = ''
           if (answer.snapshot) {
+            writeEpoch.current += 1
+            const merged = mergeChatConflict(answer.snapshot, nextChats, nextCurrent)
             revision.current = answer.snapshot.revision
             savedObjects.current = new Map(answer.snapshot.chats.map(chat => [chat.id, chat]))
+            chatsRef.current = merged.chats; currentRef.current = merged.currentChat
+            setChatValue(merged.chats); setCurrentValue(merged.currentChat)
+            conflictNote = merged.copies
+              ? ` ${merged.copies} divergent local chat version(s) are preserved as conflict copies; the newer stored versions kept their original IDs.`
+              : ' Local-only chats remain visible and no stored chat was overwritten.'
           }
-          const message = `${answer.error} Your visible chats are still in this window; retry or export recovery data.`
-          setStorage({ state: 'attention', message }); report(message)
+          const message = `${answer.error}${conflictNote} Retry to save the merged library, or export recovery data.`
+          updateStorage({ state: 'attention', message }); report(message)
           return
         }
-        revision.current = answer.snapshot.revision
+        revision.current = answer.receipt.revision
         savedObjects.current = new Map(nextChats.map(chat => [chat.id, chat]))
-        if (answer.snapshot.notice) { setStorage({ state: 'attention', message: answer.snapshot.notice }); report(answer.snapshot.notice) }
-        else setStorage({ state: 'ready', message: 'Conversations saved' })
+        if (answer.receipt.notice) { updateStorage({ state: 'attention', message: answer.receipt.notice }); report(answer.receipt.notice) }
+        else updateStorage({ state: 'ready', message: 'Conversations saved' })
         outcome = true
       } catch {
         const message = 'Conversation storage could not be reached. Your visible chats are still in this window; retry or export recovery data before closing.'
-        setStorage({ state: 'attention', message }); report(message)
+        updateStorage({ state: 'attention', message }); report(message)
       }
     })
     writes.current = operation.then(() => undefined, () => undefined)
     return operation.then(() => outcome)
-  }, [chatsKey, currentKey, report])
+  }, [chatsKey, currentKey, report, updateStorage])
 
   const schedule = useCallback(() => {
     if (isDemo || !nativeReady.current || timer.current) return
@@ -176,7 +209,7 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
   const loadNative = useCallback(async (): Promise<boolean> => {
     if (isDemo) return true
     const own = ++loadGeneration.current
-    setStorage({ state: 'loading', message: 'Opening conversation storage…' })
+    updateStorage({ state: 'loading', message: 'Opening conversation storage…' })
     try {
       let answer = await bridge.chats.read()
       if (!answer.ok) throw Error(answer.error)
@@ -205,8 +238,8 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
       chatsRef.current = loadedChats; currentRef.current = loadedCurrent
       setChatValue(loadedChats); setCurrentValue(loadedCurrent)
       nativeReady.current = true; setReady(true); gate.current!.resolve()
-      if (snapshot.notice) { setStorage({ state: 'attention', message: snapshot.notice }); report(snapshot.notice) }
-      else setStorage({ state: 'ready', message: 'Conversations saved' })
+      if (snapshot.notice) { updateStorage({ state: 'attention', message: snapshot.notice }); report(snapshot.notice) }
+      else updateStorage({ state: 'ready', message: 'Conversations saved' })
       // A successful retry means unavailable-time edits are durably written, not
       // merely put back on a timer that could be lost if the window closes.
       if (changedDuringLoad) return persist(loadedChats, loadedCurrent)
@@ -215,18 +248,23 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
       if (own !== loadGeneration.current) return false
       nativeReady.current = false; setReady(true); gate.current!.resolve()
       const message = (error as Error).message || 'Conversation storage could not be opened. Original data was not replaced.'
-      setStorage({ state: 'attention', message }); report(message)
+      updateStorage({ state: 'attention', message }); report(message)
       return false
     }
-  }, [persist, report])
+  }, [persist, report, updateStorage])
 
   useEffect(() => {
     if (initial.current?.chats.warning) report(initial.current.chats.warning)
     if (initial.current?.current.warning) report(initial.current.current.warning)
     if (isDemo) return
+    const stopProgress = bridge.chats.onLoadProgress?.(({ done, total }) => {
+      if (Number.isInteger(done) && Number.isInteger(total) && total > 0 && done >= 0 && done <= total) {
+        updateStorage({ state: 'loading', message: `Opening conversation storage… ${done.toLocaleString()} / ${total.toLocaleString()}` })
+      }
+    })
     void loadNative()
-    return () => { loadGeneration.current++ }
-  }, [loadNative, report])
+    return () => { loadGeneration.current++; stopProgress?.() }
+  }, [loadNative, report, updateStorage])
 
   useEffect(() => () => {
     if (timer.current) clearTimeout(timer.current)
@@ -287,6 +325,7 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
     if (isDemo) return { ok: false, answer: 'Chat recovery import requires the installed app.' }
     if (storageAction.current) return { ok: false, answer: 'Another conversation-storage action is still open.' }
     storageAction.current = true
+    const actionAttention = storageRef.current.state === 'attention' ? storageRef.current : null
     try {
       if (timer.current) { clearTimeout(timer.current); timer.current = null }
       await writes.current
@@ -295,16 +334,51 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
       }
       // While the native chooser/confirmation is open, retain any incoming
       // stream edits and replay them over the imported snapshot before success.
+      const priorAttention = actionAttention
       nativeReady.current = false
-      setStorage({ state: 'loading', message: 'Reviewing chat recovery import…' })
-      let answer: { ok: boolean; answer: string }
+      updateStorage({ state: 'loading', message: 'Reviewing chat recovery import…' })
+      let answer: Awaited<ReturnType<typeof bridge.chats.importRecovery>>
       try { answer = await bridge.chats.importRecovery() }
       catch { answer = { ok: false, answer: 'Chat recovery data could not be imported. Current visible chats remain in this window.' } }
-      const loaded = await loadNative()
-      if (answer.ok && !loaded) return { ok: false, answer: `${answer.answer} The imported store could not be reopened; use the persistent recovery controls before closing.` }
+
+      if (answer.ok && answer.snapshot) {
+        const snapshot = answer.snapshot
+        savedObjects.current = new Map(snapshot.chats.map(chat => [chat.id, chat]))
+        let loadedChats = snapshot.chats, loadedCurrent = snapshot.currentChat
+        for (const update of queuedChats.current) loadedChats = typeof update === 'function' ? update(loadedChats) : update
+        for (const update of queuedCurrent.current) loadedCurrent = typeof update === 'function' ? update(loadedCurrent) : update
+        const changedDuringImport = queuedChats.current.length > 0 || queuedCurrent.current.length > 0
+        queuedChats.current = []; queuedCurrent.current = []
+        revision.current = snapshot.revision
+        chatsRef.current = loadedChats; currentRef.current = loadedCurrent
+        setChatValue(loadedChats); setCurrentValue(loadedCurrent)
+        nativeReady.current = true
+        if (snapshot.notice) { updateStorage({ state: 'attention', message: snapshot.notice }); report(snapshot.notice) }
+        else updateStorage({ state: 'ready', message: 'Conversations saved' })
+        if (changedDuringImport && !await persist(loadedChats, loadedCurrent)) {
+          return { ok: false, answer: `${answer.answer} Edits made while the import dialog was open remain visible but still need a storage retry.` }
+        }
+        return answer
+      }
+
+      if (answer.ok) {
+        const loaded = await loadNative()
+        if (!loaded) return { ok: false, answer: `${answer.answer} The imported store could not be reopened; use the persistent recovery controls before closing.` }
+        return answer
+      }
+
+      // Cancelled/failed import did not alter the store. Keep queued visible edits,
+      // save them against the existing revision, and restore any prior actionable
+      // fault instead of replacing it with a transient dialog result.
+      const changedDuringDialog = queuedChats.current.length > 0 || queuedCurrent.current.length > 0
+      queuedChats.current = []; queuedCurrent.current = []
+      nativeReady.current = true
+      if (changedDuringDialog) await persist(chatsRef.current, currentRef.current)
+      if (priorAttention) updateStorage(priorAttention)
+      else if (storageRef.current.state !== 'attention') updateStorage({ state: 'ready', message: 'Conversations saved' })
       return answer
     } finally { storageAction.current = false }
-  }, [loadNative, persist])
+  }, [loadNative, persist, report, updateStorage])
   const openStorageLocation = useCallback(async (): Promise<{ ok: boolean; answer: string }> => {
     try { return await bridge.chats.openLocation() }
     catch { return { ok: false, answer: 'The private chat storage folder could not be opened.' } }

@@ -4,8 +4,8 @@ import CopyText from '../ui/CopyText'
 import { downloadBytes } from '@shared/lib/zip'
 export type ChatShellPort = Pick<CommandBridge, 'preview' | 'decide'> & Partial<Pick<CommandBridge, 'context' | 'cancel' | 'output' | 'save' | 'previewSaved'>>
 /** A separate human approval, never a model-prompt fallback. */
-export default function ShellReview({ port, onResult, saved }: { port?: ChatShellPort; onResult?: () => void; saved?: SavedCommand }) {
-  const [command, setCommand] = useState(saved?.command || ''), [name, setName] = useState(''), [cwd, setCwd] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [executing, setExecuting] = useState(false)
+export default function ShellReview({ port, onResult, saved, initialCommand = '' }: { port?: ChatShellPort; onResult?: () => void; saved?: SavedCommand; initialCommand?: string }) {
+  const [command, setCommand] = useState(saved?.command || initialCommand), [name, setName] = useState(''), [cwd, setCwd] = useState(''), [notice, setNotice] = useState(''), [busy, setBusy] = useState(false), [executing, setExecuting] = useState(false)
   const [scope, setScope] = useState<Awaited<ReturnType<CommandBridge['context']>> | null>(null)
   const [review, setReview] = useState<ShellReviewTicket | null>(null), [result, setResult] = useState<ShellResult | null>(null)
   const serial = useRef(0), lock = useRef(false), ticket = useRef<string | null>(null)
@@ -40,10 +40,10 @@ export default function ShellReview({ port, onResult, saved }: { port?: ChatShel
     <p>App-owned OS execution, outside the engine sandbox. Commands can access files and networks as your user; the working folder is not a security boundary. OddBrain does not turn this into a model prompt. Programs you run may themselves use models or networks.</p>
     {scope && <p role="status">{scope.explanation}</p>}
     {!port ? <p>Command execution is unavailable here.</p> : <>
-      <label>Exact command<textarea rows={5} readOnly={!!saved} disabled={busy || !!review} value={command} onChange={event => setCommand(event.target.value)} /></label>
+      <label>Exact command<textarea rows={5} readOnly={!!saved || !!initialCommand} disabled={busy || !!review} value={command} onChange={event => setCommand(event.target.value)} /></label>
       <label>Working folder<input readOnly={!!port.context} disabled={busy || !!review} value={cwd} onChange={event => setCwd(event.target.value)} /></label>
       <p>Uses the folder selected under Projects → Engine sessions and working folder, not an unsent chat preference.</p>
-      {!saved && port.save && <details><summary>Save this command for later</summary><label>Saved command name<input value={name} onChange={event => setName(event.target.value)} disabled={busy || !!review} /></label><button type="button" disabled={busy || !!review || !name.trim() || !command.trim() || !cwd} onClick={() => void save()}>Save new command</button><p>Saved commands still need a fresh review for every execution. Revising creates a new entry; older text is not overwritten.</p></details>}
+      {!saved && !initialCommand && port.save && <details><summary>Save this command for later</summary><label>Saved command name<input value={name} onChange={event => setName(event.target.value)} disabled={busy || !!review} /></label><button type="button" disabled={busy || !!review || !name.trim() || !command.trim() || !cwd} onClick={() => void save()}>Save new command</button><p>Saved commands still need a fresh review for every execution. Revising creates a new entry; older text is not overwritten.</p></details>}
       <button type="button" disabled={busy || !!review} onClick={() => void refresh()}>Refresh working folder and access</button>
       <button type="button" disabled={busy || !!review || !command.trim() || !cwd || (!!scope && !scope.allowed)} onClick={() => void request()}>Prepare command review</button>
       {review && <><p>{review.explanation}</p>{review.execution && <p>Program: <code>{review.execution.program}</code><br />Flags: {review.execution.arguments.slice(0, -1).join(' ')} · script shown below. Basic environment only; no saved app API keys.</p>}<pre>{review.execution?.script || review.command}</pre><p>{review.cwd}<br />Review expires at {new Date(review.expiresAt).toLocaleTimeString()}.</p><button type="button" disabled={busy} onClick={() => void request('deny')}>Deny execution</button><button type="button" disabled={busy} onClick={() => void request('allow')}>Allow this command once</button></>}
