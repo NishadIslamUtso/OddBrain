@@ -155,7 +155,7 @@ Fix: if yt-dlp is configured, accept any credential-free HTTPS URL and let `--si
 `/api/video-studio-mcp` (`src/main/api/server.ts:209`) checks loopback Host, no Origin and POST/JSON, but any local process can read every stored transcript/frame, search the library and submit plans. The native Kdenlive endpoint optionally supports a bearer token; OddBrain’s own endpoint should too. Generate a per-launch token, write it only into the reviewed engine connector, and reject other callers. This is a local threat model, but the data is private video evidence.
 
 **H7. Versions are not implemented.**
-`KdenliveAction` includes `'save-version'`, `actionTools` lists guessed tool names, and `service.ts:697` exposes the IPC, but no UI calls it and the pinned native protocol has no checkpoint tool. “Versions and shared history” in the UI is history only. Either remove the dead action or implement real project-copy/version listing with a native save-as and an OddBrain receipt.
+`KdenliveAction` includes `'save-version'`, `actionTools` lists guessed tool names, and `src/main/index.ts:697` still accepts a `save-version` action, but no UI calls it and the pinned native protocol has no checkpoint tool. “Versions and shared history” in the UI is history only. Either remove the dead action or implement real project-copy/version listing with a native save-as and an OddBrain receipt.
 
 **H8. Evidence details are incomplete or invisible.**
 - `expandEvidence` passes `videoOcr = false` (`service.ts:493`), so question-driven frames never get OCR even when video OCR is configured.
@@ -165,7 +165,7 @@ Fix: if yt-dlp is configured, accept any credential-free HTTPS URL and let `--si
 **H9. `workspace()` can block on a hung MCP port.**
 `service.ts:611` calls `nativeConnection()`. If a connection was established it is reused, but when none has ever succeeded (never connected, or Test cleared `lastConnection`) each refresh runs a full three-request handshake with a 20 s timeout per request and no abort signal from the view. A port that accepts and stays silent can therefore stall Video Studio for ~60 s per refresh. Add negative caching and pass the view's cancellation signal; retry only on an explicit Test/refresh.
 
-**H10. Kdenlive detection may fail on a Windows GUI build.**
+**H10 (risk, unverified). Kdenlive detection may fail on a Windows GUI build.**
 `testKdenlive` (`service.ts:253`) runs `<exe> --version` and treats nonzero/empty output as “could not be verified.” A GUI-subsystem Qt app may not attach stdout the way this expects. Add a fallback: file exists + Windows version resource (`FileVersionInfo`) + user confirmation, then try the MCP endpoint separately. Do not conflate “exe verified” with “MCP compatible.”
 
 ### Medium / maintainability
@@ -174,7 +174,7 @@ Fix: if yt-dlp is configured, accept any credential-free HTTPS URL and let `--si
 - `reviewEngineConnector` filters out `kdenlive` and `oddbrain-video`, then pushes only the proxy. That is a safe choice, but it must be paired with a rich read-only proxy (B1/H2).
 - AI `creativeProposal` is memory-only; a restart loses the proposal, and each search overwrites the previous one.
 - `recordEvidence` deduplicates by SHA-256 + source kind, not by owner; two windows share maps. Fine for one owner, but state it.
-- Design-kit cleanup removes the whole new folder on failure (`service.ts:590`). The random name makes collision unlikely, but a pre-existing folder should be refused instead of deleted.
+- Design-kit cleanup removes the whole new folder on failure (`service.ts:578`). The name contains a random UUID, so collision is very unlikely, but creating the leaf with a non-recursive mkdir and tracking ownership would make the delete strictly safe.
 - The main process has 2,928 lines and the video view is nearly unreadable one-line JSX. Split `main/index.ts` into handler modules and format `VideoStudioView.tsx`. This is not cosmetic: it is why integration gaps were easy to miss.
 - There is now no automated regression safety net. That is intentional for this reset, but the next change should add a small honest suite, not 1,650 mocks.
 
