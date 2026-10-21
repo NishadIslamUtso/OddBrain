@@ -12,13 +12,13 @@ afterEach(async () => { await act(async () => root.unmount()); host.remove() })
 
 test('Video Studio keeps editor authority and approvals visible without cluttering normal chat', async () => {
   await act(async () => { root.render(<VideoStudioView onSettings={() => {}} onChat={() => {}} />); await Promise.resolve() })
-  expect(host.textContent).toContain('Kdenlive remains the editable timeline')
+  expect(host.textContent).toContain('Kdenlive alone owns the timeline')
   expect(host.textContent).toContain('Creative Library')
-  expect(host.textContent).toContain('only your approved choice is downloaded')
-  expect(host.textContent).toContain('Local design kit')
+  expect(host.textContent).toContain('only your exact approved selection is downloaded')
+  expect(host.textContent).toContain('Local reusable kit')
   expect(host.textContent).toContain('Reels/Shorts')
-  expect(host.textContent).toContain('Inspect first')
-  expect(host.textContent).not.toContain('Proposed changes & safety')
+  expect(host.textContent).toContain('automatically enters the same local evidence reader')
+  expect(host.textContent).toContain('cannot bypass your Apply review')
 })
 
 test('Kdenlive settings name loopback, protected-token, provider and OCR boundaries', async () => {

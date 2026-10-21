@@ -27,3 +27,22 @@ copied — the mechanism was, and the six built-in roles are our own, tuned for 
 
 Per Apache-2.0 §4(d), this notice is reproduced here and the upstream licence
 text is available at the URL above.
+
+## Native Kdenlive MCP protocol reference — lucasscariot/kdenlive
+
+OddBrain’s Kdenlive adapter and independently written editing Skill follow the
+published native MCP tool names, revision envelope and workflow documented by
+the separate **lucasscariot/kdenlive** project.
+
+- Source: <https://github.com/lucasscariot/kdenlive>
+- Reviewed reference: `b9a1a6ce0612d9bb6be2b7df2473c2ffbe71e798`
+- Upstream paths: `docs/native-mcp.md` and
+  `docs/skills/kdenlive-mcp-editing/SKILL.md`
+- Upstream licence: **GNU General Public License v3.0 or later**
+
+No Kdenlive/GPL implementation source or upstream Skill text is bundled into
+OddBrain. Kdenlive remains a separately installed application. OddBrain
+independently implements the documented JSON/MCP boundary, checks the published
+server identity and tool inventory, and keeps its adapted workflow text under
+OddBrain’s licence. The commit pin records what was reviewed; it is not a
+warranty that an installed binary came from that source or works on Windows.

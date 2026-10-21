@@ -46,7 +46,7 @@ import { createVideoStudioService } from './video/service'
 import { createMarketplaceService } from './engine/marketplace'
 import { createAgyMarketplaceService } from './engine/agyMarketplace'
 import type { MediaFileInput, MediaInput, MediaPreferences } from '../shared/lib/mediaBridge'
-import type { CreativeKind, DesignKitFormat, VideoStudioPreferences } from '../shared/lib/videoStudio'
+import type { CreativeKind, DesignKitFormat, KdenliveEditPlan, VideoStudioPreferences } from '../shared/lib/videoStudio'
 import type { MarketplaceAction } from '../shared/lib/marketplace'
 import { fitWindow } from './windowBounds'
 import { inferenceAllowed } from './automation/inferencePolicy'
@@ -63,7 +63,7 @@ import { loadAppFlags, readAppFlagsStrict, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
 import { registerStagingRoot, setBinaryOverride, binaryOverride, resolveEngineCommand } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
-import { dirname, join, resolve, relative, isAbsolute } from 'node:path'
+import { basename, dirname, join, resolve, relative, isAbsolute } from 'node:path'
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, openSync, statSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
@@ -354,6 +354,7 @@ function inferencePermissions() {
 
 const capabilityInspector = createCapabilityInspector()
 let mediaService: ReturnType<typeof createMediaService> | undefined
+let videoStudioService: ReturnType<typeof createVideoStudioService> | undefined
 let attachmentCenterService: ReturnType<typeof createAttachmentCenter> | undefined
 let marketplaceService: ReturnType<typeof createMarketplaceService> | undefined
 let agyMarketplaceService: ReturnType<typeof createAgyMarketplaceService> | undefined
@@ -551,7 +552,17 @@ function registerBridges(): void {
   })
   handle('transcripts:recover', (_event, chatIds: string[], knownTranscriptIds: string[], before: string = '') => transcriptAnswer(() => turnArchive.recover(chatIds, knownTranscriptIds, before)))
   mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), sourceRoot: attachmentCenterRoot, processing: processingLedger, onSource: input => { attachmentCenter.record({ ...input, origin: 'native-chat' }) }, onProcessed: (sha256, processor, coverage, ok) => attachmentCenter.processed(sha256, processor, coverage, ok), onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
-  const videoStudio = createVideoStudioService({ file: join(app.getPath('userData'), 'video-studio.json'), keys: () => keyStore })
+  const videoMime = (path: string): string => /\.webm$/i.test(path) ? 'video/webm' : /\.avi$/i.test(path) ? 'video/x-msvideo' : 'video/mp4'
+  const videoStudio = createVideoStudioService({
+    file: join(app.getPath('userData'), 'video-studio.json'), keys: () => keyStore,
+    analyzeVideo: async (owner, path) => {
+      const file = statSync(path)
+      return mediaService!.decodeFile(owner, path, { name: basename(path), mime: videoMime(path), size: file.size, route: 'local', storage: 'in-place' })
+    },
+    expandVideoEvidence: (path, moments, videoOcr, signal) => mediaService!.extractEvidence(path, moments, videoOcr, signal),
+    stopVideoAnalysis: owner => mediaService!.cancel(owner),
+  })
+  videoStudioService = videoStudio
   marketplaceService = createMarketplaceService({ file: join(app.getPath('userData'), 'marketplaces.json') })
   agyMarketplaceService = createAgyMarketplaceService({ cacheFile: join(app.getPath('home'), '.gemini', 'antigravity', 'cache', 'marketplaces', 'antigravity-plugins-official', 'marketplace.json') })
   const market = (engine: unknown) => {
@@ -639,7 +650,14 @@ function registerBridges(): void {
     return mediaService!.configureOcrAdapter(picked.filePaths[0])
   })
   handle('media:decode', (event, input: MediaInput) => mediaService!.decode(track(event.sender), input))
-  handle('media:decode-file', (event, path: string, input: MediaFileInput) => mediaService!.decodeFile(track(event.sender), path, input))
+  handle('media:decode-file', async (event, path: string, input: MediaFileInput) => {
+    const owner = track(event.sender), result = await mediaService!.decodeFile(owner, path, input)
+    if (result.ok && input.route === 'local' && (/^video\//.test(input.mime) || /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(input.name))) {
+      try { await videoStudio.recordLocalEvidence(owner, path, result) }
+      catch (error) { return { ...result, disclosure: `${result.disclosure || ''} The source remained attached, but its durable Video Studio evidence map could not be registered: ${(error as Error).message}`.trim() } }
+    }
+    return result
+  })
   handle('media:release-source', (event, sourceHandle: string) => { mediaService!.releaseSource(track(event.sender), sourceHandle) })
   handle('media:dictate', event => mediaService!.dictate(track(event.sender)))
   handle('media:cancel', event => { mediaService!.cancel(event.sender.id) })
@@ -670,7 +688,13 @@ function registerBridges(): void {
   handle('video-studio:decide-asset', (event, token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean) => videoStudio.decideAsset(track(event.sender), token, decision, importIntoKdenlive))
   handle('video-studio:preflight-url', (event, url: string) => videoStudio.preflightUrl(track(event.sender), url))
   handle('video-studio:acquire-url', (event, token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean) => videoStudio.acquireUrl(track(event.sender), token, decision, !!importIntoKdenlive))
-  handle('video-studio:prepare-kdenlive-action', (event, action: 'undo' | 'save-version') => videoStudio.prepareKdenliveAction(track(event.sender), action))
+  handle('video-studio:workspace', () => videoStudio.workspace())
+  handle('video-studio:capture-frame', (_event, position: number) => videoStudio.captureKdenliveFrame(position))
+  handle('video-studio:expand-evidence', (event, id: string, moments: number[], question: string) => videoStudio.expandEvidence(track(event.sender), id, moments, question))
+  handle('video-studio:confirm-evidence', (event, id: string, at: number, description: string) => videoStudio.confirmEvidenceDescription(track(event.sender), id, at, description))
+  handle('video-studio:prepare-edit-plan', (event, plan?: KdenliveEditPlan) => videoStudio.prepareEditPlan(track(event.sender), plan))
+  handle('video-studio:decide-edit-plan', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideEditPlan(track(event.sender), token, decision))
+  handle('video-studio:prepare-kdenlive-action', (event, action: 'undo' | 'redo' | 'save-version') => videoStudio.prepareKdenliveAction(track(event.sender), action))
   handle('video-studio:decide-kdenlive-action', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideKdenliveAction(track(event.sender), token, decision))
   handle('video-studio:stop', event => videoStudio.stop(track(event.sender)))
   handle('video-studio:prepare-design-kit', (event, format: DesignKitFormat) => videoStudio.prepareDesignKit(track(event.sender), format))
@@ -2825,7 +2849,8 @@ app.whenReady().then(async () => {
       // The API is handed the cloud client, so a chat whose model names a
       // provider streams from there — through the same address, as the same
       // records, with no second path for the interface to know about.
-      api = await startLocalApi({ port: API_PORT, rendererDir, vault, cloud: cloud || undefined, onInferenceActivity: busy => { foregroundApiRequests = Math.max(0, foregroundApiRequests + (busy ? 1 : -1)); if (busy) memoryOrganizer?.cancel() } })
+      api = await startLocalApi({ port: API_PORT, rendererDir, vault, cloud: cloud || undefined, videoMcp: (request, session) => videoStudioService ? videoStudioService.aiMcp(request, session) : Promise.resolve({ status: 503, body: { error: 'Video Studio is not ready.' } }), onInferenceActivity: busy => { foregroundApiRequests = Math.max(0, foregroundApiRequests + (busy ? 1 : -1)); if (busy) memoryOrganizer?.cancel() } })
+      videoStudioService?.setAiToolsUrl(`${api.url}/api/video-studio-mcp`)
       if (api.port !== API_PORT) {
         console.log(`[api] port ${API_PORT} was busy; listening on ${api.port} instead.`)
       }

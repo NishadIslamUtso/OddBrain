@@ -16,7 +16,7 @@ function keys(values: Record<string, string> = {}): KeyStore {
 }
 
 test('video settings accept only a loopback MCP endpoint and preserve explicit executable paths', () => {
-  expect(normalizeMcpUrl('https://remote.example/mcp')).toBe('http://127.0.0.1:8766/mcp')
+  expect(normalizeMcpUrl('https://remote.example/mcp')).toBe('http://127.0.0.1:8765/mcp')
   expect(normalizeMcpUrl('http://localhost:9911/mcp')).toBe('http://localhost:9911/mcp')
   expect(normalizeVideoStudio({ kdenlive: ' C:\\Kdenlive\\kdenlive.exe ', projectFolder: 'D:\\Edit', ytDlp: 'yt-dlp.exe', mcpUrl: 'http://127.0.0.1:9000/mcp' })).toMatchObject({ kdenlive: 'C:\\Kdenlive\\kdenlive.exe', projectFolder: 'D:\\Edit', ytDlp: 'yt-dlp.exe' })
 })
@@ -24,7 +24,7 @@ test('video settings accept only a loopback MCP endpoint and preserve explicit e
 test('video service refuses a non-loopback MCP setting instead of silently substituting it', async () => {
   const root = folder(), service = createVideoStudioService({ file: join(root, 'video.json'), keys: () => keys() })
   await expect(service.update({ mcpUrl: 'https://remote.example/mcp' })).rejects.toThrow(/loopback/i)
-  expect((await service.read()).preferences.mcpUrl).toBe('http://127.0.0.1:8766/mcp')
+  expect((await service.read()).preferences.mcpUrl).toBe('http://127.0.0.1:8765/mcp')
 })
 
 test('adaptive evidence favors separated scene changes and scene metadata is bounded', () => {
@@ -88,6 +88,17 @@ test('Creative Library returns live provenance without downloading catalogue ite
   expect(requested).toHaveLength(2)
 })
 
+test('Creative Library blocks downloads when an index does not expose a specific licence', async () => {
+  const root = folder(), project = join(root, 'project'); mkdirSync(project)
+  const fetchImpl = vi.fn(async () => new Response(JSON.stringify({ results: [{ id: 'uncertain-1', title: 'Unknown terms', creator: 'A creator', foreign_landing_url: 'https://source.example/work', thumbnail: 'https://media.example/thumb.jpg', url: 'https://media.example/full.mp3' }] }), { status: 200 })) as unknown as typeof fetch
+  const service = createVideoStudioService({ file: join(root, 'video.json'), keys: () => keys(), fetchImpl })
+  service.setProjectFolder(project)
+  const result = await service.search(8, 'ambient bed', 'audio')
+  const uncertain = result.assets.find(asset => asset.provider === 'openverse')!
+  expect(uncertain.licence).toBe('See source')
+  await expect(service.prepareAsset(8, uncertain.token)).resolves.toMatchObject({ ok: false, error: expect.stringMatching(/does not expose a specific licence/i) })
+})
+
 test('public social-link preflight uses owner-selected yt-dlp metadata without cookies or downloading', async () => {
   const root = folder(), ytDlp = join(root, 'yt-dlp.exe'), project = join(root, 'project'); writeFileSync(ytDlp, 'fixture'); mkdirSync(project)
   const commands: string[][] = []
@@ -97,4 +108,33 @@ test('public social-link preflight uses owner-selected yt-dlp metadata without c
   expect(review).toMatchObject({ ok: true, provider: 'youtube', title: 'Public clip', duration: 42, method: 'yt-dlp-metadata' })
   expect(commands[0]).toContain('--skip-download'); expect(commands[0]).toContain('--no-playlist')
   expect(commands[0].join(' ')).not.toMatch(/cookies|browser/i)
+})
+
+test('an approved direct link automatically enters the durable evidence reader without reattachment', async () => {
+  const root = folder(), project = join(root, 'project'); mkdirSync(project)
+  const bytes = new Uint8Array([0, 0, 0, 20, 102, 116, 121, 112, 105, 115, 111, 109])
+  const fetchImpl = vi.fn(async (_input: string | URL | Request, init?: RequestInit) => init?.method === 'HEAD'
+    ? new Response(null, { status: 200, headers: { 'content-type': 'video/mp4', 'content-length': String(bytes.length) } })
+    : new Response(bytes, { status: 200, headers: { 'content-type': 'video/mp4', 'content-length': String(bytes.length) } })) as unknown as typeof fetch
+  const analyzeVideo = vi.fn(async (_owner: number, path: string) => ({ ok: true, name: 'clip.mp4', text: '[00:00:00–00:00:12] Speaker unassigned\nHello', textComplete: true, time: { read: 12, total: 12, unit: 'seconds' as const }, source: { handle: 'source-1', sha256: 'a'.repeat(64), bytes: bytes.length, storage: 'in-place' as const, consequence: 'Verified source.' }, sceneMap: [{ at: 2, score: .8 }, { at: 8, score: .7 }], visualEvidence: [{ at: 2, reason: 'scene-change' as const, score: .8, frame: 'frame.jpg' }], images: [{ name: 'frame.jpg', mime: 'image/jpeg', data: Buffer.from('frame').toString('base64') }], disclosure: `Complete local evidence from ${path}.` }))
+  const expandVideoEvidence = vi.fn(async () => ({ sha256: 'a'.repeat(64), duration: 12, visualEvidence: [{ at: 6, reason: 'question' as const, score: 0, frame: 'question.jpg' }], images: [{ name: 'question.jpg', mime: 'image/jpeg', data: Buffer.from('question-frame').toString('base64') }], audio: [{ at: 6, mime: 'audio/wav', data: Buffer.from('question-audio').toString('base64') }] }))
+  const service = createVideoStudioService({ file: join(root, 'video.json'), keys: () => keys(), fetchImpl, assertRemote: async () => {}, analyzeVideo, expandVideoEvidence })
+  service.setProjectFolder(project)
+  const review = await service.preflightUrl(12, 'https://media.example/clip.mp4')
+  const acquired = await service.acquireUrl(12, review.token!, 'allow', false)
+  expect(acquired).toMatchObject({ ok: true, evidence: { status: 'ready', duration: 12, transcriptSections: 1, sceneChanges: 2 } })
+  expect(acquired.answer).toMatch(/automatically entered the local evidence reader/i)
+  expect(analyzeVideo).toHaveBeenCalledTimes(1)
+  let workspace = await service.workspace()
+  expect(workspace.evidence[0]).toMatchObject({ sourceKind: 'url', sourceUrl: 'https://media.example/clip.mp4', moments: [{ at: 2 }] })
+  const expanded = await service.expandEvidence(12, workspace.evidence[0].id, [6], 'What changes here?')
+  expect(expanded).toMatchObject({ ok: true, moments: [{ at: 6, reason: 'question' }], audio: [{ at: 6, mime: 'audio/wav' }] })
+  expect(expandVideoEvidence).toHaveBeenCalledWith(expect.stringMatching(/clip\.mp4$/), [6], false, expect.any(AbortSignal))
+  const initialized = await service.aiMcp({ jsonrpc: '2.0', id: 1, method: 'initialize', params: {} }, '')
+  await service.aiMcp({ jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'oddbrain_video_evidence_note', arguments: { sourceId: workspace.evidence[0].id, question: 'What changes here?', observations: [{ at: 6, description: 'The framing becomes tighter.' }] } } }, initialized.session)
+  workspace = await service.workspace()
+  expect(workspace.evidence[0].moments.find(moment => moment.at === 6)).toMatchObject({ description: 'The framing becomes tighter.', descriptionState: 'unconfirmed' })
+  expect(service.confirmEvidenceDescription(12, workspace.evidence[0].id, 6, 'The framing becomes tighter.')).toMatchObject({ ok: true })
+  workspace = await service.workspace()
+  expect(workspace.evidence[0].moments.find(moment => moment.at === 6)?.descriptionState).toBe('confirmed')
 })

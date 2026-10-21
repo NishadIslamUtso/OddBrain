@@ -88,6 +88,19 @@ test('routes that are not on the list are refused before anything is forwarded',
   }
 })
 
+test('the review-only video MCP accepts local clients but refuses browser origins and non-POST requests', async () => {
+  let called = 0
+  const api = await start({ videoMcp: async (request, session) => { called++; return { status: 200, session: session || 'session-1', body: { jsonrpc: '2.0', id: (request as any).id, result: { ok: true } } } } })
+  try {
+    const local = await fetch(`${api.url}/api/video-studio-mcp`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'initialize' }) })
+    assert.equal(local.status, 200); assert.equal(local.headers.get('mcp-session-id'), 'session-1'); assert.equal(called, 1)
+    const browser = await fetch(`${api.url}/api/video-studio-mcp`, { method: 'POST', headers: { 'content-type': 'application/json', origin: 'https://hostile.example' }, body: '{}' })
+    assert.equal(browser.status, 403); assert.equal(called, 1)
+    const get = await fetch(`${api.url}/api/video-studio-mcp`)
+    assert.equal(get.status, 405); assert.equal(called, 1)
+  } finally { await api.close() }
+})
+
 test('a write has to be JSON, so a web page cannot post a form at the local services', async () => {
   const api = await start()
   try {

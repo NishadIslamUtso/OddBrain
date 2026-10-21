@@ -18,7 +18,7 @@ export type VideoStudioPreferences = {
 
 export const DEFAULT_VIDEO_STUDIO: VideoStudioPreferences = {
   kdenlive: '',
-  mcpUrl: 'http://127.0.0.1:8766/mcp',
+  mcpUrl: 'http://127.0.0.1:8765/mcp',
   projectFolder: '',
   ytDlp: '',
 }
@@ -47,12 +47,35 @@ export function normalizeVideoStudio(value: unknown): VideoStudioPreferences {
   }
 }
 
+export type NativeKdenliveStatus = {
+  compatible: boolean
+  identity: string
+  protocol: string
+  referenceCommit: string
+  missingTools: string[]
+  reason: string
+}
+
+export type KdenliveProjectSnapshot = {
+  documentUrl: string
+  sequenceId: string
+  /** Kept in the main process except while constructing a reviewed native call. */
+  sessionId: string
+  revision: number
+  modified: boolean
+  profile: { width: number; height: number; description: string }
+  undo: { index: number; canUndo: boolean; canRedo: boolean; undoText: string; redoText: string }
+  counts: Record<string, number>
+}
+
 export type VideoStudioView = {
   preferences: VideoStudioPreferences
   kdenliveVersion: string
   kdenliveReady: boolean
   mcpConnected: boolean
   mcpTools: string[]
+  nativeKdenlive: NativeKdenliveStatus
+  aiToolsUrl: string
   projectReady: boolean
   hasMcpToken: boolean
   hasPixabayKey: boolean
@@ -127,6 +150,32 @@ export type VideoUrlPreflight = {
   error?: string
 }
 
+export type VideoEvidenceMoment = {
+  at: number
+  reason: 'overview' | 'scene-change' | 'question'
+  score: number
+  frame?: string
+  ocr?: string
+  description?: string
+  descriptionState?: 'unconfirmed' | 'confirmed'
+}
+
+export type VideoEvidenceSummary = {
+  id: string
+  name: string
+  sourceKind: 'file' | 'url'
+  sourceUrl?: string
+  sha256: string
+  duration: number
+  createdAt: string
+  transcriptSections: number
+  sceneChanges: number
+  moments: VideoEvidenceMoment[]
+  disclosure: string
+  status: 'processing' | 'ready' | 'blocked'
+  error?: string
+}
+
 export type VideoUrlAcquireAnswer = {
   ok: boolean
   answer: string
@@ -134,7 +183,43 @@ export type VideoUrlAcquireAnswer = {
   sourceUrl?: string
   receipt?: string
   imported?: boolean
+  evidence?: VideoEvidenceSummary
 }
+
+export type KdenlivePlanCommand = { type: string; [key: string]: unknown }
+export type KdenliveEditPlan = {
+  id: string
+  title: string
+  purpose: string
+  sourceEvidenceIds: string[]
+  expectedProject: { documentUrl: string; sequenceId: string; revision: number }
+  commands: KdenlivePlanCommand[]
+  assetNeeds: Array<{ kind: CreativeKind; query: string; purpose: string; placement: string }>
+  notes: string
+}
+export type KdenlivePlanReview = {
+  ok: boolean
+  token?: string
+  plan?: KdenliveEditPlan
+  project?: Omit<KdenliveProjectSnapshot, 'sessionId'>
+  commandSummary?: string[]
+  validation?: { valid: boolean; issues: string[]; unsupported: boolean }
+  consequence?: string
+  expiresAt?: string
+  error?: string
+}
+export type KdenliveHistoryEntry = { undoIndex: number; text: string; state: string; origin: string; timestamp?: string; command?: string }
+export type CreativeProposal = { query: string; kind: CreativeKind; purpose: string; assets: CreativeAsset[]; createdAt: string }
+export type VideoStudioWorkspace = {
+  evidence: VideoEvidenceSummary[]
+  proposedPlan: KdenliveEditPlan | null
+  creativeProposal: CreativeProposal | null
+  project: Omit<KdenliveProjectSnapshot, 'sessionId'> | null
+  history: KdenliveHistoryEntry[]
+  notice: string
+}
+export type EvidenceExpansion = { ok: boolean; evidence?: VideoEvidenceSummary; moments?: VideoEvidenceMoment[]; images?: Array<{ at: number; mime: string; data: string }>; audio?: Array<{ at: number; mime: string; data: string }>; answer: string }
+export type KdenliveFrameCapture = { ok: boolean; position: number; mime?: string; data?: string; error?: string }
 
 export type KdenliveToolReview = {
   ok: boolean
@@ -145,7 +230,7 @@ export type KdenliveToolReview = {
   error?: string
 }
 
-export type KdenliveAction = 'undo' | 'save-version'
+export type KdenliveAction = 'undo' | 'redo' | 'save-version'
 export type DesignKitFormat = 'vertical' | 'landscape'
 export type DesignKitReview = { ok: boolean; token?: string; destination?: string; files?: string[]; consequence?: string; expiresAt?: string; error?: string }
 
@@ -165,6 +250,12 @@ export type VideoStudioBridge = {
   decideAsset(token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean): Promise<AssetInstallAnswer>
   preflightUrl(url: string): Promise<VideoUrlPreflight>
   acquireUrl(token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean): Promise<VideoUrlAcquireAnswer>
+  workspace(): Promise<VideoStudioWorkspace>
+  captureKdenliveFrame(position: number): Promise<KdenliveFrameCapture>
+  expandEvidence(id: string, moments: number[], question: string): Promise<EvidenceExpansion>
+  confirmEvidenceDescription(id: string, at: number, description: string): Promise<{ ok: boolean; answer: string }>
+  prepareEditPlan(plan?: KdenliveEditPlan): Promise<KdenlivePlanReview>
+  decideEditPlan(token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string; project?: Omit<KdenliveProjectSnapshot, 'sessionId'> }>
   prepareKdenliveAction(action: KdenliveAction): Promise<KdenliveToolReview>
   decideKdenliveAction(token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string }>
   stop(): Promise<{ ok: boolean; answer: string }>

@@ -172,9 +172,17 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
           const values = (await runCommand(prefs.ffmpeg || 'ffmpeg', [...common, '-ss', String(start), ...inputArgs, '-t', String(selectedDuration), '-vn', '-af', 'astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=pipe\\:1', '-f', 'null', '-'], signal, Math.max(90_000, selectedDuration * 500), 4_000_000)).toString().match(/lavfi\.astats\.Overall\.RMS_level=([-\d.]+)/g)?.map(row => Number(row.split('=')[1])).filter(Number.isFinite) || []
           acoustic = values.length ? `Measured RMS level across ${values.length} windows: average ${(values.reduce((a,b)=>a+b,0)/values.length).toFixed(1)} dB, range ${Math.min(...values).toFixed(1)} to ${Math.max(...values).toFixed(1)} dB. This describes recorded level/dynamics, not emotion or intent.` : 'Audio was fully presented to the measurement pass, but no stable RMS values were returned.'
         } catch { acoustic = 'Acoustic measurement did not finish; the transcript coverage below remains separate.' }
-        if (recognizedWords) acoustic += ` Overall recognized-word pace: ${(recognizedWords / selectedDuration * 60).toFixed(1)} words per minute across the selected duration, including pauses. This is delivery/pacing evidence, not speaker identity, emotion or intent.`
+        if (recognizedWords) acoustic += ` Overall recognized-word pace: ${(recognizedWords / selectedDuration * 60).toFixed(1)} words per minute across the selected duration, including pauses.`
+        try {
+          const pauseMetadata = (await runCommand(prefs.ffmpeg || 'ffmpeg', [...common, '-ss', String(start), ...inputArgs, '-t', String(selectedDuration), '-vn', '-af', "silencedetect=noise=-35dB:d=0.3,ametadata=mode=print:file=pipe\\:1", '-f', 'null', '-'], signal, Math.max(90_000, selectedDuration * 500), 4_000_000)).toString('utf8')
+          const durations = [...pauseMetadata.matchAll(/lavfi\.silence_duration=([\d.]+)/g)].map(match => Number(match[1])).filter(value => Number.isFinite(value) && value >= .3)
+          if (durations.length) acoustic += ` Pause evidence below -35 dB: ${durations.length} interval(s), ${durations.reduce((sum, value) => sum + value, 0).toFixed(1)} seconds total, longest ${Math.max(...durations).toFixed(1)} seconds.`
+          else acoustic += ' No pause interval of at least 0.3 seconds was returned below the fixed -35 dB threshold.'
+        } catch { acoustic += ' Pause measurement did not finish.' }
+        acoustic += ' These level, pace and pause measurements support delivery analysis but do not establish speaker identity, emotion, intent or pitch contour.'
       }
       const images: NonNullable<MediaResult['images']> = [], visualEvidence: NonNullable<MediaResult['visualEvidence']> = []
+      let sceneMap: NonNullable<MediaResult['sceneMap']> = []
       if (format.kind === 'video') {
         let scenes: Array<{ at: number; score: number }> = []
         try {
@@ -184,6 +192,7 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
           const metadata = await runCommand(prefs.ffmpeg || 'ffmpeg', [...common, '-ss', String(start), ...inputArgs, '-t', String(selectedDuration), '-an', '-vf', "fps=2,scale=320:-2,select='gt(scene,0.12)',metadata=print:file=pipe\\:1", '-f', 'null', '-'], signal, Math.max(90_000, selectedDuration * 250), 4_000_000)
           scenes = parseSceneMetadata(metadata.toString('utf8')).map(item => ({ ...item, at: item.at + start }))
         } catch { scenes = [] }
+        sceneMap = scenes.slice(0, 10_000)
         const wanted = Math.min(3, Math.max(1, Math.ceil(selectedDuration / 300)))
         const planned = adaptiveFramePoints(selectedDuration, scenes.map(item => ({ at: item.at - start, score: item.score })), wanted)
         let adapterIdentity: { bytes: number; sha256: string } | null = null
@@ -219,10 +228,59 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
       const result = extracted(name, timelineText, disclosure)
       const confirmed = await copyOrHashStable(path, null, signal)
       if (confirmed.bytes !== source.bytes || confirmed.sha256 !== source.sha256) throw Error('The selected source changed during media processing. No result was kept.')
-      return { ...result, images, visualEvidence, time: { read: selectedDuration, total: details.duration, unit: 'seconds' }, textComplete: !range || start === 0 && end === details.duration, source }
+      return { ...result, images, visualEvidence, sceneMap, time: { read: selectedDuration, total: details.duration, unit: 'seconds' }, textComplete: !range || start === 0 && end === details.duration, source }
+    } finally { await rm(temp, { recursive: true, force: true }) }
+  }
+  const extractEvidence = async (path: string, moments: number[], videoOcr = false, externalSignal?: AbortSignal): Promise<{ sha256: string; duration: number; images: NonNullable<MediaResult['images']>; audio: Array<{ at: number; mime: string; data: string }>; visualEvidence: NonNullable<MediaResult['visualEvidence']> }> => {
+    if (!Array.isArray(moments) || moments.length < 1 || moments.length > 6 || moments.some(at => !Number.isFinite(at) || at < 0)) throw Error('Choose 1–6 valid video timestamps for question-driven evidence.')
+    const controller = new AbortController(), signal = externalSignal ? AbortSignal.any([controller.signal, externalSignal]) : controller.signal
+    const identity = await copyOrHashStable(path, null, signal), sourceFile = await open(path, 'r'), head = Buffer.alloc(1024 * 1024)
+    let format!: ReturnType<typeof mediaKind>
+    try { const read = (await sourceFile.read(head, 0, head.length, 0)).bytesRead; format = mediaKind(head.subarray(0, read)) } finally { await sourceFile.close() }
+    if (format.kind !== 'video') throw Error('Question-driven frame retrieval needs a verified video source.')
+    const prefs = { ...preferences }, details = await probe(path, prefs.ffmpeg, format.mime, signal, runCommand)
+    const points = [...new Set(moments.map(at => Math.min(details.duration, Math.max(0, Math.round(at * 1000) / 1000))))]
+    const temp = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'oddbrain-question-evidence-'))
+    const images: NonNullable<MediaResult['images']> = [], audio: Array<{ at: number; mime: string; data: string }> = [], visualEvidence: NonNullable<MediaResult['visualEvidence']> = []
+    let adapterIdentity: { bytes: number; sha256: string } | null = null
+    try {
+      if (videoOcr) {
+        if (!prefs.ocrAdapter || !prefs.ocrAdapterSha256) throw Error('Question-driven OCR was requested, but the reviewed DeepSeek-OCR-2 adapter is not configured.')
+        adapterIdentity = await copyOrHashStable(prefs.ocrAdapter, null, signal)
+        if (adapterIdentity.sha256 !== prefs.ocrAdapterSha256) throw Error('The OCR-2 adapter changed since review. Choose it again.')
+      }
+      const common = ['-hide_banner', '-loglevel', 'error', '-nostdin'], inputArgs = ['-max_alloc', '134217728', '-threads', '2', '-protocol_whitelist', 'file,pipe', ...(demuxer(format.mime) ? ['-f', demuxer(format.mime)!] : []), ...(format.mime === 'video/mp4' ? ['-enable_drefs', '0', '-use_absolute_path', '0'] : []), '-i', path]
+      for (const [index, at] of points.entries()) {
+        const file = join(temp, `question-${index}.jpg`)
+        await runCommand(prefs.ffmpeg || 'ffmpeg', [...common, '-ss', String(at), ...inputArgs, '-frames:v', '1', '-vf', 'scale=1280:1280:force_original_aspect_ratio=decrease', '-q:v', '3', file], signal)
+        const data = await readFile(file); if (data.length > 2 * 1024 * 1024) throw Error('A retrieved evidence frame exceeds the 2 MB engine-image safety limit.')
+        const frame = `${basename(path)}-${clock(at)}-question.jpg`, evidence: NonNullable<MediaResult['visualEvidence']>[number] = { at, reason: 'question', score: 0, frame }
+        if (adapterIdentity) {
+          const raw = await runCommand(prefs.ocrAdapter, ['--oddbrain-process', file, '--json'], signal, 10 * 60_000, 1_000_000)
+          const output = JSON.parse(raw.toString('utf8'))
+          if (typeof output?.text !== 'string' || output.text.length > 100_000 || typeof output.coverage !== 'string' || output.coverage.length > 2000) throw Error(`OCR-2 returned invalid output for ${clock(at)}.`)
+          evidence.ocr = output.text.trim()
+        }
+        images.push({ name: frame, mime: 'image/jpeg', data: data.toString('base64') }); visualEvidence.push(evidence)
+        if (details.audio) {
+          const wav = join(temp, `question-${index}.wav`), clipStart = Math.max(0, at - 2), clipDuration = Math.min(4, details.duration - clipStart)
+          await runCommand(prefs.ffmpeg || 'ffmpeg', [...common, '-ss', String(clipStart), ...inputArgs, '-t', String(clipDuration), '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav], signal)
+          const sound = await readFile(wav)
+          if (sound.length > 300_000) throw Error('A retrieved audio evidence window exceeds the 300 KB safety limit.')
+          audio.push({ at, mime: 'audio/wav', data: sound.toString('base64') })
+        }
+      }
+      const confirmed = await copyOrHashStable(path, null, signal)
+      if (confirmed.bytes !== identity.bytes || confirmed.sha256 !== identity.sha256) throw Error('The video changed while extra evidence was being retrieved. Nothing was accepted.')
+      if (adapterIdentity) {
+        const confirmedAdapter = await copyOrHashStable(prefs.ocrAdapter, null, signal)
+        if (confirmedAdapter.sha256 !== adapterIdentity.sha256 || confirmedAdapter.bytes !== adapterIdentity.bytes) throw Error('The OCR-2 adapter changed while retrieving evidence. Nothing was accepted.')
+      }
+      return { sha256: identity.sha256, duration: details.duration, images, audio, visualEvidence }
     } finally { await rm(temp, { recursive: true, force: true }) }
   }
   return {
+    extractEvidence,
     canRecord: (owner: number): boolean => (recording.get(owner) || 0) > Date.now(),
     authorizeRecording: (owner: number, expected: { provider: string; model: string }): MediaResult => {
       try {

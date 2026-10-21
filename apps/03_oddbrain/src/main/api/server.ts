@@ -39,6 +39,8 @@ export type LocalApiOptions = {
    * has no cloud code path at all.
    */
   cloud?: CloudStream
+  /** Local, review-only MCP tools for video evidence/library/plan proposals. */
+  videoMcp?: (request: unknown, session: string) => Promise<{ status: number; body: unknown; session?: string }>
 }
 
 /**
@@ -204,6 +206,10 @@ export function startLocalApi(options: LocalApiOptions): Promise<LocalApi> {
 
   function handle(request: IncomingMessage, response: ServerResponse): void {
     const pathname = (request.url || '/').split('?')[0]
+    if (pathname === '/api/video-studio-mcp') {
+      void handleVideoMcp(request, response)
+      return
+    }
     protectLocalApi(
       { url: request.url || '/', method: request.method, headers: request.headers },
       response,
@@ -233,6 +239,26 @@ export function startLocalApi(options: LocalApiOptions): Promise<LocalApi> {
         response.end('Not found.')
       }
     )
+  }
+
+  async function handleVideoMcp(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const host = String(request.headers.host || '').split(',')[0].trim()
+    let hostname = ''
+    try { hostname = new URL(`http://${host}`).hostname } catch {}
+    const deny = (status: number, error: string): void => { response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ error })) }
+    if (!options.videoMcp) { deny(503, 'Video review tools are not running.'); return }
+    if (!['127.0.0.1', 'localhost', '[::1]'].includes(hostname)) { deny(403, 'Video review tools accept only a literal loopback Host.'); return }
+    if (request.headers.origin) { deny(403, 'Browser-origin requests cannot call Video Studio MCP tools.'); return }
+    if (request.method !== 'POST') { deny(405, 'Video Studio MCP accepts POST only.'); return }
+    if (!/^application\/json(?:\s*;|$)/i.test(String(request.headers['content-type'] || ''))) { deny(415, 'Video Studio MCP requires application/json.'); return }
+    let body: unknown
+    try { body = JSON.parse(await readBody(request, BODY_LIMIT)) } catch (error) { deny(400, (error as Error).message || 'Invalid JSON request.'); return }
+    try {
+      const sessionHeader = request.headers['mcp-session-id'], session = Array.isArray(sessionHeader) ? sessionHeader[0] || '' : sessionHeader || ''
+      const reply = await options.videoMcp(body, session)
+      response.writeHead(reply.status, { ...(reply.body === '' ? {} : { 'Content-Type': 'application/json' }), 'Cache-Control': 'no-store', ...(reply.session ? { 'Mcp-Session-Id': reply.session } : {}) })
+      response.end(reply.body === '' ? '' : JSON.stringify(reply.body))
+    } catch (error) { deny(500, `Video Studio MCP failed safely: ${(error as Error).message}`) }
   }
 
   /**
