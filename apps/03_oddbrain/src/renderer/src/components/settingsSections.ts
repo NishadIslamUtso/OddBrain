@@ -1,4 +1,4 @@
-export type SectionId = 'media' | 'windows' | 'maps' | 'about' | 'agents' | 'hooks' | 'memory' | 'house' | 'skills' | 'recipes' | 'extensions' | 'engine' | 'system' | 'connectors' | 'appearance' | 'models' | 'performance' | 'vault'
+export type SectionId = 'video' | 'media' | 'windows' | 'maps' | 'about' | 'agents' | 'hooks' | 'memory' | 'house' | 'skills' | 'recipes' | 'extensions' | 'engine' | 'system' | 'connectors' | 'appearance' | 'models' | 'performance' | 'vault'
 
 export const SECTIONS: readonly { id: SectionId; title: string; group: string; resettable?: boolean }[] = [
   { id: 'appearance', title: 'Appearance', group: 'Your space', resettable: true },
@@ -8,6 +8,7 @@ export const SECTIONS: readonly { id: SectionId; title: string; group: string; r
   { id: 'performance', title: 'Performance', group: 'Models & runtime', resettable: true },
   { id: 'agents', title: 'Agent access', group: 'Access & connections', resettable: true },
   { id: 'connectors', title: 'Connectors', group: 'Access & connections' },
+  { id: 'video', title: 'Kdenlive & video', group: 'Access & connections' },
   { id: 'extensions', title: 'Plugins', group: 'Access & connections' },
   { id: 'media', title: 'Voice & attachments', group: 'Files & memory' },
   { id: 'vault', title: 'Vault', group: 'Files & memory' },

@@ -13,6 +13,7 @@ import SkillsCatalogSection from './SkillsCatalogSection'
 import BrowserControlSection from './BrowserControlSection'
 import ExtensionsSection from './ExtensionsSection'
 import MediaSettings from './MediaSettings'
+import VideoStudioSettings from './VideoStudioSettings'
 import ConnectorsSection from './ConnectorsSection'
 import ErrorBoundary from './ErrorBoundary'
 import EngineBay from './EngineBay'
@@ -165,6 +166,7 @@ const COMPOSED_SECTIONS = new Set<SectionId>(['appearance', 'maps', 'engine', 'c
 /** Four glyphs, drawn here rather than pulled from a font or a package. */
 function SectionIcon({ id }: { id: SectionId }) {
   const paths: Record<SectionId, ReactNode> = {
+    video: <><rect x="2" y="4" width="16" height="12" rx="2" /><path d="m9 8 4 2-4 2Z" /></>,
     media: <><rect x="7" y="2" width="6" height="11" rx="3" /><path d="M4 9a6 6 0 0 0 12 0M10 15v3M6 18h8" /></>,
     windows: <><rect x="2" y="3" width="16" height="13" rx="2" /><path d="M2 7h16" /></>,
     maps: <><path d="m2 4 5-2 6 3 5-2v13l-5 2-6-3-5 2ZM7 2v13M13 5v13" /></>,
@@ -837,7 +839,8 @@ export default function SettingsView({
             : []),
         ],
     appearance: [{ label: 'Appearance', terms: 'display name profile palette theme color colour font size width spacing density motion speed pause mascot brain scenes layout mix preset words explanations compare quiz shortlist', body: <AppearancePanel appearance={appearance} onAppearanceChange={onAppearanceChange} look={look} onLookChange={onLookChange} sidebar={sidebar} onSidebarChange={onSidebarChange} name={profileName} onNameChange={onProfileNameChange} engine={engineState.settings.id} model={engineState.settings.model || 'Choose a model'} onTry={onTryWorkspace} /> }],
-    media: [{ label: 'Voice & attachments', terms: 'media attachments PDF Word Excel PowerPoint document image audio video FFmpeg transcription dictation speech voice read aloud provider', body: <MediaSettings /> }],
+    video: [{ label: 'Kdenlive & video', terms: 'video studio kdenlive mcp creative library pixabay openverse wikimedia yt-dlp timeline editor captions assets', body: <VideoStudioSettings /> }],
+    media: [{ label: 'Voice & attachments', terms: 'media attachments PDF Word Excel PowerPoint document image audio video FFmpeg transcription dictation speech voice read aloud provider OCR DeepSeek', body: <MediaSettings /> }],
     models: isDemo
       ? [
           {
@@ -1161,7 +1164,7 @@ export default function SettingsView({
     ],
   }
 
-  const sectionAliases: Partial<Record<SectionId, string>> = { media: 'voice & files voice & attachments', models: 'get api keys provider credentials encryption', connectors: 'install apps extensions connection runtime', extensions: 'plugins community packs marketplace', windows: 'smaller quick window shortcut startup warm runtime', performance: 'model stays loaded keep alive resource memory', maps: 'browsing maps sources reading history timeline', about: 'learn more help about repository', appearance: 'startup animation opening splash display name profile account looks lab compare quiz shortlist ratings notes design systems layouts styles palettes fonts motion typography density mixes' }
+  const sectionAliases: Partial<Record<SectionId, string>> = { video: 'kdenlive video studio creative library mcp stock assets', media: 'voice & files voice & attachments OCR', models: 'get api keys provider credentials encryption', connectors: 'install apps extensions connection runtime', extensions: 'plugins community packs marketplace', windows: 'smaller quick window shortcut startup warm runtime', performance: 'model stays loaded keep alive resource memory', maps: 'browsing maps sources reading history timeline', about: 'learn more help about repository', appearance: 'startup animation opening splash display name profile account looks lab compare quiz shortlist ratings notes design systems layouts styles palettes fonts motion typography density mixes' }
   rowsById.agents = [{ label: 'Cloud inference', terms: 'allow cloud external inference local transport remote model', body: <AutomationControls scope="access" /> }, ...rowsById.agents]
   const needle = query.trim().toLowerCase()
   const rowText = (row: Row): string => `${row.label} ${row.terms || ''}`.toLowerCase()

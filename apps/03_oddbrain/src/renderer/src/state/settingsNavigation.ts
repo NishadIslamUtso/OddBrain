@@ -4,7 +4,7 @@ import type { SectionId } from '../components/SettingsView'
 export type SettingsArea = { id: string; title: string; description: string; sections: readonly SectionId[] }
 export const SETTINGS_AREAS: readonly SettingsArea[] = [
   { id: 'appearance', title: 'Appearance', description: 'Looks & brain behaviour', sections: ['appearance'] },
-  { id: 'ai', title: 'AI & connections', description: 'Engines, API keys & connectors', sections: ['engine', 'models', 'connectors', 'performance'] },
+  { id: 'ai', title: 'AI & connections', description: 'Engines, API keys & connectors', sections: ['engine', 'models', 'connectors', 'video', 'performance'] },
   { id: 'memory', title: 'Memory & files', description: 'Organizer & vault', sections: ['memory', 'vault'] },
   { id: 'voice', title: 'Voice & attachments', description: 'Speech, media & documents', sections: ['media'] },
   { id: 'access', title: 'Privacy & access', description: 'Browser & AI permissions', sections: ['agents'] },

@@ -69,6 +69,18 @@ Processing jobs have durable source hashes, honest operation/section coverage, s
 
 Folder Access is read-only by default and bound to an owner-written purpose, duration, and optional project. Write, watch, review, cloud, and command authority are separate switches. Listing reads names, sizes, and dates only; it does not capture content. Every grant/list/revocation has a receipt. Revocation changes no files, and a folder grant never implies OS commands, deletion, memory capture, provider upload, or access outside the selected normal folder.
 
+## Video and Kdenlive authority
+
+OddBrain’s only video-editor target is Kdenlive. OddBrain owns intake, source-linked analysis, chat, plans, approval cards, online Creative Library search, selected downloads, and provenance receipts. Kdenlive alone owns timeline state, playback/preview, effects, undo, project saves, rendering, and export. OddBrain does not maintain a substitute timeline, rewrite an open `.kdenlive` file, or claim a save/render succeeded from a proposed plan.
+
+A live editor connection accepts only credential-free loopback HTTP MCP endpoints. Its bearer token, when used, stays in the protected secret store. The app discovers real tools instead of assuming them. Adding a token-free Kdenlive endpoint to the selected AI engine is a separate exact-file review with backups; no project connector file receives the protected token. A connection does not itself approve an edit. Required tools, a separately audited Kdenlive build/server, and real Windows 11 validation remain external gates. Stock Kdenlive has no general embedded OddBrain-panel API, so the current Video Studio remains in OddBrain rather than pretending to be a native Kdenlive dock.
+
+Creative Library catalogues remain online. Search currently names Openverse, Wikimedia Commons, and optional Pixabay rather than silently substituting a provider. Separately reviewed local design kits can create editable title/lower-third SVGs, a caption style, a restrained colour LUT, instructions, and a hash manifest without network access; they do not claim to implement Kdenlive animation or transitions. Preview fetches are bounded; only an owner-selected result is streamed to the project. Every successful download records provider, source page, creator, displayed licence/attribution, byte count, and SHA-256. Index/provider metadata is evidence, not a legal guarantee; uncertain or unavailable licensing must stay visible.
+
+Public video links are inspect-first and limited to supported public YouTube, TikTok, Instagram, or direct-video sources. Social acquisition uses an owner-installed yt-dlp with no cookies, login automation, playlists, live streams, or access-control bypass. Each approved acquisition is one source, gets a URL/hash receipt, and is never interpreted as instruction authority. Provider terms, creator rights, anti-bot behavior, and changed interfaces can still refuse the operation.
+
+Video attachments always pause for visible storage/range/OCR choices. Complete selected audio remains in scope. Local processing adds acoustic evidence, timestamped speech when supported, scene-change planning, and adaptive evidence frames. Optional frame OCR reuses the single hash-reviewed DeepSeek-OCR-2 adapter and remains unconfirmed. The current implementation does not claim speaker diarization, emotion/intent detection, every-frame visual understanding, full style replication, or successful live editing when the MCP server lacks a required tool.
+
 ## Branching
 
 Every completed AI reply has an inline **Branch** action. A branch is an isolated stored chat through that reply: stored messages and attachment/artifact references are remapped, project/context choices continue, and the active Working Notes—including the retained “What I didn’t approve” difference—are copied into a new notebook revision. The new chat starts a separate native session. OddBrain never claims hidden provider state, thinking, or unrecorded tool context was copied.
@@ -99,14 +111,15 @@ Native source-bearing turns require the engine’s Plan mode and run in a fresh 
 - Shared Attachment Center with use-in-place/private-copy identity, deferred selectable sections, durable section jobs/budgets, coverage, safe private-copy deletion previews, and streamed exact turn retention.
 - Purpose-limited Folder Access with duration, separate authorities, receipts, metadata-only listing, and revocation.
 - Large document selection: complete locally extracted sections and supported page ranges are shown for owner selection; selected sections are attached whole within the prompt limit.
-- Complete selected-duration local audio timelines, full audio handling for video, timestamped speech, honest visual sampling, and measured acoustic level/dynamics without emotion claims.
-- Optional owner-installed, hash-pinned DeepSeek-OCR-2 adapter protocol; no automatic model download or text-API substitution.
+- Complete selected-duration local audio timelines, full audio handling for video, timestamped speech, local scene-change planning, adaptive timestamped evidence frames, and measured acoustic level/dynamics without emotion claims.
+- Optional owner-installed, hash-pinned DeepSeek-OCR-2 adapter protocol; no automatic model download, second OCR subsystem, or text-API substitution.
+- Kdenlive-only Video Studio with guarded loopback MCP discovery, exact-review AI-engine connector setup, public-link preflight/acquisition, online Creative Library search, bounded previews, reviewed local design kits, selected-only downloads/imports, and URL/licence/hash receipts.
 
 ## Backup and restore domains
 
 Vault backup and app-private backup are separate and verified by size and SHA-256.
 
-The app-private backup includes selected app chats, native transcripts, Working Notes/review differences, Attachment Center private copies and inventory, processing state, artifacts, projects, recipes, handoffs, reviewed command outcomes, checkpoints, review reports, and non-secret interface preferences. It excludes credentials and API keys, extension pairing secrets, read approvals and folder/project grants, engine sessions, installed engines/models, extension packages, caches, workflow signing secrets, schedule/queue attempts, and external files used in place.
+The app-private backup includes selected app chats, native transcripts, Working Notes/review differences, Attachment Center private copies and inventory, processing state, artifacts, projects, recipes, handoffs, reviewed command outcomes, checkpoints, review reports, non-secret interface preferences, and non-secret Video Studio paths/settings. It excludes credentials and API keys, extension pairing secrets, read approvals and folder/project grants, engine sessions, installed engines/models, extension packages, caches, workflow signing secrets, schedule/queue attempts, and external files used in place.
 
 Both backup domains stream and hash complete files in bounded memory and no longer impose the former 2 GiB total ceiling. Manifest/file-count checks, path safety, source stability, and actual storage remain explicit operational limits.
 

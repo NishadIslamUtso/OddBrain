@@ -10,9 +10,10 @@ Nothing here is a current capability or standing permission. Each item needs a r
 2. Review Windows CI evidence and test the packaged build on the owner’s Windows 11 machine at 125% display scaling.
 3. Exercise real signed-in Claude Code and agy flows, Stop during tools, uncertain termination, app restart recovery, and provider context overflow.
 4. Exercise multi-gigabyte use-in-place/private-copy sources, PDF page ranges, exact streamed turn retention, large backup verification, separate restore folders, and manual transcript restore with disposable owner data copies.
-5. Benchmark complete-duration audio/video processing and acoustic measurements on Windows 11 with installed FFmpeg and recognition languages. Test the optional owner-installed DeepSeek-OCR-2 adapter only on reviewed compatible hardware; accuracy and GPU compatibility remain external gates.
-6. Exercise monthly/custom Review, manual consumer-AI handoff/import, folder expiry/revocation receipts, safe private-copy deletion previews, and inline branch continuity with real stored attachments and Working Notes.
-7. Measure startup and route chunk loading on the target machine. Keep lazy boundaries only where measured startup or memory improves without making navigation feel delayed.
+5. Benchmark complete-duration audio/video processing, scene-change selection, and acoustic measurements on Windows 11 with installed FFmpeg and recognition languages. Test the optional owner-installed DeepSeek-OCR-2 adapter only on reviewed compatible hardware; accuracy and GPU compatibility remain external gates.
+6. Exercise the Video Studio against a separately audited Kdenlive MCP build/server and real Kdenlive projects: tool discovery, exact-review connector deployment, Creative Library search/licensing, bounded previews, stopped and completed downloads, URL acquisition, import-only handoff, Undo, project versions, and recovery after either process closes. Provider accounts, public-source availability, and MCP tool coverage remain external gates.
+7. Exercise monthly/custom Review, manual consumer-AI handoff/import, folder expiry/revocation receipts, safe private-copy deletion previews, and inline branch continuity with real stored attachments and Working Notes.
+8. Measure startup and route chunk loading on the target machine. Keep lazy boundaries only where measured startup or memory improves without making navigation feel delayed.
 
 ## Later desktop work
 
@@ -21,7 +22,11 @@ Nothing here is a current capability or standing permission. Each item needs a r
 - Owner-reviewed activation tooling for a verified app-data restore folder. Current backups/restores preserve data in a separate folder; they must never activate credentials, grants, sessions, hooks, schedules, or queues implicitly.
 - Optional export/pagination improvements for very large previews and histories where current refusal or page sizes are inconvenient.
 - More document section labels for spreadsheets, slides, headings, and page ranges, without partial-text claims.
-- Additional accessibility and keyboard testing for charts, citations, document selection, recovery, and review history.
+- Additional accessibility and keyboard testing for charts, citations, document selection, recovery, review history, and Video Studio approval flows.
+- Capability-driven Kdenlive edit recipes for reviewed cuts, captions, B-roll, transitions, titles, effects, short-form reframing, preview inspection, and saved versions after real MCP schemas are pinned. Never guess a server-specific tool argument or turn OddBrain into a second timeline/rendering engine.
+- Richer local video evidence—speaker separation where a reviewed local engine truly supports it, denser owner-selected frame/OCR passes, and vocal-delivery measurements beyond current transcript/RMS evidence—without claiming emotion or identity from weak signals.
+- Additional local design-kit choices, animated-title/transition recipes tied to pinned Kdenlive MCP schemas, and more named free catalogue providers after licence, availability, API-limit, and Windows-runtime review. Do not copy proprietary catalogues or make the owner curate a bundled library.
+- A native OddBrain dock only if a separately maintained Kdenlive GPL integration exposes a stable, auditable panel API. The current loopback MCP connection does not pretend to embed UI into stock Kdenlive.
 - Authenticode publisher setup and release rehearsal. No public installer is eligible without a valid trusted signature.
 - Performance work only after profiling. Do not add speculative caches, background services, or dependencies.
 

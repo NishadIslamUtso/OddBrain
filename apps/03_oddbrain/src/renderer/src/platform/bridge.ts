@@ -19,6 +19,7 @@ import type { AttachmentCenterBridge } from '@shared/lib/attachmentCenter'
 import type { FolderAccessBridge } from '@shared/lib/folderAccess'
 import { demoMemoryWorkspace } from './sampleMemory'
 import { DEFAULT_MEDIA, type MediaBridge } from '@shared/lib/mediaBridge'
+import { DEFAULT_VIDEO_STUDIO, type VideoStudioBridge } from '@shared/lib/videoStudio'
 import type { MarketplaceBridge } from '@shared/lib/marketplace'
 import { DEFAULT_AUTOMATION, normalizeAutomation, type AutomationBridge, type AutomationView } from '@shared/lib/automation'
 /**
@@ -71,6 +72,7 @@ export type DesktopBridge = {
   workingNotes: WorkingNotesBridge
   transcripts: TranscriptBridge
   media: MediaBridge
+  videoStudio: VideoStudioBridge
   marketplace: MarketplaceBridge
   memoryWorkspace: MemoryBridge
   processing: ProcessingLedgerBridge
@@ -347,6 +349,22 @@ const demoBridge: DesktopBridge = {
     decodeFile: async (_file, input) => ({ ok: false, name: input.name, error: 'Streamed selected-file processing requires the desktop app. No file was sent.' }),
     releaseSource: async () => {},
     dictate: async () => ({ ok: false, name: 'Dictation', error: 'Offline Windows dictation requires the desktop app.' }), cancel: async () => {},
+  },
+  videoStudio: {
+    read: async () => ({ preferences: { ...DEFAULT_VIDEO_STUDIO }, kdenliveVersion: '', kdenliveReady: false, mcpConnected: false, mcpTools: [], projectReady: false, hasMcpToken: false, hasPixabayKey: false, keyEncryption: 'none', notice: 'Video Studio connections require the desktop app.' }),
+    update: async () => ({ preferences: { ...DEFAULT_VIDEO_STUDIO }, kdenliveVersion: '', kdenliveReady: false, mcpConnected: false, mcpTools: [], projectReady: false, hasMcpToken: false, hasPixabayKey: false, keyEncryption: 'none', notice: 'Video settings require the desktop app.' }),
+    chooseKdenlive: async () => ({ preferences: { ...DEFAULT_VIDEO_STUDIO }, kdenliveVersion: '', kdenliveReady: false, mcpConnected: false, mcpTools: [], projectReady: false, hasMcpToken: false, hasPixabayKey: false, keyEncryption: 'none', notice: 'Choosing Kdenlive requires the desktop app.' }),
+    chooseProjectFolder: async () => ({ preferences: { ...DEFAULT_VIDEO_STUDIO }, kdenliveVersion: '', kdenliveReady: false, mcpConnected: false, mcpTools: [], projectReady: false, hasMcpToken: false, hasPixabayKey: false, keyEncryption: 'none', notice: 'Choosing a project folder requires the desktop app.' }),
+    chooseYtDlp: async () => ({ preferences: { ...DEFAULT_VIDEO_STUDIO }, kdenliveVersion: '', kdenliveReady: false, mcpConnected: false, mcpTools: [], projectReady: false, hasMcpToken: false, hasPixabayKey: false, keyEncryption: 'none', notice: 'Choosing yt-dlp requires the desktop app.' }),
+    saveSecret: async () => { throw Error('Credential storage requires the desktop app.') }, clearSecret: async () => { throw Error('Credential storage requires the desktop app.') },
+    testKdenlive: async () => ({ preferences: { ...DEFAULT_VIDEO_STUDIO }, kdenliveVersion: '', kdenliveReady: false, mcpConnected: false, mcpTools: [], projectReady: false, hasMcpToken: false, hasPixabayKey: false, keyEncryption: 'none', notice: 'Kdenlive testing requires the desktop app.' }),
+    openKdenlive: async () => ({ ok: false, answer: 'Opening Kdenlive requires the desktop app.' }),
+    search: async () => ({ ok: false, assets: [], problems: ['Live Creative Library search requires the desktop app.'], notice: 'Nothing was searched.' }),
+    preview: async token => ({ ok: false, token, error: 'Live previews require the desktop app.' }),
+    prepareAsset: async () => ({ ok: false, error: 'Asset review requires the desktop app.' }), decideAsset: async () => ({ ok: false, answer: 'Asset installation requires the desktop app.' }),
+    preflightUrl: async url => ({ ok: false, url, provider: 'unknown', title: '', method: 'none', warnings: [], consequence: '', error: 'Video-link inspection requires the desktop app.' }), acquireUrl: async () => ({ ok: false, answer: 'Video acquisition requires the desktop app.' }),
+    prepareKdenliveAction: async () => ({ ok: false, error: 'Kdenlive actions require the desktop app.' }), decideKdenliveAction: async () => ({ ok: false, answer: 'Kdenlive actions require the desktop app.' }), stop: async () => ({ ok: true, answer: 'No desktop video transfer is running.' }),
+    prepareDesignKit: async () => ({ ok: false, error: 'Local design-kit creation requires the desktop app.' }), decideDesignKit: async () => ({ ok: false, answer: 'Local design-kit creation requires the desktop app.' }),
   },
   transcripts: { raw: async () => ({ ok: false as const, error: 'Original transcripts require the desktop app.' }), image: async () => ({ ok: false as const, error: 'Retained transcript images require the desktop app.' }), list: async () => ({ ok: false, error: 'Native transcripts require the desktop app. Sample chats remain separate.' }), read: async () => ({ ok: false, error: 'Native transcripts require the desktop app.' }) },
   marketplace: { inspect: unavailableMarket, sources: async () => [], browse: unavailableMarket, probe: unavailableMarket, installed: unavailableMarket, plan: unavailableMarket, confirm: unavailableMarket, cancel: async () => {} },

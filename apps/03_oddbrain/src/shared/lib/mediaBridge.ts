@@ -15,10 +15,11 @@ export function normalizeMedia(raw: unknown): MediaPreferences {
 }
 export type MediaInput = { name: string; mime: string; bytes: Uint8Array; route: 'local' | 'provider' | 'transcribe' | 'ocr'; expected?: { provider: string; model: string } }
 export type MediaRange = { start: number; end: number; unit: 'pages' | 'seconds' }
-export type MediaFileInput = { name: string; mime: string; size: number; route: MediaInput['route']; expected?: MediaInput['expected']; storage: 'in-place' | 'private-copy'; range?: MediaRange }
+export type MediaFileInput = { name: string; mime: string; size: number; route: MediaInput['route']; expected?: MediaInput['expected']; storage: 'in-place' | 'private-copy'; range?: MediaRange; /** Owner-approved reuse of the configured OCR-2 adapter on selected video evidence frames. */ videoOcr?: boolean }
 export type MediaSourceHandle = { handle: string; sha256: string; bytes: number; storage: 'in-place' | 'private-copy'; consequence: string }
 export type MediaTextSegment = { id: string; label: string; text: string }
-export type MediaResult = { textComplete?: boolean; pages?: { read: number; total: number }; time?: { read: number; total: number; unit: 'seconds' }; ok: boolean; name: string; text?: string; segments?: MediaTextSegment[]; images?: { name: string; mime: string; data: string }[]; disclosure?: string; error?: string; fallbackAllowed?: boolean; source?: MediaSourceHandle }
+export type MediaVisualEvidence = { at: number; reason: 'overview' | 'scene-change'; score: number; frame: string; ocr?: string }
+export type MediaResult = { textComplete?: boolean; pages?: { read: number; total: number }; time?: { read: number; total: number; unit: 'seconds' }; ok: boolean; name: string; text?: string; segments?: MediaTextSegment[]; images?: { name: string; mime: string; data: string }[]; visualEvidence?: MediaVisualEvidence[]; disclosure?: string; error?: string; fallbackAllowed?: boolean; source?: MediaSourceHandle }
 export type MediaBridge = {
   authorizeRecording(expected: { provider: string; model: string }): Promise<MediaResult>
   onCancelled(listener: () => void): () => void

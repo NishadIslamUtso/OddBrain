@@ -29,6 +29,7 @@ import FirstRunView from './components/FirstRunView'
 import useProjects from './state/projects'
 const ArtifactsView = lazy(() => import('./components/ArtifactsView'))
 const ProjectsView = lazy(() => import('./components/ProjectsView'))
+const VideoStudioView = lazy(() => import('./components/VideoStudioView'))
 const BrainView = lazy(() => import('./components/BrainView'))
 const VaultView = lazy(() => import('./components/VaultView'))
 import { resolveSavedView, migrateHistoryLocation } from './state/viewRoute'
@@ -255,7 +256,7 @@ export default function App() {
   useEffect(() => {
     const offNew = bridge.app?.onMenu?.('menu:new-chat', () => newChat())
     const offSettings = bridge.app?.onMenu?.('menu:settings', () => setSettingsOpen(true))
-    const offViews = (['chat', 'artifacts', 'today', 'projects', 'vault', 'brain', 'code'] as const).map(view =>
+    const offViews = (['chat', 'video', 'artifacts', 'today', 'projects', 'vault', 'brain', 'code'] as const).map(view =>
       bridge.app?.onMenu?.(`menu:view:${view}`, () => {
         setView(resolveSavedView(view))
       })
@@ -725,7 +726,9 @@ export default function App() {
           onPrefsChange={setSidebarPrefs}
         />        }>
         <Suspense fallback={<div role="status" className="p-6 text-[13px] text-muted">Opening this workspace…</div>}>
-        {view === 'brain' ? (
+        {view === 'video' ? (
+          <VideoStudioView onSettings={() => openSettings('video')} onChat={prompt => { setDraft(prompt); setView('chat'); setNotice('Video edit request added. Review it, attach the source video if needed, then send.') }} />
+        ) : view === 'brain' ? (
           <BrainView vault={vault} isDemo={isDemo && !sampleEnabled()} onOpenVault={() => setView('vault')} />
         ) : view === 'vault' ? (
           <VaultView key={vault.path} sourceRequest={sourceRequest?.root === vault.path ? sourceRequest : null}

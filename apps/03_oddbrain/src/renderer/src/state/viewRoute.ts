@@ -17,7 +17,7 @@ export const RETIRED_VIEWS: Readonly<Record<string, View>> = Object.freeze({
   code: 'projects',
 })
 
-const KNOWN_VIEWS: readonly string[] = ['chat', 'artifacts', 'today', 'projects', 'vault', 'brain']
+const KNOWN_VIEWS: readonly string[] = ['chat', 'video', 'artifacts', 'today', 'projects', 'vault', 'brain']
 
 /** A screen name from storage, a menu, or a link → the screen to show. */
 export function resolveSavedView(value: unknown): View {

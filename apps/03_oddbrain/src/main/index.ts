@@ -42,9 +42,11 @@ import { createFolderAccess } from './folders/access'
 import type { MemoryAction } from '../shared/lib/memoryWorkspace'
 import { normalizeExtensionAppearance, type ExtensionAppearance } from '../shared/lib/extensionAppearance'
 import { createMediaService } from './media/service'
+import { createVideoStudioService } from './video/service'
 import { createMarketplaceService } from './engine/marketplace'
 import { createAgyMarketplaceService } from './engine/agyMarketplace'
 import type { MediaFileInput, MediaInput, MediaPreferences } from '../shared/lib/mediaBridge'
+import type { CreativeKind, DesignKitFormat, VideoStudioPreferences } from '../shared/lib/videoStudio'
 import type { MarketplaceAction } from '../shared/lib/marketplace'
 import { fitWindow } from './windowBounds'
 import { inferenceAllowed } from './automation/inferencePolicy'
@@ -549,6 +551,7 @@ function registerBridges(): void {
   })
   handle('transcripts:recover', (_event, chatIds: string[], knownTranscriptIds: string[], before: string = '') => transcriptAnswer(() => turnArchive.recover(chatIds, knownTranscriptIds, before)))
   mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), sourceRoot: attachmentCenterRoot, processing: processingLedger, onSource: input => { attachmentCenter.record({ ...input, origin: 'native-chat' }) }, onProcessed: (sha256, processor, coverage, ok) => attachmentCenter.processed(sha256, processor, coverage, ok), onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
+  const videoStudio = createVideoStudioService({ file: join(app.getPath('userData'), 'video-studio.json'), keys: () => keyStore })
   marketplaceService = createMarketplaceService({ file: join(app.getPath('userData'), 'marketplaces.json') })
   agyMarketplaceService = createAgyMarketplaceService({ cacheFile: join(app.getPath('home'), '.gemini', 'antigravity', 'cache', 'marketplaces', 'antigravity-plugins-official', 'marketplace.json') })
   const market = (engine: unknown) => {
@@ -593,7 +596,7 @@ function registerBridges(): void {
   app.on('before-quit', () => { scheduler.dispose(); workflows.cancel(); commandRunner.cancel() })
   const owners = new Set<number>()
   const track = (sender: Electron.WebContents): number => {
-    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { scheduler.forget(sender.id); workflows.forget(sender.id); commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
+    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { scheduler.forget(sender.id); workflows.forget(sender.id); commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); videoStudio.forget(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
     return sender.id
   }
   handle('schedules:list', () => scheduler.list())
@@ -640,6 +643,38 @@ function registerBridges(): void {
   handle('media:release-source', (event, sourceHandle: string) => { mediaService!.releaseSource(track(event.sender), sourceHandle) })
   handle('media:dictate', event => mediaService!.dictate(track(event.sender)))
   handle('media:cancel', event => { mediaService!.cancel(event.sender.id) })
+  handle('video-studio:read', () => videoStudio.read())
+  handle('video-studio:update', (_event, patch: Partial<VideoStudioPreferences>) => videoStudio.update(patch))
+  handle('video-studio:choose-kdenlive', async () => {
+    const picked = await dialog.showOpenDialog({ title: 'Choose Kdenlive', properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'Kdenlive', extensions: ['exe'] }] : [] })
+    if (!picked.canceled && picked.filePaths[0]) videoStudio.setKdenlive(picked.filePaths[0])
+    return videoStudio.read()
+  })
+  handle('video-studio:choose-project', async () => {
+    const picked = await dialog.showOpenDialog({ title: 'Choose the Kdenlive project folder', properties: ['openDirectory'] })
+    if (!picked.canceled && picked.filePaths[0]) videoStudio.setProjectFolder(picked.filePaths[0])
+    return videoStudio.read()
+  })
+  handle('video-studio:choose-ytdlp', async () => {
+    const picked = await dialog.showOpenDialog({ title: 'Choose owner-installed yt-dlp', properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'yt-dlp', extensions: ['exe'] }] : [] })
+    if (!picked.canceled && picked.filePaths[0]) videoStudio.setYtDlp(picked.filePaths[0])
+    return videoStudio.read()
+  })
+  handle('video-studio:save-secret', (_event, kind: 'mcp' | 'pixabay', value: string) => videoStudio.saveSecret(kind, value))
+  handle('video-studio:clear-secret', (_event, kind: 'mcp' | 'pixabay') => videoStudio.clearSecret(kind))
+  handle('video-studio:test', () => videoStudio.testKdenlive())
+  handle('video-studio:open', () => videoStudio.openKdenlive())
+  handle('video-studio:search', (event, query: string, kind: CreativeKind) => videoStudio.search(track(event.sender), query, kind))
+  handle('video-studio:preview', (event, token: string) => videoStudio.preview(track(event.sender), token))
+  handle('video-studio:prepare-asset', (event, token: string) => videoStudio.prepareAsset(track(event.sender), token))
+  handle('video-studio:decide-asset', (event, token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean) => videoStudio.decideAsset(track(event.sender), token, decision, importIntoKdenlive))
+  handle('video-studio:preflight-url', (event, url: string) => videoStudio.preflightUrl(track(event.sender), url))
+  handle('video-studio:acquire-url', (event, token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean) => videoStudio.acquireUrl(track(event.sender), token, decision, !!importIntoKdenlive))
+  handle('video-studio:prepare-kdenlive-action', (event, action: 'undo' | 'save-version') => videoStudio.prepareKdenliveAction(track(event.sender), action))
+  handle('video-studio:decide-kdenlive-action', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideKdenliveAction(track(event.sender), token, decision))
+  handle('video-studio:stop', event => videoStudio.stop(track(event.sender)))
+  handle('video-studio:prepare-design-kit', (event, format: DesignKitFormat) => videoStudio.prepareDesignKit(track(event.sender), format))
+  handle('video-studio:decide-design-kit', (event, token: string, decision: 'allow' | 'deny', importTitleIntoKdenlive: boolean) => videoStudio.decideDesignKit(track(event.sender), token, decision, !!importTitleIntoKdenlive))
   handle('market:sources', (_event, engine?: unknown) => market(engine).sources())
   handle('market:browse', (event, repo: string, engine?: unknown) => marketAnswer(() => market(engine).browse(repo, track(event.sender))))
   handle('market:inspect', (event, repo: string, plugin: string, engine?: unknown) => marketAnswer(() => market(engine).inspect(track(event.sender), repo, plugin)))
@@ -2649,6 +2684,7 @@ if (!gotLock) {
         { label: 'Today', accelerator: 'CmdOrCtrl+3', click: () => sendToWindow('menu:view:today') },
         { label: 'Projects', accelerator: 'CmdOrCtrl+4', click: () => sendToWindow('menu:view:projects') },
         { label: 'Vault', accelerator: 'CmdOrCtrl+5', click: () => sendToWindow('menu:view:vault') },
+        { label: 'Video Studio', accelerator: 'CmdOrCtrl+6', click: () => sendToWindow('menu:view:video') },
         { label: 'Brain', accelerator: 'CmdOrCtrl+7', click: () => sendToWindow('menu:view:brain') },
       ],
     },

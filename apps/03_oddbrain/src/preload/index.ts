@@ -10,6 +10,7 @@ import type { ProcessingLedgerBridge } from '../shared/lib/processingLedger'
 import type { AttachmentCenterBridge } from '../shared/lib/attachmentCenter'
 import type { FolderAccessBridge } from '../shared/lib/folderAccess'
 import type { MediaBridge } from '../shared/lib/mediaBridge'
+import type { VideoStudioBridge } from '../shared/lib/videoStudio'
 import type { EngineSourceFile } from '../shared/lib/media'
 import type { MarketplaceBridge } from '../shared/lib/marketplace'
 import type { AutomationBridge, AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
@@ -227,6 +228,28 @@ const mediaApi: MediaBridge = {
   releaseSource: handle => ipcRenderer.invoke('media:release-source', handle),
   dictate: () => ipcRenderer.invoke('media:dictate'), cancel: () => ipcRenderer.invoke('media:cancel'),
 }
+const videoStudioApi: VideoStudioBridge = {
+  read: () => ipcRenderer.invoke('video-studio:read'),
+  update: patch => ipcRenderer.invoke('video-studio:update', patch),
+  chooseKdenlive: () => ipcRenderer.invoke('video-studio:choose-kdenlive'),
+  chooseProjectFolder: () => ipcRenderer.invoke('video-studio:choose-project'),
+  chooseYtDlp: () => ipcRenderer.invoke('video-studio:choose-ytdlp'),
+  saveSecret: (kind, value) => ipcRenderer.invoke('video-studio:save-secret', kind, value),
+  clearSecret: kind => ipcRenderer.invoke('video-studio:clear-secret', kind),
+  testKdenlive: () => ipcRenderer.invoke('video-studio:test'),
+  openKdenlive: () => ipcRenderer.invoke('video-studio:open'),
+  search: (query, kind) => ipcRenderer.invoke('video-studio:search', query, kind),
+  preview: token => ipcRenderer.invoke('video-studio:preview', token),
+  prepareAsset: token => ipcRenderer.invoke('video-studio:prepare-asset', token),
+  decideAsset: (token, decision, importIntoKdenlive) => ipcRenderer.invoke('video-studio:decide-asset', token, decision, importIntoKdenlive),
+  preflightUrl: url => ipcRenderer.invoke('video-studio:preflight-url', url),
+  acquireUrl: (token, decision, importIntoKdenlive) => ipcRenderer.invoke('video-studio:acquire-url', token, decision, importIntoKdenlive),
+  prepareKdenliveAction: action => ipcRenderer.invoke('video-studio:prepare-kdenlive-action', action),
+  decideKdenliveAction: (token, decision) => ipcRenderer.invoke('video-studio:decide-kdenlive-action', token, decision),
+  stop: () => ipcRenderer.invoke('video-studio:stop'),
+  prepareDesignKit: format => ipcRenderer.invoke('video-studio:prepare-design-kit', format),
+  decideDesignKit: (token, decision, importTitleIntoKdenlive) => ipcRenderer.invoke('video-studio:decide-design-kit', token, decision, importTitleIntoKdenlive),
+}
 const marketplaceApi: MarketplaceBridge = {
   inspect: (repo, plugin, engine) => ipcRenderer.invoke('market:inspect', repo, plugin, engine),
   sources: engine => ipcRenderer.invoke('market:sources', engine), browse: (repo, engine) => ipcRenderer.invoke('market:browse', repo, engine),
@@ -261,7 +284,7 @@ const api = {
     importRecovery: chatId => ipcRenderer.invoke('working-notes:import', chatId),
   } satisfies WorkingNotesBridge,
   transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), image: (id: string, imageId: string) => ipcRenderer.invoke('transcripts:image', id, imageId), attachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:attachment', id, attachmentId), saveAttachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:save-attachment', id, attachmentId), recover: (chatIds: string[], knownTranscriptIds: string[], before?: string) => ipcRenderer.invoke('transcripts:recover', chatIds, knownTranscriptIds, before), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
-  media: mediaApi, marketplace: marketplaceApi,
+  media: mediaApi, videoStudio: videoStudioApi, marketplace: marketplaceApi,
   automation: automationApi,
   memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,
   processing: { read: () => ipcRenderer.invoke('processing:read'), resume: id => ipcRenderer.invoke('processing:resume', id), setLimits: limits => ipcRenderer.invoke('processing:set-limits', limits) } satisfies ProcessingLedgerBridge,

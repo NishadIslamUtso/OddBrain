@@ -1,4 +1,4 @@
-import { Brain, Database, FolderOpen, MessageSquare, Shapes, Sun } from 'lucide-react'
+import { Brain, Database, Film, FolderOpen, MessageSquare, Shapes, Sun } from 'lucide-react'
 
 /**
  * The app's own sections, at the top of the sidebar.
@@ -10,10 +10,11 @@ import { Brain, Database, FolderOpen, MessageSquare, Shapes, Sun } from 'lucide-
  * state/viewRoute.ts, so old links land where the board went.
  */
 
-export type View = 'chat' | 'artifacts' | 'today' | 'projects' | 'vault' | 'brain'
+export type View = 'chat' | 'video' | 'artifacts' | 'today' | 'projects' | 'vault' | 'brain'
 
 export const NAV_ITEMS: Array<{ id: View; label: string; Icon: typeof MessageSquare }> = [
   { id: 'chat', label: 'Chat', Icon: MessageSquare },
+  { id: 'video', label: 'Video Studio', Icon: Film },
   { id: 'artifacts', label: 'Artifacts', Icon: Shapes },
   { id: 'today', label: 'Today', Icon: Sun },
   { id: 'projects', label: 'Projects', Icon: FolderOpen },

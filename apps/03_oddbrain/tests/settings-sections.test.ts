@@ -46,11 +46,11 @@ const open = async (title: string): Promise<void> => {
   if (area.sections.length > 1) await click(host.querySelector(`.ob-settings-subsections [aria-label="Section: ${title}"]`) as HTMLButtonElement)
 }
 
-test('eight task groups expose all seventeen retained pages without nested buttons', async () => {
+test('eight task groups expose all eighteen retained pages without nested buttons', async () => {
   expect(destinations()).toHaveLength(8)
   expect(destinations().map(button => button.querySelector('.ob-settings-area-title')?.textContent)).toEqual(SETTINGS_AREAS.map(area => area.title))
   const ids = SETTINGS_AREAS.flatMap(area => area.sections)
-  expect(new Set(ids).size).toBe(17)
+  expect(new Set(ids).size).toBe(18)
   expect([...ids].sort()).toEqual(SECTIONS.filter(s => s.id !== 'maps').map(s => s.id).sort())
   expect(host.querySelector('[aria-label="Section: Capture sources"]')).toBeNull()
   for (const { title } of SECTIONS.filter(s => s.id !== 'maps')) {
