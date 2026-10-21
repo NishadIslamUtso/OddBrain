@@ -29,13 +29,13 @@ Outside video, the app is in better shape than the chat history suggested: it co
 
 ### Tests removed
 
-- Deleted `apps/03_oddbrain/tests/` (237 files, about 2.0 MB), `vitest.config.ts`, 13 `check-ui-*.cjs` scripts, `settings-navigation.cjs`, `check-ci-tests.cjs`, `ci-browser.cjs`, `check-electron-automation.cjs`, `check-media-runtime.cjs`, and `extension/scripts/check-browser.cjs`.
+- Deleted `apps/03_oddbrain/tests/` (245 files: 235 `*.test.*` files plus shims and fixtures, about 2 MB), `vitest.config.ts`, 12 `check-ui-*.cjs` scripts, `settings-navigation.cjs`, `check-ci-tests.cjs`, `ci-browser.cjs`, `check-electron-automation.cjs`, `check-media-runtime.cjs`, and `extension/scripts/check-browser.cjs`.
 - Removed `vitest`, `jsdom`, `fake-indexeddb` and `playwright-core` from `devDependencies`; regenerated the lockfile.
 - Removed the Vitest, Playwright, JUnit, browser-coverage and Electron-automation steps from `.github/workflows/checks.yml`. CI now runs typecheck, security policy, desktop/web builds, release inspection and native smoke. The extension browser step was removed with its harness.
 - Updated `README.md`, `RULES_FEATURES_AND_REASONS.md` and `FUTURE_PLAN.md` to say the suite was removed on 2026-10-21 and must be rebuilt. No old test total is presented as evidence.
 - Committed as `7c93c0f`. The old tests remain in Git history at `ba66c9d` (their last state before removal) if any of them are worth mining later.
 
-Net diff: **271 files changed, 8 insertions, 30,958 deletions**. Build still passes after removal.
+The test-removal commit changed **271 files: +8 / −30,958**. The build still passes after removal.
 
 ---
 
