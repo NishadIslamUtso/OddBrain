@@ -55,7 +55,11 @@ export default function useMediaAttachments(attachments: Attachment[], setAttach
         if (source.sourceHandle && source.sourceHandle.handle !== result.source?.handle) releaseHandle(source.sourceHandle.handle)
         if (result.source) sourceHandles.current.add(result.source.handle)
         if (result.segments?.length) {
-          setSources(old => old.map(s => s.id === source.id ? { ...s, failed: false, awaitingChoice: false, storage, sourceHandle: result.source, note: result.disclosure || 'Choose complete sections to attach.', segments: result.segments, selected: [] } : s))
+          const remaining = current.current.filter(file => !source.attachments.includes(file.id))
+          const evidence = attachmentsFromMedia(result, source.file.size).map(attachment => ({ ...attachment, originalSource: result.source, originalId: source.id, originalFile: source.file }))
+          if (remaining.length + evidence.length > 4) throw Error(`This source produces ${evidence.length} visual evidence attachment(s), but only ${4 - remaining.length} slot(s) remain. Nothing from it was silently dropped. Remove attachments, then retry.`)
+          replace([...remaining, ...evidence])
+          setSources(old => old.map(s => s.id === source.id ? { ...s, failed: false, awaitingChoice: false, storage, sourceHandle: result.source, attachments: evidence.map(attachment => attachment.id), note: result.disclosure || 'Choose complete sections to attach.', segments: result.segments, selected: [] } : s))
           return
         }
         added = attachmentsFromMedia(result, source.file.size); description = result.disclosure || ''
@@ -80,11 +84,12 @@ export default function useMediaAttachments(attachments: Attachment[], setAttach
     if (!chosen.length) { setSources(old => old.map(item => item.id === source.id ? { ...item, note: 'Choose at least one complete document section.' } : item)); return }
     const text = chosen.map(segment => `${segment.label}\n${segment.text}`).join('\n\n')
     if (text.length > MAX_EXTRACTED_TEXT) { setSources(old => old.map(item => item.id === source.id ? { ...item, note: `The selected complete sections total ${text.length.toLocaleString()} characters, above the ${MAX_EXTRACTED_TEXT.toLocaleString()}-character attachment limit. Choose fewer sections; nothing was shortened.` } : item)); return }
+    const evidence = current.current.filter(file => source.attachments.includes(file.id) && file.kind === 'image')
     const remaining = current.current.filter(file => !source.attachments.includes(file.id))
-    if (remaining.length >= 4) { setSources(old => old.map(item => item.id === source.id ? { ...item, note: 'Four attachment slots are already used. Remove one before attaching this selection.' } : item)); return }
+    if (remaining.length + evidence.length + 1 > 4) { setSources(old => old.map(item => item.id === source.id ? { ...item, note: 'The selected text and visual evidence need more attachment slots. Remove another attachment; nothing was silently dropped.' } : item)); return }
     const attachment: Attachment = { id: newId(), name: source.file.name, kind: 'text', mime: 'text/plain', size: source.file.size, text, extraction: `Owner selected ${chosen.map(segment => segment.label).join(', ')} from the complete local extraction. Unselected sections were omitted whole.`, originalId: source.id, originalFile: source.file, originalSource: source.sourceHandle }
-    replace([...remaining, attachment])
-    setSources(old => old.map(item => item.id === source.id ? { ...item, attachments: [attachment.id], note: `${chosen.length} complete section(s) attached. Other sections remain available and were not shortened.` } : item))
+    replace([...remaining, attachment, ...evidence])
+    setSources(old => old.map(item => item.id === source.id ? { ...item, attachments: [attachment.id, ...evidence.map(file => file.id)], note: `${chosen.length} complete section(s) and ${evidence.length} adaptive visual evidence frame(s) attached. Other text sections remain available and were not shortened.` } : item))
   }
   const addFiles = async (files: File[]): Promise<void> => {
     if (locked.current) { notice('Wait for the current import or cancel it before adding more files.'); return }

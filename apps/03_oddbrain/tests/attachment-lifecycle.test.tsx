@@ -44,6 +44,23 @@ test('a handled derived frame retains the exact original source name and MIME', 
   const files = await originalSourceFiles([{ id: 'frame', name: 'meeting-00:10.jpg', kind: 'image', mime: 'image/jpeg', size: 5, originalId: 'source-one', originalFile: original, originalSource: { handle: 'a'.repeat(36), sha256: 'b'.repeat(64), bytes: 5, storage: 'in-place', consequence: 'fixture' } }])
   expect(files[0]).toMatchObject({ name: 'meeting.mp4', mime: 'video/mp4' })
 })
+test('long video keeps adaptive frames while the owner chooses transcript sections', async () => {
+  const original = new File(['video'], 'long-meeting.mp4', { type: 'video/mp4' })
+  const source = { handle: 'e'.repeat(36), sha256: 'f'.repeat(64), bytes: original.size, storage: 'in-place', consequence: 'fixture' }
+  media.decodeFile.mockResolvedValue({ ok: true, name: original.name, disclosure: 'Complete audio timeline with two adaptive frames.', segments: [{ id: 'part-1', label: 'Transcript part 1', text: 'First complete transcript section.' }, { id: 'part-2', label: 'Transcript part 2', text: 'Second complete transcript section.' }], images: [{ name: 'long-meeting-00:10.jpg', mime: 'image/jpeg', data: 'ZnJhbWUx' }, { name: 'long-meeting-02:00.jpg', mime: 'image/jpeg', data: 'ZnJhbWUy' }], source })
+  await act(async () => { await controls.addFiles([original]) })
+  expect(media.decodeFile).not.toHaveBeenCalled()
+  await act(async () => { button('Use in place').click(); await new Promise(resolve => setTimeout(resolve, 0)) })
+  expect(attached.map(file => file.kind)).toEqual(['image', 'image'])
+  expect(attached.every(file => file.originalFile === original && file.originalSource?.handle === source.handle)).toBe(true)
+  const transcriptChoice = [...host.querySelectorAll('label')].find(label => label.textContent?.includes('Transcript part 1'))?.querySelector('input')
+  expect(transcriptChoice).toBeDefined()
+  await act(() => transcriptChoice!.click())
+  await act(() => button('Attach selected sections').click())
+  expect(attached.map(file => file.kind)).toEqual(['text', 'image', 'image'])
+  expect(attached[0].text).toContain('First complete transcript section.')
+  expect(host.textContent).toContain('1 complete section(s) and 2 adaptive visual evidence frame(s) attached')
+})
 test('saving voice/file preferences updates available explicit upload choices without reimporting', async () => {
   await act(async () => { await controls.addFiles([file()]) })
   media.read.mockResolvedValue({ ...DEFAULT_MEDIA, provider: 'gemini', model: 'newly-chosen' })
