@@ -123,7 +123,9 @@ jobs:
         run: npm run security:policy
       - name: Tests
         working-directory: apps/03_oddbrain
-        run: npx vitest run --maxWorkers=2 --reporter=default --reporter=github-actions --reporter=junit --outputFile=junit-windows.xml
+        # The hosted Windows runner has shown broad I/O stalls with two isolated workers.
+        # One worker is slower but keeps durability and extension tests deterministic.
+        run: npx vitest run --maxWorkers=1 --reporter=default --reporter=github-actions --reporter=junit --outputFile=junit-windows.xml
       - name: Enforce browser coverage and explicit skip policy
         working-directory: apps/03_oddbrain
         run: node scripts/check-ci-tests.cjs junit-windows.xml
