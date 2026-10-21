@@ -137,6 +137,9 @@ jobs:
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build
+      - name: Browser preview build
+        working-directory: apps/03_oddbrain
+        run: npm run build:web
       - name: Inspect Windows release build output
         working-directory: apps/03_oddbrain
         run: npm run security:release
