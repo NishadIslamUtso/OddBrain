@@ -74,9 +74,9 @@ test('Kdenlive verification initializes loopback MCP and reports its real tools'
 test('Creative Library returns live provenance without downloading catalogue items', async () => {
   const root = folder(), requested: string[] = []
   const fetchImpl = vi.fn(async (input: string | URL | Request) => {
-    const url = String(input); requested.push(url)
-    if (url.includes('api.openverse.org')) return new Response(JSON.stringify({ results: [{ id: 'ov-1', title: 'Calm sky', creator: 'A Creator', license: 'by', license_version: '4.0', license_url: 'https://creativecommons.org/licenses/by/4.0/', foreign_landing_url: 'https://source.example/work', thumbnail: 'https://media.example/thumb.jpg', url: 'https://media.example/full.jpg', width: 1000, height: 600 }] }), { status: 200 })
-    if (url.includes('commons.wikimedia.org')) return new Response(JSON.stringify({ query: { pages: { one: { pageid: 12, title: 'File:Cloud.jpg', imageinfo: [{ url: 'https://upload.wikimedia.org/cloud.jpg', thumburl: 'https://upload.wikimedia.org/thumb.jpg', width: 900, height: 500, extmetadata: { Artist: { value: 'Commons Creator' }, LicenseShortName: { value: 'CC BY-SA 4.0' } } }] } } } }), { status: 200 })
+    const url = String(input), hostname = new URL(url).hostname; requested.push(url)
+    if (hostname === 'api.openverse.org') return new Response(JSON.stringify({ results: [{ id: 'ov-1', title: 'Calm sky', creator: 'A Creator', license: 'by', license_version: '4.0', license_url: 'https://creativecommons.org/licenses/by/4.0/', foreign_landing_url: 'https://source.example/work', thumbnail: 'https://media.example/thumb.jpg', url: 'https://media.example/full.jpg', width: 1000, height: 600 }] }), { status: 200 })
+    if (hostname === 'commons.wikimedia.org') return new Response(JSON.stringify({ query: { pages: { one: { pageid: 12, title: 'File:Cloud.jpg', imageinfo: [{ url: 'https://upload.wikimedia.org/cloud.jpg', thumburl: 'https://upload.wikimedia.org/thumb.jpg', width: 900, height: 500, extmetadata: { Artist: { value: 'Commons Creator' }, LicenseShortName: { value: 'CC BY-SA 4.0' } } }] } } } }), { status: 200 })
     throw Error('Unexpected network request')
   }) as unknown as typeof fetch
   const service = createVideoStudioService({ file: join(root, 'video.json'), keys: () => keys(), fetchImpl })

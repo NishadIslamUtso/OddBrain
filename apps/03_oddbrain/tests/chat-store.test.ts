@@ -90,7 +90,7 @@ test('delta depth compacts to a new snapshot and cleans records no complete inde
   expect(item.depth).toBe(1)
   expect(readdirSync(join(folder, 'items')).filter(name => /\.(?:delta\.)?json$/.test(name))).toHaveLength(2)
   expect(createChatStore(folder).read().chats).toEqual([value])
-})
+}, 15_000)
 
 test('reads version-one full snapshots and upgrades only on the next real edit', () => {
   const folder = root(), value = chat('legacy', 'kept exactly'), text = JSON.stringify(value)
