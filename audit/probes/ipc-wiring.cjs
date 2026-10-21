@@ -4,7 +4,7 @@ const walk = d => fs.readdirSync(d, { withFileTypes: true }).flatMap(e => e.isDi
 const root = require('path').join(require('./paths.cjs').APP_ROOT, 'src')
 const preload = fs.readFileSync(root + '/preload/index.ts', 'utf8')
 const invoked = new Set([...preload.matchAll(/ipcRenderer\.invoke\(\s*['"`]([^'"`]+)['"`]/g)].map(m => m[1]))
-const listened = new Set([...preload.matchAll(/ipcRenderer\.on\(\s*['"`]([^'"`]+)['"`]/g)].map(m => m[1]))
+const listened = new Set([...preload.matchAll(/ipcRenderer\.on\(\s*['"`]([^'"`]+)['"`]/g)].map(m => m[1]).concat([...preload.matchAll(/const channel = ['"`]([^'"`]+)['"`]/g)].map(m => m[1])))
 const mainFiles = walk(root + '/main').filter(f => /\.ts$/.test(f))
 const mainText = mainFiles.map(f => fs.readFileSync(f, 'utf8')).join('\n')
 const handled = new Set([...mainText.matchAll(/(?:\bhandle|ipcMain\.handle|ipcMain\.handleOnce)\(\s*['"`]([^'"`]+)['"`]/g)].map(m => m[1]))

@@ -1,6 +1,6 @@
 # Audit evidence (2026-10-21)
 
-This folder holds the **evidence behind `AUDIT_REPORT.md`**. It is not part of the app, is not wired into
+This folder holds the **evidence behind `AUDIT_REPORT.md` and `PONYTAIL_AUDIT.md`**. It is not part of the app, is not wired into
 `package.json` or CI, and is not the test suite (the tests were removed on purpose and will be rebuilt later).
 Delete the folder at any time; nothing in the app depends on it.
 
@@ -27,6 +27,20 @@ SHIM_FIXED_PIPE=1 audit/probes/run.sh probe-media   # same, but with the one-arg
 audit/probes/run.sh timing "$AUDIT_WORK/media/work/test300.mp4"   # reader speed per phase
 audit/probes/run.sh ipc-wiring              # every renderer->main channel has a handler?
 audit/probes/run.sh reach                   # source files not reachable from the real entry points
+
+# Added for PONYTAIL_AUDIT.md (measured):
+audit/probes/run.sh probe-evidence-size     # how many one-hour videos fit in video-evidence-v1.json
+audit/probes/run.sh probe-backup-stall      # how long the real backupVault freezes the event loop (AUDIT_BACKUP_MB, default 1024)
+audit/probes/run.sh probe-vault-search      # real searchVault time per query as the vault grows (AUDIT_VAULT_NOTES=76,3000,20000)
+audit/probes/probe-scene-speed.sh           # scene pass: every frame vs keyframes only (run make-media.sh first)
+
+# Added for PONYTAIL_AUDIT.md (counted by reading the code):
+audit/probes/run.sh static-unused-exports   # functions nothing calls; rewrites audit/dead-code.txt (needs commit ba66c9d in the clone)
+audit/probes/run.sh static-duplicates       # identical helper functions copied into several files
+audit/probes/run.sh static-empty-catches    # empty catch blocks
+audit/probes/run.sh static-ignored-errors   # catch blocks that never look at the error, grouped by what they wrap
+audit/probes/run.sh static-readability      # function lengths, comment share, long lines
+audit/probes/run.sh static-deps             # dependencies nothing references, and the leftover test-only tools
 ```
 
 Where to get the tools without installing anything system-wide (what I used):
@@ -52,6 +66,10 @@ serves the DASH copy of the test video, so YouTube-style separate audio/video st
 | `probe-media.cjs` | M01–M07 | The real reader on a real video (loudness, pauses, scene cuts, frames); link → yt-dlp → reader with and without ffmpeg on PATH; what the AI sees; question-driven frames/audio; notes; the durable evidence file |
 | `probe-direct.cjs` | S01, D01–D02 | Private/loopback addresses refused before any request; direct-link download, hash receipt and automatic reading |
 | `timing.cjs` | — | Reader time per phase |
+| `probe-evidence-size.cjs` | B-series in PONYTAIL_AUDIT | The evidence file refuses to save after about 45 one-hour videos |
+| `probe-backup-stall.cjs`, `probe-vault-search.cjs` | same | Backup and vault search block the main thread for as long as they run |
+| `probe-scene-speed.sh` | same | Scene pass time, every frame versus keyframes only |
+| `static-*.cjs` | same | Counts: dead code, copies, swallowed errors, long functions, unused dependencies |
 | `ipc-wiring.cjs`, `reach.cjs` | — | Static wiring and reachability |
 
 Verdict words: **PASS** works as promised, **DEFECT** broken or missing against the plan, **WARN** works

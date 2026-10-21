@@ -12,4 +12,7 @@ Promise.all([
   esbuild.build({ ...common, entryPoints: [root + '/main/video/nativeProtocol.ts'], outfile: path.join(OUT, 'native-protocol.cjs') }),
   esbuild.build({ ...common, entryPoints: [root + '/shared/lib/videoEditingSkill.ts'], outfile: path.join(OUT, 'skill.cjs') }),
   esbuild.build({ ...common, entryPoints: [root + '/main/media/process.ts'], outfile: path.join(OUT, 'process.cjs') }),
+  esbuild.build({ ...common, entryPoints: [root + '/main/vault/backup.ts'], outfile: path.join(OUT, 'backup.cjs') }),
+  esbuild.build({ ...common, entryPoints: [root + '/main/vault/recall.ts'], outfile: path.join(OUT, 'recall.cjs') }),
+  esbuild.build({ ...common, entryPoints: [root + '/main/vault/files.ts'], outfile: path.join(OUT, 'vfiles.cjs') }),
 ]).then(() => console.log('bundled OK')).catch(e => { console.error('BUNDLE FAILED', e.message); process.exit(1) })

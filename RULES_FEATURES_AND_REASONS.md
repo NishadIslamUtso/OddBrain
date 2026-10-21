@@ -2,7 +2,7 @@
 
 Updated: 2026-10-21 (Asia/Dhaka)
 
-This is the current product authority. Code and dated test evidence outrank an old claim. `CONTEXT.md` is an archive pointer, not a second rulebook.
+This is the current product authority. Code and dated evidence outrank an old claim. The automated tests were removed on 2026-10-21 and are being rebuilt, so `audit/` holds the only behavioural evidence until they return. `CONTEXT.md` is an archive pointer, not a second rulebook.
 
 ## Product boundary
 
@@ -139,6 +139,6 @@ Owner-data writes use immutable revisions or atomic replacement with a complete 
 
 ## Release and verification
 
-Pull requests run Node 24 typechecking, security policy checks, tests, builds, browser coverage policy, and native smoke checks on Linux and Windows. Windows installer CI builds and launches the packaged executable, checks Electron fuses and final contents, records hashes for the executable, app archive, and smoke screenshot, produces an SBOM, and attests provenance. Public tagged releases additionally require valid Authenticode signatures.
+Pull requests run Node 24 typechecking, security policy checks, builds, release-output inspection, and a native launch smoke on Linux and Windows. The automated tests and the browser coverage policy were removed on 2026-10-21 and are being rebuilt. Until they return, a green check shows that the app compiles, builds and opens; it does not test behaviour. Windows installer CI builds and launches the packaged executable, checks Electron fuses and final contents, records hashes for the executable, app archive, and smoke screenshot, produces an SBOM, and attests provenance. Public tagged releases additionally require valid Authenticode signatures.
 
 A green check proves only its assertions. Real Windows 11 acceptance remains the final product evidence.

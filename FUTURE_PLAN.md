@@ -6,7 +6,7 @@ Nothing here is a current capability or standing permission. Each item needs a r
 
 ## Next validation
 
-1. Run the full Node 24 test suite, typecheck, desktop/web builds, security checks, and native smoke.
+1. Rebuild the test suite, starting from `audit/probes` (they run the real ffmpeg and yt-dlp and a stand-in editor server), then run typecheck, desktop/web builds, security checks, and native smoke.
 2. Review Windows CI evidence and test the packaged build on the owner’s Windows 11 machine at 125% display scaling.
 3. Exercise real signed-in Claude Code and agy flows, Stop during tools, uncertain termination, app restart recovery, and provider context overflow.
 4. Exercise multi-gigabyte use-in-place/private-copy sources, PDF page ranges, exact streamed turn retention, large backup verification, separate restore folders, and manual transcript restore with disposable owner data copies.
