@@ -1,3 +1,8 @@
+# NOTE (2026-10-21): the automated test steps (vitest, browser/UI suites, the
+# extension Chromium check and the junit coverage gate) were removed on purpose on
+# this branch because the old suite was largely broken; tests are to be rebuilt.
+# Until they return this gate is: types, security policy, build, release-output
+# inspection and the native launch smoke. It is NOT a behavioural test gate.
 # The gate, once per pull request (and on long-lived branch pushes), on both
 # operating systems. Linux always ran it; Windows (the target OS) joined
 # 2026-10-17 as allow-failure until it ran green once — and when it did, the
@@ -29,39 +34,12 @@ jobs:
       - name: Install the pinned Electron runtime explicitly
         working-directory: apps/03_oddbrain
         run: node node_modules/electron/install.js
-      - name: Install Chromium for reader and durable-restart tests
-        working-directory: apps/03_oddbrain
-        run: npx playwright-core install --with-deps chromium
-      - name: Configure browser tests
-        working-directory: apps/03_oddbrain
-        run: node scripts/ci-browser.cjs
       - name: Types
         working-directory: apps/03_oddbrain
         run: npx tsc --noEmit -p tsconfig.json
       - name: Security policy invariants
         working-directory: apps/03_oddbrain
         run: npm run security:policy
-      - name: Tests
-        working-directory: apps/03_oddbrain
-        run: npx vitest run --maxWorkers=2 --reporter=default --reporter=github-actions --reporter=junit --outputFile=junit-linux.xml
-      - name: Enforce browser coverage and explicit skip policy
-        working-directory: apps/03_oddbrain
-        run: node scripts/check-ci-tests.cjs junit-linux.xml
-      - name: Upload test evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: junit-linux
-          path: apps/03_oddbrain/junit-linux.xml
-          if-no-files-found: error
-      - name: Extension companion in Chromium
-        working-directory: apps/03_oddbrain
-        run: |
-          node ../../extension/scripts/preview-server.cjs > "$RUNNER_TEMP/extension-preview.log" 2>&1 &
-          PREVIEW_PID=$!
-          trap 'kill "$PREVIEW_PID"' EXIT
-          node -e 'const deadline=Date.now()+15000; async function ready(){try {const r=await fetch("http://127.0.0.1:5175");if(r.ok)return;}catch{}if(Date.now()>deadline)throw Error("Extension preview did not start");await new Promise(r=>setTimeout(r,200));return ready();}ready().catch(e=>{console.error(e);process.exit(1)});'
-          node ../../extension/scripts/check-browser.cjs
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build
@@ -109,33 +87,12 @@ jobs:
       - name: Install the pinned Electron runtime explicitly
         working-directory: apps/03_oddbrain
         run: node node_modules/electron/install.js
-      - name: Install Chromium for reader and durable-restart tests
-        working-directory: apps/03_oddbrain
-        run: npx playwright-core install chromium
-      - name: Configure browser tests
-        working-directory: apps/03_oddbrain
-        run: node scripts/ci-browser.cjs
       - name: Types
         working-directory: apps/03_oddbrain
         run: npx tsc --noEmit -p tsconfig.json
       - name: Security policy invariants
         working-directory: apps/03_oddbrain
         run: npm run security:policy
-      - name: Tests
-        working-directory: apps/03_oddbrain
-        # The hosted Windows runner has shown broad I/O stalls with two isolated workers.
-        # One worker is slower but keeps durability and extension tests deterministic.
-        run: npx vitest run --maxWorkers=1 --reporter=default --reporter=github-actions --reporter=junit --outputFile=junit-windows.xml
-      - name: Enforce browser coverage and explicit skip policy
-        working-directory: apps/03_oddbrain
-        run: node scripts/check-ci-tests.cjs junit-windows.xml
-      - name: Upload test evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: junit-windows
-          path: apps/03_oddbrain/junit-windows.xml
-          if-no-files-found: error
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build

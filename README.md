@@ -175,14 +175,13 @@ Run from `apps/03_oddbrain/`:
 
 ```sh
 npm run typecheck
-npm test -- --maxWorkers=2
 npm run build
 npm run build:web
 npm run smoke       # requires a working native Electron environment
 npm run dist:win    # Windows packaging; CI can produce the installer artifact
 ```
 
-Browser tests need an installed Chromium and `ODDBRAIN_BROWSER_OPTIONS` pointing to its Playwright launch-options JSON. UI suites also need their preview servers; see the scripts and [verification scope](CONTEXT.md#verification-scope). Report browser/platform skips explicitly.
+**Tests were removed on 2026-10-21** (this branch only): the old vitest suite, the browser/UI check scripts and the CI steps that ran them were deleted because much of the suite was broken. Nothing in this repository currently proves behaviour automatically; type-checking, the build, the security-policy script and the native `--smoke` launch are the only automated gates. Tests are to be rebuilt. The old suite is still in Git history (for example commit `ba66c9d`) and on the PR #12 branch.
 
 Current source baseline, historical test results, independently verified faults and other-branch audit evidence are recorded in [CONTEXT.md](CONTEXT.md#independent-audit-of-other-agents-claims). Passing automated checks does not establish real-account or target-laptop acceptance.
 
