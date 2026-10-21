@@ -37,6 +37,8 @@ Outside video, the app is in better shape than the chat history suggested: it co
 
 The test-removal commit changed **271 files: +8 / −30,958**. The build still passes after removal.
 
+**What was actually lost, measured from the branch (not assumed):** 235 test files, 2,751 assertions, 148 `vi.fn` fakes and only 29 module mocks. That is not a mock swamp; most tests exercised real code with injected transports. The problem was what they asserted. In `tests/video-studio.test.ts` the frame-selection test checked three things — length is 3, the list is sorted, and the two scene points are present — and never checked the third point's timestamp. That is how the biased 6/12/18-second selection passed, while CI ran green on both Linux and Windows. The right lesson is "assert values, not shapes", not "tests are worthless".
+
 ---
 
 ## 3. Health check (what actually ran)
@@ -72,7 +74,7 @@ This proves the renderer is not blank or crashing. It does **not** prove the Ele
 - 369 TypeScript/TSX files, **50,207 lines**. The entire video feature is about **1,970 lines (4 %)** across `src/main/video`, `src/main/media`, `src/shared/lib/video*` and two renderer components — this is a contained module, not a rewrite of the app.
 - 17 files over 500 lines; `src/main/index.ts` is 2,928 lines; `src/main/video/service.ts` is 806.
 - 360 lines longer than 400 characters (mostly single-line JSX); `VideoStudioView.tsx` is 64 lines with several 10k-character JSX lines.
-- 50 explicit `any` uses, 19 empty `catch` blocks (mostly cleanup), 252 fire-and-forget `void` calls in the renderer, 262 main-process handlers and 220 preload invokes.
+- 48 `any` uses, 19 empty `catch` blocks (mostly cleanup), 607 `void`-discarded promises in the renderer, 262 main-process handlers and 263 preload invokes (counted with `grep -rnE ":\s*any\b|\bas any\b|<any>"`, `grep -rn "void "`, and `invoke('`).
 - This is a maintainability risk, not by itself a functional failure.
 
 ---
@@ -176,9 +178,27 @@ Fix: if yt-dlp is configured, accept any credential-free HTTPS URL and let `--si
 - `recordEvidence` deduplicates by SHA-256 + source kind, not by owner; two windows share maps. Fine for one owner, but state it.
 - Design-kit cleanup removes the whole new folder on failure (`service.ts:578`). The name contains a random UUID, so collision is very unlikely, but creating the leaf with a non-recursive mkdir and tracking ownership would make the delete strictly safe.
 - The main process has 2,928 lines and the video view is nearly unreadable one-line JSX. Split `main/index.ts` into handler modules and format `VideoStudioView.tsx`. This is not cosmetic: it is why integration gaps were easy to miss.
-- There is now no automated regression safety net. That is intentional for this reset, but the next change should add a small honest suite, not 1,650 mocks.
+- There is now no automated regression safety net. That is intentional for this reset, but the next change should add a small suite that asserts values, not another 235-file shape check.
 
 ---
+
+## 5b. Efficiency review (ponytail ladder)
+
+The ladder: does it need to exist → is it already here → stdlib → platform → installed dependency → one line → minimum that works. Validation, error handling, security and accessibility are never cut. Applied to this codebase, in order of real payoff:
+
+| Rung | Finding | Verdict |
+|---|---|---|
+| Reuse | `src/main/engine/downloadStream.ts:downloadToFile()` already streams to disk with a size cap, SHA-256 and progress. `src/main/video/service.ts:346` re-implements the same thing, lacks progress, and `receiptForSource` (`:518`) re-reads the finished file to hash it **again** because `download()`'s SHA is discarded. | Best win. One streamer, one hash, progress for free. Merge the free-space hook and no-overwrite rename into the shared helper; do not drop either. |
+| YAGNI | `skills:deploy` handler always returns "no" and nothing invokes it. `save-version` is threaded through shared types, preload and main, with no caller and no native tool. | Delete both, or finish versions. |
+| YAGNI | 77 SVG scenes (1.2 MB raw) are inlined into the entry bundle by `import.meta.glob(..., { eager: true, query: '?raw' })`. Entry chunk is 1,908.54 kB (345.13 kB gzip). | Electron loads this from disk once; not worth an async API ripple. Only revisit if the smoke log's window-ready number gets worse. |
+| Minimum | Two workflow jobs are near-identical 60-line copies. | One `strategy: matrix` over `[ubuntu-24.04, windows-latest]` with conditional steps. Fewer places to drift. |
+| Measure first | 512 synchronous `fs` calls in `src/main` (`existsSync` 132, `statSync` 126, `mkdirSync` 81, `readdirSync` 67, `writeFileSync` 65, `readFileSync` 41) run on the same thread that pumps IPC and the window. | Do not bulk-convert. Log timing for startup, vault open and Brain open; convert what actually stalls. Any single large `readFileSync` is a frozen window, not a slow call. |
+| Measure first | CI prints "first window ready in N ms" and asserts nothing. There is no first-token or IPC latency number. | Record 3 numbers in the smoke log. That is the whole perf dashboard needed here. |
+| Stop | 1.9 MB entry chunk, `manualChunks`, code-splitting beyond the existing six lazy views. | Desktop app; the warning is cosmetic. Spending a day here buys nothing a user can feel. |
+
+Two corrections to earlier notes, after reading the service: `normalizeMcpUrl` does reset a non-loopback value to the loopback default, but `update()` compares the normalized result with the input and **throws**, so a LAN URL cannot be silently saved (`service.ts:175`). And `classifyVideoUrl` accepts an unknown host, but `preflightUrl` refuses anything that is not `direct-media`/YouTube/TikTok/Instagram with a clear message, so the refusal happens one call later than ideal, not never.
+
+The cheapest new scope with the widest payoff is a **doctor page**: one function that checks FFmpeg, ffprobe, yt-dlp, Kdenlive, the MCP port, Ollama, the project folder, free space and the OCR adapter, and prints a copyable fix for each failure. No dependency, no new architecture, and it removes the most common owner-side dead end.
 
 ## 6. What is genuinely good
 
@@ -279,7 +299,7 @@ The plan below accepts the repo’s current architecture (OddBrain = brain + lib
 
 ### Phase D — Proof (2–3 days)
 
-15. **Rebuild a small suite.** Pure functions (`adaptiveFramePoints`, `classifyVideoUrl`, plan normalization), a fixture MCP server for protocol shape, IPC contract checks, and the jsdom UI smoke used in this audit. No 1,650 mocks. Add a Windows acceptance checklist with exact evidence to record.
+15. **Rebuild a small suite.** Pure functions with exact expected values (`adaptiveFramePoints` positions at 15/30/45 s, `classifyVideoUrl`, plan normalization), a fixture MCP server for protocol shape, IPC contract checks, and the jsdom UI smoke used in this audit. Roughly 10 files, not 235. Add a Windows acceptance checklist with exact evidence to record.
 
 16. **Do not call it complete until:** a real Windows 11 machine opens a real project, the AI reads state, proposes a batch, the owner approves, the batch applies as one Undo step, a 10 s preview is watched, and the final export verifies. If the fork is not installed, prove the draft-export path end to end instead.
 
@@ -290,7 +310,7 @@ The plan below accepts the repo’s current architecture (OddBrain = brain + lib
 - Do not build another timeline editor or a second render engine.
 - Do not parse or rewrite an open `.kdenlive` file behind Kdenlive’s back.
 - Do not make the GPL fork a hard dependency for basic chat, video reading, library search or draft export.
-- Do not re-add the 1,650 mock tests. Add a small suite that tests the real contracts.
+- Do not re-add 235 broad assertion files. Add a small suite that asserts exact values and real contracts.
 - Do not promise CapCut/Canva’s catalogue. Use licensed provider APIs and say what is missing.
 - Do not let the AI download or Apply directly. Keep the one-use owner review.
 - Do not “fix” the missing state by asking the model to guess FPS or clip IDs. Read it from the server.
