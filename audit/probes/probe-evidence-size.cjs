@@ -9,8 +9,12 @@ const { world } = require('./harness.cjs')
   for (const [label, wordCount, sceneCount] of [['1 h talk, System.Speech-style text (about 9,000 words), 400 scene cuts', 9000, 400]]) {
     let n = 0, firstFailure = ''
     for (; n < 300; n++) {
-      const text = `Video coverage: the complete 01:00:00 duration.\n\n[00:00:00–00:10:00] Speaker unassigned\n${mk(n, wordCount)}`
-      const result = { ok: true, name: `talk-${n}.mp4`, text, source: { sha256: String(n).padStart(64, 'a') }, time: { total: 3600 }, sceneMap: Array.from({ length: sceneCount }, (_, i) => ({ at: i * 9, score: 0.31234567 })), visualEvidence: [], images: [], disclosure: 'x' }
+      // Reader output as of 2026-10-22: one transcript section per minute, textComplete true. The 2026-10-21 reader gave one block.
+      const clock = sec => `${String(Math.floor(sec / 3600)).padStart(2, '0')}:${String(Math.floor(sec % 3600 / 60)).padStart(2, '0')}:${String(Math.floor(sec % 60)).padStart(2, '0')}`
+      const sections = Math.ceil(3600 / 60), per = Math.round(wordCount / sections)
+      const segments = Array.from({ length: sections }, (_, i) => ({ id: `transcript-${String(i + 1).padStart(4, '0')}`, label: `${clock(i * 60)}–${clock((i + 1) * 60)} · speaker unassigned`, text: mk(n + i, per) }))
+      const text = `Video coverage: the complete 01:00:00 duration.\n\n` + segments.map(x => `[${x.label}]\n${x.text}`).join('\n\n')
+      const result = { ok: true, name: `talk-${n}.mp4`, text, segments: process.env.AUDIT_OLD_READER ? undefined : segments, textComplete: true, source: { sha256: String(n).padStart(64, 'a') }, time: { read: 3600, total: 3600, unit: 'seconds' }, sceneMap: Array.from({ length: sceneCount }, (_, i) => ({ at: i * 9, score: 0.31234567 })), visualEvidence: [], images: [], disclosure: 'x' }
       try { await w.svc.recordLocalEvidence(1, `/tmp/talk-${n}.mp4`, result) } catch (e) { firstFailure = e.message; break }
     }
     const size = fs.existsSync(file) ? fs.statSync(file).size : 0

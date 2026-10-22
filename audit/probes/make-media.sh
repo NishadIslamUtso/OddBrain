@@ -22,4 +22,6 @@ printf "file 's1.mp4'\nfile 's2.mp4'\nfile 's3.mp4'\nfile 's4.mp4'\nfile 's5.mp4
 mkdir -p dash && rm -f dash/*
 "$F" -hide_banner -loglevel error -y -i test75.mp4 -map 0:v -map 0:a -c copy -f dash -seg_duration 5 -use_template 1 -use_timeline 1 \
   -adaptation_sets "id=0,streams=v id=1,streams=a" dash/manifest.mpd
+# What the stand-in editor "renders": 2 s, 360x640, with audio, so preview inspection can run the real reader.
+"$F" -hide_banner -loglevel error -y -f lavfi -i "testsrc2=size=360x640:rate=30" -f lavfi -i "sine=frequency=500:sample_rate=48000" -t 2 -c:v libx264 -preset veryfast -pix_fmt yuv420p -c:a aac -shortest render-sample.mp4
 echo "media ready in $OUT"

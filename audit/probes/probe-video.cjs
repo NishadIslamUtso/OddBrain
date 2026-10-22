@@ -29,15 +29,16 @@ async function groupA() {
   await safe('A03', 'can the AI see the IDs it needs', async () => {
     const w = await world(); await w.svc.testKdenlive(); const c = await aiClient(w.svc)
     const state = await c.call('oddbrain_kdenlive_state')
-    const text = json(state.data)
-    const project = state.data.project
-    const sees = { tracks: 'tracks' in project, clips: 'clips' in project, bin: 'bin' in project, trackTagV1: /\bV1\b/.test(text), binItemName: /interview\.mp4/.test(text), binId3: /"binId"|"bin"/.test(text) }
+    // 2026-10-22 build: IDs come from oddbrain_kdenlive_timeline. Older build: only counts existed.
+    const names = (await c.list()).body.result.tools.map(t => t.name)
+    const timeline = names.includes('oddbrain_kdenlive_timeline') ? await c.call('oddbrain_kdenlive_timeline', { include: ['tracks', 'bin'] }) : null
+    const view = timeline?.data?.snapshot || state.data.project, text = json(timeline?.data || state.data)
+    const sees = { tracks: Array.isArray(view.tracks), bin: Array.isArray(view.bin), trackTagV1: /\bV1\b/.test(text), binId3: (view.bin || []).some(b => b.id === '3') }
     const fakeState = w.fake.project()
     const needed = `The project the fake holds has ${fakeState.tracks.length} tracks (${fakeState.tracks.map(t => t.tag).join(',')}) and bin item "${fakeState.bin[0].name}" with binId "${fakeState.bin[0].id}".`
-    const blind = !sees.tracks && !sees.clips && !sees.bin && !sees.binItemName
-    record('A03', 'oddbrain_kdenlive_state exposes tracks / clips / bin IDs to the AI?', blind ? 'DEFECT' : 'PASS',
-      `keys returned in project: ${Object.keys(project).join(', ')}\ncounts only: ${json(project.counts)}\nAI can see -> ${json(sees)}\n${needed}\nOnly path to IDs for the AI: none (the Skill forbids calling native tools; the connector deploy step removes any server named "kdenlive").`)
-    // Also check the other AI tools don't leak the IDs:
+    const visible = sees.tracks && sees.bin && sees.trackTagV1 && sees.binId3
+    record('A03', 'can the AI read tracks / clips / bin IDs?', visible ? 'PASS' : 'DEFECT',
+      `timeline tool present: ${!!timeline}\nAI can see -> ${json(sees)}\n${needed}`)
     const sources = await c.call('oddbrain_video_sources')
     record('A03b', 'any other AI tool revealing binId/trackId/clipId?', /binId|clipId|trackId/.test(json(sources.data)) ? 'PASS' : 'INFO', `oddbrain_video_sources keys: ${json(Object.keys(sources.data))} (no timeline ids expected there)`)
     await w.fake.stop()
@@ -51,7 +52,7 @@ async function groupA() {
     const guessed = { ...base, commands: [{ type: 'insert', binId: '1', trackId: 'V1', position: 0, sourceIn: 0, media: 'video' }] }
     let r = await c.call('oddbrain_edit_plan_propose', { plan: guessed }); const accepted = r.data?.acceptedForReview
     const review1 = await w.svc.prepareEditPlan(1)
-    record('A04a', 'plan with a GUESSED binId (all the AI can do today)', review1.ok ? 'WARN' : 'DEFECT', `AI submission accepted for review: ${accepted}\npreflight: ok=${review1.ok} error="${review1.error || ''}"\nissues: ${json(review1.validation?.issues || [])}`)
+    record('A04a', 'a plan with a GUESSED binId is refused before the owner sees it', review1.ok ? 'WARN' : 'PASS', `AI submission accepted for review: ${accepted}\npreflight: ok=${review1.ok} error="${review1.error || ''}"\nissues: ${json(review1.validation?.issues || [])}`)
     // Same plan with the id only desktop_state reveals:
     const real = { ...base, commands: [{ type: 'insert', binId: w.fake.project().bin[0].id, trackId: 'V1', position: 0, sourceIn: 0, media: 'video' }] }
     await c.call('oddbrain_edit_plan_propose', { plan: real }); const review2 = await w.svc.prepareEditPlan(1)
@@ -173,7 +174,7 @@ async function groupA() {
     const types = ['insert','range_cut','title_create','audio_duck','clip_fade','reframe','effect_add','split','trim','move','remove_range','transcript_import']
     const mentioned = types.filter(t => new RegExp('\\b' + t + '\\b').test(KDENLIVE_EDITING_SKILL_BODY))
     const planSchema = propose.inputSchema.properties.plan
-    record('A15', 'schema/grammar the AI is given for the 31 batch command types', Object.keys(planSchema).length <= 1 && mentioned.length === 0 ? 'DEFECT' : 'PASS',
+    record('A15', 'schema/grammar the AI is given for the 31 batch command types', Object.keys(planSchema).length <= 1 && mentioned.length < 8 ? 'DEFECT' : 'PASS',
       `oddbrain_edit_plan_propose.inputSchema.plan = ${json(planSchema)}\ncommand types named anywhere in the installed Skill text: ${mentioned.length ? mentioned.join(', ') : 'none'} (checked: ${types.join(', ')})\nupstream desktop_batch publishes commands.items.oneOf = one JSON Schema per command type; OddBrain does not forward it.`)
     await w.fake.stop()
   })

@@ -41,7 +41,7 @@ const analyze = (media) => async (owner, p) => media.decodeFile(owner, p, { name
       const frames = (r.images || []).map(i => i.name)
       const scene = r.sceneMap
       // Healthy = the three measurement passes actually returned data for a video with 4 hard cuts, 5 silences, steady tones.
-      const healthy = (r.sceneMap || []).length >= 3 && /Measured RMS level/.test(r.text) && /Pause evidence below/.test(r.text)
+      const healthy = (r.sceneMap || []).length >= 3 && /Measured (one-second )?RMS/.test(r.text) && /Pause evidence below/.test(r.text)
       record(SHIM ? 'M01-fixed' : 'M01', `media reader on a real 75 s video, 5 scenes (real ffmpeg/ffprobe, stubbed speech)${SHIM ? '  [WITH file=- shim, i.e. what the 3-line fix would give]' : '  [code exactly as shipped]'}`, healthy ? 'PASS' : 'DEFECT',
         `wall time ${secs}s; result keys: ${Object.keys(r).join(', ')}\nframes returned: ${frames.length} -> ${frames.join(', ')}\nvisualEvidence: ${json((r.visualEvidence || []).map(v => ({ at: v.at, reason: v.reason, score: +Number(v.score).toFixed(2) })))}\nsceneMap(${(scene||[]).length} cuts): ${String(json(scene)).slice(0, 500)}\nrecognizer calls (what speech-to-text was asked to do): ${json(recog)}\ntext (first 900 chars):\n${String(r.text).slice(0, 900)}`)
       globalThis.M01 = r

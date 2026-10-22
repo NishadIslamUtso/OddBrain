@@ -21,8 +21,13 @@ async function world(opts = {}) {
   const projectFolder = path.join(root, 'project'); fs.mkdirSync(projectFolder, { recursive: true })
   const kdenlive = path.join(root, 'kdenlive')
   fs.writeFileSync(kdenlive, '#!/bin/sh\necho "kdenlive 26.08.0 (fake binary for audit)"\n', { mode: 0o755 })
-  const fake = opts.noFake ? null : await startFake({ token: opts.token })
+  // The 2026-10-22 build refuses an editor endpoint that does not require a bearer token, so probes save one by default.
+  // Tests that need the old behaviour pass `token` explicitly (A10) or `noToken: true`.
+  const defaultToken = 'audit-token', token = opts.noToken ? '' : (opts.token === undefined ? defaultToken : opts.token)
+  const editorFolder = opts.editorFolder ? (fs.mkdirSync(opts.editorFolder, { recursive: true }), opts.editorFolder) : projectFolder
+  const fake = opts.noFake ? null : await startFake({ token, projectFolder: editorFolder, renderSample: opts.renderSample })
   const store = new Map(Object.entries(opts.keys || {}))
+  if (!opts.noToken && opts.token === undefined) store.set('oddbrain-kdenlive-mcp', defaultToken)
   const keyStore = { encryption: 'os', has: id => store.has(id), persisted: id => store.has(id), get: id => store.get(id) || '', set: (id, v) => store.set(id, v), clear: id => store.delete(id), ids: () => [...store.keys()] }
   const clock = { t: Date.UTC(2026, 9, 21, 12, 0, 0) }
   const svc = createVideoStudioService({

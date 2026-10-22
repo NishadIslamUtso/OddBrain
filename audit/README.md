@@ -34,6 +34,13 @@ audit/probes/run.sh probe-backup-stall      # how long the real backupVault free
 audit/probes/run.sh probe-vault-search      # real searchVault time per query as the vault grows (AUDIT_VAULT_NOTES=76,3000,20000)
 audit/probes/probe-scene-speed.sh           # scene pass: every frame vs keyframes only (run make-media.sh first)
 
+# Added 2026-10-22 for CHECK_2026-10-22.md (the owner's three new commits on arena/81a07155-oddbrain):
+#   point OB_APP_ROOT at an export of that branch:  git archive origin/arena/81a07155-oddbrain | tar -x -C /tmp/theirs ; npm ci there
+#   then: OB_APP_ROOT=/tmp/theirs/apps/03_oddbrain audit/probes/run.sh build
+audit/probes/run.sh probe-video-new         # mandatory token, AI timeline tool, versions, render/preview/inspect/export/stop, library
+audit/probes/run.sh probe-capability        # real HTTP: the AI connector URL must carry the secret capability
+audit/probes/run.sh probe-frame-spread      # are the retained overview frames spread over the whole video?
+
 # Added for PONYTAIL_AUDIT.md (counted by reading the code):
 audit/probes/run.sh static-unused-exports   # functions nothing calls; rewrites audit/dead-code.txt (needs commit ba66c9d in the clone)
 audit/probes/run.sh static-duplicates       # identical helper functions copied into several files
@@ -66,6 +73,9 @@ serves the DASH copy of the test video, so YouTube-style separate audio/video st
 | `probe-media.cjs` | M01–M07 | The real reader on a real video (loudness, pauses, scene cuts, frames); link → yt-dlp → reader with and without ffmpeg on PATH; what the AI sees; question-driven frames/audio; notes; the durable evidence file |
 | `probe-direct.cjs` | S01, D01–D02 | Private/loopback addresses refused before any request; direct-link download, hash receipt and automatic reading |
 | `timing.cjs` | — | Reader time per phase |
+| `probe-video-new.cjs` | K, T, V, R, L series | The 2026-10-22 features against the stand-in editor and the real reader: token enforcement, timeline readback with secrets removed, save version, preview/status/verify/inspect/export/stop, Library providers and licences |
+| `probe-capability.cjs` | C01 | The real local API server refuses the AI connector path without the secret capability |
+| `probe-frame-spread.cjs` | F01 | Overview frames cover only the first third of a video when few scene cuts are found |
 | `probe-evidence-size.cjs` | B-series in PONYTAIL_AUDIT | The evidence file refuses to save after about 45 one-hour videos |
 | `probe-backup-stall.cjs`, `probe-vault-search.cjs` | same | Backup and vault search block the main thread for as long as they run |
 | `probe-scene-speed.sh` | same | Scene pass time, every frame versus keyframes only |

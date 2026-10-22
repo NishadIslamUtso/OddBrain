@@ -38,4 +38,4 @@ console.log(`  used only by the deleted tests: ${testsOnly.length} items, ${L(te
 console.log(`  never used and never tested: ${unused.length} items, ${L(unused)} lines`)
 const rows = ['# Exported functions and constants that nothing in the repo calls (written by static-unused-exports.cjs)', '# lines | where | what | status', '# tests-only = only the deleted tests used it; unused = no user and no test', '# Method: every export in src/** with no use in another src file, then a whole-repo word search (app, extension, scripts, store, vault). Types are excluded.', '']
 for (const o of dead.sort((a, b) => b.lines - a.lines)) rows.push(`${String(o.lines).padStart(3)} | ${o.file.replace('src/', '')}:${o.line} | ${o.kind} ${o.name} | ${o.oldTestFiles > 0 ? 'tests-only' : 'unused'}`)
-fs.writeFileSync(path_.resolve(__dirname, '..', 'dead-code.txt'), rows.join('\n') + '\n'); console.log('wrote audit/dead-code.txt')
+const deadOut = process.env.AUDIT_DEAD_CODE_OUT || path_.resolve(__dirname, '..', 'dead-code.txt'); fs.writeFileSync(deadOut, rows.join('\n') + '\n'); console.log('wrote ' + deadOut)
