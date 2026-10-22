@@ -7,6 +7,7 @@ import { spawn } from 'node:child_process'
 import { boundedResponse } from '../network/boundedResponse'
 import { readRecoverableJson, writeRecoverableJson } from '../recoverableJson'
 import { runMediaCommand } from '../media/process'
+import { DEFAULT_EXTENSION_PORT } from '../extension/server'
 import type { KeyStore } from '../cloud/keys'
 import {
   DEFAULT_VIDEO_STUDIO,
@@ -172,7 +173,8 @@ export function createVideoStudioService(options: {
   }
   const save = (patch: Partial<VideoStudioPreferences>): VideoStudioPreferences => {
     for (const key of ['kdenlive', 'projectFolder', 'ytDlp'] as const) if (patch[key] !== undefined && (typeof patch[key] !== 'string' || patch[key]!.length > 4096 || /[\u0000\r\n]/.test(patch[key]!))) throw Error('Video path setting is invalid. Nothing was saved.')
-    if (patch.mcpUrl !== undefined && normalizeMcpUrl(patch.mcpUrl) !== String(patch.mcpUrl).trim()) throw Error('Kdenlive MCP must be credential-free loopback HTTP, such as http://127.0.0.1:8765/mcp. Nothing was saved.')
+    if (patch.mcpUrl !== undefined && normalizeMcpUrl(patch.mcpUrl) !== String(patch.mcpUrl).trim()) throw Error(`Kdenlive MCP must be credential-free loopback HTTP, such as http://127.0.0.1:${DEFAULT_EXTENSION_PORT + 1}/mcp. Nothing was saved.`)
+    if (patch.mcpUrl !== undefined && Number(new URL(String(patch.mcpUrl).trim()).port) === DEFAULT_EXTENSION_PORT) throw Error(`Port ${DEFAULT_EXTENSION_PORT} belongs to OddBrain's own browser-capture server. Kdenlive cannot listen there too; use ${DEFAULT_EXTENSION_PORT + 1} or another free port. Nothing was saved.`)
     const next = normalizeVideoStudio({ ...preferences, ...patch })
     writeRecoverableJson(options.file, next); preferences = next; lastConnection = null; return { ...next }
   }
@@ -199,15 +201,16 @@ export function createVideoStudioService(options: {
     return current
   }
 
-  const mcpRequest = async (method: string, params: unknown, session = '', notification = false, signal?: AbortSignal): Promise<{ value: any; session: string }> => {
+  const mcpRequest = async (method: string, params: unknown, session = '', notification = false, signal?: AbortSignal, timeoutMs = 20_000): Promise<{ value: any; session: string }> => {
     const url = new URL(preferences.mcpUrl)
     if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.protocol !== 'http:') throw Error('Kdenlive MCP must use loopback HTTP.')
+    if (Number(url.port) === DEFAULT_EXTENSION_PORT) throw Error(`Port ${DEFAULT_EXTENSION_PORT} is OddBrain's own browser-capture server, not Kdenlive. Change the MCP address in Kdenlive & video settings.`)
     const key = options.keys()?.get(MCP_KEY) || ''
     const headers: Record<string, string> = { 'Content-Type': 'application/json', Accept: 'application/json, text/event-stream' }
     if (key) headers.Authorization = `Bearer ${key}`
     if (session) headers['Mcp-Session-Id'] = session
     const request = { jsonrpc: '2.0', ...(notification ? {} : { id: randomUUID() }), method, params }
-    const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000)
+    const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(timeoutMs)]) : AbortSignal.timeout(timeoutMs)
     const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(request), redirect: 'error', signal: requestSignal })
     const raw = await boundedResponse(response, 2_000_000, 'Kdenlive MCP response exceeded 2 MB.')
     if (!response.ok) throw Error(`Kdenlive MCP refused the request (HTTP ${response.status}).`)
@@ -227,9 +230,9 @@ export function createVideoStudioService(options: {
     lastConnection = { session: listed.session, tools, serverInfo, protocol, native: nativeCompatibility(serverInfo, protocol, tools) }; return lastConnection
   }
 
-  const callTool = async (connection: McpConnection, name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<any> => {
+  const callTool = async (connection: McpConnection, name: string, args: Record<string, unknown>, signal?: AbortSignal, timeoutMs = 20_000): Promise<any> => {
     if (!connection.tools.some(tool => tool.name === name)) throw Error(`The connected Kdenlive server does not expose ${name}.`)
-    const called = await mcpRequest('tools/call', { name, arguments: args }, connection.session, false, signal)
+    const called = await mcpRequest('tools/call', { name, arguments: args }, connection.session, false, signal, timeoutMs)
     return toolPayload(called.value)
   }
 
@@ -397,7 +400,9 @@ export function createVideoStudioService(options: {
     if (!connection.tools.some(item => item.name === 'desktop_media_import')) throw Error('The reviewed native Kdenlive protocol exposes no media-import tool. The asset remains downloaded but was not imported.')
     const state = await readNativeState(connection)
     if (!state.documentUrl) throw Error('Save the visible Kdenlive project before importing the downloaded asset.')
-    const result = await callTool(connection, 'desktop_media_import', { sessionId: state.sessionId, expectedRevision: state.revision, requestId: randomUUID(), path, wait: 30 })
+    // The server is told to wait up to 30 s. A 20 s client timeout would report
+    // failure for an import Kdenlive actually completed, so allow the wait plus slack.
+    const result = await callTool(connection, 'desktop_media_import', { sessionId: state.sessionId, expectedRevision: state.revision, requestId: randomUUID(), path, wait: 30 }, undefined, 60_000)
     const next = projectSnapshot(result)
     if (next.documentUrl !== state.documentUrl || next.sequenceId !== state.sequenceId || next.revision <= state.revision) throw Error('Kdenlive did not return the expected project revision after media import.')
     return true
@@ -625,7 +630,7 @@ export function createVideoStudioService(options: {
       if (plan.expectedProject.documentUrl !== state.documentUrl || plan.expectedProject.sequenceId !== state.sequenceId || plan.expectedProject.revision !== state.revision) return { ok: false, error: 'The plan names a different project, sequence, or revision than the one now visible in Kdenlive. Re-read state and regenerate the plan; nothing was applied.' }
       let validation = { valid: false, issues: [] as string[], unsupported: false }
       try {
-        const checked = await callTool(connection, 'desktop_batch_validate', { commands: plan.commands })
+        const checked = await callTool(connection, 'desktop_batch_validate', { commands: plan.commands }, undefined, 60_000)
         const rawIssues = Array.isArray(checked.issues) ? checked.issues : []
         validation = { valid: checked.valid === true, issues: rawIssues.map((issue: any) => typeof issue === 'string' ? issue.slice(0, 1000) : JSON.stringify(issue).slice(0, 1000)), unsupported: rawIssues.some((issue: any) => /VALIDATION_UNSUPPORTED/.test(typeof issue === 'string' ? issue : JSON.stringify(issue))) }
       } catch (error) {
@@ -648,7 +653,9 @@ export function createVideoStudioService(options: {
     try {
       const connection = await nativeConnection(), current = await readNativeState(connection, controller.signal)
       if (current.sessionId !== ticket.state.sessionId || current.sequenceId !== ticket.state.sequenceId || current.documentUrl !== ticket.state.documentUrl || current.revision !== ticket.state.revision) throw Error('The visible Kdenlive project changed after review. Re-read and review a fresh plan; nothing was applied.')
-      const applied = await callTool(connection, 'desktop_batch', { sessionId: current.sessionId, expectedRevision: current.revision, requestId: randomUUID(), commands: ticket.plan.commands }, controller.signal)
+      // A 200-command batch can run for minutes; a short client timeout would
+      // call it failed while Kdenlive was still applying it. Stop still aborts.
+      const applied = await callTool(connection, 'desktop_batch', { sessionId: current.sessionId, expectedRevision: current.revision, requestId: randomUUID(), commands: ticket.plan.commands }, controller.signal, 180_000)
       const next = projectSnapshot(applied)
       proposedPlan = null
       return { ok: true, answer: `Kdenlive reported that the reviewed ${ticket.plan.commands.length}-command batch completed as one Undo step. Revision ${current.revision} → ${next.revision}. Inspect captured frames and the result in Kdenlive’s monitor before exporting.`, project: withoutSession(next) }
@@ -734,26 +741,26 @@ export function createVideoStudioService(options: {
   }
 
   const actionTools: Record<KdenliveAction, string[]> = {
-    undo: ['desktop_undo', 'desktop_timeline_undo', 'timeline_undo', 'undo'],
-    redo: ['desktop_redo', 'desktop_timeline_redo', 'timeline_redo', 'redo'],
-    'save-version': ['desktop_project_checkpoint', 'project_checkpoint', 'checkpoint_save', 'save_version'],
+    undo: ['desktop_undo'],
+    redo: ['desktop_redo'],
   }
   const prepareKdenliveAction = async (owner: number, action: KdenliveAction): Promise<KdenliveToolReview> => {
     prune()
     if (!actionTools[action]) return { ok: false, error: 'Unknown Kdenlive action.' }
     try {
-      const connection = lastConnection || await connectMcp(), tool = connection.tools.find(item => actionTools[action].includes(item.name))
-      if (!tool) return { ok: false, error: `This Kdenlive MCP server does not expose a reviewed ${action === 'undo' ? 'Undo' : action === 'redo' ? 'Redo' : 'save-version'} tool. Use Kdenlive’s own control instead.` }
-      let args: Record<string, unknown> = {}
-      if (connection.native.compatible && (tool.name === 'desktop_undo' || tool.name === 'desktop_redo')) {
-        const state = await readNativeState(connection)
-        if (tool.name === 'desktop_undo' && !state.undo.canUndo) return { ok: false, error: 'The visible Kdenlive project has nothing to Undo.' }
-        if (tool.name === 'desktop_redo' && !state.undo.canRedo) return { ok: false, error: 'The visible Kdenlive project has nothing to Redo.' }
-        args = { sessionId: state.sessionId, expectedRevision: state.revision, requestId: randomUUID(), count: 1 }
-      } else if (tool.inputSchema?.required?.length) return { ok: false, error: `${tool.name} needs server-specific inputs. OddBrain will not guess them; use Kdenlive or a reviewed native protocol.` }
+      const connection = lastConnection || await connectMcp()
+      // Undo and Redo are edits. They get the same identity gate as a batch, so a
+      // program squatting on the port can never be driven by this button.
+      if (!connection.native.compatible) return { ok: false, error: `Undo and Redo require the reviewed Kdenlive MCP identity. ${connection.native.reason}` }
+      const tool = connection.tools.find(item => actionTools[action].includes(item.name))
+      if (!tool) return { ok: false, error: `This Kdenlive MCP server does not expose a reviewed ${action === 'undo' ? 'Undo' : 'Redo'} tool. Use Kdenlive’s own control instead.` }
+      const state = await readNativeState(connection)
+      if (tool.name === 'desktop_undo' && !state.undo.canUndo) return { ok: false, error: 'The visible Kdenlive project has nothing to Undo.' }
+      if (tool.name === 'desktop_redo' && !state.undo.canRedo) return { ok: false, error: 'The visible Kdenlive project has nothing to Redo.' }
+      const args: Record<string, unknown> = { sessionId: state.sessionId, expectedRevision: state.revision, requestId: randomUUID(), count: 1 }
       const token = randomUUID(), expires = now() + 2 * 60_000
       editorActions.set(token, { owner, action, tool: tool.name, args, preferences: preferencesDigest(preferences), expires })
-      const label = action === 'undo' ? 'Undo the latest visible shared-history step' : action === 'redo' ? 'Redo the next visible shared-history step' : 'Save a recoverable project version'
+      const label = action === 'undo' ? 'Undo the latest visible shared-history step' : 'Redo the next visible shared-history step'
       return { ok: true, token, tool: tool.name, summary: `${label} using ${tool.name}. This is one-use approval; a native revision conflict fails instead of guessing.`, expiresAt: expiresAt(expires) }
     } catch (error) { return { ok: false, error: (error as Error).message } }
   }
@@ -765,17 +772,12 @@ export function createVideoStudioService(options: {
     const controller = new AbortController(); mcpJobs.get(owner)?.abort(); mcpJobs.set(owner, controller)
     try {
       const connection = lastConnection || await connectMcp()
+      if (!connection.native.compatible) throw Error(`The Kdenlive endpoint no longer matches the reviewed identity. ${connection.native.reason}`)
       if (!connection.tools.some(item => item.name === ticket.tool)) throw Error('The reviewed tool is no longer exposed by this Kdenlive server.')
-      if (connection.native.compatible && (ticket.tool === 'desktop_undo' || ticket.tool === 'desktop_redo')) {
-        const expected = Number(ticket.args.expectedRevision), current = await readNativeState(connection, controller.signal)
-        if (current.sessionId !== ticket.args.sessionId || current.revision !== expected) throw Error('The Kdenlive project changed after review. Nothing was sent; review again.')
-      }
-      if (connection.native.compatible) await callTool(connection, ticket.tool, ticket.args, controller.signal)
-      else {
-        const called = await mcpRequest('tools/call', { name: ticket.tool, arguments: ticket.args }, connection.session, false, controller.signal)
-        if (called.value?.isError) throw Error('Kdenlive MCP reported that the action failed.')
-      }
-      return { ok: true, answer: ticket.action === 'undo' ? 'Kdenlive reported that the reviewed Undo completed.' : ticket.action === 'redo' ? 'Kdenlive reported that the reviewed Redo completed.' : 'Kdenlive reported that the reviewed project-version save completed.' }
+      const expected = Number(ticket.args.expectedRevision), current = await readNativeState(connection, controller.signal)
+      if (current.sessionId !== ticket.args.sessionId || current.revision !== expected) throw Error('The Kdenlive project changed after review. Nothing was sent; review again.')
+      await callTool(connection, ticket.tool, ticket.args, controller.signal)
+      return { ok: true, answer: ticket.action === 'undo' ? 'Kdenlive reported that the reviewed Undo completed.' : 'Kdenlive reported that the reviewed Redo completed.' }
     } catch (error) { return { ok: false, answer: controller.signal.aborted ? 'Stop was requested while Kdenlive was answering. The outcome is uncertain; refresh state and history before retrying.' : (error as Error).message } }
     finally { if (mcpJobs.get(owner) === controller) mcpJobs.delete(owner) }
   }

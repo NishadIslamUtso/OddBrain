@@ -16,9 +16,16 @@ export type VideoStudioPreferences = {
   ytDlp: string
 }
 
+/**
+ * 8766, not 8765: OddBrain's own browser-capture server already owns 8765
+ * (`DEFAULT_EXTENSION_PORT`). Two programs cannot hold one port, so the default
+ * must not collide with our own listener. `service.ts` refuses that port too,
+ * because a silent collision shows up later as "Kdenlive MCP refused (HTTP 404)"
+ * — an error that blames Kdenlive for a choice OddBrain made.
+ */
 export const DEFAULT_VIDEO_STUDIO: VideoStudioPreferences = {
   kdenlive: '',
-  mcpUrl: 'http://127.0.0.1:8765/mcp',
+  mcpUrl: 'http://127.0.0.1:8766/mcp',
   projectFolder: '',
   ytDlp: '',
 }
@@ -230,7 +237,9 @@ export type KdenliveToolReview = {
   error?: string
 }
 
-export type KdenliveAction = 'undo' | 'redo' | 'save-version'
+/** Undo and Redo only. There is no project-checkpoint tool in the pinned protocol,
+ * so a 'save-version' action would be a button that can never succeed. */
+export type KdenliveAction = 'undo' | 'redo'
 export type DesignKitFormat = 'vertical' | 'landscape'
 export type DesignKitReview = { ok: boolean; token?: string; destination?: string; files?: string[]; consequence?: string; expiresAt?: string; error?: string }
 
@@ -278,9 +287,16 @@ export function adaptiveFramePoints(duration: number, sceneCandidates: Array<{ a
     if (selected.every(item => Math.abs(item.at - scene.at) >= gap)) selected.push({ at: scene.at, reason: 'scene-change', score: scene.score })
     if (selected.length >= wanted) break
   }
-  for (let index = 0; selected.length < wanted && index < wanted * 3; index++) {
-    const at = duration * ((index + 1) / (wanted * 3 + 1))
-    if (selected.every(item => Math.abs(item.at - at) >= gap / 2)) selected.push({ at, reason: 'overview', score: 0 })
+  // Overview points must span the whole clip. The first pass targets evenly
+  // spaced slots at (i+1)/(wanted+1); later passes nudge inside a slot only when
+  // a scene point already occupies it. The previous formula divided by
+  // `wanted * 3 + 1`, which bunched every frame into the opening third.
+  const slot = duration / (wanted + 1)
+  for (let attempt = 0; selected.length < wanted && attempt < wanted * 3; attempt++) {
+    const index = attempt % wanted, round = Math.floor(attempt / wanted)
+    const at = slot * (index + 1) + (round ? slot * (round % 2 ? 0.35 : -0.35) : 0)
+    if (at <= margin || at >= duration - margin) continue
+    if (selected.every(item => Math.abs(item.at - at) >= (round ? gap / 2 : gap))) selected.push({ at, reason: 'overview', score: 0 })
   }
   if (!selected.length) selected.push({ at: duration / 2, reason: 'overview', score: 0 })
   return selected.slice(0, wanted).sort((a, b) => a.at - b.at)

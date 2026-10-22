@@ -1,5 +1,7 @@
 # What the judges said — merged, checked, de-duplicated
 
+**Status 2026-10-21:** items 1, 2, 3, 4, and 8 of §1 are fixed in commit on this branch, plus the frame-sampling bug and the one-frame Short. See §9 for the exact diff. Everything else in this file is still open.
+
 Six reviews, one list. I verified each claim against the code before keeping it.
 "Verified" = I read the exact lines. "Reported" = plausible but not proven here.
 
@@ -81,3 +83,30 @@ Nothing has run against a real Kdenlive on a real Windows machine. Every judge's
 4. Require the pinned identity for Undo/Redo (5 min).
 5. Show the full plan JSON in the approval card (30 min).
 6. Then the real-machine run — before any new feature.
+
+---
+
+## 9. Fixed on this branch (2026-10-21)
+
+| Fault | What changed | Proof |
+|---|---|---|
+| Port collision | Kdenlive MCP default moved 8765 → 8766; `save()` and `mcpRequest()` now refuse 8765 with a message that names OddBrain's own capture server instead of blaming Kdenlive | probe: `normalizeMcpUrl('')` → `http://127.0.0.1:8766/mcp` |
+| False "not imported" | `callTool` takes a per-call timeout: import 60 s (it asks the server to wait 30), validate 60 s, apply 180 s. Reads stay at 20 s | typecheck + build |
+| Dead "Save version" | Removed from the shared type, the IPC signature and the action table. Undo/Redo remain | `grep save-version` → no hits |
+| Undo/Redo on any server | Both now require the pinned `kdenlive-native` identity; the generic fallback branch is gone | action path reads `native.compatible` first |
+| Frames in the first third | Overview points now sit at 15/30/45 s of a 60 s clip instead of 6/12/18 | probe (below) |
+| One frame for a Short | Minimum raised to 3 frames, maximum 6 for long clips | `media/service.ts` |
+| Approval card hid fields | Full command JSON, asset needs and notes render in a scrollable block; Apply is disabled when no plan object is present | typecheck + build |
+
+Probe output after the fix:
+
+```
+60s, no scenes, 3        [15, 30, 45]
+600s, no scenes, 3       [150, 300, 450]
+120s, scenes 10/40, 3    [10 scene, 30 overview, 40 scene]
+30s (Short), 3           [7.5, 15, 22.5]
+```
+
+Still open from §1: **5** (evidence file dies at 8 MB), **6** (the underlying single-file design), **7** (AI cannot see the timeline — needs the full state model), **9** (backup skips evidence), **10** (no key on the local AI endpoint).
+
+Verified this round: `tsc` clean, `npm run build` clean (1,884 modules), `build:web` clean, `security:policy` passed. Not verified: anything touching a real Kdenlive, FFmpeg or Windows — unchanged, still blocked in this sandbox.

@@ -694,7 +694,7 @@ function registerBridges(): void {
   handle('video-studio:confirm-evidence', (event, id: string, at: number, description: string) => videoStudio.confirmEvidenceDescription(track(event.sender), id, at, description))
   handle('video-studio:prepare-edit-plan', (event, plan?: KdenliveEditPlan) => videoStudio.prepareEditPlan(track(event.sender), plan))
   handle('video-studio:decide-edit-plan', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideEditPlan(track(event.sender), token, decision))
-  handle('video-studio:prepare-kdenlive-action', (event, action: 'undo' | 'redo' | 'save-version') => videoStudio.prepareKdenliveAction(track(event.sender), action))
+  handle('video-studio:prepare-kdenlive-action', (event, action: 'undo' | 'redo') => videoStudio.prepareKdenliveAction(track(event.sender), action))
   handle('video-studio:decide-kdenlive-action', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideKdenliveAction(track(event.sender), token, decision))
   handle('video-studio:stop', event => videoStudio.stop(track(event.sender)))
   handle('video-studio:prepare-design-kit', (event, format: DesignKitFormat) => videoStudio.prepareDesignKit(track(event.sender), format))

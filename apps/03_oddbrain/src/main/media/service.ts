@@ -193,7 +193,9 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
           scenes = parseSceneMetadata(metadata.toString('utf8')).map(item => ({ ...item, at: item.at + start }))
         } catch { scenes = [] }
         sceneMap = scenes.slice(0, 10_000)
-        const wanted = Math.min(3, Math.max(1, Math.ceil(selectedDuration / 300)))
+        // At least three pictures, even for a 30-second Short; more only when the
+        // clip is long enough to earn them. The old cap gave a sub-5-minute video one.
+        const wanted = Math.min(6, Math.max(3, Math.ceil(selectedDuration / 300)))
         const planned = adaptiveFramePoints(selectedDuration, scenes.map(item => ({ at: item.at - start, score: item.score })), wanted)
         let adapterIdentity: { bytes: number; sha256: string } | null = null
         if (videoOcr) {
