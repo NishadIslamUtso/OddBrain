@@ -91,11 +91,14 @@ export function createMemmoryObStore(root: string) {
   }
 
   const nextObject = (previous: MemmoryObject | undefined, candidate: Omit<MemmoryObject, 'revision' | 'createdAt' | 'updatedAt' | 'useCount'>): MemmoryObject | null => {
+    // Owner-set access metadata survives every sync: the catalogue may never
+    // silently clear a Never Send mark.
+    const owned: typeof candidate = { ...candidate, neverSend: previous ? previous.neverSend : candidate.neverSend }
     const comparable = previous ? { ...previous, revision: 0, createdAt: '', updatedAt: '', useCount: 0, lastUsedAt: undefined } : null
-    const proposed = { ...candidate, revision: 0, createdAt: '', updatedAt: '', useCount: 0, lastUsedAt: undefined }
+    const proposed = { ...owned, revision: 0, createdAt: '', updatedAt: '', useCount: 0, lastUsedAt: undefined }
     if (comparable && JSON.stringify(comparable) === JSON.stringify(proposed)) return null
     const at = nowIso()
-    return normalizeMemmoryObject({ ...candidate, revision: (previous?.revision || 0) + 1, createdAt: previous?.createdAt || at, updatedAt: at, useCount: previous?.useCount || 0, ...(previous?.lastUsedAt ? { lastUsedAt: previous.lastUsedAt } : {}) })
+    return normalizeMemmoryObject({ ...owned, revision: (previous?.revision || 0) + 1, createdAt: previous?.createdAt || at, updatedAt: at, useCount: previous?.useCount || 0, ...(previous?.lastUsedAt ? { lastUsedAt: previous.lastUsedAt } : {}) })
   }
 
   const nextRelationship = (previous: MemmoryRelationship | undefined, candidate: Omit<MemmoryRelationship, 'revision' | 'createdAt' | 'updatedAt'>): MemmoryRelationship | null => {

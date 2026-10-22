@@ -50,13 +50,14 @@ const skillBytes = readFileSync(skillSource)
 if (!adapterBytes.length || adapterBytes.length > 5_000_000) fail('The adapter bundle is empty or exceeds 5 MB.')
 if (!skillBytes.length || skillBytes.length > 512_000) fail('The skill file is empty or exceeds 512 KB.')
 
-// ---------- brain folder ----------
+// ---------- brain folder (paths only — nothing is created before ALLOW) ----------
 const brainLayout = [
   '00 System/Connectors', '01 Inbox', '02 Sources/Conversations', '02 Sources/Documents',
-  '03 Memory/Entities', '04 Working Memory', '05 Workspace', '06 Review/Organizer',
-  '06 Review/Chapter sources', '90 Archive', '99 Trash', 'store', 'chats', 'adapter',
+  '03 Memory/Entities', '04 Working Memory', '05 Knowledge', '05 Workspace',
+  '06 Review/Organizer', '06 Review/Chapter sources', '06 Review/Memory',
+  '07 Sharing Receipts', '08 Journal', '09 Activity & Undo', '10 People',
+  '90 Archive', '99 Trash', 'store', 'chats', 'adapter',
 ]
-for (const part of brainLayout) mkdirSync(join(brainRoot, part), { recursive: true })
 const adapterTarget = join(brainRoot, 'adapter', 'memmory-ob-mcp.cjs')
 const receiptPath = join(brainRoot, 'adapter', 'goose-adapter.json')
 const skillTarget = join(dirname(gooseConfig), 'skills', 'memmory-ob-memory', 'SKILL.md')
@@ -217,13 +218,19 @@ if (!(await proceed())) {
   process.exit(0)
 }
 
-// ---------- atomic write ----------
+// ---------- atomic write (only after ALLOW; re-verified immediately before) ----------
 const writeFileAtomic = (path, data) => {
   mkdirSync(dirname(path), { recursive: true })
   const temporary = `${path}.${randomUUID()}.tmp`
   writeFileSync(temporary, data, { mode: 0o600 })
   renameSync(temporary, path)
 }
+// TOCTOU guard: the exact reviewed snapshot must still be in place at write
+// time. Anything changed meanwhile is refused; nothing is written.
+if (readFileSync(gooseConfig, 'utf8') !== before) fail('The Goose config changed since this preview. Nothing was written; run the install again to review the current file.')
+ownedFile(adapterTarget, adapterBytes, priorReceipt?.adapterSha256, 'adapter')
+ownedFile(skillTarget, skillBytes, priorReceipt?.skillSha256, 'skill')
+for (const part of brainLayout) mkdirSync(join(brainRoot, part), { recursive: true })
 let backup = ''
 if (after !== before) {
   backup = `${gooseConfig}.oddbrain-original`
