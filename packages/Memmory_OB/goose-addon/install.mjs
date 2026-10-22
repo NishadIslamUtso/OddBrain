@@ -18,7 +18,7 @@
  *   node install.mjs --print-only --goose-config <path>     (show diff, write nothing)
  */
 import { createHash, randomUUID } from 'node:crypto'
-import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs'
+import { closeSync, constants, existsSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readSync, renameSync, unlinkSync, writeSync } from 'node:fs'
 import { dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
@@ -26,6 +26,44 @@ import { fileURLToPath } from 'node:url'
 const here = dirname(fileURLToPath(import.meta.url))
 const sha = (value) => createHash('sha256').update(value).digest('hex')
 const fail = (message) => { console.error(`\n${message}`); process.exit(1) }
+
+// ---------- race-safe file helpers (one handle per read or verify-write) ----------
+const noLinkedParents = (path) => {
+  const full = resolve(path), root = /^[A-Za-z]:[\\/]/.test(full) ? full.slice(0, 3) : '/'
+  let current = root
+  for (const part of full.slice(root.length).split(/[\\/]/).filter(Boolean)) {
+    current = join(current, part)
+    try { if (lstatSync(current).isSymbolicLink()) fail(`Refusing linked storage paths: ${path}`) }
+    catch (error) { if (error.code !== 'ENOENT') throw error }
+  }
+}
+const readRegularFile = (path, limit, label) => {
+  noLinkedParents(path)
+  const descriptor = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW || 0))
+  try {
+    const before = fstatSync(descriptor)
+    if (!before.isFile() || before.size < 1 || before.size > limit) fail(`The ${label} is not a regular file within its size limit: ${path}`)
+    const bytes = Buffer.alloc(before.size); let total = 0
+    while (total < bytes.length) { const count = readSync(descriptor, bytes, total, bytes.length - total, null); if (!count) break; total += count }
+    const after = fstatSync(descriptor)
+    if (total !== before.size || before.dev !== after.dev || before.ino !== after.ino || before.size !== after.size || before.mtimeMs !== after.mtimeMs) fail(`The ${label} changed while being read. Nothing was used; run the install again.`)
+    return bytes
+  } finally { closeSync(descriptor) }
+}
+const writeFileAtomic = (path, data) => {
+  mkdirSync(dirname(path), { recursive: true })
+  const temporary = `${path}.${randomUUID()}.tmp`
+  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data)
+  let descriptor = null
+  try {
+    descriptor = openSync(temporary, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600)
+    writeSync(descriptor, bytes, 0, bytes.length, null); closeSync(descriptor); descriptor = null
+    renameSync(temporary, path)
+  } finally {
+    if (descriptor !== null) closeSync(descriptor)
+    if (existsSync(temporary)) unlinkSync(temporary)
+  }
+}
 
 // ---------- arguments ----------
 const args = process.argv.slice(2)
@@ -41,14 +79,13 @@ const skillSource = resolve(option('--skill', join(here, '..', 'goose-skill', 'S
 
 if (!option('--goose-config')) fail('Missing --goose-config. Point it at Goose\'s config.yaml (usually %APPDATA%\\Block\\goose\\config.yaml on Windows or ~/.config/goose/config.yaml).')
 if (!existsSync(gooseConfig)) fail(`Goose config not found: ${gooseConfig}. Start Goose once first so it creates config.yaml.`)
-try { if (lstatSync(gooseConfig).isSymbolicLink()) fail('Refusing a linked config.yaml.') } catch (e) { fail(`Cannot read config.yaml: ${e.message}`) }
 if (!existsSync(adapterSource)) fail(`Adapter bundle not found: ${adapterSource}. Build it first (npm run build:memmory-ob) or pass --adapter <file>.`)
 if (!existsSync(skillSource)) fail(`Skill file not found: ${skillSource}.`)
 
-const adapterBytes = readFileSync(adapterSource)
-const skillBytes = readFileSync(skillSource)
-if (!adapterBytes.length || adapterBytes.length > 5_000_000) fail('The adapter bundle is empty or exceeds 5 MB.')
-if (!skillBytes.length || skillBytes.length > 512_000) fail('The skill file is empty or exceeds 512 KB.')
+const configBytes = readRegularFile(gooseConfig, 8_000_000, 'Goose config')
+const before = new TextDecoder('utf-8', { fatal: true }).decode(configBytes)
+const adapterBytes = readRegularFile(adapterSource, 5_000_000, 'adapter bundle')
+const skillBytes = readRegularFile(skillSource, 512_000, 'skill file')
 
 // ---------- brain folder (paths only — nothing is created before ALLOW) ----------
 const brainLayout = [
@@ -65,12 +102,12 @@ const skillTarget = join(dirname(gooseConfig), 'skills', 'memmory-ob-memory', 'S
 // Ownership check: never overwrite a file we cannot prove we wrote.
 const ownedFile = (path, bytes, priorHash, label) => {
   if (!existsSync(path)) return
-  const current = readFileSync(path)
+  const current = readRegularFile(path, 8_000_000, label)
   if (current.equals(bytes)) return
   if (priorHash && sha(current) === priorHash) return
   fail(`The ${label} path holds a file this installer does not own. Nothing was replaced. Inspect it manually:\n  ${path}`)
 }
-const priorReceipt = existsSync(receiptPath) ? JSON.parse(readFileSync(receiptPath, 'utf8')) : null
+const priorReceipt = existsSync(receiptPath) ? JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readRegularFile(receiptPath, 1_000_000, 'adapter receipt'))) : null
 ownedFile(adapterTarget, adapterBytes, priorReceipt?.adapterSha256, 'adapter')
 ownedFile(skillTarget, skillBytes, priorReceipt?.skillSha256, 'skill')
 
@@ -181,7 +218,6 @@ function patchConfig(before) {
   return { after: lines.join('\n'), notes }
 }
 
-const before = readFileSync(gooseConfig, 'utf8')
 const { after, notes } = patchConfig(before)
 
 // Sanity: the result must contain exactly our four tools and the memory switch.
@@ -204,6 +240,8 @@ for (const note of notes) console.log(region('', note.label, note.before, note.a
 if (priorReceipt) console.log(`Receipt update: ${receiptPath}\n  old adapter sha ${priorReceipt.adapterSha256}\n  new adapter sha ${sha(adapterBytes)}\n`)
 console.log('Everything else in config.yaml is preserved byte for byte. No secrets are printed.')
 console.log('This gives Goose four READ-ONLY memory tools and switches OFF its stock memory.')
+console.log('IMPORTANT: import your existing Goose history FIRST (node import-goose-history.mjs) if you want')
+console.log('to keep it. After stock memory is switched off, Goose stops reading its old memory store.')
 console.log('Type ALLOW to write these changes, anything else to cancel.')
 
 const proceed = async () => {
@@ -218,25 +256,53 @@ if (!(await proceed())) {
   process.exit(0)
 }
 
-// ---------- atomic write (only after ALLOW; re-verified immediately before) ----------
-const writeFileAtomic = (path, data) => {
-  mkdirSync(dirname(path), { recursive: true })
-  const temporary = `${path}.${randomUUID()}.tmp`
-  writeFileSync(temporary, data, { mode: 0o600 })
-  renameSync(temporary, path)
+// ---------- atomic write (only after ALLOW; re-verified on one open handle) ----------
+const writeExclusive = (path, data, label) => {
+  const bytes = Buffer.isBuffer(data) ? data : Buffer.from(data)
+  let descriptor
+  try { descriptor = openSync(path, constants.O_CREAT | constants.O_EXCL | constants.O_WRONLY, 0o600) }
+  catch (error) { if (error.code === 'EEXIST') return false; throw error }
+  try { writeSync(descriptor, bytes, 0, bytes.length, null) } finally { closeSync(descriptor) }
+  return true
 }
-// TOCTOU guard: the exact reviewed snapshot must still be in place at write
-// time. Anything changed meanwhile is refused; nothing is written.
-if (readFileSync(gooseConfig, 'utf8') !== before) fail('The Goose config changed since this preview. Nothing was written; run the install again to review the current file.')
+// TOCTOU guard: the exact reviewed snapshot must still be in place on one open
+// handle at write time. Anything changed meanwhile is refused BEFORE the first
+// filesystem write, so a refused install leaves the machine completely untouched.
+const writeConfigVerified = (newBytes) => {
+  const descriptor = openSync(gooseConfig, constants.O_RDWR | (constants.O_NOFOLLOW || 0))
+  try {
+    const current = fstatSync(descriptor)
+    if (!current.isFile() || current.size !== configBytes.length) fail('The Goose config changed since this preview. Nothing was written; run the install again to review the current file.')
+    const buf = Buffer.alloc(current.size); let total = 0
+    while (total < buf.length) { const count = readSync(descriptor, buf, total, buf.length - total, null); if (!count) break; total += count }
+    if (total !== current.size || !buf.equals(configBytes)) fail('The Goose config changed since this preview. Nothing was written; run the install again to review the current file.')
+    // Verified on this handle — only now may anything reach the filesystem.
+    let backup = ''
+    backup = `${gooseConfig}.oddbrain-original`
+    if (!writeExclusive(backup, configBytes)) {
+      backup = `${gooseConfig}.oddbrain-original-${new Date().toISOString().replace(/[:.]/g, '-')}`
+      if (!writeExclusive(backup, configBytes)) fail('Could not create a fresh Goose config backup. Nothing was written.')
+    }
+    ftruncateSync(descriptor, 0)
+    let written = 0
+    while (written < newBytes.length) { const count = writeSync(descriptor, newBytes, written, newBytes.length - written, null); if (!count) break; written += count }
+    if (written !== newBytes.length) fail('The Goose config could not be completed. Inspect it manually before restarting Goose.')
+    return backup
+  } finally { closeSync(descriptor) }
+}
 ownedFile(adapterTarget, adapterBytes, priorReceipt?.adapterSha256, 'adapter')
 ownedFile(skillTarget, skillBytes, priorReceipt?.skillSha256, 'skill')
-for (const part of brainLayout) mkdirSync(join(brainRoot, part), { recursive: true })
 let backup = ''
-if (after !== before) {
-  backup = `${gooseConfig}.oddbrain-original`
-  if (existsSync(backup)) backup = `${gooseConfig}.oddbrain-original-${new Date().toISOString().replace(/[:.]/g, '-')}`
-  writeFileSync(backup, before, { mode: 0o600, flag: 'wx' })
-  writeFileAtomic(gooseConfig, Buffer.from(after))
+if (after !== before) backup = writeConfigVerified(Buffer.from(after))
+for (const part of brainLayout) mkdirSync(join(brainRoot, part), { recursive: true })
+// A new brain is born usable: an empty valid catalogue manifest, created only
+// when absent. An existing catalogue is never touched.
+{
+  const manifestPath = join(brainRoot, 'store', 'manifest.json')
+  if (!existsSync(manifestPath)) {
+    const at = new Date().toISOString()
+    writeExclusive(manifestPath, `${JSON.stringify({ format: 'oddbrain-memmory-ob', version: 1, revision: 0, createdAt: at, updatedAt: at, records: 0, relationships: 0, lastChatStoreRevision: 0 }, null, 2)}\n`, 'catalogue manifest')
+  }
 }
 writeFileAtomic(adapterTarget, adapterBytes)
 writeFileAtomic(skillTarget, skillBytes)
@@ -261,3 +327,5 @@ console.log(`Receipt: ${receiptPath}`)
 console.log('\nNext: fully close and reopen Goose, then ask "what memory tools do you have?"')
 console.log('It should list the four memmory_ob_* tools. Stock Goose Memory is switched off.')
 console.log('Your memory lives in the brain folder as plain files you can always open and read.')
+console.log('To hide any record from Goose permanently, run:')
+console.log(`  node ${adapterTarget} --catalogue ${join(brainRoot, 'store')} --chats ${join(brainRoot, 'chats')} --vault ${brainRoot} owner list`)

@@ -7,10 +7,11 @@
  * database, confirms memory, writes chats, grants access, or sends data itself.
  */
 import { createHash } from 'node:crypto'
-import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, statSync } from 'node:fs'
+import { constants, closeSync, fstatSync, lstatSync, openSync, readSync, readdirSync, statSync, type Dirent } from 'node:fs'
 import { isAbsolute, join, parse, resolve, sep } from 'node:path'
 import { createInterface } from 'node:readline'
 import { createChatStore } from '../chats/store'
+import { writeRecoverableJson } from '../recoverableJson'
 import { MEMMORY_OB_FORMAT, MEMMORY_OB_VERSION, type MemmoryManifest, type MemmoryObject, type MemmorySearchHit } from '../../shared/lib/memmoryOb'
 import type { Chat, Message } from '../../shared/types'
 import { memoryStateProblem, staleBasis, type MemorySource, type MemoryWorkspace } from '../../shared/lib/memoryWorkspace'
@@ -63,7 +64,12 @@ const readStable = (path: string, limit: number): Buffer => {
 const json = <T>(path: string, limit: number): T => JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(readStable(path, limit))) as T
 
 const manifest = (): MemmoryManifest => {
-  const row = json<MemmoryManifest>(join(catalogueRoot, 'manifest.json'), 1_000_000)
+  let row: MemmoryManifest
+  try { row = json<MemmoryManifest>(join(catalogueRoot, 'manifest.json'), 1_000_000) }
+  catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') throw Error('This brain has no Memmory_OB catalogue yet (store/manifest.json is missing). Run the Memmory_OB installer once to create it, or open OddBrain and sync memory, then restart Goose.')
+    throw error
+  }
   if (row?.format !== MEMMORY_OB_FORMAT || row.version !== MEMMORY_OB_VERSION || !Number.isSafeInteger(row.revision) || row.revision < 0 || !Number.isSafeInteger(row.records) || row.records < 0 || !Number.isSafeInteger(row.relationships) || row.relationships < 0 || !Number.isSafeInteger(row.lastChatStoreRevision) || row.lastChatStoreRevision < 0) throw Error('The Memmory_OB catalogue manifest is unsupported or damaged.')
   return row
 }
@@ -99,6 +105,17 @@ const excerpt = (text: string, terms: string[], maximum = 3_000): { text: string
   return { text: text.slice(start, start + maximum), start, end: start + maximum }
 }
 const active = (chat: Chat): boolean => chat.lifecycle !== 'trash' && chat.lifecycle !== 'archived'
+/**
+ * Raw supporting text follows the recall hazard law exactly: the precise text
+ * that would be returned is scanned first, and invisible or instruction-like
+ * content is omitted whole rather than sent as model context.
+ */
+const safeRawExcerpt = (text: string, limit: number): { text: string; omitted: boolean } => {
+  const slice = text.slice(0, limit)
+  const invisible = scanTextHazards(slice).total, instructions = scanInstructionSignals(slice).total
+  if (invisible || instructions) return { text: '', omitted: true }
+  return { text: slice, omitted: false }
+}
 const reviewedMemory = (): MemoryWorkspace | null => {
   if (!vaultRoot) return null
   try {
@@ -189,7 +206,10 @@ const evidenceLookup = (input: Record<string, unknown>): Record<string, unknown>
   const recordId = typeof input.recordId === 'string' ? input.recordId.trim() : ''
   const expected = typeof input.expectedSha256 === 'string' ? input.expectedSha256.trim().toLowerCase() : ''
   const messageId = typeof input.messageId === 'string' ? input.messageId.trim() : ''
+  const projectId = typeof input.projectId === 'string' ? input.projectId.trim() : ''
+  const currentChatId = typeof input.currentChatId === 'string' ? input.currentChatId.trim() : ''
   if (recordId.length > 2_048 || messageId.length > 1_024) throw Error('The requested evidence identity is too long.')
+  if (projectId.length > MAX_PROJECT || currentChatId.length > 1_024) throw Error('A requested scope identifier is too long.')
   if (!hashPattern.test(expected)) throw Error('expectedSha256 must be the 64-character hash recorded with the evidence.')
   const bounds = (text: string): { start: number; end: number } => {
     const start = input.start === undefined ? 0 : input.start
@@ -200,11 +220,18 @@ const evidenceLookup = (input: Record<string, unknown>): Record<string, unknown>
     return { start: start as number, end: end as number }
   }
   if (recordId.startsWith('app-chat:')) {
+    // Engine-facing raw chat evidence mirrors the app exactly: it travels only
+    // inside an approved Project scope, and never from the current chat.
+    if (!projectId) throw Error('Raw conversation evidence is only shared inside an approved Project scope, exactly as OddBrain shares chat evidence with engines. Ask again with the record’s projectId; nothing was returned.')
+    const project = object('project', projectId)
+    if (!project || project.lifecycle !== 'active') throw Error('That Project is not an active Memmory_OB scope. Nothing was returned.')
     const chatId = recordId.slice('app-chat:'.length)
     const denied = accessRefusal(recordId)
     if (denied) throw Error(`${denied} Nothing was returned.`)
     const chat = createChatStore(chatsRoot).read().chats.find(value => value.id === chatId)
     if (!chat || !active(chat)) throw Error('Not found: that app-chat record is not an active readable Memmory_OB source. Nothing was returned.')
+    if (chat.projectId !== projectId) throw Error('That app-chat record is not part of the requested Project scope. Nothing was returned.')
+    if (currentChatId && chat.id === currentChatId) throw Error('The current chat is excluded, exactly as search excludes it. Nothing was returned.')
     const message = chat.messages.find(value => value.id === messageId)
     if (!message) throw Error('Not found: that message is not part of the requested app-chat record.')
     const actual = sha(message.content)
@@ -238,15 +265,16 @@ const evidenceLookup = (input: Record<string, unknown>): Record<string, unknown>
     catch (error) { throw Error(`${(error as Error).message} ${/excluded or unavailable/.test((error as Error).message) ? 'Current privacy rules win even if this record was reviewed earlier; do not attempt to reconstruct it.' : 'Nothing was returned; the claim needs owner review.'}`) }
     if (proposal.quote && !original.includes(proposal.quote)) throw Error('The recorded quotation is not present in the verified original observation. Nothing was returned; the claim needs owner review.')
     const { start, end } = bounds(proposal.text)
+    const observation = safeRawExcerpt(original, 6_000)
     return {
       recordId, kind: proposal.kind === 'journal' ? 'journal' : proposal.kind === 'story' ? 'life-story' : proposal.kind === 'capsule' ? 'capsule' : 'memory',
       title: proposal.title, authority: 'confirmed-owner-memory', revision: proposal.revision, reviewedAt: proposal.reviewedAt || '',
       sha256: actual, start, end, totalCharacters: proposal.text.length, text: proposal.text.slice(start, end),
       coverage: start === 0 && end === proposal.text.length ? 'Complete confirmed memory record' : `Exact characters ${start}–${end} of ${proposal.text.length}`,
       sourceLocator: proposal.source.path, exactQuote: proposal.quote, uncertainty: proposal.uncertainty,
-      originalObservation: original.slice(0, 6_000),
+      originalObservation: observation.text,
       sourceVerification: 'Original observation hash verified; recorded quotation found in the original; chapter basis traced and current.',
-      notice: 'Owner-confirmed memory. Still cite the record ID and quote; it is fact authority only within its stated uncertainty.',
+      notice: `Owner-confirmed memory. Still cite the record ID and quote; it is fact authority only within its stated uncertainty.${observation.omitted ? ' The supporting raw observation was omitted because the exact text contains invisible or direction-changing text or instruction-like language. Open the source to inspect it; it was not sent as model context.' : ''}`,
     }
   }
   throw Error('Evidence lookup supports app-chat and approved interpretation records only. Nothing was returned.')
@@ -365,8 +393,8 @@ const tools = [
   },
   {
     name: 'memmory_ob_evidence',
-    description: 'Retrieve the exact stored text for one record only while it still matches the caller-supplied SHA-256 from a prior search result. Returns source identity and coverage; refuses with "source changed" on mismatch. Approved confirmed memory and active raw app-chat messages only. Read-only.',
-    inputSchema: { type: 'object', properties: { recordId: { type: 'string', minLength: 1, maxLength: 2048 }, messageId: { type: 'string', maxLength: 1024 }, expectedSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' }, start: { type: 'integer', minimum: 0 }, end: { type: 'integer', minimum: 1 } }, required: ['recordId', 'expectedSha256'], additionalProperties: false },
+    description: 'Retrieve the exact stored text for one record only while it still matches the caller-supplied SHA-256 from a prior search result. Returns source identity and coverage; refuses with "source changed" on mismatch. Approved confirmed memory and active raw app-chat messages only; raw app-chat evidence additionally requires the record’s Project scope, exactly as search. Read-only.',
+    inputSchema: { type: 'object', properties: { recordId: { type: 'string', minLength: 1, maxLength: 2048 }, messageId: { type: 'string', maxLength: 1024 }, expectedSha256: { type: 'string', pattern: '^[a-f0-9]{64}$' }, start: { type: 'integer', minimum: 0 }, end: { type: 'integer', minimum: 1 }, projectId: { type: 'string', maxLength: MAX_PROJECT }, currentChatId: { type: 'string', maxLength: 1024 } }, required: ['recordId', 'expectedSha256'], additionalProperties: false },
   },
 ]
 
@@ -375,7 +403,7 @@ const callTool = (name: unknown, args: unknown): Record<string, unknown> => {
   const input = args && typeof args === 'object' && !Array.isArray(args) ? args as Record<string, unknown> : {}
   if (name === 'memmory_ob_status') {
     const state = manifest()
-    return textResult({ format: state.format, version: state.version, revision: state.revision, records: state.records, relationships: state.relationships, lastChatStoreRevision: state.lastChatStoreRevision, authority: 'OddBrain-owned, read-only MCP adapter', notice: 'No memory writer is exposed.' })
+    return textResult({ format: state.format, version: state.version, revision: state.revision, records: state.records, relationships: state.relationships, lastChatStoreRevision: state.lastChatStoreRevision, authority: 'OddBrain-owned, read-only MCP adapter', notice: 'No memory writer is exposed. The owner can mark any record Never Send with the adapter’s local owner command (owner never-send <recordId>); it is then never handed to an agent.' })
   }
   if (name === 'memmory_ob_search') return textResult(exactSearch(input))
   if (name === 'memmory_ob_project') return textResult(projectView(input))
@@ -383,11 +411,75 @@ const callTool = (name: unknown, args: unknown): Record<string, unknown> => {
   throw Error('Unknown Memmory_OB tool.')
 }
 
+/**
+ * Owner-only local command (never an MCP tool): the supported way to mark a
+ * record or app-chat Never Send, or to clear the mark. It edits exactly the
+ * `neverSend` field OddBrain's sync already preserves, through the same
+ * recoverable-atomic store writes, so the choice survives every sync.
+ *
+ *   node memmory-ob-mcp.cjs --catalogue <store> --chats <chats> [--vault <brain>] owner list
+ *   node ... owner never-send <recordId>
+ *   node ... owner allow-send <recordId>
+ */
+const ownerConsole = (args: string[]): void => {
+  const [action, identity] = args
+  const rowPath = (id: string): string => {
+    const digest = sha(id)
+    return join(catalogueRoot, 'objects', digest.slice(0, 2), `${digest}.json`)
+  }
+  const list = (): void => {
+    const rows: MemmoryObject[] = []
+    const walk = (folder: string): void => {
+      let entries: Dirent[]
+      try { entries = readdirSync(folder, { withFileTypes: true }) } catch (error) {
+        if ((error as NodeJS.ErrnoException).code === 'ENOENT') return
+        throw error
+      }
+      for (const entry of entries) {
+        const full = join(folder, entry.name)
+        if (entry.isDirectory()) walk(full)
+        else if (entry.isFile() && entry.name.endsWith('.json') && !entry.name.endsWith('.previous')) {
+          const row = jsonOrNull<MemmoryObject>(full, 1_000_000)
+          if (row?.id) rows.push(row)
+        }
+      }
+    }
+    walk(join(catalogueRoot, 'objects'))
+    rows.sort((a, b) => a.id.localeCompare(b.id))
+    process.stdout.write(`${JSON.stringify(rows.map(row => ({ id: row.id, kind: row.kind, sensitivity: row.sensitivity, neverSend: row.neverSend === true })), null, 2)}\n`)
+    process.stdout.write(`${rows.length} catalogue record(s). neverSend true means that record is never handed to an agent.\n`)
+  }
+  const setNeverSend = (value: boolean): void => {
+    if (!identity || identity.length > 2_048 || typeof identity !== 'string') throw Error('Provide one catalogue record id, for example app-chat:<chat id> or interpretation:<record id>.')
+    const row = objectByRecordId(identity)
+    if (!row) throw Error('Not found: that record is not in the Memmory_OB catalogue.')
+    if (row.neverSend === value) {
+      process.stdout.write(`${identity} is already marked ${value ? 'Never Send' : 'allowed to send'} (${row.kind}; sensitivity ${row.sensitivity}). Nothing was changed.\n`)
+      return
+    }
+    writeRecoverableJson(rowPath(identity), { ...row, neverSend: value })
+    process.stdout.write(`${value ? 'Never Send set for' : 'Never Send cleared for'} ${identity} (${row.kind}; sensitivity ${row.sensitivity}).\n`)
+    process.stdout.write('OddBrain preserves this choice across every memory sync, and the four read-only tools enforce it immediately.\n')
+  }
+  try {
+    if (action === 'list') list()
+    else if (action === 'never-send') setNeverSend(true)
+    else if (action === 'allow-send') setNeverSend(false)
+    else throw Error('Usage: owner list | owner never-send <recordId> | owner allow-send <recordId>')
+    process.exit(0)
+  } catch (error) {
+    process.stderr.write(`[Memmory_OB owner] ${error instanceof Error ? error.message : String(error)}\n`)
+    process.exit(1)
+  }
+}
+
 type Rpc = { jsonrpc?: unknown; id?: unknown; method?: unknown; params?: unknown }
 const send = (value: unknown): void => { process.stdout.write(`${JSON.stringify(value)}\n`) }
 const success = (id: unknown, result: unknown): void => send({ jsonrpc: '2.0', id, result })
 const failure = (id: unknown, code: number, message: string): void => send({ jsonrpc: '2.0', id: id ?? null, error: { code, message } })
 
+if (process.argv.includes('owner')) ownerConsole(process.argv.slice(process.argv.indexOf('owner') + 1))
+else {
 const reader = createInterface({ input: process.stdin, crlfDelay: Infinity })
 reader.on('line', line => {
   if (!line.trim()) return
@@ -416,3 +508,4 @@ reader.on('line', line => {
 reader.on('close', () => process.exit(0))
 process.on('uncaughtException', error => { process.stderr.write(`[Memmory_OB] ${error.message}\n`); process.exit(1) })
 process.on('unhandledRejection', error => { process.stderr.write(`[Memmory_OB] ${error instanceof Error ? error.message : String(error)}\n`); process.exit(1) })
+}

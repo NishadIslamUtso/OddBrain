@@ -29,10 +29,16 @@ folder defaults to `Memmory_OB` in your home directory; change it with
 3. Read the exact proposed changes it prints. Type `ALLOW` to write them,
    anything else cancels. Nothing is written before you allow.
 
+**Before you install on a computer that has history you want to keep:** run the
+history import first (see *Still coming next* below). The install switches
+Goose's stock memory off in the same change, and Goose stops reading its old
+memory store afterwards.
+
 The installer:
 
 - adds one `memmory_ob` extension entry to Goose's config (four read-only tools),
 - switches **off** Goose's stock `memory` extension (`enabled: false`),
+- creates the brain folder ready to use, including an empty memory catalogue,
 - installs the `memmory-ob-memory` rule sheet into Goose's skills folder,
 - keeps your original `config.yaml` as a backup,
 - writes a receipt with SHA-256 hashes of everything it installed,
@@ -45,7 +51,22 @@ The installer:
 | `memmory_ob_status` | Is the brain alive? Which revision? |
 | `memmory_ob_search` | Find exact word matches in confirmed memory and raw chat evidence. Every answer carries its authority label. |
 | `memmory_ob_project` | Bounded counts for one Project. |
-| `memmory_ob_evidence` | Return exact wording, only while the stored bytes still match the SHA-256 you were given. Changed source → refused. |
+| `memmory_ob_evidence` | Return exact wording, only while the stored bytes still match the SHA-256 you were given. Changed source → refused. Raw chat evidence needs its Project ID — same boundary as search. |
+
+## Hiding a record from Goose (Never Send)
+
+You decide what Goose can ever see. On your own machine, in a terminal:
+
+```
+node <brain>/adapter/memmory-ob-mcp.cjs --catalogue <brain>/store --chats <brain>/chats --vault <brain> owner list
+node <brain>/adapter/memmory-ob-mcp.cjs --catalogue <brain>/store --chats <brain>/chats --vault <brain> owner never-send <recordId>
+node <brain>/adapter/memmory-ob-mcp.cjs --catalogue <brain>/store --chats <brain>/chats --vault <brain> owner allow-send <recordId>
+```
+
+`owner list` shows every record with its `recordId`, sensitivity and Never-Send
+mark. `never-send` hides it from all four tools immediately and permanently —
+OddBrain keeps your choice across every memory sync. `allow-send` clears the
+mark again. The install receipt prints the full command with your real paths.
 
 ## The brain folder
 

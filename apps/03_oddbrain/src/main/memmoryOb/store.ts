@@ -438,6 +438,11 @@ export function createMemmoryObStore(root: string) {
     const hits: MemmorySearchHit[] = []
     if (!input.kinds || input.kinds.includes('app-chat')) for (const chat of chats.values()) {
       if (memmoryChatLifecycle(chat) !== 'active' || chat.id === input.currentChatId || (input.projectId && chat.projectId !== input.projectId)) continue
+      // Never Send and local-only are app-enforced sharing guards here exactly
+      // as they are in the read-only adapter: an owner-marked record is never
+      // handed to an engine.
+      const chatRecord = records.get(recordId('app-chat', chat.id))
+      if (chatRecord && (chatRecord.neverSend === true || chatRecord.sensitivity === 'local-only')) continue
       for (const message of chat.messages) {
         const score = scoreMessage(message, terms)
         if (!score) continue
@@ -448,7 +453,7 @@ export function createMemmoryObStore(root: string) {
     }
     if (!input.kinds || input.kinds.includes('working-note')) for (const [chatId, note] of workingNoteText) {
       const chat = chats.get(chatId), record = records.get(recordId('working-note', chatId))
-      if (!record || record.lifecycle !== 'active' || chatId === input.currentChatId || (input.projectId && chat?.projectId !== input.projectId)) continue
+      if (!record || record.lifecycle !== 'active' || record.neverSend === true || record.sensitivity === 'local-only' || chatId === input.currentChatId || (input.projectId && chat?.projectId !== input.projectId)) continue
       const score = scoreText(note.text, terms)
       if (!score) continue
       const slice = excerpt(note.text, terms), digest = sha(note.text)
