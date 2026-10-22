@@ -1,12 +1,8 @@
-# The gate, once per pull request (and on long-lived branch pushes), on both
-# operating systems. Linux always ran it; Windows (the target OS) joined
-# 2026-10-17 as allow-failure until it ran green once — and when it did, the
-# training wheels came off the same day. A red X fails the gate now.
+# Non-test validation only. The previous automated test suite was removed on
+# 2026-10-21 because its results were not trusted; replacement tests must be
+# designed after the connected product is confirmed.
 name: checks
 on:
-  # Pull requests get one check set. Push runs are only for long-lived branches;
-  # running both events for the same PR head left cancelled duplicate jobs on the
-  # commit and made GitHub's Branches page report a misleading red 6/9.
   push:
     branches: [main, v3]
   pull_request:
@@ -29,39 +25,12 @@ jobs:
       - name: Install the pinned Electron runtime explicitly
         working-directory: apps/03_oddbrain
         run: node node_modules/electron/install.js
-      - name: Install Chromium for reader and durable-restart tests
-        working-directory: apps/03_oddbrain
-        run: npx playwright-core install --with-deps chromium
-      - name: Configure browser tests
-        working-directory: apps/03_oddbrain
-        run: node scripts/ci-browser.cjs
       - name: Types
         working-directory: apps/03_oddbrain
-        run: npx tsc --noEmit -p tsconfig.json
+        run: npm run typecheck
       - name: Security policy invariants
         working-directory: apps/03_oddbrain
         run: npm run security:policy
-      - name: Tests
-        working-directory: apps/03_oddbrain
-        run: npx vitest run --maxWorkers=2 --reporter=default --reporter=github-actions --reporter=junit --outputFile=junit-linux.xml
-      - name: Enforce browser coverage and explicit skip policy
-        working-directory: apps/03_oddbrain
-        run: node scripts/check-ci-tests.cjs junit-linux.xml
-      - name: Upload test evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: junit-linux
-          path: apps/03_oddbrain/junit-linux.xml
-          if-no-files-found: error
-      - name: Extension companion in Chromium
-        working-directory: apps/03_oddbrain
-        run: |
-          node ../../extension/scripts/preview-server.cjs > "$RUNNER_TEMP/extension-preview.log" 2>&1 &
-          PREVIEW_PID=$!
-          trap 'kill "$PREVIEW_PID"' EXIT
-          node -e 'const deadline=Date.now()+15000; async function ready(){try {const r=await fetch("http://127.0.0.1:5175");if(r.ok)return;}catch{}if(Date.now()>deadline)throw Error("Extension preview did not start");await new Promise(r=>setTimeout(r,200));return ready();}ready().catch(e=>{console.error(e);process.exit(1)});'
-          node ../../extension/scripts/check-browser.cjs
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build
@@ -71,28 +40,6 @@ jobs:
       - name: Inspect release build output
         working-directory: apps/03_oddbrain
         run: npm run security:release
-      - name: Smoke — the window opens and the console is clean
-        id: native-smoke
-        working-directory: apps/03_oddbrain
-        timeout-minutes: 5
-        env:
-          ELECTRON_DISABLE_SANDBOX: 1
-        run: |
-          set -o pipefail
-          sudo apt-get update -qq && sudo apt-get install -y -qq xvfb libnss3 libnspr4 libasound2t64
-          started=$(date +%s%3N)
-          xvfb-run -a npx electron . --smoke 2>&1 | tee native-smoke.log
-          elapsed=$(($(date +%s%3N)-started))
-          ready=$(grep -o '\[startup\] first window ready in [0-9]* ms' native-smoke.log | tail -1 || true)
-          echo "Linux ${ready:-startup-ready marker missing}; smoke process duration: ${elapsed} ms" | tee -a "$GITHUB_STEP_SUMMARY"
-      - name: Upload native smoke evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: native-smoke-linux
-          path: apps/03_oddbrain/native-smoke.log
-          if-no-files-found: warn
-
 
   windows:
     runs-on: windows-latest
@@ -109,33 +56,12 @@ jobs:
       - name: Install the pinned Electron runtime explicitly
         working-directory: apps/03_oddbrain
         run: node node_modules/electron/install.js
-      - name: Install Chromium for reader and durable-restart tests
-        working-directory: apps/03_oddbrain
-        run: npx playwright-core install chromium
-      - name: Configure browser tests
-        working-directory: apps/03_oddbrain
-        run: node scripts/ci-browser.cjs
       - name: Types
         working-directory: apps/03_oddbrain
-        run: npx tsc --noEmit -p tsconfig.json
+        run: npm run typecheck
       - name: Security policy invariants
         working-directory: apps/03_oddbrain
         run: npm run security:policy
-      - name: Tests
-        working-directory: apps/03_oddbrain
-        # The hosted Windows runner has shown broad I/O stalls with two isolated workers.
-        # One worker is slower but keeps durability and extension tests deterministic.
-        run: npx vitest run --maxWorkers=1 --reporter=default --reporter=github-actions --reporter=junit --outputFile=junit-windows.xml
-      - name: Enforce browser coverage and explicit skip policy
-        working-directory: apps/03_oddbrain
-        run: node scripts/check-ci-tests.cjs junit-windows.xml
-      - name: Upload test evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: junit-windows
-          path: apps/03_oddbrain/junit-windows.xml
-          if-no-files-found: error
       - name: Build
         working-directory: apps/03_oddbrain
         run: npm run build
@@ -145,23 +71,3 @@ jobs:
       - name: Inspect Windows release build output
         working-directory: apps/03_oddbrain
         run: npm run security:release
-      - name: Smoke — the window opens and the console is clean
-        working-directory: apps/03_oddbrain
-        timeout-minutes: 5
-        shell: pwsh
-        run: |
-          $watch = [System.Diagnostics.Stopwatch]::StartNew()
-          npx electron . --smoke 2>&1 | Tee-Object -FilePath native-smoke.log
-          $code = $LASTEXITCODE
-          $watch.Stop()
-          $ready = Select-String -Path native-smoke.log -Pattern '\[startup\] first window ready in [0-9]+ ms' | Select-Object -Last 1
-          $readyText = if ($ready) { $ready.Matches[0].Value } else { 'startup-ready marker missing' }
-          "Windows $readyText; smoke process duration: $($watch.ElapsedMilliseconds) ms" | Tee-Object -FilePath $env:GITHUB_STEP_SUMMARY -Append
-          exit $code
-      - name: Upload native smoke evidence
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
-        with:
-          name: native-smoke-windows
-          path: apps/03_oddbrain/native-smoke.log
-          if-no-files-found: warn

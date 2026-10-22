@@ -2,18 +2,19 @@
 
 Updated: 2026-10-21 (Asia/Dhaka)
 
-Nothing here is a current capability or standing permission. Each item needs a reviewed design, explicit owner approval when it changes a useful behavior, tests, and Windows 11 evidence.
+Nothing here is a current capability or standing permission. Each item needs a reviewed design, explicit owner approval when it changes a useful behavior, manual confirmation, replacement tests designed from confirmed behavior, and Windows 11 evidence.
 
 ## Next validation
 
-1. Run the full Node 24 test suite, typecheck, desktop/web builds, security checks, and native smoke.
-2. Review Windows CI evidence and test the packaged build on the owner’s Windows 11 machine at 125% display scaling.
-3. Exercise real signed-in Claude Code and agy flows, Stop during tools, uncertain termination, app restart recovery, and provider context overflow.
-4. Exercise multi-gigabyte use-in-place/private-copy sources, PDF page ranges, exact streamed turn retention, large backup verification, separate restore folders, and manual transcript restore with disposable owner data copies.
-5. Benchmark complete-duration audio/video processing, scene-change selection, and acoustic measurements on Windows 11 with installed FFmpeg and recognition languages. Test the optional owner-installed DeepSeek-OCR-2 adapter only on reviewed compatible hardware; accuracy and GPU compatibility remain external gates.
-6. Build and audit the separately installed native Kdenlive MCP reference `b9a1a6ce0612d9bb6be2b7df2473c2ffbe71e798` on Windows 11, then exercise a real project end to end: connector/Skill deployment, approved link → evidence map, selective transcript and question-driven frame/audio retrieval, AI library ranking, exact plan, revision conflict, native validation/batch, Stop uncertainty, Undo/Redo/history, frame and short audio/motion preview inspection, improvement plan, render, verification, restart recovery and packaged-app behavior. Protocol compatibility in OddBrain is implemented; source/build provenance and owner-machine outcomes are not yet proven.
-7. Exercise monthly/custom Review, manual consumer-AI handoff/import, folder expiry/revocation receipts, safe private-copy deletion previews, and inline branch continuity with real stored attachments and Working Notes.
-8. Measure startup and route chunk loading on the target machine. Keep lazy boundaries only where measured startup or memory improves without making navigation feel delayed.
+1. Run the remaining non-test Node 24 checks: typecheck, desktop/web builds, security policy, dependency audit, release-output inspection and Windows packaging checks.
+2. Manually confirm the connected product on the owner’s Windows 11 machine at 125% display scaling. Do not treat CI builds or static checks as behavioral evidence.
+3. After that confirmation, design a new automated test suite from the observed contracts; do not restore the removed faulty tests by default.
+4. Exercise real signed-in Claude Code and agy flows, Stop during tools, uncertain termination, app restart recovery, and provider context overflow.
+5. Exercise multi-gigabyte use-in-place/private-copy sources, PDF page ranges, exact streamed turn retention, large backup verification, separate restore folders, and manual transcript restore with disposable owner data copies.
+6. Benchmark complete-duration audio/video processing, scene-change selection, and acoustic measurements on Windows 11 with installed FFmpeg and recognition languages. Test the optional owner-installed DeepSeek-OCR-2 adapter only on reviewed compatible hardware; accuracy and GPU compatibility remain external gates.
+7. Build and audit the separately installed native Kdenlive MCP reference `b9a1a6ce0612d9bb6be2b7df2473c2ffbe71e798` on Windows 11, then exercise a real project end to end: connector/Skill deployment, approved link → evidence map, selective transcript and question-driven frame/audio retrieval, AI library ranking, exact plan, revision conflict, native validation/batch, Stop uncertainty, Undo/Redo/history, frame and short audio/motion preview inspection, improvement plan, render, verification, restart recovery and packaged-app behavior. Protocol compatibility in OddBrain is implemented; source/build provenance and owner-machine outcomes are not yet proven.
+8. Exercise monthly/custom Review, manual consumer-AI handoff/import, folder expiry/revocation receipts, safe private-copy deletion previews, and inline branch continuity with real stored attachments and Working Notes.
+9. Measure startup and route chunk loading on the target machine. Keep lazy boundaries only where measured startup or memory improves without making navigation feel delayed.
 
 ## Later desktop work
 

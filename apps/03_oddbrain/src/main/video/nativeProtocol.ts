@@ -26,6 +26,9 @@ export const NATIVE_WORKFLOW_TOOLS = [
   'desktop_redo',
   'desktop_frame_capture',
   'desktop_preview_render',
+  'desktop_render',
+  'desktop_render_status',
+  'desktop_render_verify',
   'desktop_render_cancel',
 ] as const
 
@@ -81,6 +84,8 @@ const REQUIRED_FIELDS: Partial<Record<(typeof NATIVE_WORKFLOW_TOOLS)[number], st
   desktop_redo: ['sessionId', 'expectedRevision', 'requestId'],
   desktop_frame_capture: ['position'],
   desktop_preview_render: ['sessionId', 'expectedRevision', 'requestId', 'path', 'start', 'end'],
+  desktop_render: ['sessionId', 'expectedRevision', 'requestId', 'path'],
+  desktop_render_verify: ['path'],
   desktop_render_cancel: ['path'],
 }
 
@@ -136,6 +141,7 @@ export function projectSnapshot(value: unknown): KdenliveProjectSnapshot {
   const revision = Number(state.revision)
   if (!sessionId || !sequenceId || !Number.isSafeInteger(revision) || revision < 0) throw Error('Kdenlive state is missing its editing session, sequence, or revision.')
   const profile = plain(state.profile) ? state.profile : {}
+  const fpsValue = plain(state.fps) && Number(state.fps.denominator) > 0 ? Number(state.fps.numerator) / Number(state.fps.denominator) : 0
   const undo = plain(state.undo) ? state.undo : {}
   return {
     documentUrl,
@@ -147,6 +153,8 @@ export function projectSnapshot(value: unknown): KdenliveProjectSnapshot {
       width: Number.isSafeInteger(Number(profile.width)) ? Number(profile.width) : 0,
       height: Number.isSafeInteger(Number(profile.height)) ? Number(profile.height) : 0,
       description: short(profile.description, 300),
+      duration: Number.isSafeInteger(Number(profile.duration)) ? Number(profile.duration) : 0,
+      fps: Number.isFinite(fpsValue) && fpsValue > 0 ? fpsValue : 0,
     },
     undo: {
       index: Number.isSafeInteger(Number(undo.index)) ? Number(undo.index) : 0,

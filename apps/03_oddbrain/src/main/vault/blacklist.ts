@@ -10,7 +10,7 @@
  * and must NOT cover bank.com.evil.org — that look-alike is exactly the spoof
  * these rules exist to stop. The browser extension keeps its own copy of the
  * same rules (extension/lib/blacklist.js) and
- * tests/blacklist-parity.test.ts asserts the two implementations agree.
+ * Keep this implementation and the browser companion implementation aligned.
  */
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from 'yaml'
 

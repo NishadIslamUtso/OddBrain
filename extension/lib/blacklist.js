@@ -11,7 +11,7 @@
  * apps/03_oddbrain/src/main/vault/blacklist.ts. A substring shortcut
  * here previously matched "bank.com.evil.org" against the pattern "bank.com/*",
  * which is exactly the spoof the host-aware rules below exist to stop.
- * tests/blacklist.test.js asserts both implementations agree.
+ * Keep this implementation and the desktop implementation aligned.
  */
 
 const DEFAULT_EXCLUDED = ['bank.com/*']

@@ -3,7 +3,7 @@ import { link, lstat, mkdir, open, readFile, rm, stat, statfs } from 'node:fs/pr
 import { basename, dirname, join } from 'node:path'
 import { freemem, tmpdir } from 'node:os'
 import { readRecoverableJson, writeRecoverableJson } from '../recoverableJson'
-import { DEFAULT_MEDIA, MAX_INLINE_MEDIA_BYTES, normalizeMedia, type MediaFileInput, type MediaInput, type MediaPreferences, type MediaRange, type MediaResult, type MediaSourceHandle } from '../../shared/lib/mediaBridge'
+import { DEFAULT_MEDIA, MAX_INLINE_MEDIA_BYTES, normalizeMedia, type MediaFileInput, type MediaAudioWindow, type MediaInput, type MediaPreferences, type MediaRange, type MediaResult, type MediaSourceHandle } from '../../shared/lib/mediaBridge'
 import { decodeInWorker } from './workerClient'
 import { providerDecode, type MediaAccess } from './provider'
 import { extracted } from './documents'
@@ -16,6 +16,15 @@ import type { ProcessingLedgerStore } from '../processing/ledger'
 const safeName = (value: string): string => basename(value).replace(/[^a-zA-Z0-9._ -]/g, '_').slice(0, 180) || 'source.bin'
 const same = (a: Awaited<ReturnType<typeof stat>>, b: Awaited<ReturnType<typeof stat>>): boolean => a.isFile() && b.isFile() && a.dev === b.dev && a.ino === b.ino && a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs
 const clock = (seconds: number): string => `${String(Math.floor(seconds / 3600)).padStart(2, '0')}:${String(Math.floor(seconds % 3600 / 60)).padStart(2, '0')}:${String(Math.floor(seconds % 60)).padStart(2, '0')}`
+function pauseIntervals(value: string, offset: number): Array<{ start: number; end: number; duration: number }> {
+  const found: Array<{ start: number; end: number; duration: number }> = []; let end: number | undefined
+  for (const line of value.split(/\r?\n/)) {
+    const ended = line.match(/lavfi\.silence_end=([\d.]+)/); if (ended) end = Number(ended[1])
+    const duration = line.match(/lavfi\.silence_duration=([\d.]+)/)
+    if (duration && Number.isFinite(end)) { const seconds = Number(duration[1]); if (Number.isFinite(seconds) && seconds >= .3) found.push({ start: offset + Math.max(0, end! - seconds), end: offset + end!, duration: seconds }); end = undefined }
+  }
+  return found
+}
 
 async function copyOrHashStable(path: string, destination: string | null, signal: AbortSignal): Promise<{ bytes: number; sha256: string }> {
   // Open first, then validate the name against that descriptor. All bytes come
@@ -60,7 +69,7 @@ async function probe(path: string, ffmpeg: string, mime: string, signal: AbortSi
   return { duration, audio: Array.isArray(value.streams) && value.streams.some((stream: any) => stream.codec_type === 'audio') }
 }
 
-export function createMediaService(options: { file: string; sourceRoot?: string; processing?: ProcessingLedgerStore; onCancelled?(owner: number): void; onSource?(input: { sha256: string; name: string; mime: string; bytes: number; storage: 'in-place' | 'private-copy'; locator: string }): void; onProcessed?(sha256: string, processor: string, coverage: string, ok: boolean): void; access(): MediaAccess; decode?: typeof decodeInWorker; recognize?: typeof windowsRecognize; runCommand?: typeof runMediaCommand; fetchImpl?: typeof fetch }) {
+export function createMediaService(options: { file: string; sourceRoot?: string; processing?: ProcessingLedgerStore; onCancelled?(owner: number): void; onSource?(owner: number, input: { sha256: string; name: string; mime: string; bytes: number; storage: 'in-place' | 'private-copy'; locator: string; videoOcr: boolean }): void; onProcessed?(owner: number, sha256: string, processor: string, coverage: string, ok: boolean): void; access(): MediaAccess; decode?: typeof decodeInWorker; recognize?: typeof windowsRecognize; runCommand?: typeof runMediaCommand; fetchImpl?: typeof fetch }) {
   let preferences = { ...DEFAULT_MEDIA }
   try { preferences = readRecoverableJson(options.file, normalizeMedia, { ...DEFAULT_MEDIA }).value } catch { /* first use or unrecoverable owner file */ }
   const jobs = new Map<number, AbortController>(), recording = new Map<number, number>()
@@ -109,7 +118,7 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
       } catch (error) { try { await rm(temporary, { force: true }) } catch {}; throw error }
     } else identity = await copyOrHashStable(path, null, signal)
     const handle = randomUUID(), consequence = input.storage === 'private-copy' ? 'Verified private copy kept in app data and included in app-data backup; sending also retains a turn copy.' : 'Processed from its current location. Move/delete makes later reprocessing unavailable; sending retains a verified turn copy.'
-    options.onSource?.({ sha256: identity.sha256, name: input.name, mime: input.mime, bytes: identity.bytes, storage: input.storage, locator: usePath })
+    options.onSource?.(owner, { sha256: identity.sha256, name: input.name, mime: input.mime, bytes: identity.bytes, storage: input.storage, locator: usePath, videoOcr: input.videoOcr === true })
     let jobId: string | undefined
     if (options.processing) {
       const rangeLabel = input.range ? ` ${input.range.unit}:${input.range.start}-${input.range.end}` : ' complete-source'
@@ -123,7 +132,7 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
     handles.set(handle, { owner, path: usePath, name: input.name, mime: input.mime, bytes: identity.bytes, sha256: identity.sha256, storage: input.storage })
     return { path: usePath, source: { handle, sha256: identity.sha256, bytes: identity.bytes, storage: input.storage, consequence }, ...(jobId ? { jobId } : {}) }
   }
-  const decodeLocalPath = async (name: string, path: string, source: MediaSourceHandle, range: MediaRange | undefined, videoOcr: boolean, signal: AbortSignal): Promise<MediaResult> => {
+  const decodeLocalPath = async (name: string, path: string, source: MediaSourceHandle, range: MediaRange | undefined, videoOcr: boolean, videoFrameBudget: number, signal: AbortSignal): Promise<MediaResult> => {
     const sourceFile = await open(path, 'r'), head = Buffer.alloc(1024 * 1024)
     let read = 0, documentBytes: Buffer | null = null, format!: ReturnType<typeof mediaKind>
     try {
@@ -158,28 +167,39 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
     const selectedDuration = end - start, temp = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'oddbrain-media-'))
     try {
       const common = ['-hide_banner', '-loglevel', 'error', '-nostdin'], inputArgs = ['-max_alloc', '134217728', '-threads', '2', '-protocol_whitelist', 'file,pipe', ...(demuxer(format.mime) ? ['-f', demuxer(format.mime)!] : []), ...(format.mime === 'video/mp4' ? ['-enable_drefs', '0', '-use_absolute_path', '0'] : []), '-i', path]
-      const transcript: string[] = []; let recognizedWords = 0
-      if (details.audio) for (let offset = start; offset < end; offset += 600) {
-        const duration = Math.min(600, end - offset), wav = join(temp, `audio-${Math.floor(offset)}.wav`)
+      const transcript: string[] = [], transcriptSegments: NonNullable<MediaResult['segments']> = [], audioMap: MediaAudioWindow[] = []; let recognizedWords = 0
+      const transcriptInterval = 60
+      if (details.audio) for (let offset = start, index = 0; offset < end; offset += transcriptInterval, index++) {
+        const duration = Math.min(transcriptInterval, end - offset), wav = join(temp, `audio-${index}.wav`)
         await runCommand(prefs.ffmpeg || 'ffmpeg', [...common, '-ss', String(offset), ...inputArgs, '-t', String(duration), '-vn', '-ac', '1', '-ar', '16000', '-c:a', 'pcm_s16le', wav], signal, Math.max(90_000, duration * 2_000))
-        let text = ''
-        try { text = await recognize(prefs.language, signal, wav); recognizedWords += text.trim().split(/\s+/).filter(Boolean).length } catch (error) { if (!/No speech was recognized/.test((error as Error).message)) throw error; text = '[No speech recognized in this interval.]' }
-        transcript.push(`[${clock(offset)}–${clock(offset + duration)}] Speaker unassigned (this local recognizer does not diarize)\n${text}`); await rm(wav, { force: true })
+        let recognized = ''
+        try { recognized = (await recognize(prefs.language, signal, wav)).trim() } catch (error) { if (!/No speech was recognized/.test((error as Error).message)) throw error }
+        const words = recognized.split(/\s+/).filter(Boolean).length, shown = recognized || '[No speech recognized in this interval.]', label = `${clock(offset)}–${clock(offset + duration)} · speaker unassigned`
+        recognizedWords += words; transcript.push(`[${label}]\n${shown}`); transcriptSegments.push({ id: `transcript-${String(index + 1).padStart(4, '0')}`, label, text: shown })
+        audioMap.push({ start: offset, end: offset + duration, speaker: 'unassigned', words, paceWpm: duration ? words / duration * 60 : 0, pauseCount: 0, pauseSeconds: 0 })
+        await rm(wav, { force: true })
       }
       let acoustic = 'No audio stream was present.'
       if (details.audio) {
+        let rmsValues: number[] = []
         try {
-          const values = (await runCommand(prefs.ffmpeg || 'ffmpeg', [...common, '-ss', String(start), ...inputArgs, '-t', String(selectedDuration), '-vn', '-af', 'astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=pipe\\:1', '-f', 'null', '-'], signal, Math.max(90_000, selectedDuration * 500), 4_000_000)).toString().match(/lavfi\.astats\.Overall\.RMS_level=([-\d.]+)/g)?.map(row => Number(row.split('=')[1])).filter(Number.isFinite) || []
-          acoustic = values.length ? `Measured RMS level across ${values.length} windows: average ${(values.reduce((a,b)=>a+b,0)/values.length).toFixed(1)} dB, range ${Math.min(...values).toFixed(1)} to ${Math.max(...values).toFixed(1)} dB. This describes recorded level/dynamics, not emotion or intent.` : 'Audio was fully presented to the measurement pass, but no stable RMS values were returned.'
-        } catch { acoustic = 'Acoustic measurement did not finish; the transcript coverage below remains separate.' }
+          const rmsOutput = (await runCommand(prefs.ffmpeg || 'ffmpeg', [...common, '-ss', String(start), ...inputArgs, '-t', String(selectedDuration), '-vn', '-af', 'aresample=16000,asetnsamples=n=16000:p=1,astats=metadata=1:reset=1,ametadata=print:key=lavfi.astats.Overall.RMS_level:file=pipe\\:1', '-f', 'null', '-'], signal, Math.max(90_000, selectedDuration * 500), 4_000_000)).toString(), rmsTimeline = [...rmsOutput.matchAll(/lavfi\.astats\.Overall\.RMS_level=([^\r\n]+)/g)].map(match => { const value = Number(match[1]); return Number.isFinite(value) ? value : null })
+          rmsValues = rmsTimeline.filter((value): value is number => value !== null)
+          for (const window of audioMap) {
+            const first = Math.max(0, Math.floor(window.start - start)), last = Math.min(rmsTimeline.length, Math.ceil(window.end - start)), values = rmsTimeline.slice(first, last).filter((value): value is number => value !== null)
+            if (values.length) { window.rmsAverageDb = values.reduce((sum, value) => sum + value, 0) / values.length; window.rmsMinimumDb = Math.min(...values); window.rmsMaximumDb = Math.max(...values) }
+          }
+          acoustic = rmsValues.length ? `Measured one-second RMS windows across the complete selected audio: average ${(rmsValues.reduce((a,b)=>a+b,0)/rmsValues.length).toFixed(1)} dB, range ${Math.min(...rmsValues).toFixed(1)} to ${Math.max(...rmsValues).toFixed(1)} dB.` : 'Audio was fully presented to the measurement pass, but no stable RMS values were returned.'
+        } catch { acoustic = 'Acoustic measurement did not finish; transcript coverage remains separate.' }
         if (recognizedWords) acoustic += ` Overall recognized-word pace: ${(recognizedWords / selectedDuration * 60).toFixed(1)} words per minute across the selected duration, including pauses.`
         try {
-          const pauseMetadata = (await runCommand(prefs.ffmpeg || 'ffmpeg', [...common, '-ss', String(start), ...inputArgs, '-t', String(selectedDuration), '-vn', '-af', "silencedetect=noise=-35dB:d=0.3,ametadata=mode=print:file=pipe\\:1", '-f', 'null', '-'], signal, Math.max(90_000, selectedDuration * 500), 4_000_000)).toString('utf8')
-          const durations = [...pauseMetadata.matchAll(/lavfi\.silence_duration=([\d.]+)/g)].map(match => Number(match[1])).filter(value => Number.isFinite(value) && value >= .3)
-          if (durations.length) acoustic += ` Pause evidence below -35 dB: ${durations.length} interval(s), ${durations.reduce((sum, value) => sum + value, 0).toFixed(1)} seconds total, longest ${Math.max(...durations).toFixed(1)} seconds.`
+          const pauseMetadata = (await runCommand(prefs.ffmpeg || 'ffmpeg', [...common, '-ss', String(start), ...inputArgs, '-t', String(selectedDuration), '-vn', '-af', "silencedetect=noise=-35dB:d=0.3,ametadata=mode=print:file=pipe\\:1", '-f', 'null', '-'], signal, Math.max(90_000, selectedDuration * 500), 4_000_000)).toString('utf8'), pauses = pauseIntervals(pauseMetadata, start)
+          for (const window of audioMap) for (const pause of pauses) { const overlap = Math.max(0, Math.min(window.end, pause.end) - Math.max(window.start, pause.start)); if (overlap > 0) { window.pauseCount++; window.pauseSeconds += overlap } }
+          if (pauses.length) acoustic += ` Pause evidence below -35 dB: ${pauses.length} interval(s), ${pauses.reduce((sum, value) => sum + value.duration, 0).toFixed(1)} seconds total, longest ${Math.max(...pauses.map(value => value.duration)).toFixed(1)} seconds.`
           else acoustic += ' No pause interval of at least 0.3 seconds was returned below the fixed -35 dB threshold.'
         } catch { acoustic += ' Pause measurement did not finish.' }
-        acoustic += ' These level, pace and pause measurements support delivery analysis but do not establish speaker identity, emotion, intent or pitch contour.'
+        acoustic += ' Interval measurements support delivery, pacing and emphasis analysis but do not establish speaker identity, emotion, intent or pitch contour.'
+        transcriptSegments.unshift({ id: 'audio-delivery-summary', label: 'Complete audio delivery measurements', text: acoustic })
       }
       const images: NonNullable<MediaResult['images']> = [], visualEvidence: NonNullable<MediaResult['visualEvidence']> = []
       let sceneMap: NonNullable<MediaResult['sceneMap']> = []
@@ -188,12 +208,12 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
         try {
           // A low-resolution local pass scores visual changes. It processes the
           // stream deterministically; no frame is uploaded or treated as model
-          // context. The three evidence frames are chosen from this map.
+          // context. The bounded adaptive retained frames are chosen from this map.
           const metadata = await runCommand(prefs.ffmpeg || 'ffmpeg', [...common, '-ss', String(start), ...inputArgs, '-t', String(selectedDuration), '-an', '-vf', "fps=2,scale=320:-2,select='gt(scene,0.12)',metadata=print:file=pipe\\:1", '-f', 'null', '-'], signal, Math.max(90_000, selectedDuration * 250), 4_000_000)
           scenes = parseSceneMetadata(metadata.toString('utf8')).map(item => ({ ...item, at: item.at + start }))
         } catch { scenes = [] }
         sceneMap = scenes.slice(0, 10_000)
-        const wanted = Math.min(3, Math.max(1, Math.ceil(selectedDuration / 300)))
+        const wanted = Math.min(videoFrameBudget, Math.max(1, Math.ceil(selectedDuration / 120)))
         const planned = adaptiveFramePoints(selectedDuration, scenes.map(item => ({ at: item.at - start, score: item.score })), wanted)
         let adapterIdentity: { bytes: number; sha256: string } | null = null
         if (videoOcr) {
@@ -224,11 +244,12 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
       const coverage = range ? `${clock(start)}–${clock(end)} of ${clock(details.duration)}` : `the complete ${clock(details.duration)} duration`
       const visualText = visualEvidence.length ? `\n\nAdaptive visual evidence:\n${visualEvidence.map(item => `[${clock(item.at)}] ${item.reason === 'scene-change' ? `scene change score ${item.score.toFixed(3)}` : 'overview'}${item.ocr ? `\nOn-screen text from configured OCR-2 (unconfirmed): ${item.ocr}` : ''}`).join('\n')}` : ''
       const timelineText = `${format.kind === 'video' ? 'Video' : 'Audio'} coverage: ${coverage}.\n${acoustic}\n\n${transcript.join('\n\n')}${visualText}`
-      const disclosure = `Local full-duration timeline for ${coverage}; ${transcript.length ? 'timestamped speech text was returned for the processed audio intervals, with speaker left unassigned because the current local recognizer does not diarize' : 'no timestamped speech text was returned, so visual evidence remains separate from any unheard words'}. A local scene-change pass planned ${images.length} adaptive visual evidence frame(s); they are samples, not frame-by-frame AI interpretation.${videoOcr ? ' The existing reviewed DeepSeek-OCR-2 adapter read only those selected frames; its derived text remains unconfirmed.' : ''}`
-      const result = extracted(name, timelineText, disclosure)
+      if (!transcriptSegments.length) transcriptSegments.push({ id: 'media-overview', label: `Complete ${format.kind} overview`, text: `${format.kind === 'video' ? 'No recognized speech was available. ' : ''}${acoustic}${visualText}`.trim() })
+      const disclosure = `Local full-duration timeline for ${coverage}; ${transcript.length ? `speech was divided into complete ${transcriptInterval}-second-or-shorter timestamp intervals, with speaker left unassigned because the current local recognizer does not diarize` : 'no timestamped speech text was returned, so visual evidence remains separate from any unheard words'}. One-second signal measurements were aggregated into the same intervals. A two-frame-per-second local scene-change pass planned ${images.length} initial visual evidence frame(s); they are samples, not continuous model vision. The AI can inspect retained frames and retrieve new question-driven timestamps without loading the whole video into model context.${videoOcr ? ' The existing reviewed DeepSeek-OCR-2 adapter read only the owner-approved selected frames; its derived text remains unconfirmed.' : ''}`
+      const result: MediaResult = { ok: true, name, textComplete: true, ...(timelineText.length <= 12_000 ? { text: timelineText } : {}), segments: transcriptSegments, disclosure }
       const confirmed = await copyOrHashStable(path, null, signal)
       if (confirmed.bytes !== source.bytes || confirmed.sha256 !== source.sha256) throw Error('The selected source changed during media processing. No result was kept.')
-      return { ...result, images, visualEvidence, sceneMap, time: { read: selectedDuration, total: details.duration, unit: 'seconds' }, textComplete: !range || start === 0 && end === details.duration, source }
+      return { ...result, images, visualEvidence, sceneMap, audioMap, time: { read: selectedDuration, total: details.duration, unit: 'seconds' }, textComplete: !range || start === 0 && end === details.duration, source }
     } finally { await rm(temp, { recursive: true, force: true }) }
   }
   const extractEvidence = async (path: string, moments: number[], videoOcr = false, externalSignal?: AbortSignal): Promise<{ sha256: string; duration: number; images: NonNullable<MediaResult['images']>; audio: Array<{ at: number; mime: string; data: string }>; visualEvidence: NonNullable<MediaResult['visualEvidence']> }> => {
@@ -322,7 +343,7 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
       if (!result.ok) throw Error(result.error || 'Decoding failed.'); return result
     }),
     decodeFile: (owner: number, path: string, input: MediaFileInput): Promise<MediaResult> => job(owner, typeof input?.name === 'string' ? input.name.slice(0, 200) : 'Attachment', async signal => {
-      if (!input || typeof path !== 'string' || !path || typeof input.name !== 'string' || !input.name || input.name !== basename(input.name) || /[\x00-\x1f]/.test(input.name) || input.name.length > 240 || !Number.isSafeInteger(input.size) || input.size < 1 || !['local','provider','transcribe','ocr'].includes(input.route) || !['in-place','private-copy'].includes(input.storage) || (input.videoOcr !== undefined && typeof input.videoOcr !== 'boolean')) throw Error('The selected-file request is invalid.')
+      if (!input || typeof path !== 'string' || !path || typeof input.name !== 'string' || !input.name || input.name !== basename(input.name) || /[\x00-\x1f]/.test(input.name) || input.name.length > 240 || !Number.isSafeInteger(input.size) || input.size < 1 || !['local','provider','transcribe','ocr'].includes(input.route) || !['in-place','private-copy'].includes(input.storage) || (input.videoOcr !== undefined && typeof input.videoOcr !== 'boolean') || (input.videoFrameBudget !== undefined && (!Number.isInteger(input.videoFrameBudget) || input.videoFrameBudget < 1 || input.videoFrameBudget > 12))) throw Error('The selected-file request is invalid.')
       if (input.range && (!Number.isFinite(input.range.start) || !Number.isFinite(input.range.end) || input.range.start < 0 || input.range.end < input.range.start || (input.range.unit === 'seconds' && input.range.end === input.range.start) || !['pages','seconds'].includes(input.range.unit))) throw Error('Choose a valid page or time range.')
       recording.delete(owner)
       const staged = await stage(owner, path, input, signal), processor = input.route === 'local' ? 'local-media/document' : input.route === 'ocr' ? `local:${preferences.ocrAdapterLabel || 'DeepSeek-OCR-2 adapter'}` : `${input.route}:${input.expected?.provider || 'unselected'}/${input.expected?.model || 'unselected'}`
@@ -353,17 +374,17 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
           if (staged.source.bytes > providerLimit) throw Error(`The selected ${input.route === 'transcribe' ? 'transcription' : 'file'} provider adapter accepts at most ${providerLimit.toLocaleString()} bytes per upload. Nothing was uploaded; local processing and manual external handoff remain available.`)
           const bytes = await readFile(staged.path)
           result = { ...(await providerDecode({ name: input.name, mime: input.mime, bytes, route: input.route, expected: input.expected }, { ...preferences }, options.access(), signal, options.fetchImpl)), source: staged.source }
-        } else result = await decodeLocalPath(input.name, staged.path, staged.source, input.range, input.videoOcr === true, signal)
+        } else result = await decodeLocalPath(input.name, staged.path, staged.source, input.range, input.videoOcr === true, input.videoFrameBudget || 3, signal)
         const coverage = result.disclosure || 'Processor returned usable output without a coverage note.'
         if (staged.jobId && options.processing && claimedStart !== null) {
           options.processing.finish(staged.jobId, claimedStart, { state: 'done', output: coverage, usage: input.route === 'local' || input.route === 'ocr' ? { localSeconds: Math.max(1, (Date.now() - startedAt) / 1000) } : {} })
         }
-        options.onProcessed?.(staged.source.sha256, processor, coverage, true)
+        options.onProcessed?.(owner, staged.source.sha256, processor, coverage, true)
         return result
       } catch (error) {
         handles.delete(staged.source.handle)
         if (staged.jobId && options.processing && claimedStart !== null) try { options.processing.finish(staged.jobId, claimedStart, { state: 'blocked', error: (error as Error).message, usage: input.route === 'local' || input.route === 'ocr' ? { localSeconds: Math.max(0, (Date.now() - startedAt) / 1000) } : {} }) } catch {}
-        options.onProcessed?.(staged.source.sha256, processor, (error as Error).message, false); throw error
+        options.onProcessed?.(owner, staged.source.sha256, processor, (error as Error).message, false); throw error
       }
     }),
   }

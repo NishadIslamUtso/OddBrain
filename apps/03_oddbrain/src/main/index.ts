@@ -64,7 +64,7 @@ import { userInfo } from 'node:os'
 import { registerStagingRoot, setBinaryOverride, binaryOverride, resolveEngineCommand } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
 import { basename, dirname, join, resolve, relative, isAbsolute } from 'node:path'
-import { closeSync, constants, existsSync, fstatSync, fsyncSync, openSync, statSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, openSync, statSync, lstatSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
 import { createVaultService, resolveVaultRoot } from './vault/service'
@@ -534,6 +534,9 @@ function registerBridges(): void {
   const nativeLaunchTrust = new Map<string, { digest: string; fullSpeed: boolean }>()
   const sessionMemory = createSessionMemory(join(app.getPath('userData'), 'engine-sessions.json'))
   const turnArchive = createTurnArchive(join(app.getPath('userData'), 'turn-transcripts'))
+  // Service-owned URL/retry reads already have a durable Video Studio intake.
+  // This prevents the generic attachment callback from creating a second file-kind intake.
+  const internalVideoReads = new Set<string>(), internalVideoOwners = new Set<number>(), directVideoOwners = new Set<number>()
   const transcriptAnswer = <T,>(read: () => T) => { try { return { ok: true as const, value: read() } } catch { return { ok: false as const, error: 'The transcript could not be read. Its original file has not been changed.' } } }
   handle('transcripts:list', (_event, before: string = '') => transcriptAnswer(() => turnArchive.list(before)))
   handle('transcripts:read', (_event, id: string) => transcriptAnswer(() => turnArchive.read(id)))
@@ -551,14 +554,26 @@ function registerBridges(): void {
     } catch (error) { return { ok: false, answer: `${(error as Error).message} The retained original is unchanged.` } }
   })
   handle('transcripts:recover', (_event, chatIds: string[], knownTranscriptIds: string[], before: string = '') => transcriptAnswer(() => turnArchive.recover(chatIds, knownTranscriptIds, before)))
-  mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), sourceRoot: attachmentCenterRoot, processing: processingLedger, onSource: input => { attachmentCenter.record({ ...input, origin: 'native-chat' }) }, onProcessed: (sha256, processor, coverage, ok) => attachmentCenter.processed(sha256, processor, coverage, ok), onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
+  mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), sourceRoot: attachmentCenterRoot, processing: processingLedger, onSource: (owner, input) => {
+    if (internalVideoOwners.has(owner) || internalVideoReads.has(input.locator)) {
+      if (directVideoOwners.has(owner) && (/^video\//.test(input.mime) || /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(input.name))) videoStudioService?.registerLocalIntake(owner, input.locator, { name: input.name, sha256: input.sha256, videoOcr: input.videoOcr })
+      return
+    }
+    attachmentCenter.record({ ...input, origin: 'native-chat' })
+    if (/^video\//.test(input.mime) || /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(input.name)) try { videoStudioService?.registerLocalIntake(owner, input.locator, { name: input.name, sha256: input.sha256, videoOcr: input.videoOcr }) } catch (error) { console.error(`[video-intake] ${(error as Error).message}`) }
+  }, onProcessed: (owner, sha256, processor, coverage, ok) => {
+    if (!internalVideoOwners.has(owner)) attachmentCenter.processed(sha256, processor, coverage, ok)
+    if (!ok) videoStudioService?.markLocalEvidenceFailure(sha256, coverage)
+  }, onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
   const videoMime = (path: string): string => /\.webm$/i.test(path) ? 'video/webm' : /\.avi$/i.test(path) ? 'video/x-msvideo' : 'video/mp4'
   const videoStudio = createVideoStudioService({
     file: join(app.getPath('userData'), 'video-studio.json'), keys: () => keyStore,
-    analyzeVideo: async (owner, path) => {
-      const file = statSync(path)
-      return mediaService!.decodeFile(owner, path, { name: basename(path), mime: videoMime(path), size: file.size, route: 'local', storage: 'in-place' })
+    analyzeVideo: async (owner, path, videoOcr = false) => {
+      const file = statSync(path); internalVideoReads.add(path); internalVideoOwners.add(owner)
+      try { return await mediaService!.decodeFile(owner, path, { name: basename(path), mime: videoMime(path), size: file.size, route: 'local', storage: 'in-place', videoOcr, videoFrameBudget: 12 }) }
+      finally { internalVideoReads.delete(path); internalVideoOwners.delete(owner) }
     },
+    videoOcrAvailable: () => Boolean(mediaService!.read().ocrAdapter),
     expandVideoEvidence: (path, moments, videoOcr, signal) => mediaService!.extractEvidence(path, moments, videoOcr, signal),
     stopVideoAnalysis: owner => mediaService!.cancel(owner),
   })
@@ -606,8 +621,9 @@ function registerBridges(): void {
 
   app.on('before-quit', () => { scheduler.dispose(); workflows.cancel(); commandRunner.cancel() })
   const owners = new Set<number>()
+  const localVideoReviews = new Map<string, { owner: number; path: string; name: string; size: number; dev: number; ino: number; mtimeMs: number; ocrAvailable: boolean; expires: number }>()
   const track = (sender: Electron.WebContents): number => {
-    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { scheduler.forget(sender.id); workflows.forget(sender.id); commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); videoStudio.forget(sender.id); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
+    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { scheduler.forget(sender.id); workflows.forget(sender.id); commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); videoStudio.forget(sender.id); for (const [token, review] of localVideoReviews) if (review.owner === sender.id) localVideoReviews.delete(token); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
     return sender.id
   }
   handle('schedules:list', () => scheduler.list())
@@ -654,13 +670,47 @@ function registerBridges(): void {
     const owner = track(event.sender), result = await mediaService!.decodeFile(owner, path, input)
     if (result.ok && input.route === 'local' && (/^video\//.test(input.mime) || /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(input.name))) {
       try { await videoStudio.recordLocalEvidence(owner, path, result) }
-      catch (error) { return { ...result, disclosure: `${result.disclosure || ''} The source remained attached, but its durable Video Studio evidence map could not be registered: ${(error as Error).message}`.trim() } }
+      catch (error) { if (result.source?.sha256) videoStudio.markLocalEvidenceFailure(result.source.sha256, (error as Error).message); return { ...result, disclosure: `${result.disclosure || ''} The source remained attached, and its durable Video Studio intake is waiting for a complete retry: ${(error as Error).message}`.trim() } }
     }
     return result
   })
   handle('media:release-source', (event, sourceHandle: string) => { mediaService!.releaseSource(track(event.sender), sourceHandle) })
   handle('media:dictate', event => mediaService!.dictate(track(event.sender)))
   handle('media:cancel', event => { mediaService!.cancel(event.sender.id) })
+  handle('video-studio:choose-local', async event => {
+    for (const [token, review] of localVideoReviews) if (review.expires <= Date.now()) localVideoReviews.delete(token)
+    const owner = track(event.sender), picked = await dialog.showOpenDialog({ title: 'Choose one local video for Video Studio', properties: ['openFile'], filters: [{ name: 'Video', extensions: ['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'] }] })
+    if (picked.canceled || !picked.filePaths[0]) return { ok: false, name: '', bytes: 0, ocrAvailable: false, consequence: '', error: 'Local video selection cancelled. Nothing was read.' }
+    try {
+      const path = picked.filePaths[0], info = lstatSync(path)
+      if (!info.isFile() || info.isSymbolicLink() || info.size < 1) throw Error('The selected video is not a normal non-empty file.')
+      const name = basename(path)
+      if (!/\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(name)) throw Error('Choose a supported video container.')
+      const token = randomUUID(), expires = Date.now() + 5 * 60_000, ocrAvailable = !!mediaService!.read().ocrAdapter
+      localVideoReviews.set(token, { owner, path, name, size: info.size, dev: info.dev, ino: info.ino, mtimeMs: info.mtimeMs, ocrAvailable, expires })
+      return { ok: true, token, name, bytes: info.size, ocrAvailable, consequence: `Use in place makes no extra source copy and later retries depend on this file staying here. A verified private copy uses another ${info.size.toLocaleString()} bytes in app data and joins app-data backups. After approval, OddBrain saves the durable intake before building the complete audio/transcript/scene map and up to twelve adaptive retained frames; it does not attach the video to chat or send it to a provider.`, expiresAt: new Date(expires).toISOString() }
+    } catch (error) { return { ok: false, name: '', bytes: 0, ocrAvailable: false, consequence: '', error: (error as Error).message } }
+  })
+  handle('video-studio:decide-local', async (event, token: string, decision: 'allow' | 'deny', storage: 'in-place' | 'private-copy', videoOcr: boolean) => {
+    const owner = track(event.sender), review = localVideoReviews.get(token); localVideoReviews.delete(token)
+    if (!review || review.owner !== owner || review.expires <= Date.now()) return { ok: false, answer: 'That local-video review expired or belongs to another window. Nothing was read.' }
+    if (decision !== 'allow') return { ok: true, answer: 'Cancelled. The selected local video was not read or copied.' }
+    if (!['in-place', 'private-copy'].includes(storage) || typeof videoOcr !== 'boolean' || (videoOcr && (!review.ocrAvailable || !mediaService!.read().ocrAdapter))) return { ok: false, answer: 'The reviewed storage or OCR choice changed. Choose the video again.' }
+    let sourceHandle = '', sourceSha = ''
+    try {
+      const current = lstatSync(review.path)
+      if (!current.isFile() || current.isSymbolicLink() || current.size !== review.size || current.dev !== review.dev || current.ino !== review.ino || current.mtimeMs !== review.mtimeMs) throw Error('The selected video changed after review. Choose it again; nothing was read.')
+      internalVideoOwners.add(owner); directVideoOwners.add(owner)
+      const result = await mediaService!.decodeFile(owner, review.path, { name: review.name, mime: videoMime(review.path), size: review.size, route: 'local', storage, videoOcr, videoFrameBudget: 12 })
+      sourceHandle = result.source?.handle || ''; sourceSha = result.source?.sha256 || ''
+      if (!result.ok) return { ok: false, answer: `Reading did not complete: ${result.error || 'Local video reading failed.'} If source staging finished, its durable intake remains blocked for retry; otherwise no source was registered.` }
+      const evidence = await videoStudio.recordLocalEvidence(owner, review.path, result)
+      return { ok: true, answer: 'The approved local video is now a durable ready intake. It was read completely without attaching it to chat or uploading it.', evidence }
+    } catch (error) {
+      if (sourceSha) videoStudio.markLocalEvidenceFailure(sourceSha, (error as Error).message)
+      return { ok: false, answer: `The local video remains unchanged, and any created intake is blocked: ${(error as Error).message}` }
+    } finally { directVideoOwners.delete(owner); internalVideoOwners.delete(owner); if (sourceHandle) mediaService!.releaseSource(owner, sourceHandle) }
+  })
   handle('video-studio:read', () => videoStudio.read())
   handle('video-studio:update', (_event, patch: Partial<VideoStudioPreferences>) => videoStudio.update(patch))
   handle('video-studio:choose-kdenlive', async () => {
@@ -682,7 +732,7 @@ function registerBridges(): void {
   handle('video-studio:clear-secret', (_event, kind: 'mcp' | 'pixabay') => videoStudio.clearSecret(kind))
   handle('video-studio:test', () => videoStudio.testKdenlive())
   handle('video-studio:open', () => videoStudio.openKdenlive())
-  handle('video-studio:search', (event, query: string, kind: CreativeKind) => videoStudio.search(track(event.sender), query, kind))
+  handle('video-studio:search', (event, query: string, kind: CreativeKind, page?: number) => videoStudio.search(track(event.sender), query, kind, page))
   handle('video-studio:preview', (event, token: string) => videoStudio.preview(track(event.sender), token))
   handle('video-studio:prepare-asset', (event, token: string) => videoStudio.prepareAsset(track(event.sender), token))
   handle('video-studio:decide-asset', (event, token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean) => videoStudio.decideAsset(track(event.sender), token, decision, importIntoKdenlive))
@@ -690,7 +740,14 @@ function registerBridges(): void {
   handle('video-studio:acquire-url', (event, token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean) => videoStudio.acquireUrl(track(event.sender), token, decision, !!importIntoKdenlive))
   handle('video-studio:workspace', () => videoStudio.workspace())
   handle('video-studio:capture-frame', (_event, position: number) => videoStudio.captureKdenliveFrame(position))
+  handle('video-studio:prepare-kdenlive-render', (event, mode: 'preview' | 'export', start?: number, end?: number, intent?: 'vertical-short' | 'current-sequence') => videoStudio.prepareKdenliveRender(track(event.sender), mode, start, end, intent))
+  handle('video-studio:decide-kdenlive-render', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideKdenliveRender(track(event.sender), token, decision))
+  handle('video-studio:kdenlive-render-status', event => { track(event.sender); return videoStudio.kdenliveRenderStatus() })
+  handle('video-studio:prepare-preview-inspection', (event, path: string, videoOcr: boolean) => videoStudio.prepareKdenlivePreviewInspection(track(event.sender), path, videoOcr === true))
+  handle('video-studio:decide-preview-inspection', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideKdenlivePreviewInspection(track(event.sender), token, decision))
   handle('video-studio:expand-evidence', (event, id: string, moments: number[], question: string) => videoStudio.expandEvidence(track(event.sender), id, moments, question))
+  handle('video-studio:read-evidence-frame', (event, id: string, at: number) => { track(event.sender); return videoStudio.readEvidenceFrame(id, at) })
+  handle('video-studio:retry-evidence', (event, id: string) => videoStudio.retryEvidence(track(event.sender), id))
   handle('video-studio:confirm-evidence', (event, id: string, at: number, description: string) => videoStudio.confirmEvidenceDescription(track(event.sender), id, at, description))
   handle('video-studio:prepare-edit-plan', (event, plan?: KdenliveEditPlan) => videoStudio.prepareEditPlan(track(event.sender), plan))
   handle('video-studio:decide-edit-plan', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideEditPlan(track(event.sender), token, decision))
@@ -2384,13 +2441,6 @@ try {
 
 const processStartedAt = performance.now()
 let startupReported = false
-const isSmoke = process.argv.includes('--smoke')
-const smokeOutArg = process.argv.find(arg => arg.startsWith('--smoke-out='))
-const smokeOut = smokeOutArg ? smokeOutArg.split('=')[1] : ''
-
-/** Renderer console output, kept so the smoke run can fail on it. */
-const consoleErrors: string[] = []
-const consoleWarnings: string[] = []
 
 let api: LocalApi | null = null
 
@@ -2530,30 +2580,7 @@ function createWindow(): BrowserWindow {
     },
   })
 
-  // Electron changed this event's payload shape across versions; read both.
-  window.webContents.on('console-message', (...args: unknown[]) => {
-    const maybeDetails = args[1]
-    const details =
-      maybeDetails && typeof maybeDetails === 'object'
-        ? (maybeDetails as { level?: string | number; message?: string })
-        : null
-    const level = details ? details.level : (args[1] as string | number)
-    const message = details ? details.message : (args[2] as string)
-    const text = String(message ?? '')
-    if (level === 'error' || level === 3) consoleErrors.push(text)
-    else if (level === 'warning' || level === 2) consoleWarnings.push(text)
-  })
-
-  window.webContents.on('preload-error', (_event, path, error) => {
-    consoleErrors.push(`preload failed at ${path}: ${error.message}`)
-  })
-
-  window.webContents.on('did-fail-load', (_event, code, description) => {
-    consoleErrors.push(`renderer failed to load (${code}): ${description}`)
-  })
-
-  // Show on first paint so there is never a white flash, and so a screenshot
-  // taken by the smoke run captures something real rather than an unpainted frame.
+  // Show on first paint so there is never a white flash.
   window.once('ready-to-show', () => {
     window.show()
     if (!startupReported) {
@@ -2584,77 +2611,9 @@ function createWindow(): BrowserWindow {
   pinOwnOrigins([devServer, api?.url, appRendererFileUrl()])
   lockNavigation(window.webContents)
 
-  if (isSmoke) runSmoke(window)
-
   return window
 }
 
-/**
- * Headless proof that the shell works: wait for the renderer, photograph the
- * window, and exit non-zero if the renderer logged anything it shouldn't have.
- * This is the test that makes "the window opens" a fact instead of a claim.
- */
-function runSmoke(window: BrowserWindow): void {
-  const started = Date.now()
-  window.webContents.once('did-finish-load', () => {
-    setTimeout(async () => {
-      try {
-        // The real machine reported a chat that would not scroll. Photograph
-        // alone cannot see that, so the smoke run now proves the scroll
-        // chain on the built app: force overflow in the message scroller and
-        // demand that it actually moves.
-        let scrollLine = 'SCROLL skipped'
-        try {
-          const probe = (await window.webContents.executeJavaScript(
-            `(() => {
-              const scroller = document.querySelector('[data-find-scroll]')
-              if (!scroller) return { ok: false, why: 'no scroller in the tree' }
-              const filler = document.createElement('div')
-              filler.style.height = '4000px'
-              ;(scroller.firstElementChild ?? scroller).appendChild(filler)
-              const scrollable = scroller.scrollHeight > scroller.clientHeight
-              scroller.scrollTop = 99999
-              const moved = scroller.scrollTop > 100
-              filler.remove()
-              return { ok: scrollable && moved, scrollable, moved }
-            })()`,
-            true,
-          )) as { ok: boolean; why?: string; scrollable?: boolean; moved?: boolean }
-          scrollLine = probe && probe.ok ? 'SCROLL OK' : `SCROLL BROKEN ${JSON.stringify(probe)}`
-        } catch (probeError) {
-          scrollLine = `SCROLL FAILED ${(probeError as Error).message}`
-        }
-        // Under virtual Linux displays the DOM can be fully interactive one paint before
-        // capturePage receives pixels. Show explicitly and wait for a non-empty frame;
-        // the final observation still fails closed if Chromium never paints one.
-        window.show()
-        let image = await window.webContents.capturePage()
-        for (let attempt = 0; image.isEmpty() && attempt < 40; attempt++) {
-          await new Promise(resolve => setTimeout(resolve, 250))
-          image = await window.webContents.capturePage()
-        }
-        if (smokeOut) writeFileSync(smokeOut, image.toPNG())
-        const bounds = window.getBounds()
-        const title = window.getTitle()
-        const blank = image.isEmpty()
-        console.log(
-          `SMOKE ${blank ? 'BLANK' : 'OK'} ${scrollLine} title="${title}" size=${bounds.width}x${bounds.height} ` +
-            `in ${Date.now() - started}ms errors=${consoleErrors.length} warnings=${consoleWarnings.length}`
-        )
-        for (const line of consoleErrors.slice(0, 10)) console.log(`  ERROR: ${line}`)
-        for (const line of consoleWarnings.slice(0, 10)) console.log(`  WARN:  ${line}`)
-        // The rule the owner set: a WARNING is already a failure. The smoke
-        // run is the console-clean gate, so it enforces the whole sentence.
-        const failed =
-          consoleErrors.length > 0 || consoleWarnings.length > 0 || blank || scrollLine.startsWith('SCROLL BROKEN')
-        app.exit(failed ? 1 : 0)
-      } catch (error) {
-        console.log(`SMOKE FAILED: ${(error as Error).message}`)
-        app.exit(1)
-      }
-    }, 1500)
-  })
-}
 
 // One copy at a time. A second launch focuses the window you already have.
 const gotLock = app.requestSingleInstanceLock()

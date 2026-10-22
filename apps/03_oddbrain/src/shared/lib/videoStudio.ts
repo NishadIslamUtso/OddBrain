@@ -63,7 +63,7 @@ export type KdenliveProjectSnapshot = {
   sessionId: string
   revision: number
   modified: boolean
-  profile: { width: number; height: number; description: string }
+  profile: { width: number; height: number; description: string; duration?: number; fps?: number }
   undo: { index: number; canUndo: boolean; canRedo: boolean; undoText: string; redoText: string }
   counts: Record<string, number>
 }
@@ -97,6 +97,7 @@ export type CreativeAsset = {
   width?: number
   height?: number
   duration?: number
+  mediaType?: string
   previewAvailable: boolean
 }
 
@@ -105,6 +106,8 @@ export type CreativeSearchAnswer = {
   assets: CreativeAsset[]
   problems: string[]
   notice: string
+  page?: number
+  hasMore?: boolean
 }
 
 export type CreativePreview = {
@@ -130,6 +133,7 @@ export type AssetInstallAnswer = {
   answer: string
   path?: string
   imported?: boolean
+  binId?: string
   receipt?: string
 }
 
@@ -170,9 +174,24 @@ export type VideoEvidenceSummary = {
   createdAt: string
   transcriptSections: number
   sceneChanges: number
+  audioWindows?: number
   moments: VideoEvidenceMoment[]
   disclosure: string
   status: 'processing' | 'ready' | 'blocked'
+  /** Number of local reading attempts. Interrupted attempts reopen as blocked, never as silently resumed work. */
+  attempts?: number
+  updatedAt?: string
+  error?: string
+}
+
+export type LocalVideoIntakeReview = {
+  ok: boolean
+  token?: string
+  name: string
+  bytes: number
+  ocrAvailable: boolean
+  consequence: string
+  expiresAt?: string
   error?: string
 }
 
@@ -183,6 +202,7 @@ export type VideoUrlAcquireAnswer = {
   sourceUrl?: string
   receipt?: string
   imported?: boolean
+  binId?: string
   evidence?: VideoEvidenceSummary
 }
 
@@ -219,7 +239,14 @@ export type VideoStudioWorkspace = {
   notice: string
 }
 export type EvidenceExpansion = { ok: boolean; evidence?: VideoEvidenceSummary; moments?: VideoEvidenceMoment[]; images?: Array<{ at: number; mime: string; data: string }>; audio?: Array<{ at: number; mime: string; data: string }>; answer: string }
+export type VideoEvidenceFrame = { ok: boolean; sourceId: string; at: number; mime?: string; data?: string; error?: string }
 export type KdenliveFrameCapture = { ok: boolean; position: number; mime?: string; data?: string; error?: string }
+export type KdenliveRenderMode = 'preview' | 'export'
+export type KdenliveOutputIntent = 'vertical-short' | 'current-sequence'
+export type KdenliveRenderReview = { ok: boolean; token?: string; mode?: KdenliveRenderMode; intent?: KdenliveOutputIntent; destination?: string; range?: { start: number; end: number }; profile?: { width: number; height: number; fps?: number; durationSeconds?: number }; consequence?: string; expiresAt?: string; error?: string }
+export type KdenliveRenderJob = { path: string; mode: KdenliveRenderMode; range?: { start: number; end: number }; status: string; progress?: number; error?: string; startedAt?: string; verification?: Record<string, unknown> }
+export type KdenliveRenderStatus = { ok: boolean; jobs: KdenliveRenderJob[]; answer: string }
+export type KdenlivePreviewInspectionReview = { ok: boolean; token?: string; path?: string; consequence?: string; expiresAt?: string; error?: string }
 
 export type KdenliveToolReview = {
   ok: boolean
@@ -244,15 +271,24 @@ export type VideoStudioBridge = {
   clearSecret(kind: 'mcp' | 'pixabay'): Promise<VideoStudioView>
   testKdenlive(): Promise<VideoStudioView>
   openKdenlive(): Promise<{ ok: boolean; answer: string }>
-  search(query: string, kind: CreativeKind): Promise<CreativeSearchAnswer>
+  search(query: string, kind: CreativeKind, page?: number): Promise<CreativeSearchAnswer>
   preview(token: string): Promise<CreativePreview>
   prepareAsset(token: string): Promise<AssetReview>
   decideAsset(token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean): Promise<AssetInstallAnswer>
+  chooseLocalVideo(): Promise<LocalVideoIntakeReview>
+  decideLocalVideo(token: string, decision: 'allow' | 'deny', storage: 'in-place' | 'private-copy', videoOcr: boolean): Promise<{ ok: boolean; answer: string; evidence?: VideoEvidenceSummary }>
   preflightUrl(url: string): Promise<VideoUrlPreflight>
   acquireUrl(token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean): Promise<VideoUrlAcquireAnswer>
   workspace(): Promise<VideoStudioWorkspace>
   captureKdenliveFrame(position: number): Promise<KdenliveFrameCapture>
+  prepareKdenliveRender(mode: KdenliveRenderMode, start?: number, end?: number, intent?: KdenliveOutputIntent): Promise<KdenliveRenderReview>
+  decideKdenliveRender(token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string }>
+  kdenliveRenderStatus(): Promise<KdenliveRenderStatus>
+  prepareKdenlivePreviewInspection(path: string, videoOcr: boolean): Promise<KdenlivePreviewInspectionReview>
+  decideKdenlivePreviewInspection(token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string; evidence?: VideoEvidenceSummary }>
   expandEvidence(id: string, moments: number[], question: string): Promise<EvidenceExpansion>
+  readEvidenceFrame(id: string, at: number): Promise<VideoEvidenceFrame>
+  retryEvidence(id: string): Promise<{ ok: boolean; answer: string; evidence?: VideoEvidenceSummary }>
   confirmEvidenceDescription(id: string, at: number, description: string): Promise<{ ok: boolean; answer: string }>
   prepareEditPlan(plan?: KdenliveEditPlan): Promise<KdenlivePlanReview>
   decideEditPlan(token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string; project?: Omit<KdenliveProjectSnapshot, 'sessionId'> }>

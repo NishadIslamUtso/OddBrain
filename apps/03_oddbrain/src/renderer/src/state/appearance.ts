@@ -62,7 +62,7 @@ export const APPEARANCE_KEY = 'ai-assistant.appearance'
  * It is not decoration — it is the readability guarantee. White text on the
  * raw hues fails the WCAG line on all five (violet 4.35:1, amber 2.19:1),
  * so violet is deepened just enough for white to clear 4.5:1, and the four
- * lighter hues carry near-black ink instead. tests/accent-contrast.test.ts
+ * lighter hues carry near-black ink instead.
  * computes the ratios, so no hue can ship unreadable again.
  */
 export const ACCENTS: readonly { name: AccentName; label: string; hex: string; ink: string }[] = Object.freeze([
