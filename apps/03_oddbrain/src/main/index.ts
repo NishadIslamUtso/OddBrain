@@ -46,7 +46,7 @@ import { createVideoStudioService } from './video/service'
 import { createMarketplaceService } from './engine/marketplace'
 import { createAgyMarketplaceService } from './engine/agyMarketplace'
 import type { MediaFileInput, MediaInput, MediaPreferences } from '../shared/lib/mediaBridge'
-import type { CreativeKind, DesignKitFormat, KdenliveEditPlan, VideoStudioPreferences } from '../shared/lib/videoStudio'
+import type { CreativeKind, CreativeUse, DesignKitFormat, KdenliveAudioIntent, KdenliveEditPlan, VideoStudioPreferences } from '../shared/lib/videoStudio'
 import type { MarketplaceAction } from '../shared/lib/marketplace'
 import { fitWindow } from './windowBounds'
 import { inferenceAllowed } from './automation/inferencePolicy'
@@ -574,6 +574,7 @@ function registerBridges(): void {
       finally { internalVideoReads.delete(path); internalVideoOwners.delete(owner) }
     },
     videoOcrAvailable: () => Boolean(mediaService!.read().ocrAdapter),
+    ffmpegPath: () => mediaService!.read().ffmpeg,
     expandVideoEvidence: (path, moments, videoOcr, signal) => mediaService!.extractEvidence(path, moments, videoOcr, signal),
     stopVideoAnalysis: owner => mediaService!.cancel(owner),
   })
@@ -732,7 +733,7 @@ function registerBridges(): void {
   handle('video-studio:clear-secret', (_event, kind: 'mcp' | 'pixabay') => videoStudio.clearSecret(kind))
   handle('video-studio:test', () => videoStudio.testKdenlive())
   handle('video-studio:open', () => videoStudio.openKdenlive())
-  handle('video-studio:search', (event, query: string, kind: CreativeKind, page?: number) => videoStudio.search(track(event.sender), query, kind, page))
+  handle('video-studio:search', (event, query: string, kind: CreativeKind, page?: number, intendedUse?: CreativeUse) => videoStudio.search(track(event.sender), query, kind, page, intendedUse))
   handle('video-studio:preview', (event, token: string) => videoStudio.preview(track(event.sender), token))
   handle('video-studio:prepare-asset', (event, token: string) => videoStudio.prepareAsset(track(event.sender), token))
   handle('video-studio:decide-asset', (event, token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean) => videoStudio.decideAsset(track(event.sender), token, decision, importIntoKdenlive))
@@ -740,7 +741,7 @@ function registerBridges(): void {
   handle('video-studio:acquire-url', (event, token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean) => videoStudio.acquireUrl(track(event.sender), token, decision, !!importIntoKdenlive))
   handle('video-studio:workspace', () => videoStudio.workspace())
   handle('video-studio:capture-frame', (_event, position: number) => videoStudio.captureKdenliveFrame(position))
-  handle('video-studio:prepare-kdenlive-render', (event, mode: 'preview' | 'export', start?: number, end?: number, intent?: 'vertical-short' | 'current-sequence') => videoStudio.prepareKdenliveRender(track(event.sender), mode, start, end, intent))
+  handle('video-studio:prepare-kdenlive-render', (event, mode: 'preview' | 'export', start?: number, end?: number, intent?: 'vertical-short' | 'current-sequence', audioIntent?: KdenliveAudioIntent) => videoStudio.prepareKdenliveRender(track(event.sender), mode, start, end, intent, audioIntent))
   handle('video-studio:decide-kdenlive-render', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideKdenliveRender(track(event.sender), token, decision))
   handle('video-studio:kdenlive-render-status', event => { track(event.sender); return videoStudio.kdenliveRenderStatus() })
   handle('video-studio:prepare-preview-inspection', (event, path: string, videoOcr: boolean) => videoStudio.prepareKdenlivePreviewInspection(track(event.sender), path, videoOcr === true))
@@ -751,7 +752,7 @@ function registerBridges(): void {
   handle('video-studio:confirm-evidence', (event, id: string, at: number, description: string) => videoStudio.confirmEvidenceDescription(track(event.sender), id, at, description))
   handle('video-studio:prepare-edit-plan', (event, plan?: KdenliveEditPlan) => videoStudio.prepareEditPlan(track(event.sender), plan))
   handle('video-studio:decide-edit-plan', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideEditPlan(track(event.sender), token, decision))
-  handle('video-studio:prepare-kdenlive-action', (event, action: 'undo' | 'redo' | 'save-version') => videoStudio.prepareKdenliveAction(track(event.sender), action))
+  handle('video-studio:prepare-kdenlive-action', (event, action: 'undo' | 'redo' | 'save-version' | 'make-vertical') => videoStudio.prepareKdenliveAction(track(event.sender), action))
   handle('video-studio:decide-kdenlive-action', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideKdenliveAction(track(event.sender), token, decision))
   handle('video-studio:stop', event => videoStudio.stop(track(event.sender)))
   handle('video-studio:prepare-design-kit', (event, format: DesignKitFormat) => videoStudio.prepareDesignKit(track(event.sender), format))
@@ -1985,7 +1986,26 @@ function registerBridges(): void {
     }
     return service
   }
-  handle('mcp:preview', (event, servers: unknown) => mcpReview(event.sender).preview(servers))
+  handle('mcp:preview', async (event, servers: unknown) => {
+    const oddbrain = Array.isArray(servers) ? servers.find(item => item && typeof item === 'object' && (item as any).name === 'oddbrain-video') as { url?: unknown } | undefined : undefined
+    if (oddbrain) {
+      const endpoint = typeof oddbrain.url === 'string' ? oddbrain.url : '', expected = (await videoStudio.read()).aiToolsUrl
+      if (!endpoint || endpoint !== expected) throw Error('The safe video connector must use the exact current capability URL, including its complete path. Nothing was written.')
+      const post = async (body: unknown, sessionId = ''): Promise<{ response: Response; value: any }> => {
+        const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(sessionId ? { 'Mcp-Session-Id': sessionId } : {}) }, body: JSON.stringify(body), redirect: 'error', signal: AbortSignal.timeout(10_000) })
+        const raw = await response.text()
+        if (!response.ok || raw.length > 1_000_000) throw Error(`The exact safe video connector path failed its local handshake (HTTP ${response.status}). Nothing was written.`)
+        return { response, value: raw ? JSON.parse(raw) : null }
+      }
+      const initialized = await post({ jsonrpc: '2.0', id: 'oddbrain-path-check', method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'OddBrain connector review', version: '0.9.0' } } })
+      const sessionId = initialized.response.headers.get('mcp-session-id') || ''
+      if (!sessionId) throw Error('The exact safe video connector path did not return an MCP session. Nothing was written.')
+      await post({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, sessionId)
+      const listed = await post({ jsonrpc: '2.0', id: 'oddbrain-tools-check', method: 'tools/list', params: {} }, sessionId)
+      if (!Array.isArray(listed.value?.result?.tools) || !listed.value.result.tools.some((tool: any) => tool?.name === 'oddbrain_video_sources')) throw Error('The exact safe video connector path did not return the reviewed tool inventory. Nothing was written.')
+    }
+    return mcpReview(event.sender).preview(servers)
+  })
   handle('mcp:decide', (event, token: string, decision: 'allow' | 'deny') => mcpReview(event.sender).decide(token, decision))
   handle('mcp:inventory', (_event, id: EngineId) => {
     const home = app.getPath('home'), workspace = settings.engine.workspace || vaultRoot()

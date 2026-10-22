@@ -8,12 +8,16 @@
 
 export type CreativeKind = 'image' | 'video' | 'audio'
 export type CreativeProvider = 'openverse' | 'wikimedia' | 'pixabay'
+export type CreativeUse = 'commercial-or-public' | 'noncommercial'
+export type CreativeLicenceRisk = 'standard' | 'noncommercial' | 'no-derivatives' | 'noncommercial-no-derivatives' | 'unknown'
 
 export type VideoStudioPreferences = {
   kdenlive: string
   mcpUrl: string
   projectFolder: string
   ytDlp: string
+  /** Zero means no owner-selected ceiling. Streaming disk-space protection still applies. */
+  maxDownloadBytes: number
 }
 
 export const DEFAULT_VIDEO_STUDIO: VideoStudioPreferences = {
@@ -23,6 +27,7 @@ export const DEFAULT_VIDEO_STUDIO: VideoStudioPreferences = {
   mcpUrl: 'http://127.0.0.1:8766/mcp',
   projectFolder: '',
   ytDlp: '',
+  maxDownloadBytes: 0,
 }
 
 const cleanText = (value: unknown, max: number): string =>
@@ -41,11 +46,13 @@ export function normalizeMcpUrl(value: unknown): string {
 
 export function normalizeVideoStudio(value: unknown): VideoStudioPreferences {
   const raw = value && typeof value === 'object' ? value as Partial<VideoStudioPreferences> : {}
+  const maximum = Number(raw.maxDownloadBytes)
   return {
     kdenlive: cleanText(raw.kdenlive, 4096),
     mcpUrl: normalizeMcpUrl(raw.mcpUrl),
     projectFolder: cleanText(raw.projectFolder, 4096),
     ytDlp: cleanText(raw.ytDlp, 4096),
+    maxDownloadBytes: Number.isSafeInteger(maximum) && maximum >= 0 ? maximum : 0,
   }
 }
 
@@ -68,6 +75,12 @@ export type KdenliveProjectSnapshot = {
   profile: { width: number; height: number; description: string; duration?: number; fps?: number }
   undo: { index: number; canUndo: boolean; canRedo: boolean; undoText: string; redoText: string }
   counts: Record<string, number>
+}
+
+/** Safe project identity exposed to renderers and AI. Native URL/session remain main-process-only. */
+export type KdenlivePublicProject = Omit<KdenliveProjectSnapshot, 'documentUrl' | 'sessionId'> & {
+  projectHandle: string
+  projectName: string
 }
 
 export type VideoStudioView = {
@@ -96,6 +109,10 @@ export type CreativeAsset = {
   licence: string
   licenceUrl: string
   attribution: string
+  intendedUse: CreativeUse
+  licenceRisk: CreativeLicenceRisk
+  licenceNotice: string
+  downloadAllowed: boolean
   width?: number
   height?: number
   duration?: number
@@ -166,6 +183,8 @@ export type VideoEvidenceMoment = {
   descriptionState?: 'unconfirmed' | 'confirmed'
 }
 
+export type VideoEvidenceDiagnostic = { area: 'audio-levels' | 'pauses' | 'scene-changes'; status: 'complete' | 'empty' | 'failed'; message: string }
+
 export type VideoEvidenceSummary = {
   id: string
   name: string
@@ -177,6 +196,7 @@ export type VideoEvidenceSummary = {
   transcriptSections: number
   sceneChanges: number
   audioWindows?: number
+  diagnostics?: VideoEvidenceDiagnostic[]
   moments: VideoEvidenceMoment[]
   disclosure: string
   status: 'processing' | 'ready' | 'blocked'
@@ -214,7 +234,7 @@ export type KdenliveEditPlan = {
   title: string
   purpose: string
   sourceEvidenceIds: string[]
-  expectedProject: { documentUrl: string; sequenceId: string; revision: number }
+  expectedProject: { projectHandle: string; sequenceId: string; revision: number }
   commands: KdenlivePlanCommand[]
   assetNeeds: Array<{ kind: CreativeKind; query: string; purpose: string; placement: string }>
   notes: string
@@ -223,7 +243,9 @@ export type KdenlivePlanReview = {
   ok: boolean
   token?: string
   plan?: KdenliveEditPlan
-  project?: Omit<KdenliveProjectSnapshot, 'sessionId'>
+  planJson?: string
+  planDigest?: string
+  project?: KdenlivePublicProject
   commandSummary?: string[]
   validation?: { valid: boolean; issues: string[]; unsupported: boolean }
   consequence?: string
@@ -231,12 +253,12 @@ export type KdenlivePlanReview = {
   error?: string
 }
 export type KdenliveHistoryEntry = { undoIndex: number; text: string; state: string; origin: string; timestamp?: string; command?: string }
-export type CreativeProposal = { query: string; kind: CreativeKind; purpose: string; assets: CreativeAsset[]; createdAt: string }
+export type CreativeProposal = { query: string; kind: CreativeKind; purpose: string; intendedUse: CreativeUse; assets: CreativeAsset[]; createdAt: string }
 export type VideoStudioWorkspace = {
   evidence: VideoEvidenceSummary[]
   proposedPlan: KdenliveEditPlan | null
   creativeProposal: CreativeProposal | null
-  project: Omit<KdenliveProjectSnapshot, 'sessionId'> | null
+  project: KdenlivePublicProject | null
   history: KdenliveHistoryEntry[]
   notice: string
 }
@@ -245,7 +267,8 @@ export type VideoEvidenceFrame = { ok: boolean; sourceId: string; at: number; mi
 export type KdenliveFrameCapture = { ok: boolean; position: number; mime?: string; data?: string; error?: string }
 export type KdenliveRenderMode = 'preview' | 'export'
 export type KdenliveOutputIntent = 'vertical-short' | 'current-sequence'
-export type KdenliveRenderReview = { ok: boolean; token?: string; mode?: KdenliveRenderMode; intent?: KdenliveOutputIntent; destination?: string; range?: { start: number; end: number }; profile?: { width: number; height: number; fps?: number; durationSeconds?: number }; consequence?: string; expiresAt?: string; error?: string }
+export type KdenliveAudioIntent = 'required' | 'silent' | 'unspecified'
+export type KdenliveRenderReview = { ok: boolean; token?: string; mode?: KdenliveRenderMode; intent?: KdenliveOutputIntent; audioIntent?: KdenliveAudioIntent; destination?: string; range?: { start: number; end: number }; profile?: { width: number; height: number; fps?: number; durationSeconds?: number }; consequence?: string; expiresAt?: string; error?: string }
 export type KdenliveRenderJob = { path: string; mode: KdenliveRenderMode; range?: { start: number; end: number }; status: string; progress?: number; error?: string; startedAt?: string; verification?: Record<string, unknown> }
 export type KdenliveRenderStatus = { ok: boolean; jobs: KdenliveRenderJob[]; answer: string }
 export type KdenlivePreviewInspectionReview = { ok: boolean; token?: string; path?: string; consequence?: string; expiresAt?: string; error?: string }
@@ -259,7 +282,7 @@ export type KdenliveToolReview = {
   error?: string
 }
 
-export type KdenliveAction = 'undo' | 'redo' | 'save-version'
+export type KdenliveAction = 'undo' | 'redo' | 'save-version' | 'make-vertical'
 export type DesignKitFormat = 'vertical' | 'landscape'
 export type DesignKitReview = { ok: boolean; token?: string; destination?: string; files?: string[]; consequence?: string; expiresAt?: string; error?: string }
 
@@ -273,7 +296,7 @@ export type VideoStudioBridge = {
   clearSecret(kind: 'mcp' | 'pixabay'): Promise<VideoStudioView>
   testKdenlive(): Promise<VideoStudioView>
   openKdenlive(): Promise<{ ok: boolean; answer: string }>
-  search(query: string, kind: CreativeKind, page?: number): Promise<CreativeSearchAnswer>
+  search(query: string, kind: CreativeKind, page?: number, intendedUse?: CreativeUse): Promise<CreativeSearchAnswer>
   preview(token: string): Promise<CreativePreview>
   prepareAsset(token: string): Promise<AssetReview>
   decideAsset(token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean): Promise<AssetInstallAnswer>
@@ -283,7 +306,7 @@ export type VideoStudioBridge = {
   acquireUrl(token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean): Promise<VideoUrlAcquireAnswer>
   workspace(): Promise<VideoStudioWorkspace>
   captureKdenliveFrame(position: number): Promise<KdenliveFrameCapture>
-  prepareKdenliveRender(mode: KdenliveRenderMode, start?: number, end?: number, intent?: KdenliveOutputIntent): Promise<KdenliveRenderReview>
+  prepareKdenliveRender(mode: KdenliveRenderMode, start?: number, end?: number, intent?: KdenliveOutputIntent, audioIntent?: KdenliveAudioIntent): Promise<KdenliveRenderReview>
   decideKdenliveRender(token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string }>
   kdenliveRenderStatus(): Promise<KdenliveRenderStatus>
   prepareKdenlivePreviewInspection(path: string, videoOcr: boolean): Promise<KdenlivePreviewInspectionReview>
@@ -293,7 +316,7 @@ export type VideoStudioBridge = {
   retryEvidence(id: string): Promise<{ ok: boolean; answer: string; evidence?: VideoEvidenceSummary }>
   confirmEvidenceDescription(id: string, at: number, description: string): Promise<{ ok: boolean; answer: string }>
   prepareEditPlan(plan?: KdenliveEditPlan): Promise<KdenlivePlanReview>
-  decideEditPlan(token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string; project?: Omit<KdenliveProjectSnapshot, 'sessionId'> }>
+  decideEditPlan(token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string; project?: KdenlivePublicProject }>
   prepareKdenliveAction(action: KdenliveAction): Promise<KdenliveToolReview>
   decideKdenliveAction(token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string }>
   stop(): Promise<{ ok: boolean; answer: string }>
@@ -308,25 +331,27 @@ export type VideoStudioBridge = {
 export function adaptiveFramePoints(duration: number, sceneCandidates: Array<{ at: number; score: number }>, count = 3): Array<{ at: number; reason: 'overview' | 'scene-change'; score: number }> {
   if (!Number.isFinite(duration) || duration <= 0 || !Number.isInteger(count) || count < 1) return []
   const wanted = Math.min(count, 12)
-  // A one-second minimum spacing collapses sub-second and very short clips to a
-  // single frame. Scale spacing down with duration while retaining the existing
-  // one-second maximum for long material.
-  const margin = Math.min(1, duration / Math.max(4, wanted + 2))
-  const gap = Math.max(0.001, Math.min(1, duration / Math.max(12, wanted * 4)))
+  // Give every requested frame a time slot across the complete source. A strong
+  // scene change may replace that slot's overview point, but cannot crowd every
+  // retained frame into the opening or another busy section.
+  const slot = duration / wanted
+  const gap = Math.max(0.001, Math.min(1, slot / 4))
   const scenes = sceneCandidates
-    .filter(item => Number.isFinite(item.at) && item.at >= margin && item.at <= duration - margin && Number.isFinite(item.score) && item.score >= 0)
-    .sort((a, b) => b.score - a.score || a.at - b.at)
+    .filter(item => Number.isFinite(item.at) && item.at >= 0 && item.at < duration && Number.isFinite(item.score) && item.score >= 0)
+  const used = new Set<number>()
   const selected: Array<{ at: number; reason: 'overview' | 'scene-change'; score: number }> = []
-  for (const scene of scenes) {
-    if (selected.every(item => Math.abs(item.at - scene.at) >= gap)) selected.push({ at: scene.at, reason: 'scene-change', score: scene.score })
-    if (selected.length >= wanted) break
+  for (let index = 0; index < wanted; index++) {
+    const target = Math.min(duration - Math.min(0.001, duration / 2), slot * (index + 0.5))
+    const nearby = scenes
+      .map((scene, sceneIndex) => ({ scene, sceneIndex }))
+      .filter(item => !used.has(item.sceneIndex) && Math.abs(item.scene.at - target) <= slot * 0.45 && selected.every(chosen => Math.abs(chosen.at - item.scene.at) >= gap))
+      .sort((a, b) => b.scene.score - a.scene.score || Math.abs(a.scene.at - target) - Math.abs(b.scene.at - target))[0]
+    if (nearby) {
+      used.add(nearby.sceneIndex)
+      selected.push({ at: nearby.scene.at, reason: 'scene-change', score: nearby.scene.score })
+    } else selected.push({ at: target, reason: 'overview', score: 0 })
   }
-  for (let index = 0; selected.length < wanted && index < wanted * 3; index++) {
-    const at = duration * ((index + 1) / (wanted * 3 + 1))
-    if (selected.every(item => Math.abs(item.at - at) >= gap / 2)) selected.push({ at, reason: 'overview', score: 0 })
-  }
-  if (!selected.length) selected.push({ at: duration / 2, reason: 'overview', score: 0 })
-  return selected.slice(0, wanted).sort((a, b) => a.at - b.at)
+  return selected.sort((a, b) => a.at - b.at)
 }
 
 export function parseSceneMetadata(value: string): Array<{ at: number; score: number }> {

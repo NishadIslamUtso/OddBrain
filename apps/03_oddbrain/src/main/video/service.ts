@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { isIP } from 'node:net'
 import { lookup } from 'node:dns/promises'
-import { lstat, mkdir, open, readFile, realpath, rename, rm, statfs, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm, statfs, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative } from 'node:path'
 import { spawn } from 'node:child_process'
 import { fileURLToPath } from 'node:url'
@@ -21,6 +21,8 @@ import {
   type CreativePreview,
   type CreativeProvider,
   type CreativeSearchAnswer,
+  type CreativeUse,
+  type CreativeLicenceRisk,
   type DesignKitFormat,
   type DesignKitReview,
   type CreativeProposal,
@@ -32,6 +34,8 @@ import {
   type KdenliveProjectSnapshot,
   type KdenlivePreviewInspectionReview,
   type KdenliveOutputIntent,
+  type KdenlivePublicProject,
+  type KdenliveAudioIntent,
   type KdenliveRenderJob,
   type KdenliveRenderMode,
   type KdenliveRenderReview,
@@ -66,9 +70,10 @@ type StoredEvidence = Omit<VideoEvidenceSummary, 'audioWindows'> & {
   unconfirmed: { descriptions: Array<{ at: number; description: string; question: string; createdAt: string }> }
   confirmed: { descriptions: Array<{ at: number; description: string; confirmedAt: string }> }
 }
-type EditPlanApproval = { owner: number; plan: KdenliveEditPlan; planDigest: string; state: KdenliveProjectSnapshot; validation: { valid: boolean; issues: string[]; unsupported: boolean }; authority: string; expires: number }
-type RenderApproval = { owner: number; mode: KdenliveRenderMode; intent: KdenliveOutputIntent; state: KdenliveProjectSnapshot; destination: string; range?: { start: number; end: number }; authority: string; expires: number }
+type EditPlanApproval = { owner: number; plan: KdenliveEditPlan; planJson: string; planDigest: string; state: KdenliveProjectSnapshot; validation: { valid: boolean; issues: string[]; unsupported: boolean }; authority: string; expires: number }
+type RenderApproval = { owner: number; mode: KdenliveRenderMode; intent: KdenliveOutputIntent; audioIntent: KdenliveAudioIntent; state: KdenliveProjectSnapshot; destination: string; range?: { start: number; end: number }; authority: string; expires: number }
 type PreviewInspectionApproval = { owner: number; path: string; videoOcr: boolean; size: number; dev: number; ino: number; mtimeMs: number; preferences: string; expires: number }
+type NativeOperation = { id: string; requestId?: string; owner: number; tool: string; summary: string; projectHandle: string; expectedRevision: number; payloadDigest: string; state: 'prepared' | 'completed' | 'uncertain' | 'not-dispatched'; preparedAt: string; updatedAt: string; error?: string }
 type AiMcpReply = { status: number; body: unknown; session?: string }
 
 const MCP_KEY = 'oddbrain-kdenlive-mcp'
@@ -78,12 +83,24 @@ const clock = (): number => Date.now()
 const expiresAt = (milliseconds: number): string => new Date(milliseconds).toISOString()
 const safePart = (value: string): string => value.normalize('NFKC').replace(/[^a-zA-Z0-9._ -]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 90) || 'asset'
 const text = (value: unknown, max = 500): string => typeof value === 'string' && value.length <= max && !/[\u0000-\u001f]/.test(value) ? value.trim() : ''
+const pathFreeText = (value: string): string => value.replace(/file:\/\/\/[^\r\n]*/gi, '[private local path]').replace(/\b[a-z]:[\\/][^\r\n]*/gi, '[private local path]')
 const finite = (value: unknown): number | undefined => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : undefined
 const plain = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const payloadDigest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
-const preferencesDigest = (value: VideoStudioPreferences): string => payloadDigest(value)
+const canonicalJson = (value: unknown): string => JSON.stringify((function sort(item: unknown): unknown { if (Array.isArray(item)) return item.map(sort); if (plain(item)) return Object.fromEntries(Object.keys(item).sort().map(key => [key, sort(item[key])])); return item })(value), null, 2)
+const canonicalDigest = (value: unknown): string => createHash('sha256').update(canonicalJson(value)).digest('hex')
+const preferencesDigest = (value: unknown): string => payloadDigest(value)
 
-function publicAsset(input: Omit<CreativeAsset, 'token'>, token: string): CreativeAsset { return { ...input, token } }
+function licencePolicy(licence: string, intendedUse: CreativeUse): { licenceRisk: CreativeLicenceRisk; licenceNotice: string; downloadAllowed: boolean } {
+  const code = licence.toUpperCase().replace(/[^A-Z0-9]+/g, '-')
+  const nc = /(?:^|-)NC(?:-|$)/.test(code), nd = /(?:^|-)ND(?:-|$)/.test(code)
+  if (nd) return { licenceRisk: nc ? 'noncommercial-no-derivatives' : 'no-derivatives', licenceNotice: 'No-Derivatives terms are not offered as a routine editable-video asset. Verify the source terms and choose material that permits the planned edit.', downloadAllowed: false }
+  if (nc && intendedUse !== 'noncommercial') return { licenceRisk: 'noncommercial', licenceNotice: 'NonCommercial terms conflict with the selected public/commercial use. Change the intended use only if the project is genuinely noncommercial.', downloadAllowed: false }
+  if (nc) return { licenceRisk: 'noncommercial', licenceNotice: 'NonCommercial terms apply. OddBrain does not provide legal clearance; verify the source terms before publishing.', downloadAllowed: true }
+  if (/^(?:SEE|UNKNOWN|UNSPECIFIED|CUSTOM)/i.test(licence)) return { licenceRisk: 'unknown', licenceNotice: 'Specific reusable terms were not available. OddBrain will not download this result.', downloadAllowed: false }
+  return { licenceRisk: 'standard', licenceNotice: 'No NC or ND marker was found in the provider licence label. Verify the linked source terms before publishing.', downloadAllowed: true }
+}
+function publicAsset(input: Omit<CreativeAsset, 'token' | 'licenceRisk' | 'licenceNotice' | 'downloadAllowed'>, token: string): CreativeAsset { return { ...input, ...licencePolicy(`${input.licence} ${input.licenceUrl}`, input.intendedUse), token } }
 function providerNotice(provider: CreativeProvider): string {
   if (provider === 'pixabay') return 'Pixabay result. Source identification and Pixabay’s current content rules still apply.'
   if (provider === 'openverse') return 'Openverse indexes third-party works. Verify the shown licence and source before publishing.'
@@ -152,54 +169,123 @@ export function createVideoStudioService(options: {
   now?: () => number
   analyzeVideo?: (owner: number, path: string, videoOcr?: boolean) => Promise<MediaResult>
   videoOcrAvailable?: () => boolean
+  ffmpegPath?: () => string
   expandVideoEvidence?: (path: string, moments: number[], videoOcr: boolean, signal?: AbortSignal) => Promise<{ sha256: string; duration: number; images: NonNullable<MediaResult['images']>; audio?: Array<{ at: number; mime: string; data: string }>; visualEvidence: NonNullable<MediaResult['visualEvidence']> }>
   stopVideoAnalysis?: (owner: number) => void
 }) {
   const fetchImpl = options.fetchImpl || fetch, runCommand = options.runCommand || runMediaCommand, now = options.now || clock, checkRemote = options.assertRemote || assertPublicHttps
-  let preferences = { ...DEFAULT_VIDEO_STUDIO }
-  try { preferences = readRecoverableJson(options.file, normalizeVideoStudio, DEFAULT_VIDEO_STUDIO).value } catch {}
   let lastVersion = '', lastConnection: McpConnection | null = null, lastNotice = '', aiToolsUrl = ''
+  const storageWarnings: string[] = []
+  let preferences = { ...DEFAULT_VIDEO_STUDIO }, preferencesAvailable = true
+  try { const loaded = readRecoverableJson(options.file, normalizeVideoStudio, DEFAULT_VIDEO_STUDIO); preferences = loaded.value; if (loaded.recovered) storageWarnings.push('Video Studio settings recovered from their last complete generation; review them before use.') }
+  catch { preferencesAvailable = false; storageWarnings.push('Video Studio settings are unreadable. Settings and project/native actions remain locked until their recoverable storage is repaired.') }
+  const projectHandleSalt = randomUUID()
+  const projectHandleFor = (state: KdenliveProjectSnapshot): string => `project-${createHash('sha256').update(`${projectHandleSalt}\u0000${state.documentUrl}\u0000${state.sequenceId}`).digest('hex').slice(0, 24)}`
+  const publicProject = (state: KdenliveProjectSnapshot): KdenlivePublicProject => {
+    let projectName = 'Untitled Kdenlive project'
+    if (state.documentUrl) try { projectName = basename(fileURLToPath(state.documentUrl)) || projectName } catch { projectName = 'Saved Kdenlive project' }
+    const { documentUrl: _documentUrl, sessionId: _sessionId, ...safe } = state
+    return { ...safe, projectHandle: projectHandleFor(state), projectName }
+  }
+  const transferPreferencesDigest = (): string => preferencesDigest({ preferences, ffmpeg: options.ffmpegPath?.() || '' })
   let proposedPlan: KdenliveEditPlan | null = null, creativeProposal: CreativeProposal | null = null
   const evidenceFile = join(dirname(options.file), 'video-evidence-v1.json')
-  let storedEvidence: StoredEvidence[] = []
+  let storedEvidence: StoredEvidence[] = [], evidenceIndexAvailable = true
   try {
-    storedEvidence = readRecoverableJson(evidenceFile, value => {
-      if (!Array.isArray(value)) return []
-      return value.filter(item => item && typeof item === 'object' && typeof item.id === 'string' && typeof item.sourcePath === 'string' && typeof item.sha256 === 'string') as StoredEvidence[]
-    }, []).value
-  } catch { /* first use or an unrecoverable evidence index */ }
+    const loaded = readRecoverableJson(evidenceFile, value => {
+      if (!Array.isArray(value)) throw Error('Invalid video evidence index.')
+      if (!value.every(item => item && typeof item === 'object' && typeof item.id === 'string' && typeof item.sourcePath === 'string' && typeof item.sha256 === 'string')) throw Error('Invalid video evidence record.')
+      return value as StoredEvidence[]
+    }, [])
+    storedEvidence = loaded.value
+    if (loaded.recovered) storageWarnings.push('The video-evidence index recovered its last complete generation; no damaged generation was accepted.')
+  } catch { evidenceIndexAvailable = false; storageWarnings.push('The durable video-evidence index is unreadable. Evidence intake and updates remain locked; nothing was replaced.') }
   const assets = new Map<string, PrivateAsset>(), approvals = new Map<string, AssetApproval>(), urls = new Map<string, UrlApproval>()
-  const editorActions = new Map<string, { owner: number; action: KdenliveAction; tool: string; args: Record<string, unknown>; argsDigest: string; state: KdenliveProjectSnapshot; authority: string; expires: number }>(), editPlans = new Map<string, EditPlanApproval>(), renderApprovals = new Map<string, RenderApproval>(), activeRenders = new Map<string, { owner: number; mode: KdenliveRenderMode; range?: { start: number; end: number }; startedAt: string; status: string; verified?: boolean }>(), designKits = new Map<string, { owner: number; format: DesignKitFormat; destination: string; preferences: string; expires: number }>(), transfers = new Map<number, AbortController>(), mcpJobs = new Map<number, AbortController>()
+  const editorActions = new Map<string, { owner: number; action: KdenliveAction; tool: string; args: Record<string, unknown>; argsDigest: string; state: KdenliveProjectSnapshot; authority: string; expires: number }>(), editPlans = new Map<string, EditPlanApproval>(), renderApprovals = new Map<string, RenderApproval>(), activeRenders = new Map<string, { owner: number; mode: KdenliveRenderMode; audioIntent: KdenliveAudioIntent; range?: { start: number; end: number }; startedAt: string; status: string; requestId?: string; operationId?: string; verified?: boolean; audioReview?: { mime: string; data: string } }>(), designKits = new Map<string, { owner: number; format: DesignKitFormat; destination: string; preferences: string; expires: number }>(), transfers = new Map<number, AbortController>(), mcpJobs = new Map<number, AbortController>()
   const previewInspections = new Map<string, PreviewInspectionApproval>()
   const aiSessions = new Map<string, number>()
   const saveEvidence = (next: StoredEvidence[] = storedEvidence): void => {
+    if (!evidenceIndexAvailable) throw Error('The durable video-evidence index is unavailable. Nothing was replaced.')
     writeRecoverableJson(evidenceFile, next)
     storedEvidence = next
   }
   const renderReceiptsFile = join(dirname(options.file), 'video-render-receipts-v1.json')
+  let renderReceiptsAvailable = true
+  type StoredRenderReceipt = { path: string; mode: KdenliveRenderMode; audioIntent?: KdenliveAudioIntent; range?: { start: number; end: number }; startedAt: string; status: string; requestId?: string; operationId?: string; verified?: boolean }
   try {
-    const retained = readRecoverableJson<{ schema: 1; renders: Array<{ path: string; mode: KdenliveRenderMode; range?: { start: number; end: number }; startedAt: string; status: string; verified?: boolean }> }>(renderReceiptsFile, value => {
-      if (!plain(value) || value.schema !== 1 || !Array.isArray(value.renders)) throw Error('Invalid video render receipt index.')
-      return value as { schema: 1; renders: Array<{ path: string; mode: KdenliveRenderMode; range?: { start: number; end: number }; startedAt: string; status: string; verified?: boolean }> }
-    }, { schema: 1, renders: [] }).value
+    const loaded = readRecoverableJson<{ schema: 1; renders: StoredRenderReceipt[] }>(renderReceiptsFile, value => {
+      if (!plain(value) || value.schema !== 1 || !Array.isArray(value.renders) || !value.renders.every(item => plain(item) && typeof item.path === 'string' && isAbsolute(item.path) && ['preview', 'export'].includes(String(item.mode)) && typeof item.startedAt === 'string' && typeof item.status === 'string')) throw Error('Invalid video render receipt index.')
+      return value as { schema: 1; renders: StoredRenderReceipt[] }
+    }, { schema: 1, renders: [] })
+    const retained = loaded.value
+    if (loaded.recovered) storageWarnings.push('Kdenlive render receipts recovered their last complete generation; refresh native render status before retrying anything.')
     for (const item of retained.renders) {
       const range = item.range && Number.isSafeInteger(item.range.start) && Number.isSafeInteger(item.range.end) && item.range.start >= 0 && item.range.end > item.range.start ? item.range : undefined
-      if (typeof item?.path === 'string' && item.path.length <= 32_768 && isAbsolute(item.path) && ['preview', 'export'].includes(item.mode) && typeof item.startedAt === 'string' && typeof item.status === 'string') activeRenders.set(item.path, { owner: -1, mode: item.mode, ...(range ? { range } : {}), startedAt: item.startedAt.slice(0, 100), status: item.status.slice(0, 100), ...(item.verified === true ? { verified: true } : {}) })
+      const audioIntent: KdenliveAudioIntent = ['required', 'silent', 'unspecified'].includes(String(item.audioIntent)) ? item.audioIntent! : 'unspecified'
+      if (typeof item?.path === 'string' && item.path.length <= 32_768 && isAbsolute(item.path) && ['preview', 'export'].includes(item.mode) && typeof item.startedAt === 'string' && typeof item.status === 'string') activeRenders.set(item.path, { owner: -1, mode: item.mode, audioIntent, ...(range ? { range } : {}), startedAt: item.startedAt.slice(0, 100), status: item.status.slice(0, 100), ...(text(item.requestId, 200) ? { requestId: text(item.requestId, 200) } : {}), ...(text(item.operationId, 200) ? { operationId: text(item.operationId, 200) } : {}), ...(item.verified === true ? { verified: true } : {}) })
     }
-  } catch { /* malformed receipts fail closed; Kdenlive remains the render authority */ }
-  const saveRenderReceipts = (): void => writeRecoverableJson(renderReceiptsFile, { schema: 1, renders: [...activeRenders].map(([path, value]) => ({ path, mode: value.mode, ...(value.range ? { range: value.range } : {}), startedAt: value.startedAt, status: value.status, ...(value.verified ? { verified: true } : {}) })) })
+  } catch { renderReceiptsAvailable = false; storageWarnings.push('The durable Kdenlive render receipts are unreadable. New renders remain locked; Kdenlive remains the existing render authority.') }
+  const saveRenderReceipts = (): void => {
+    if (!renderReceiptsAvailable) throw Error('The durable Kdenlive render receipts are unavailable. Nothing was started or replaced.')
+    writeRecoverableJson(renderReceiptsFile, { schema: 1, renders: [...activeRenders].map(([path, value]) => ({ path, mode: value.mode, audioIntent: value.audioIntent, ...(value.range ? { range: value.range } : {}), startedAt: value.startedAt, status: value.status, ...(value.requestId ? { requestId: value.requestId } : {}), ...(value.operationId ? { operationId: value.operationId } : {}), ...(value.verified ? { verified: true } : {}) })) })
+  }
+
+  const nativeOperationsFile = join(dirname(options.file), 'video-native-operations-v1.json')
+  let nativeOperations: NativeOperation[] = []
+  let recoveredNativeOperations = 0, nativeJournalAvailable = true
+  try {
+    const loaded = readRecoverableJson<NativeOperation[]>(nativeOperationsFile, value => {
+      if (!Array.isArray(value) || !value.every(item => plain(item) && text(item.id, 200) && text(item.tool, 200) && Number.isSafeInteger(item.owner) && text(item.summary, 500) && text(item.projectHandle, 200) && Number.isSafeInteger(item.expectedRevision) && /^[a-f0-9]{64}$/.test(String(item.payloadDigest)) && ['prepared', 'completed', 'uncertain', 'not-dispatched'].includes(String(item.state)) && text(item.preparedAt, 100) && text(item.updatedAt, 100) && (item.requestId === undefined || Boolean(text(item.requestId, 200))) && (item.error === undefined || typeof item.error === 'string'))) throw Error('Invalid native-operation journal.')
+      return value as NativeOperation[]
+    }, [])
+    nativeOperations = loaded.value.map(item => item.state === 'prepared' ? (recoveredNativeOperations++, { ...item, state: 'uncertain' as const, updatedAt: new Date(now()).toISOString(), error: 'OddBrain restarted after durable intent was recorded but before the native outcome was durably confirmed. Reconcile Kdenlive state/history with this same request ID; no fresh retry was issued.' }) : item)
+    if (loaded.recovered) storageWarnings.push('The native-operation journal recovered its last complete generation; any recovered prepared operation is treated as uncertain, never retried automatically.')
+    if (recoveredNativeOperations) {
+      writeRecoverableJson(nativeOperationsFile, nativeOperations)
+      storageWarnings.push(`${recoveredNativeOperations} native Kdenlive operation${recoveredNativeOperations === 1 ? '' : 's'} recovered as uncertain. No automatic retry was issued; refresh state, history or render status before deciding what to do.`)
+    }
+  } catch {
+    nativeJournalAvailable = false
+    storageWarnings.push('The durable Kdenlive operation journal is unreadable. Native mutations remain locked until its recoverable storage is repaired; nothing was retried.')
+  }
+  const saveNativeOperations = (): void => writeRecoverableJson(nativeOperationsFile, nativeOperations)
+  const requestIdTools = new Set(['desktop_media_import', 'desktop_batch', 'desktop_undo', 'desktop_redo', 'desktop_project_save_as', 'desktop_project_profile', 'desktop_preview_render', 'desktop_render'])
+  const prepareNativeOperation = (owner: number, tool: string, args: Record<string, unknown>, state: KdenliveProjectSnapshot, summary: string): { operation: NativeOperation; args: Record<string, unknown> } => {
+    if (!nativeJournalAvailable) throw Error('The durable Kdenlive operation journal is unavailable. Nothing was sent.')
+    const requestId = requestIdTools.has(tool) ? text(args.requestId, 200) || randomUUID() : ''
+    const boundArgs = requestId ? { ...args, requestId } : { ...args }
+    const at = new Date(now()).toISOString(), operation: NativeOperation = { id: randomUUID(), ...(requestId ? { requestId } : {}), owner, tool, summary: text(summary, 500) || tool, projectHandle: projectHandleFor(state), expectedRevision: state.revision, payloadDigest: payloadDigest(boundArgs), state: 'prepared', preparedAt: at, updatedAt: at }
+    nativeOperations = [...nativeOperations, operation]
+    saveNativeOperations()
+    return { operation, args: boundArgs }
+  }
+  const finishNativeOperation = (operation: NativeOperation, state: 'completed' | 'uncertain' | 'not-dispatched', error = ''): void => {
+    const updated: NativeOperation = { ...operation, state, updatedAt: new Date(now()).toISOString(), ...(error ? { error: error.slice(0, 1000) } : {}) }
+    nativeOperations = nativeOperations.map(item => item.id === operation.id ? updated : item)
+    saveNativeOperations()
+  }
+  const dispatchNativeOperation = async (prepared: { operation: NativeOperation; args: Record<string, unknown> }, connection: McpConnection, signal?: AbortSignal): Promise<any> => {
+    try {
+      const result = await callTool(connection, prepared.operation.tool, prepared.args, signal)
+      finishNativeOperation(prepared.operation, 'completed')
+      return result
+    } catch (error) {
+      try { finishNativeOperation(prepared.operation, 'uncertain', (error as Error).message) } catch { /* the already-fsynced prepared record remains the recovery authority */ }
+      throw error
+    }
+  }
   // A process restart never turns an interrupted decoder into an implied retry.
   // The durable intake remains linked to its original path/receipt and waits for
   // the owner to press Retry in Video Studio.
   let recoveredInterrupted = false
   storedEvidence = storedEvidence.map(item => {
-    const safe: StoredEvidence = { ...item, raw: item.raw && typeof item.raw === 'object' ? item.raw : {}, unconfirmed: item.unconfirmed && Array.isArray(item.unconfirmed.descriptions) ? item.unconfirmed : { descriptions: [] }, confirmed: item.confirmed && Array.isArray(item.confirmed.descriptions) ? item.confirmed : { descriptions: [] }, transcriptSegments: Array.isArray(item.transcriptSegments) ? item.transcriptSegments : [], scenes: Array.isArray(item.scenes) ? item.scenes : [], audioWindows: Array.isArray(item.audioWindows) ? item.audioWindows : [], frameFiles: Array.isArray(item.frameFiles) ? item.frameFiles : [], moments: Array.isArray(item.moments) ? item.moments : [] }
+    const safe: StoredEvidence = { ...item, diagnostics: Array.isArray(item.diagnostics) ? item.diagnostics : [], raw: item.raw && typeof item.raw === 'object' ? item.raw : {}, unconfirmed: item.unconfirmed && Array.isArray(item.unconfirmed.descriptions) ? item.unconfirmed : { descriptions: [] }, confirmed: item.confirmed && Array.isArray(item.confirmed.descriptions) ? item.confirmed : { descriptions: [] }, transcriptSegments: Array.isArray(item.transcriptSegments) ? item.transcriptSegments : [], scenes: Array.isArray(item.scenes) ? item.scenes : [], audioWindows: Array.isArray(item.audioWindows) ? item.audioWindows : [], frameFiles: Array.isArray(item.frameFiles) ? item.frameFiles : [], moments: Array.isArray(item.moments) ? item.moments : [] }
     if (safe.status !== 'processing') return safe
     recoveredInterrupted = true
     return { ...safe, status: 'blocked', updatedAt: new Date(now()).toISOString(), error: 'OddBrain closed or restarted while this source was being read. The source and receipt were retained; retry explicitly from Video Studio.' }
   })
   if (recoveredInterrupted) saveEvidence()
-  const publicEvidence = (value: StoredEvidence): VideoEvidenceSummary => ({ id: value.id, name: value.name, sourceKind: value.sourceKind, ...(value.sourceUrl ? { sourceUrl: value.sourceUrl } : {}), sha256: value.sha256, duration: value.duration, createdAt: value.createdAt, transcriptSections: value.transcriptSections, sceneChanges: value.sceneChanges, audioWindows: value.audioWindows.length, moments: value.moments.map(moment => { const copy = { ...moment }; delete copy.frame; return copy }), disclosure: value.disclosure, status: value.status, ...(Number.isSafeInteger(value.attempts) ? { attempts: value.attempts } : {}), ...(value.updatedAt ? { updatedAt: value.updatedAt } : {}), ...(value.error ? { error: value.error } : {}) })
+  const publicEvidence = (value: StoredEvidence): VideoEvidenceSummary => ({ id: value.id, name: value.name, sourceKind: value.sourceKind, ...(value.sourceUrl ? { sourceUrl: value.sourceUrl } : {}), sha256: value.sha256, duration: value.duration, createdAt: value.createdAt, transcriptSections: value.transcriptSections, sceneChanges: value.sceneChanges, audioWindows: value.audioWindows.length, ...(value.diagnostics?.length ? { diagnostics: value.diagnostics } : {}), moments: value.moments.map(moment => { const copy = { ...moment }; delete copy.frame; return copy }), disclosure: value.disclosure, status: value.status, ...(Number.isSafeInteger(value.attempts) ? { attempts: value.attempts } : {}), ...(value.updatedAt ? { updatedAt: value.updatedAt } : {}), ...(value.error ? { error: value.error } : {}) })
 
   const prune = (): void => {
     const at = now()
@@ -214,7 +300,9 @@ export function createVideoStudioService(options: {
     for (const [key, touched] of aiSessions) if (touched + 30 * 60_000 <= at) aiSessions.delete(key)
   }
   const save = (patch: Partial<VideoStudioPreferences>): VideoStudioPreferences => {
+    if (!preferencesAvailable) throw Error('Video Studio settings are unavailable. Nothing was replaced.')
     for (const key of ['kdenlive', 'projectFolder', 'ytDlp'] as const) if (patch[key] !== undefined && (typeof patch[key] !== 'string' || patch[key]!.length > 4096 || /[\u0000\r\n]/.test(patch[key]!))) throw Error('Video path setting is invalid. Nothing was saved.')
+    if (patch.maxDownloadBytes !== undefined && (!Number.isSafeInteger(patch.maxDownloadBytes) || patch.maxDownloadBytes < 0)) throw Error('The optional download maximum must be zero or a whole number of bytes. Nothing was saved.')
     if (patch.mcpUrl !== undefined && normalizeMcpUrl(patch.mcpUrl) !== String(patch.mcpUrl).trim()) throw Error('Kdenlive MCP must be credential-free loopback HTTP, such as http://127.0.0.1:8766/mcp. Nothing was saved.')
     const next = normalizeVideoStudio({ ...preferences, ...patch })
     writeRecoverableJson(options.file, next); preferences = next; lastConnection = null; return { ...next }
@@ -310,6 +398,7 @@ export function createVideoStudioService(options: {
   }
 
   const nativeConnection = async (): Promise<McpConnection> => {
+    if (!preferencesAvailable) throw Error('Video Studio settings are unavailable. Native access remains locked.')
     const connection = lastConnection || await connectMcp()
     if (!connection.native.compatible) throw Error(connection.native.reason)
     if (!connection.bearerRequired) throw Error('Enable “Require access token” in the separately installed Kdenlive MCP settings. OddBrain verified that this endpoint currently accepts unauthenticated local requests, so native reads and actions remain locked.')
@@ -332,7 +421,7 @@ export function createVideoStudioService(options: {
     const native = lastConnection?.native || { compatible: false, missing: [], identity: 'Not connected', reason: `Connect the separately installed native Kdenlive MCP protocol reviewed at ${NATIVE_KDENLIVE_REFERENCE.commit.slice(0, 12)}. No editor build has been accepted on this machine yet.` }
     const tokenSaved = !!keys?.has(MCP_KEY), bearerRequired = lastConnection?.bearerRequired === true, compatible = native.compatible && bearerRequired && tokenSaved
     const reason = native.compatible && !bearerRequired ? 'The endpoint matches the reviewed protocol shape, but OddBrain verified that bearer authentication is not required. Enable “Require access token” in Kdenlive MCP before any native read or action.' : native.compatible && !tokenSaved ? 'The endpoint requires bearer authentication, but its token is not saved here. Save the Kdenlive token before OddBrain reads state or offers native actions.' : native.reason
-    return { preferences: { ...preferences }, kdenliveVersion: lastVersion, kdenliveReady, mcpConnected: !!lastConnection, mcpTools: (lastConnection?.tools || []).map(tool => tool.name), nativeKdenlive: { compatible, identity: native.identity, protocol: lastConnection?.protocol || '', referenceCommit: NATIVE_KDENLIVE_REFERENCE.commit, missingTools: native.missing, reason }, aiToolsUrl, projectReady, hasMcpToken: tokenSaved, hasPixabayKey: !!keys?.has(PIXABAY_KEY), keyEncryption: keys?.encryption || 'none', notice: lastNotice }
+    return { preferences: { ...preferences }, kdenliveVersion: lastVersion, kdenliveReady, mcpConnected: !!lastConnection, mcpTools: (lastConnection?.tools || []).map(tool => tool.name), nativeKdenlive: { compatible, identity: native.identity, protocol: lastConnection?.protocol || '', referenceCommit: NATIVE_KDENLIVE_REFERENCE.commit, missingTools: native.missing, reason }, aiToolsUrl, projectReady, hasMcpToken: tokenSaved, hasPixabayKey: !!keys?.has(PIXABAY_KEY), keyEncryption: keys?.encryption || 'none', notice: [lastNotice, ...storageWarnings].filter(Boolean).join(' ') }
   }
 
   const testKdenlive = async (): Promise<VideoStudioView> => {
@@ -357,7 +446,7 @@ export function createVideoStudioService(options: {
     assets.set(token, { ...record, public: publicValue, owner, expires: now() + 15 * 60_000 }); return publicValue
   }
 
-  const searchOpenverse = async (owner: number, query: string, kind: CreativeKind, page: number): Promise<CreativeAsset[]> => {
+  const searchOpenverse = async (owner: number, query: string, kind: CreativeKind, page: number, intendedUse: CreativeUse): Promise<CreativeAsset[]> => {
     const endpoint = kind === 'audio' ? 'audio' : 'images'
     if (kind === 'video') return []
     const data = await fetchFixedJson(fetchImpl, `https://api.openverse.org/v1/${endpoint}/?q=${encodeURIComponent(query)}&page_size=12&page=${page}&mature=false`, 'Openverse')
@@ -366,11 +455,11 @@ export function createVideoStudioService(options: {
       if (!id || !url || !page || !preview) return []
       const licence = [text(item.license, 100).toUpperCase(), text(item.license_version, 50)].filter(Boolean).join(' ') || 'See source'
       const creator = text(item.creator, 300) || 'Unknown creator', title = text(item.title, 300) || `Openverse ${kind}`, filetype = text(item.filetype, 20).toLowerCase(), mediaType = ({ jpg: 'image/jpeg', jpeg: 'image/jpeg', png: 'image/png', gif: 'image/gif', webp: 'image/webp', mp3: 'audio/mpeg', wav: 'audio/wav', ogg: 'audio/ogg', oga: 'audio/ogg', flac: 'audio/flac' } as Record<string, string>)[filetype]
-      return [rememberAsset(owner, { previewUrl: preview, downloadUrl: url, public: publicAsset({ provider: 'openverse', providerId: id, kind, title, creator, sourcePage: page, licence, licenceUrl: text(item.license_url, 4096), attribution: `${title} — ${creator} — ${licence}`, width: finite(item.width), height: finite(item.height), duration: finite(item.duration), ...(mediaType ? { mediaType } : {}), previewAvailable: true }, '') })]
+      return [rememberAsset(owner, { previewUrl: preview, downloadUrl: url, public: publicAsset({ provider: 'openverse', providerId: id, kind, title, creator, sourcePage: page, licence, licenceUrl: text(item.license_url, 4096), attribution: `${title} — ${creator} — ${licence}`, intendedUse, width: finite(item.width), height: finite(item.height), duration: kind === 'audio' && finite(item.duration) !== undefined ? finite(item.duration)! / 1000 : finite(item.duration), ...(mediaType ? { mediaType } : {}), previewAvailable: true }, '') })]
     })
   }
 
-  const searchWikimedia = async (owner: number, query: string, kind: CreativeKind, page: number): Promise<CreativeAsset[]> => {
+  const searchWikimedia = async (owner: number, query: string, kind: CreativeKind, page: number, intendedUse: CreativeUse): Promise<CreativeAsset[]> => {
     const filetype = kind === 'image' ? 'bitmap' : kind
     const params = new URLSearchParams({ action: 'query', generator: 'search', gsrsearch: `filetype:${filetype} ${query}`, gsrnamespace: '6', gsrlimit: '12', gsroffset: String((page - 1) * 12), prop: 'imageinfo', iiprop: 'url|extmetadata|mime|size|mediatype', iiurlwidth: '640', format: 'json', origin: '*' })
     const data = await fetchFixedJson(fetchImpl, `https://commons.wikimedia.org/w/api.php?${params}`, 'Wikimedia Commons')
@@ -380,11 +469,11 @@ export function createVideoStudioService(options: {
       if (!id || !url || !typeMatches) return []
       const thumbnail = text(info?.thumburl, 4096), preview = kind === 'image' ? thumbnail || url : thumbnail
       const title = text(String(page?.title || '').replace(/^File:/, ''), 300) || `Wikimedia ${kind}`, creator = text(metadata.Artist?.value?.replace(/<[^>]+>/g, ' '), 300) || 'See file page', licence = text(metadata.LicenseShortName?.value, 200) || 'See file page', pageUrl = `https://commons.wikimedia.org/?curid=${encodeURIComponent(id)}`
-      return [rememberAsset(owner, { previewUrl: preview, downloadUrl: url, public: publicAsset({ provider: 'wikimedia', providerId: id, kind, title, creator, sourcePage: pageUrl, licence, licenceUrl: text(metadata.LicenseUrl?.value, 4096), attribution: text(metadata.Credit?.value?.replace(/<[^>]+>/g, ' '), 500) || `${title} — ${creator} — ${licence}`, width: finite(info?.width), height: finite(info?.height), duration: finite(info?.duration), mediaType: mime, previewAvailable: Boolean(preview) }, '') })]
+      return [rememberAsset(owner, { previewUrl: preview, downloadUrl: url, public: publicAsset({ provider: 'wikimedia', providerId: id, kind, title, creator, sourcePage: pageUrl, licence, licenceUrl: text(metadata.LicenseUrl?.value, 4096), attribution: text(metadata.Credit?.value?.replace(/<[^>]+>/g, ' '), 500) || `${title} — ${creator} — ${licence}`, intendedUse, width: finite(info?.width), height: finite(info?.height), duration: finite(info?.duration), mediaType: mime, previewAvailable: Boolean(preview) }, '') })]
     })
   }
 
-  const searchPixabay = async (owner: number, query: string, kind: CreativeKind, page: number): Promise<CreativeAsset[]> => {
+  const searchPixabay = async (owner: number, query: string, kind: CreativeKind, page: number, intendedUse: CreativeUse): Promise<CreativeAsset[]> => {
     const key = options.keys()?.get(PIXABAY_KEY) || ''; if (!key) throw Error('Pixabay is not configured; Openverse and Wikimedia were still searched.')
     const endpoint = kind === 'video' ? 'https://pixabay.com/api/videos/' : 'https://pixabay.com/api/'
     if (kind === 'audio') return []
@@ -396,7 +485,7 @@ export function createVideoStudioService(options: {
       const preview = kind === 'video' && item?.picture_id ? `https://i.vimeocdn.com/video/${encodeURIComponent(String(item.picture_id))}_640x360.jpg` : text(item?.previewURL || item?.webformatURL, 4096)
       if (!id || !page || !download || !preview) return []
       const title = text(item?.tags, 300) || `Pixabay ${kind}`
-      return [rememberAsset(owner, { previewUrl: preview, downloadUrl: download, public: publicAsset({ provider: 'pixabay', providerId: id, kind, title, creator, sourcePage: page, licence: 'Pixabay Content License', licenceUrl: 'https://pixabay.com/service/license-summary/', attribution: `${title} — ${creator} via Pixabay`, width: finite(item?.imageWidth || item?.videos?.medium?.width), height: finite(item?.imageHeight || item?.videos?.medium?.height), duration: finite(item?.duration), mediaType: kind === 'video' ? 'video/mp4' : 'image/jpeg', previewAvailable: true }, '') })]
+      return [rememberAsset(owner, { previewUrl: preview, downloadUrl: download, public: publicAsset({ provider: 'pixabay', providerId: id, kind, title, creator, sourcePage: page, licence: 'Pixabay Content License', licenceUrl: 'https://pixabay.com/service/license-summary/', attribution: `${title} — ${creator} via Pixabay`, intendedUse, width: finite(item?.imageWidth || item?.videos?.medium?.width), height: finite(item?.imageHeight || item?.videos?.medium?.height), duration: finite(item?.duration), mediaType: kind === 'video' ? 'video/mp4' : 'image/jpeg', previewAvailable: true }, '') })]
     })
   }
 
@@ -406,18 +495,20 @@ export function createVideoStudioService(options: {
       const title = asset.title.toLowerCase(), creator = asset.creator.toLowerCase(), attribution = asset.attribution.toLowerCase()
       const relevance = (title.includes(phrase) ? 20 : 0) + terms.reduce((score, term) => score + (title.includes(term) ? 5 : 0) + (creator.includes(term) ? 2 : 0) + (attribution.includes(term) ? 1 : 0), 0)
       const evidence = (/^(?:see|unknown|unspecified|custom)/i.test(asset.licence) ? 0 : 5) + (asset.licenceUrl ? 2 : 0) + (asset.previewAvailable ? 1 : 0) + (asset.duration || asset.width || asset.height ? 1 : 0)
-      return { asset, index, score: relevance + evidence }
+      const licenceFit = asset.downloadAllowed ? asset.licenceRisk === 'standard' ? 4 : 0 : -100
+      return { asset, index, score: relevance + evidence + licenceFit }
     }).sort((a, b) => b.score - a.score || a.index - b.index).map(item => item.asset)
   }
 
-  const search = async (owner: number, queryInput: string, kind: CreativeKind, pageInput = 1): Promise<CreativeSearchAnswer> => {
-    prune(); const query = text(queryInput, 160), page = Number(pageInput)
+  const search = async (owner: number, queryInput: string, kind: CreativeKind, pageInput = 1, useInput: CreativeUse = 'commercial-or-public'): Promise<CreativeSearchAnswer> => {
+    prune(); const query = text(queryInput, 160), page = Number(pageInput), intendedUse: CreativeUse = useInput === 'noncommercial' ? 'noncommercial' : 'commercial-or-public'
     if (!query || query.length < 2 || !['image', 'video', 'audio'].includes(kind) || !Number.isSafeInteger(page) || page < 1 || page > 20) return { ok: false, assets: [], problems: ['Enter at least two normal search characters and use a valid result page.'], notice: 'Nothing was searched.' }
-    const jobs = [searchOpenverse(owner, query, kind, page), searchWikimedia(owner, query, kind, page), searchPixabay(owner, query, kind, page)]
+    const jobs = [searchOpenverse(owner, query, kind, page, intendedUse), searchWikimedia(owner, query, kind, page, intendedUse), searchPixabay(owner, query, kind, page, intendedUse)]
     const settled = await Promise.allSettled(jobs), found: CreativeAsset[] = [], problems: string[] = []; let hasMore = false
     for (const result of settled) { if (result.status === 'fulfilled') { found.push(...result.value); if (result.value.length >= 12) hasMore = true } else problems.push((result.reason as Error).message) }
     const unique = [...new Map(found.map(asset => [`${asset.provider}:${asset.providerId}`, asset] as const)).values()], ranked = rankAssets(unique, query).slice(0, 24)
-    return { ok: ranked.length > 0 || problems.length < jobs.length, assets: ranked, problems: [...new Set(problems)], page, hasMore: hasMore && page < 20, notice: ranked.length ? `${ranked.length} live result${ranked.length === 1 ? '' : 's'} on page ${page}, locally ranked by query fit and provenance completeness. Nothing has been downloaded. ${[...new Set(ranked.map(item => providerNotice(item.provider)))].join(' ')}` : 'No matching licensed assets were returned. Nothing was downloaded.' }
+    const restricted = ranked.filter(asset => !asset.downloadAllowed).length
+    return { ok: ranked.length > 0 || problems.length < jobs.length, assets: ranked, problems: [...new Set(problems)], page, hasMore: hasMore && page < 20, notice: ranked.length ? `${ranked.length} live result${ranked.length === 1 ? '' : 's'} on page ${page}, locally ranked by query fit, intended use and provenance completeness.${restricted ? ` ${restricted} result${restricted === 1 ? ' is' : 's are'} visibly restricted by NC/ND or unclear terms and cannot enter ordinary download approval.` : ''} Nothing has been downloaded. ${[...new Set(ranked.map(item => providerNotice(item.provider)))].join(' ')}` : 'No matching licensed assets were returned. Nothing was downloaded.' }
   }
 
   const fetchImage = async (urlText: string): Promise<{ mime: string; data: string }> => {
@@ -456,11 +547,12 @@ export function createVideoStudioService(options: {
   const prepareAsset = async (owner: number, token: string): Promise<AssetReview> => {
     prune(); const asset = assets.get(token)
     if (!asset || (asset.owner !== owner && asset.owner !== -1)) return { ok: false, error: 'That search result expired. Search again.' }
+    if (!asset.public.downloadAllowed) return { ok: false, error: `${asset.public.licenceNotice} Nothing was downloaded.` }
     if (!asset.public.licence || /^(?:see|unknown|unspecified|custom)/i.test(asset.public.licence)) return { ok: false, error: 'This result does not expose a specific licence. OddBrain will not download it; open the source page and choose another result with clear terms.' }
     if (!await realFolder(preferences.projectFolder)) return { ok: false, error: 'Choose an existing Kdenlive project folder first.' }
     const approval = randomUUID(), expires = now() + 5 * 60_000, destination = assetDestination(asset.public)
     approvals.set(approval, { asset, destination, preferences: preferencesDigest(preferences), expires, owner })
-    return { ok: true, token: approval, asset: asset.public, destination, consequence: `Download this one ${asset.public.kind} into the selected project, preserve its source/licence receipt, and optionally import it into the connected Kdenlive timeline bin. Existing files will not be overwritten.`, expiresAt: expiresAt(expires) }
+    return { ok: true, token: approval, asset: asset.public, destination, consequence: `Download this one ${asset.public.kind} into the selected project, preserve its source/licence/intended-use receipt, and optionally import it into the connected Kdenlive timeline bin. ${asset.public.licenceNotice} Existing files will not be overwritten.`, expiresAt: expiresAt(expires) }
   }
 
   const download = async (sourceText: string, destination: string, signal?: AbortSignal, projectArea: 'OddBrain Assets' | 'OddBrain Sources' = 'OddBrain Assets', expected?: CreativeKind): Promise<{ path: string; sha256: string; bytes: number; requestedUrl: string; resolvedUrl: string }> => {
@@ -475,13 +567,15 @@ export function createVideoStudioService(options: {
     if (!response?.ok || !response.body) throw Error(`The provider refused the selected download${response ? ` (HTTP ${response.status})` : ''}.`)
     const mediaType = (response.headers.get('content-type') || '').split(';')[0].trim().toLowerCase()
     if (expected && mediaType && mediaType !== 'application/octet-stream' && !mediaType.startsWith(`${expected}/`) && !(mediaType === 'application/ogg' && (expected === 'audio' || expected === 'video'))) throw Error(`The selected ${expected} download returned ${mediaType}; it was refused before writing.`)
-    const declared = Number(response.headers.get('content-length') || 0), space = await statfs(preferences.projectFolder), available = Number(space.bavail) * Number(space.bsize)
+    const declared = Number(response.headers.get('content-length') || 0), space = await statfs(preferences.projectFolder), available = Number(space.bavail) * Number(space.bsize), maximum = preferences.maxDownloadBytes
+    if (maximum > 0 && Number.isFinite(declared) && declared > maximum) throw Error(`This source declares ${declared.toLocaleString()} bytes, above your ${maximum.toLocaleString()}-byte download maximum. Nothing was written.`)
     if (Number.isFinite(declared) && declared > 0 && declared + 128 * 1024 * 1024 > available) throw Error(`This selected asset needs ${declared.toLocaleString()} bytes plus working space, but the project drive does not have it.`)
     const temporary = `${destination}.incoming-${randomUUID()}`, file = await open(temporary, 'wx', 0o600), reader = response.body.getReader(), hash = createHash('sha256')
     let bytes = 0, nextSpaceCheck = 64 * 1024 * 1024
     try {
       for (;;) {
         const next = await reader.read(); if (next.done) break
+        if (maximum > 0 && bytes + next.value.byteLength > maximum) throw Error(`The transfer exceeded your ${maximum.toLocaleString()}-byte download maximum. The incomplete file was removed.`)
         let written = 0; while (written < next.value.byteLength) written += (await file.write(next.value, written, next.value.byteLength - written, null)).bytesWritten
         hash.update(next.value); bytes += next.value.byteLength
         if (bytes >= nextSpaceCheck) { const current = await statfs(preferences.projectFolder), free = Number(current.bavail) * Number(current.bsize); if (free < 128 * 1024 * 1024) throw Error('The project drive ran out of safe working space. The incomplete download was removed.'); nextSpaceCheck += 64 * 1024 * 1024 }
@@ -496,12 +590,13 @@ export function createVideoStudioService(options: {
     finally { await reader.cancel().catch(() => undefined) }
   }
 
-  const importAsset = async (path: string): Promise<{ binId: string; ready: boolean; duration?: number }> => {
+  const importAsset = async (owner: number, path: string): Promise<{ binId: string; ready: boolean; duration?: number }> => {
     const connection = await nativeConnection()
     if (!connection.tools.some(item => item.name === 'desktop_media_import')) throw Error('The reviewed native Kdenlive protocol exposes no media-import tool. The asset remains downloaded but was not imported.')
     const state = await readNativeState(connection)
     if (!state.documentUrl) throw Error('Save the visible Kdenlive project before importing the downloaded asset.')
-    const result = await callTool(connection, 'desktop_media_import', { sessionId: state.sessionId, expectedRevision: state.revision, requestId: randomUUID(), path, wait: 30 })
+    const prepared = prepareNativeOperation(owner, 'desktop_media_import', { sessionId: state.sessionId, expectedRevision: state.revision, path, wait: 30 }, state, `Import ${basename(path)} into the visible Kdenlive bin`)
+    const result = await dispatchNativeOperation(prepared, connection)
     const next = projectSnapshot(result), binId = text(result?.binId, 200)
     if (next.sessionId !== state.sessionId || next.documentUrl !== state.documentUrl || next.sequenceId !== state.sequenceId || next.revision <= state.revision || !binId) throw Error('Kdenlive did not return the expected project identity, revision, and bin ID after media import.')
     return { binId, ready: result?.ready === true, ...(finite(result?.duration) ? { duration: finite(result.duration) } : {}) }
@@ -516,7 +611,7 @@ export function createVideoStudioService(options: {
     try {
       const result = await download(approval.asset.downloadUrl, approval.destination, controller.signal, 'OddBrain Assets', approval.asset.public.kind), receiptFolder = await safeProjectDirectory('OddBrain Assets', 'asset-receipts'); downloadedPath = result.path
       let imported = false, importOutcome: { binId: string; ready: boolean; duration?: number } | undefined, importError = ''
-      if (importIntoKdenlive) try { importOutcome = await importAsset(result.path); imported = true; importedBinId = importOutcome.binId } catch (error) { importError = (error as Error).message }
+      if (importIntoKdenlive) try { importOutcome = await importAsset(owner, result.path); imported = true; importedBinId = importOutcome.binId } catch (error) { importError = (error as Error).message }
       const receipt = join(receiptFolder, `${result.sha256}-${randomUUID().slice(0, 8)}.json`)
       await writeFile(receipt, `${JSON.stringify({ schema: 1, acquiredAt: new Date(now()).toISOString(), file: basename(result.path), bytes: result.bytes, sha256: result.sha256, requestedUrl: result.requestedUrl, resolvedUrl: result.resolvedUrl, asset: approval.asset.public, kdenliveImport: { requested: importIntoKdenlive, succeeded: imported, ...(importOutcome || {}), ...(importError ? { error: importError } : {}) } }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
       return { ok: true, path: result.path, imported, ...(importedBinId ? { binId: importedBinId } : {}), receipt, answer: `Downloaded the selected asset and saved its source/licence/import-outcome receipt.${imported ? ` Kdenlive imported it as bin ${importedBinId}${importOutcome?.ready ? ' and reported it ready' : ', but readiness was not confirmed'}.` : importError ? ` It was not imported: ${importError}` : ' It was not imported.'}` }
@@ -545,9 +640,10 @@ export function createVideoStudioService(options: {
         if (metadata?.is_live || metadata?.live_status === 'is_live') throw Error('Live sources are not supported.')
         if (metadata?.availability && !['public', 'unlisted', 'needs_auth'].includes(metadata.availability)) throw Error(`This source reports availability “${String(metadata.availability).slice(0, 80)}”; OddBrain will not bypass it.`)
         if (metadata?.availability === 'needs_auth') throw Error('This source requires authentication. OddBrain does not read browser cookies or bypass access controls.')
-        result = { ok: true, url: url.toString(), provider, title: text(metadata?.title, 500) || `${provider} video`, duration: finite(metadata?.duration), uploader: text(metadata?.uploader || metadata?.channel, 300), mediaType: text(metadata?.ext, 50), estimatedBytes: finite(metadata?.filesize_approx || metadata?.filesize), method: 'yt-dlp-metadata', warnings: ['Only public, permitted content may be acquired. Site rules and creator rights still apply.', 'No cookies, login data, playlist expansion or DRM bypass is used.'], consequence: 'Approval asks the reviewed yt-dlp executable to acquire this one public video into the selected project folder and records its URL and file hash.' }
+        result = { ok: true, url: url.toString(), provider, title: text(metadata?.title, 500) || `${provider} video`, duration: finite(metadata?.duration), uploader: text(metadata?.uploader || metadata?.channel, 300), mediaType: text(metadata?.ext, 50), estimatedBytes: finite(metadata?.filesize_approx || metadata?.filesize), method: 'yt-dlp-metadata', warnings: ['Only public, permitted content may be acquired. Site rules and creator rights still apply.', 'No cookies, login data, playlist expansion or DRM bypass is used.', 'Approval requires the owner-reviewed FFmpeg executable for any merge; yt-dlp is not allowed to discover a different copy from PATH.'], consequence: 'Approval asks the reviewed yt-dlp executable to acquire this one public video into the selected project folder and records its URL and file hash.' }
       }
-      const token = randomUUID(), complete = { ...result, token }; urls.set(token, { preflight: complete, source: url, preferences: preferencesDigest(preferences), expires: now() + 5 * 60_000, owner }); return complete
+      if (preferences.maxDownloadBytes > 0) result.warnings.push(result.estimatedBytes && result.estimatedBytes > preferences.maxDownloadBytes ? `The estimated ${result.estimatedBytes.toLocaleString()} bytes exceed your ${preferences.maxDownloadBytes.toLocaleString()}-byte maximum; approval will stop before acquisition.` : `Your ${preferences.maxDownloadBytes.toLocaleString()}-byte maximum will be enforced against declared and actual transfer size.`)
+      const token = randomUUID(), complete = { ...result, token }; urls.set(token, { preflight: complete, source: url, preferences: transferPreferencesDigest(), expires: now() + 5 * 60_000, owner }); return complete
     } catch (error) { return { ok: false, url: url.toString(), provider, title: '', method: 'none', warnings: [], consequence: '', error: (error as Error).message } }
   }
 
@@ -599,7 +695,7 @@ export function createVideoStudioService(options: {
       const stored: StoredEvidence = {
         ...intake, name: intake.name || result.name, ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}), sourcePath: intake.sourcePath || path,
         sha256: result.source.sha256, duration: result.time.total, updatedAt: new Date(now()).toISOString(), transcriptSections: transcriptSegments.length,
-        sceneChanges: result.sceneMap?.length || 0, moments, disclosure: result.disclosure || 'Local media evidence; derived text and frames remain unconfirmed.', status: 'ready', error: undefined,
+        sceneChanges: result.sceneMap?.length || 0, diagnostics: result.diagnostics || [], moments, disclosure: result.disclosure || 'Local media evidence; derived text and frames remain unconfirmed.', status: 'ready', error: undefined,
         sourceText: result.text || transcriptSegments.map(section => `${section.label}\n${section.text}`).join('\n\n'), transcript: result.text || '', transcriptSegments,
         scenes: result.sceneMap || [], audioWindows: result.audioMap || [], frameFiles, raw: { ...intake.raw, ...(input.receipt ? { sourceReceipt: input.receipt } : {}) },
       }
@@ -721,8 +817,9 @@ export function createVideoStudioService(options: {
     prune(); const approval = urls.get(token); urls.delete(token)
     if (!approval || approval.owner !== owner) return { ok: false, answer: 'That video-link approval expired. Nothing was downloaded.' }
     if (decision !== 'allow') return { ok: true, answer: 'Cancelled. Nothing was downloaded.' }
-    if (approval.preferences !== preferencesDigest(preferences)) return { ok: false, answer: 'Video source, downloader, or project settings changed after review. Review the link again; nothing was downloaded.' }
+    if (approval.preferences !== transferPreferencesDigest()) return { ok: false, answer: 'Video source, downloader, FFmpeg, maximum-size, or project settings changed after review. Review the link again; nothing was downloaded.' }
     if (!await realFolder(preferences.projectFolder)) return { ok: false, answer: 'The selected project folder is no longer available. Nothing was downloaded.' }
+    if (preferences.maxDownloadBytes > 0 && approval.preflight.estimatedBytes && approval.preflight.estimatedBytes > preferences.maxDownloadBytes) return { ok: false, answer: `The estimated ${approval.preflight.estimatedBytes.toLocaleString()} bytes exceed your reviewed ${preferences.maxDownloadBytes.toLocaleString()}-byte maximum. Nothing was downloaded.` }
     const controller = new AbortController(); transfers.get(owner)?.abort(); transfers.set(owner, controller)
     let staging = '', path = '', resolvedUrl = approval.source.toString()
     try {
@@ -732,15 +829,31 @@ export function createVideoStudioService(options: {
         const downloaded = await download(approval.source.toString(), destination, controller.signal, 'OddBrain Sources', 'video'); path = downloaded.path; resolvedUrl = downloaded.resolvedUrl
       } else {
         if (!await regularFile(preferences.ytDlp)) throw Error('The reviewed yt-dlp executable is no longer available.')
-        staging = join(folder, `.incoming-${randomUUID()}`); await mkdir(staging, { mode: 0o700 })
-        const output = join(staging, `${safePart(approval.preflight.title)}-${randomUUID().slice(0, 8)}.%(ext)s`)
-        const raw = await runCommand(preferences.ytDlp, ['--ignore-config', '--no-playlist', '--no-warnings', '--no-overwrites', '--restrict-filenames', '-f', 'bv*+ba/b', '--merge-output-format', 'mp4', '--print', 'after_move:filepath', '-o', output, '--', approval.source.toString()], controller.signal, 2 * 60 * 60_000, 200_000)
+        const transferKey = payloadDigest(approval.source.toString()).slice(0, 20)
+        staging = join(folder, `.incoming-ytdlp-${transferKey}`)
+        try {
+          const existing = await lstat(staging)
+          if (!existing.isDirectory() || existing.isSymbolicLink()) throw Error('The recoverable yt-dlp staging path is not a normal folder. Nothing was replaced.')
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error
+          await mkdir(staging, { mode: 0o700 })
+        }
+        const root = await realpath(folder), stageRoot = await realpath(staging), stageWithin = relative(root, stageRoot)
+        if (!stageWithin || stageWithin.startsWith('..') || isAbsolute(stageWithin)) throw Error('The recoverable yt-dlp staging folder escaped the selected project.')
+        const output = join(stageRoot, `source-${transferKey}.%(ext)s`), ffmpeg = options.ffmpegPath?.() || ''
+        if (!ffmpeg || !await regularFile(ffmpeg)) throw Error('Choose the owner-reviewed FFmpeg executable in Voice & files before yt-dlp acquisition. OddBrain will not let yt-dlp discover a different merge tool from PATH; recoverable transfer data was not discarded.')
+        const downloaderArgs = ['--ignore-config', '--no-playlist', '--no-warnings', '--no-overwrites', '--continue', '--restrict-filenames', '--ffmpeg-location', ffmpeg, ...(preferences.maxDownloadBytes > 0 ? ['--max-filesize', String(preferences.maxDownloadBytes)] : []), '-f', 'bv*+ba/b', '--merge-output-format', 'mp4', '--print', 'after_move:filepath', '-o', output, '--', approval.source.toString()]
+        const raw = await runCommand(preferences.ytDlp, downloaderArgs, controller.signal, 2 * 60 * 60_000, 200_000)
         path = raw.toString('utf8').trim().split(/\r?\n/).filter(Boolean).at(-1) || ''
-        const root = await realpath(staging), actual = path ? await realpath(path) : ''
-        const within = actual ? relative(root, actual) : ''
-        if (!actual || !within || within.startsWith('..') || isAbsolute(within)) throw Error('yt-dlp did not report a safe completed file inside its temporary project folder.')
-        const metadata = await lstat(actual); if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size < 1) throw Error('yt-dlp did not produce a regular completed media file.')
-        const completed = join(folder, basename(actual)); await rename(actual, completed); await rm(staging, { recursive: true, force: true }); staging = ''; path = completed
+        const actual = path ? await realpath(path) : '', within = actual ? relative(stageRoot, actual) : ''
+        if (!actual || !within || within.startsWith('..') || isAbsolute(within)) throw Error('yt-dlp did not report a safe completed file inside its recoverable project folder.')
+        const metadata = await lstat(actual)
+        if (!metadata.isFile() || metadata.isSymbolicLink() || metadata.size < 1) throw Error('yt-dlp did not produce a regular completed media file.')
+        if (preferences.maxDownloadBytes > 0 && metadata.size > preferences.maxDownloadBytes) throw Error(`The completed source exceeds your ${preferences.maxDownloadBytes.toLocaleString()}-byte maximum. It remains in recoverable staging and was not accepted.`)
+        const completedName = `${safePart(approval.preflight.title)}-${transferKey.slice(0, 8)}`
+        let completed = join(folder, `${completedName}${extname(actual)}`)
+        try { await lstat(completed); completed = join(folder, `${completedName}-${randomUUID().slice(0, 8)}${extname(actual)}`) } catch {}
+        await rename(actual, completed); await rm(staging, { recursive: true, force: true }); staging = ''; path = completed
       }
       const receipt = await receiptForSource(path, approval.source.toString(), approval.preflight.provider, resolvedUrl, approval.preflight.uploader || '', approval.preflight.title)
       const intakeInput = { sourceKind: 'url' as const, sourceUrl: approval.source.toString(), receipt: receipt.path, sha256: receipt.sha256 }
@@ -750,14 +863,26 @@ export function createVideoStudioService(options: {
         catch (error) { evidence = recordEvidenceFailure(path, approval.preflight.title, intakeInput, (error as Error).message); evidenceAnswer = ` Its durable intake remains available, but the automatic reader was blocked: ${(error as Error).message}` }
       } else { evidence = recordEvidenceFailure(path, approval.preflight.title, intakeInput, 'This runtime has no connected local evidence reader.'); evidenceAnswer = ' The durable intake was kept, but this runtime has no connected local evidence reader.' }
       let imported = false, importOutcome: { binId: string; ready: boolean; duration?: number } | undefined, importError = '', importReceipt = '', suffix = ''
-      if (importIntoKdenlive) try { importOutcome = await importAsset(path); imported = true } catch (error) { importError = (error as Error).message; suffix = ` ${importError}` }
+      if (importIntoKdenlive) try { importOutcome = await importAsset(owner, path); imported = true } catch (error) { importError = (error as Error).message; suffix = ` ${importError}` }
       if (importIntoKdenlive) {
         try { importReceipt = join(dirname(receipt.path), `${receipt.sha256}-${randomUUID().slice(0, 8)}-kdenlive-import.json`); await writeFile(importReceipt, `${JSON.stringify({ schema: 1, recordedAt: new Date(now()).toISOString(), sourceReceipt: basename(receipt.path), requested: true, succeeded: imported, ...(importOutcome || {}), ...(importError ? { error: importError } : {}) }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' }) }
         catch (error) { importReceipt = ''; suffix += ` The Kdenlive outcome could not be written to its companion receipt: ${(error as Error).message}` }
       }
       return { ok: true, answer: `Downloaded the one approved source and saved its URL/hash receipt.${importReceipt ? ' The requested Kdenlive import outcome has a separate durable companion receipt.' : ''}${evidenceAnswer}${imported ? ` Imported it into Kdenlive as bin ${importOutcome!.binId} without timeline placement${importOutcome!.ready ? ' and Kdenlive reported it ready' : ', but readiness was not confirmed'}.${suffix}` : suffix}`, path, sourceUrl: approval.source.toString(), receipt: receipt.path, imported, ...(importOutcome ? { binId: importOutcome.binId } : {}), evidence }
-    } catch (error) { return { ok: false, answer: controller.signal.aborted ? (path ? `Stop arrived after the source completed. The file remains at ${path}; receipt/import did not finish.` : 'Stopped. The incomplete source transfer was removed.') : `${(error as Error).message}${path ? ` The completed source remains at ${path}, but its receipt/import did not finish.` : ''}` } }
-    finally { if (staging) await rm(staging, { recursive: true, force: true }).catch(() => undefined); if (transfers.get(owner) === controller) transfers.delete(owner) }
+    } catch (error) {
+      let recovery = ''
+      if (staging) {
+        try {
+          const entries = await readdir(staging)
+          if (entries.some(name => name !== '.oddbrain-recovery.json')) {
+            await writeFile(join(staging, '.oddbrain-recovery.json'), `${JSON.stringify({ schema: 1, sourceUrl: approval.source.toString(), title: approval.preflight.title, retainedAt: new Date(now()).toISOString(), state: 'incomplete-or-merge-failed', error: (error as Error).message.slice(0, 1000) }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+            recovery = ' Recoverable yt-dlp streams remain in the project staging area; approving the same URL again reuses them. Remove them deliberately when no longer needed.'
+          } else { await rm(staging, { recursive: true, force: true }); staging = '' }
+        } catch { recovery = ' The temporary transfer could not be classified or removed; inspect the project source folder before retrying.' }
+      }
+      return { ok: false, answer: controller.signal.aborted ? (path ? `Stop arrived after the source completed. The file remains at ${path}; receipt/import did not finish.${recovery}` : `Stopped.${recovery || ' No reusable transfer data was retained.'}`) : `${(error as Error).message}${path ? ` The completed source remains at ${path}, but its receipt/import did not finish.` : ''}${recovery}` }
+    }
+    finally { if (transfers.get(owner) === controller) transfers.delete(owner) }
   }
 
   const prepareDesignKit = async (owner: number, format: DesignKitFormat): Promise<DesignKitReview> => {
@@ -780,23 +905,20 @@ export function createVideoStudioService(options: {
       for (const [name, content] of Object.entries(files)) { const bytes = Buffer.from(content); await writeFile(join(folder, name), bytes, { mode: 0o600, flag: 'wx' }); manifest.push({ file: name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }) }
       const receipt = join(folder, 'manifest.json'); await writeFile(receipt, `${JSON.stringify({ schema: 1, generatedAt: new Date(now()).toISOString(), generator: 'OddBrain local design kit v1', format: ticket.format, licence: 'Owner-created local output; review before reuse or distribution.', files: manifest }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
       let imported = false, importOutcome: { binId: string; ready: boolean; duration?: number } | undefined, importError = '', outcomeRecorded = false, suffix = ''
-      if (importTitleIntoKdenlive) try { importOutcome = await importAsset(join(folder, 'title-card.svg')); imported = true } catch (error) { importError = (error as Error).message; suffix = ` ${importError}` }
+      if (importTitleIntoKdenlive) try { importOutcome = await importAsset(owner, join(folder, 'title-card.svg')); imported = true } catch (error) { importError = (error as Error).message; suffix = ` ${importError}` }
       if (importTitleIntoKdenlive) try { await writeFile(join(folder, 'kdenlive-import.json'), `${JSON.stringify({ schema: 1, recordedAt: new Date(now()).toISOString(), requested: true, succeeded: imported, ...(importOutcome || {}), ...(importError ? { error: importError } : {}) }, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' }); outcomeRecorded = true } catch (error) { suffix += ` The Kdenlive outcome receipt could not be saved: ${(error as Error).message}` }
       return { ok: true, answer: `Created the reviewed local ${ticket.format} design kit with a hash manifest.${outcomeRecorded ? ' Saved the requested Kdenlive import outcome.' : ''}${imported ? ` Imported its title card into Kdenlive as bin ${importOutcome!.binId} without timeline placement.${suffix}` : suffix}`, path: folder, imported, ...(importOutcome ? { binId: importOutcome.binId } : {}), receipt }
     } catch (error) { if (folder) await rm(folder, { recursive: true, force: true }).catch(() => undefined); return { ok: false, answer: `The new design kit could not be completed and its new partial folder was removed: ${(error as Error).message}` } }
   }
 
-  const withoutSession = (state: KdenliveProjectSnapshot): Omit<KdenliveProjectSnapshot, 'sessionId'> => {
-    const { sessionId: _sessionId, ...visible } = state
-    return visible
-  }
+  const withoutSession = (state: KdenliveProjectSnapshot): KdenlivePublicProject => publicProject(state)
   const assertNativeTransition = (before: KdenliveProjectSnapshot, after: KdenliveProjectSnapshot, label: string): void => {
     if (after.sessionId !== before.sessionId || after.sequenceId !== before.sequenceId || after.documentUrl !== before.documentUrl || after.revision <= before.revision) throw Error(`Kdenlive returned an unexpected project identity or revision after ${label}. Refresh state and history before any retry; completion is not claimed.`)
   }
 
   const historyFrom = (value: any): KdenliveHistoryEntry[] => (Array.isArray(value?.entries) ? value.entries : Array.isArray(value?.history) ? value.history : []).slice(-100).flatMap((entry: any) => {
     if (!entry || !Number.isSafeInteger(Number(entry.undoIndex))) return []
-    return [{ undoIndex: Number(entry.undoIndex), text: text(entry.text, 500), state: text(entry.state, 100), origin: text(entry.origin, 100), ...(text(entry.timestamp, 100) ? { timestamp: text(entry.timestamp, 100) } : {}), ...(text(entry.command, 100) ? { command: text(entry.command, 100) } : {}) }]
+    return [{ undoIndex: Number(entry.undoIndex), text: pathFreeText(text(entry.text, 500)), state: pathFreeText(text(entry.state, 100)), origin: pathFreeText(text(entry.origin, 100)), ...(text(entry.timestamp, 100) ? { timestamp: text(entry.timestamp, 100) } : {}), ...(text(entry.command, 100) ? { command: pathFreeText(text(entry.command, 100)) } : {}) }]
   })
 
   const captureKdenliveFrame = async (positionInput: number): Promise<import('../../shared/lib/videoStudio').KdenliveFrameCapture> => {
@@ -811,10 +933,11 @@ export function createVideoStudioService(options: {
     } catch (error) { return { ok: false, position, error: (error as Error).message } }
   }
 
-  const prepareKdenliveRender = async (owner: number, mode: KdenliveRenderMode, startInput?: number, endInput?: number, intentInput: KdenliveOutputIntent = 'current-sequence'): Promise<KdenliveRenderReview> => {
+  const prepareKdenliveRender = async (owner: number, mode: KdenliveRenderMode, startInput?: number, endInput?: number, intentInput: KdenliveOutputIntent = 'current-sequence', audioInput: KdenliveAudioIntent = 'required'): Promise<KdenliveRenderReview> => {
     prune()
     if (!['preview', 'export'].includes(mode)) return { ok: false, error: 'Choose a short preview or final export.' }
     const intent: KdenliveOutputIntent = mode === 'preview' ? 'current-sequence' : intentInput
+    const audioIntent: KdenliveAudioIntent = ['required', 'silent', 'unspecified'].includes(audioInput) ? audioInput : 'required'
     if (!['vertical-short', 'current-sequence'].includes(intent)) return { ok: false, error: 'Choose a vertical short or current-sequence export review.' }
     try {
       if (!await realFolder(preferences.projectFolder)) throw Error('Choose an existing project folder before rendering.')
@@ -834,9 +957,10 @@ export function createVideoStudioService(options: {
       const root = await realpath(preferences.projectFolder), folder = mode === 'preview' ? 'OddBrain Previews' : 'OddBrain Exports'
       const destination = join(root, folder, `${mode === 'export' ? intent : mode}-${new Date(now()).toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}.mp4`)
       const token = randomUUID(), expires = now() + 5 * 60_000
-      renderApprovals.set(token, { owner, mode, intent, state, destination, ...(range ? { range } : {}), authority: nativeAuthority(connection), expires })
+      renderApprovals.set(token, { owner, mode, intent, audioIntent, state, destination, ...(range ? { range } : {}), authority: nativeAuthority(connection), expires })
       const profile = { width: state.profile.width, height: state.profile.height, ...(state.profile.fps ? { fps: state.profile.fps } : {}), ...(durationSeconds ? { durationSeconds } : {}) }
-      return { ok: true, token, mode, intent, destination, profile, ...(range ? { range } : {}), consequence: mode === 'preview' ? `Kdenlive will render only frames ${range!.start}–${range!.end} with mixed timeline audio to one new review file. It will not overwrite a file or change the playhead.` : intent === 'vertical-short' ? `Kdenlive will render the complete visible ${state.profile.width}×${state.profile.height} portrait sequence${durationSeconds ? ` (${durationSeconds.toFixed(1)} seconds)` : ''} to a new MP4. This checks shape, not changing platform upload rules; inspect the platform’s current duration/codec requirements before publishing.` : `Kdenlive will render the complete visible ${state.profile.width}×${state.profile.height} sequence${durationSeconds ? ` (${durationSeconds.toFixed(1)} seconds)` : ''} to one new MP4. Existing files are not overwritten.`, expiresAt: expiresAt(expires) }
+      const audioConsequence = audioIntent === 'required' ? 'Verification must report an audio stream; the short preview also returns a bounded WAV review block.' : audioIntent === 'silent' ? 'Silence is intentional, so technical verification will not reject the export merely for having no audio stream.' : 'Audio-stream presence will be reported without being treated as a pass/fail requirement.'
+      return { ok: true, token, mode, intent, audioIntent, destination, profile, ...(range ? { range } : {}), consequence: `${mode === 'preview' ? `Kdenlive will render only frames ${range!.start}–${range!.end} with the visible timeline mix to one new review file. It will not overwrite a file or change the playhead.` : intent === 'vertical-short' ? `Kdenlive will render the complete visible ${state.profile.width}×${state.profile.height} portrait sequence${durationSeconds ? ` (${durationSeconds.toFixed(1)} seconds)` : ''} to a new MP4. This checks shape, not changing platform upload rules; inspect the platform’s current duration/codec requirements before publishing.` : `Kdenlive will render the complete visible ${state.profile.width}×${state.profile.height} sequence${durationSeconds ? ` (${durationSeconds.toFixed(1)} seconds)` : ''} to one new MP4. Existing files are not overwritten.`} ${audioConsequence}`, expiresAt: expiresAt(expires) }
     } catch (error) { return { ok: false, error: (error as Error).message } }
   }
 
@@ -853,11 +977,11 @@ export function createVideoStudioService(options: {
       const folder = await safeProjectDirectory(ticket.mode === 'preview' ? 'OddBrain Previews' : 'OddBrain Exports'), destination = join(folder, basename(ticket.destination))
       if (destination !== ticket.destination) throw Error('The reviewed render destination changed. Nothing was started.')
       const tool = ticket.mode === 'preview' ? 'desktop_preview_render' : 'desktop_render'
-      const args: Record<string, unknown> = { sessionId: current.sessionId, expectedRevision: current.revision, requestId: randomUUID(), path: destination, ...(ticket.range ? { start: ticket.range.start, end: ticket.range.end, width: 640 } : {}) }
-      const receipt = { owner, mode: ticket.mode, ...(ticket.range ? { range: ticket.range } : {}), startedAt: new Date(now()).toISOString(), status: 'starting' }
+      const prepared = prepareNativeOperation(owner, tool, { sessionId: current.sessionId, expectedRevision: current.revision, path: destination, ...(ticket.range ? { start: ticket.range.start, end: ticket.range.end, width: 640 } : {}) }, current, `${ticket.mode === 'preview' ? 'Render short review' : 'Render final export'} ${basename(destination)}`)
+      const receipt = { owner, mode: ticket.mode, audioIntent: ticket.audioIntent, ...(ticket.range ? { range: ticket.range } : {}), startedAt: new Date(now()).toISOString(), status: 'starting', requestId: prepared.operation.requestId, operationId: prepared.operation.id }
       activeRenders.set(destination, receipt)
-      try { saveRenderReceipts() } catch (error) { activeRenders.delete(destination); throw error }
-      try { await callTool(connection, tool, args, controller.signal); receipt.status = 'started'; saveRenderReceipts() }
+      try { saveRenderReceipts() } catch (error) { activeRenders.delete(destination); try { finishNativeOperation(prepared.operation, 'not-dispatched', `Render receipt persistence failed before dispatch: ${(error as Error).message}`) } catch { /* prepared intent remains durable and will recover conservatively */ }; throw error }
+      try { await dispatchNativeOperation(prepared, connection, controller.signal); receipt.status = 'started'; saveRenderReceipts() }
       catch (error) { receipt.status = 'start-failed-or-uncertain'; try { saveRenderReceipts() } catch {}; throw error }
       return { ok: true, answer: `${ticket.mode === 'preview' ? 'Short preview' : 'Final export'} started in Kdenlive at ${destination}. Refresh render status rather than assuming completion.` }
     } catch (error) { return { ok: false, answer: controller.signal.aborted ? 'Stop was requested while Kdenlive was starting the render. The outcome is uncertain; refresh native render status before retrying.' : (error as Error).message } }
@@ -874,12 +998,19 @@ export function createVideoStudioService(options: {
         const raw = reported.find((item: any) => item && item.path === path) || {}; let status = text(raw.status || raw.state, 100) || retained.status || 'unknown'
         retained.status = status
         let verification: Record<string, unknown> | undefined
-        if (retained.verified) verification = { verified: true, retainedReceipt: true }
+        if (retained.verified && (retained.mode !== 'preview' || retained.audioReview)) verification = { verified: true, retainedReceipt: true, hasAudio: retained.audioIntent === 'required' ? true : undefined, audioIntent: retained.audioIntent, ...(retained.audioReview ? { audioReview: retained.audioReview } : {}) }
         else if (/^(?:complete|completed|done|finished|succeeded|unconfirmed|interrupted)$/i.test(status)) {
           try {
-            const checked = await callTool(connection, 'desktop_render_verify', { path, includeAudio: false })
-            verification = { verified: checked?.verified === true, fullDecode: checked?.fullDecode === true, hasAudio: checked?.hasAudio === true, ...(Number.isFinite(Number(checked?.expectedFrames)) ? { expectedFrames: Number(checked.expectedFrames) } : {}), ...(Number.isFinite(Number(checked?.actualFrames)) ? { actualFrames: Number(checked.actualFrames) } : {}), ...(Number.isFinite(Number(checked?.width)) ? { width: Number(checked.width) } : {}), ...(Number.isFinite(Number(checked?.height)) ? { height: Number(checked.height) } : {}), ...(text(checked?.format, 100) ? { format: text(checked.format, 100) } : {}) }
-            if (checked?.verified === true) { status = 'finished'; retained.status = status; retained.verified = true }
+            const includeAudio = retained.mode === 'preview'
+            const called = await mcpRequest('tools/call', { name: 'desktop_render_verify', arguments: { path, includeAudio } }, connection.session, false, undefined, 120_000)
+            const checked = toolPayload(called.value), hasAudio = checked?.hasAudio === true
+            const audioBlock = includeAudio && Array.isArray(called.value?.content) ? called.value.content.find((item: any) => item?.type === 'audio' && item.mimeType === 'audio/wav' && typeof item.data === 'string' && item.data.length <= 4_000_000) : null
+            if (audioBlock) retained.audioReview = { mime: audioBlock.mimeType, data: audioBlock.data }
+            const audioExpectationMet = retained.audioIntent !== 'required' || hasAudio && (retained.mode !== 'preview' || Boolean(retained.audioReview))
+            const verified = checked?.verified === true && audioExpectationMet
+            verification = { verified, technicalVideoVerified: checked?.verified === true, fullDecode: checked?.fullDecode === true, hasAudio, audioIntent: retained.audioIntent, audioExpectationMet, ...(retained.audioReview ? { audioReview: retained.audioReview } : {}), ...(retained.audioIntent === 'silent' && hasAudio ? { audioNote: 'An audio stream exists, but stream presence does not prove audible sound; intentional silence remains allowed.' } : {}), ...(Number.isFinite(Number(checked?.expectedFrames)) ? { expectedFrames: Number(checked.expectedFrames) } : {}), ...(Number.isFinite(Number(checked?.actualFrames)) ? { actualFrames: Number(checked.actualFrames) } : {}), ...(Number.isFinite(Number(checked?.width)) ? { width: Number(checked.width) } : {}), ...(Number.isFinite(Number(checked?.height)) ? { height: Number(checked.height) } : {}), ...(text(checked?.format, 100) ? { format: text(checked.format, 100) } : {}) }
+            if (verified) { status = 'finished'; retained.status = status; retained.verified = true }
+            else if (!audioExpectationMet) { status = 'audio-review-failed'; retained.status = status; retained.verified = false }
           } catch (error) { verification = { verified: false, error: (error as Error).message.slice(0, 1000) } }
         }
         jobs.push({ path, mode: retained.mode, ...(retained.range ? { range: retained.range } : {}), status, ...(Number.isFinite(Number(raw.progress)) ? { progress: Number(raw.progress) } : {}), ...(text(raw.error, 1000) ? { error: text(raw.error, 1000) } : {}), startedAt: retained.startedAt, ...(verification ? { verification } : {}) })
@@ -936,7 +1067,7 @@ export function createVideoStudioService(options: {
   }
 
   const workspace = async (): Promise<VideoStudioWorkspace> => {
-    let project: Omit<KdenliveProjectSnapshot, 'sessionId'> | null = null, history: KdenliveHistoryEntry[] = [], notice = lastNotice
+    let project: KdenlivePublicProject | null = null, history: KdenliveHistoryEntry[] = [], notice = [lastNotice, ...storageWarnings].filter(Boolean).join(' ')
     try {
       const connection = await nativeConnection(), state = await readNativeState(connection)
       project = withoutSession(state); history = historyFrom(await callTool(connection, 'desktop_history', { limit: 100, includeUndone: true }))
@@ -953,7 +1084,7 @@ export function createVideoStudioService(options: {
       if (unknownEvidence.length) return { ok: false, plan, commandSummary: commandSummary(plan.commands), error: `The plan cites ${unknownEvidence.length} missing or non-ready evidence source${unknownEvidence.length === 1 ? '' : 's'}. Nothing was validated or applied.` }
       const connection = await nativeConnection(), state = await readNativeState(connection)
       if (!state.documentUrl) return { ok: false, error: 'Save the visible Kdenlive project before reviewing an edit plan.' }
-      if (plan.expectedProject.documentUrl !== state.documentUrl || plan.expectedProject.sequenceId !== state.sequenceId || plan.expectedProject.revision !== state.revision) return { ok: false, error: 'The plan names a different project, sequence, or revision than the one now visible in Kdenlive. Re-read state and regenerate the plan; nothing was applied.' }
+      if (plan.expectedProject.projectHandle !== projectHandleFor(state) || plan.expectedProject.sequenceId !== state.sequenceId || plan.expectedProject.revision !== state.revision) return { ok: false, error: 'The plan names a different private project handle, sequence, or revision than the one now visible in Kdenlive. Re-read state and regenerate the plan; nothing was applied.' }
       let validation = { valid: false, issues: [] as string[], unsupported: false }
       try {
         const checked = await callTool(connection, 'desktop_batch_validate', { commands: plan.commands })
@@ -964,24 +1095,25 @@ export function createVideoStudioService(options: {
         else throw error
       }
       if (!validation.valid && !validation.unsupported) return { ok: false, plan, project: withoutSession(state), commandSummary: commandSummary(plan.commands), validation, error: 'Kdenlive rejected this batch during preflight. Fix every reported issue before review.' }
-      const token = randomUUID(), expires = now() + 5 * 60_000
-      editPlans.set(token, { owner, plan, planDigest: payloadDigest(plan), state, validation, authority: nativeAuthority(connection), expires })
-      return { ok: true, token, plan, project: withoutSession(state), commandSummary: commandSummary(plan.commands), validation, consequence: `${plan.commands.length} exact command${plan.commands.length === 1 ? '' : 's'} will be sent as one native Kdenlive batch and one shared Undo step. ${plan.sourceEvidenceIds.length ? `${plan.sourceEvidenceIds.length} ready source-evidence map${plan.sourceEvidenceIds.length === 1 ? ' is' : 's are'} cited.` : 'No Video Studio evidence map is cited; review whether this is intentionally a project-only edit.'} ${validation.valid ? 'Kdenlive preflight accepted the supported insertions.' : 'Kdenlive reports that separate preflight does not cover one or more command types; the native batch still validates its schema and rolls back atomically on failure.'} Any project change invalidates this one-use approval.`, expiresAt: expiresAt(expires) }
+      const token = randomUUID(), expires = now() + 5 * 60_000, planJson = canonicalJson(plan), planDigest = canonicalDigest(plan)
+      editPlans.set(token, { owner, plan, planJson, planDigest, state, validation, authority: nativeAuthority(connection), expires })
+      return { ok: true, token, plan, planJson, planDigest, project: withoutSession(state), commandSummary: commandSummary(plan.commands), validation, consequence: `${plan.commands.length} exact command${plan.commands.length === 1 ? '' : 's'} will be sent as one native Kdenlive batch and one shared Undo step. ${plan.sourceEvidenceIds.length ? `${plan.sourceEvidenceIds.length} ready source-evidence map${plan.sourceEvidenceIds.length === 1 ? ' is' : 's are'} cited.` : 'No Video Studio evidence map is cited; review whether this is intentionally a project-only edit.'} ${validation.valid ? 'Kdenlive preflight accepted the supported insertions.' : 'Kdenlive reports that separate preflight does not cover one or more command types; the native batch still validates its schema and rolls back atomically on failure.'} Any project change invalidates this one-use approval.`, expiresAt: expiresAt(expires) }
     } catch (error) { return { ok: false, error: (error as Error).message } }
   }
 
-  const decideEditPlan = async (owner: number, token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string; project?: Omit<KdenliveProjectSnapshot, 'sessionId'> }> => {
+  const decideEditPlan = async (owner: number, token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string; project?: KdenlivePublicProject }> => {
     prune(); const ticket = editPlans.get(token); editPlans.delete(token)
     if (!ticket || ticket.owner !== owner) return { ok: false, answer: 'That edit-plan approval expired or belongs to another window. Nothing was sent.' }
     if (decision !== 'allow') return { ok: true, answer: 'Denied. Nothing was sent to Kdenlive.' }
     const controller = new AbortController(); mcpJobs.get(owner)?.abort(); mcpJobs.set(owner, controller)
     try {
-      if (ticket.planDigest !== payloadDigest(ticket.plan)) throw Error('The reviewed edit plan changed in memory. Nothing was sent; review a fresh plan.')
+      if (ticket.planJson !== canonicalJson(ticket.plan) || ticket.planDigest !== canonicalDigest(ticket.plan)) throw Error('The reviewed canonical edit plan changed in memory. Nothing was sent; review a fresh plan.')
       const connection = await nativeConnection()
       if (ticket.authority !== nativeAuthority(connection)) throw Error('The authenticated Kdenlive endpoint, token, session, tool inventory, or project settings changed after review. Nothing was sent; review again.')
       const current = await readNativeState(connection, controller.signal)
       if (current.sessionId !== ticket.state.sessionId || current.sequenceId !== ticket.state.sequenceId || current.documentUrl !== ticket.state.documentUrl || current.revision !== ticket.state.revision) throw Error('The visible Kdenlive project changed after review. Re-read and review a fresh plan; nothing was applied.')
-      const applied = await callTool(connection, 'desktop_batch', { sessionId: current.sessionId, expectedRevision: current.revision, requestId: randomUUID(), commands: ticket.plan.commands }, controller.signal)
+      const prepared = prepareNativeOperation(owner, 'desktop_batch', { sessionId: current.sessionId, expectedRevision: current.revision, commands: ticket.plan.commands }, current, `Apply reviewed edit plan ${ticket.plan.id} as one Kdenlive batch`)
+      const applied = await dispatchNativeOperation(prepared, connection, controller.signal)
       const next = projectSnapshot(applied)
       assertNativeTransition(current, next, 'the reviewed batch')
       proposedPlan = null
@@ -1002,26 +1134,26 @@ export function createVideoStudioService(options: {
     { name: 'oddbrain_video_locate', description: 'Run a local literal-word search over complete transcript sections, retained OCR, and unconfirmed visual notes to suggest timestamp windows. This is retrieval, not semantic interpretation; use returned candidates to request exact evidence.', inputSchema: { type: 'object', properties: { sourceId: { type: 'string' }, query: { type: 'string', minLength: 2, maxLength: 500 }, maxResults: { type: 'integer', minimum: 1, maximum: 20 } }, required: ['sourceId', 'query'], additionalProperties: false } },
     { name: 'oddbrain_video_evidence_expand', description: 'Retrieve 1–6 additional local frames and matching short audio windows at question-relevant timestamps from an already approved source. Does not edit Kdenlive or upload media.', inputSchema: { type: 'object', properties: { sourceId: { type: 'string' }, moments: { type: 'array', minItems: 1, maxItems: 6, items: { type: 'number', minimum: 0 } }, question: { type: 'string', minLength: 2, maxLength: 1000 } }, required: ['sourceId', 'moments', 'question'], additionalProperties: false } },
     { name: 'oddbrain_video_evidence_note', description: 'Preserve AI visual descriptions as unconfirmed derived notes linked to exact timestamps and the question. It never confirms them for the owner.', inputSchema: { type: 'object', properties: { sourceId: { type: 'string' }, question: { type: 'string' }, observations: { type: 'array', minItems: 1, maxItems: 50, items: { type: 'object', properties: { at: { type: 'number' }, description: { type: 'string' } }, required: ['at', 'description'], additionalProperties: false } } }, required: ['sourceId', 'question', 'observations'], additionalProperties: false } },
-    { name: 'oddbrain_creative_search', description: 'Search live legal/free Creative Library providers for an edit need. Returns provenance for ranking and downloads nothing.', inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 2, maxLength: 160 }, kind: { type: 'string', enum: ['image', 'video', 'audio'] }, purpose: { type: 'string', minLength: 2, maxLength: 1000 }, maxResults: { type: 'integer', minimum: 1, maximum: 12 }, page: { type: 'integer', minimum: 1, maximum: 20 } }, required: ['query', 'kind', 'purpose'], additionalProperties: false } },
-    { name: 'oddbrain_edit_plan_propose', description: 'Submit an exact native Kdenlive batch for visible owner review. This does not validate or apply it. Read safe state and bounded timeline/bin sections first, cite real ready evidence IDs, and include the exact documentUrl, sequenceId and revision. Non-empty assetNeeds deliberately block Apply until exact assets are approved/imported and the plan is regenerated with real bin IDs.', inputSchema: { type: 'object', properties: { plan: { type: 'object' } }, required: ['plan'], additionalProperties: false } },
+    { name: 'oddbrain_creative_search', description: 'Search live legal/free Creative Library providers for an edit need. Returns provenance for ranking and downloads nothing.', inputSchema: { type: 'object', properties: { query: { type: 'string', minLength: 2, maxLength: 160 }, kind: { type: 'string', enum: ['image', 'video', 'audio'] }, purpose: { type: 'string', minLength: 2, maxLength: 1000 }, intendedUse: { type: 'string', enum: ['commercial-or-public', 'noncommercial'] }, maxResults: { type: 'integer', minimum: 1, maximum: 12 }, page: { type: 'integer', minimum: 1, maximum: 20 } }, required: ['query', 'kind', 'purpose'], additionalProperties: false } },
+    { name: 'oddbrain_edit_plan_propose', description: 'Submit an exact native Kdenlive batch for visible owner review. This does not validate or apply it. Read safe state and bounded timeline/bin sections first, cite real ready evidence IDs, and include the opaque projectHandle, sequenceId and revision. The private local document URL is never exposed. Non-empty assetNeeds deliberately block Apply until exact assets are approved/imported and the plan is regenerated with real bin IDs.', inputSchema: { type: 'object', properties: { plan: { type: 'object' } }, required: ['plan'], additionalProperties: false } },
   ]
 
   const safeNativeRead = (value: unknown, depth = 0): unknown => {
     if (depth > 16) throw Error('The selected Kdenlive state is nested too deeply. Request a narrower section.')
     if (value === null || typeof value === 'boolean' || typeof value === 'number') return value
-    if (typeof value === 'string') { if (value.length > 100_000) throw Error('One selected Kdenlive state value exceeds 100,000 characters. Request a narrower section.'); return value }
+    if (typeof value === 'string') { if (value.length > 100_000) throw Error('One selected Kdenlive state value exceeds 100,000 characters. Request a narrower section.'); return /^(?:file:\/\/|[a-z]:[\\/]|\/)/i.test(value) || value.includes('\\') ? '[private local path]' : value }
     if (Array.isArray(value)) { if (value.length > 10_000) throw Error('The selected Kdenlive state has more than 10,000 entries. Request a narrower range.'); return value.map(item => safeNativeRead(item, depth + 1)) }
     if (!plain(value) || Object.keys(value).length > 500) throw Error('The selected Kdenlive state has an unsupported shape.')
     return Object.fromEntries(Object.entries(value).filter(([key, item]) => {
       const lowered = key.toLowerCase()
-      if (['sessionid', 'requestid', 'url', 'path', 'filepath', 'proxypath', 'originalpath', 'token', 'authorization', 'headers'].includes(lowered) || /(?:token|secret|password|authorization|cookie)$/.test(lowered)) return false
-      if (['resource', 'proxy', 'originalurl'].includes(lowered) && typeof item === 'string' && (/^(?:file:\/\/|[a-z]:[\\/]|\/)/i.test(item) || item.includes('\\'))) return false
+      if (['sessionid', 'requestid', 'documenturl', 'url', 'path', 'filepath', 'proxypath', 'originalpath', 'token', 'authorization', 'headers'].includes(lowered) || /(?:token|secret|password|authorization|cookie)$/.test(lowered)) return false
+      if (typeof item === 'string' && (/^(?:file:\/\/|[a-z]:[\\/]|\/)/i.test(item) || item.includes('\\'))) return false
       return true
     }).map(([key, item]) => [key, safeNativeRead(item, depth + 1)]))
   }
 
   const aiResult = (id: unknown, payload: unknown, images: Array<{ mime: string; data: string }> = [], audio: Array<{ mime: string; data: string }> = []): AiMcpReply => ({ status: 200, body: { jsonrpc: '2.0', id, result: { content: [{ type: 'text', text: JSON.stringify(payload) }, ...images.map(image => ({ type: 'image', mimeType: image.mime, data: image.data })), ...audio.map(item => ({ type: 'audio', mimeType: item.mime, data: item.data }))], isError: false } } })
-  const aiError = (id: unknown, message: string, code = -32602): AiMcpReply => ({ status: 200, body: { jsonrpc: '2.0', id, error: { code, message: message.slice(0, 2000) } } })
+  const aiError = (id: unknown, message: string, code = -32602): AiMcpReply => ({ status: 200, body: { jsonrpc: '2.0', id, error: { code, message: pathFreeText(message).slice(0, 2000) } } })
   const aiMcp = async (request: unknown, session = ''): Promise<AiMcpReply> => {
     prune()
     if (!request || typeof request !== 'object' || Array.isArray(request)) return aiError(null, 'Invalid JSON-RPC request.', -32600)
@@ -1076,7 +1208,7 @@ export function createVideoStudioService(options: {
       if (params.name === 'oddbrain_kdenlive_review_output') {
         const status = await kdenliveRenderStatus(), complete = [...status.jobs].reverse().find(job => job.mode === 'preview' && /^(?:complete|completed|done|finished|succeeded)$/i.test(job.status) && job.verification?.verified === true)
         if (!complete) return aiResult(id, { ok: status.ok, answer: status.answer, job: null, note: 'No completed owner-approved and natively verified preview is available.' })
-        const { path: _privatePath, error: _privateError, ...safeJob } = complete, evidence = storedEvidence.find(item => item.sourcePath === complete.path && item.status === 'ready')
+        const { path: _privatePath, error: _privateError, ...jobWithoutPath } = complete, { audioReview: _privateAudio, ...safeVerification } = jobWithoutPath.verification || {}, safeJob = { ...jobWithoutPath, verification: safeVerification }, evidence = storedEvidence.find(item => item.sourcePath === complete.path && item.status === 'ready')
         return aiResult(id, { ok: status.ok, answer: status.answer, job: safeJob, evidence: evidence ? publicEvidence(evidence) : null, note: evidence ? 'The owner separately approved complete evidence inspection. Read its exact sections and frames through the normal evidence tools.' : 'Only path-free technical verification is available. Ask the owner to approve Inspect verified preview before judging audio, motion, transcript, or delivery.' })
       }
       if (params.name === 'oddbrain_video_sources') return aiResult(id, { sources: storedEvidence.map(publicEvidence) })
@@ -1125,9 +1257,9 @@ export function createVideoStudioService(options: {
         saveEvidence(); return aiResult(id, { saved: observations.length, state: 'unconfirmed', sourceId: item.id })
       }
       if (params.name === 'oddbrain_creative_search') {
-        const kind = args.kind as CreativeKind, query = text(args.query, 160), purpose = text(args.purpose, 1000), max = Number.isSafeInteger(args.maxResults) ? Math.max(1, Math.min(12, args.maxResults)) : 8, page = Number.isSafeInteger(args.page) ? Math.max(1, Math.min(20, args.page)) : 1
+        const kind = args.kind as CreativeKind, query = text(args.query, 160), purpose = text(args.purpose, 1000), intendedUse: CreativeUse = args.intendedUse === 'noncommercial' ? 'noncommercial' : 'commercial-or-public', max = Number.isSafeInteger(args.maxResults) ? Math.max(1, Math.min(12, args.maxResults)) : 8, page = Number.isSafeInteger(args.page) ? Math.max(1, Math.min(20, args.page)) : 1
         if (!query || !purpose || !['image', 'video', 'audio'].includes(kind)) throw Error('Provide a valid query, kind, and edit purpose.')
-        const found = await search(-1, query, kind, page), ranked = found.assets.slice(0, max); creativeProposal = { query, kind, purpose, assets: ranked, createdAt: new Date(now()).toISOString() }
+        const found = await search(-1, query, kind, page, intendedUse), ranked = found.assets.slice(0, max); creativeProposal = { query, kind, purpose, intendedUse, assets: ranked, createdAt: new Date(now()).toISOString() }
         return aiResult(id, { ...found, assets: ranked, purpose, note: 'Nothing was downloaded. The owner must approve one exact result in Video Studio.' })
       }
       if (params.name === 'oddbrain_edit_plan_propose') {
@@ -1138,7 +1270,7 @@ export function createVideoStudioService(options: {
     } catch (error) { return aiError(id, (error as Error).message) }
   }
 
-  const actionTools: Record<KdenliveAction, string> = { undo: 'desktop_undo', redo: 'desktop_redo', 'save-version': 'desktop_project_save_as' }
+  const actionTools: Record<KdenliveAction, string> = { undo: 'desktop_undo', redo: 'desktop_redo', 'save-version': 'desktop_project_save_as', 'make-vertical': 'desktop_project_profile' }
   const prepareKdenliveAction = async (owner: number, action: KdenliveAction): Promise<KdenliveToolReview> => {
     prune()
     if (!actionTools[action]) return { ok: false, error: 'Unknown Kdenlive action.' }
@@ -1152,17 +1284,20 @@ export function createVideoStudioService(options: {
       if (toolName === 'desktop_undo' || toolName === 'desktop_redo') {
         if (toolName === 'desktop_undo' && !state.undo.canUndo) return { ok: false, error: 'The visible Kdenlive project has nothing to Undo.' }
         if (toolName === 'desktop_redo' && !state.undo.canRedo) return { ok: false, error: 'The visible Kdenlive project has nothing to Redo.' }
-        args = { sessionId: state.sessionId, expectedRevision: state.revision, requestId: randomUUID(), count: 1 }
+        args = { sessionId: state.sessionId, expectedRevision: state.revision, count: 1 }
+      } else if (toolName === 'desktop_project_profile') {
+        if (state.profile.width === 1080 && state.profile.height === 1920) return { ok: false, error: 'The visible Kdenlive project already uses a 1080×1920 vertical profile.' }
+        args = { sessionId: state.sessionId, expectedRevision: state.revision, width: 1080, height: 1920 }
       } else {
         if (!await realFolder(preferences.projectFolder)) return { ok: false, error: 'Choose an existing project folder before saving a version.' }
         if (!state.documentUrl) return { ok: false, error: 'Save the visible Kdenlive project before creating a version.' }
         const root = await realpath(preferences.projectFolder), destination = join(root, 'OddBrain Versions', `version-${new Date(now()).toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}.kdenlive`)
-        args = { sessionId: state.sessionId, expectedRevision: state.revision, requestId: randomUUID(), path: destination }
+        args = { sessionId: state.sessionId, expectedRevision: state.revision, path: destination }
       }
       const token = randomUUID(), expires = now() + 2 * 60_000
       editorActions.set(token, { owner, action, tool: tool.name, args, argsDigest: payloadDigest(args), state, authority: nativeAuthority(connection), expires })
-      const label = action === 'undo' ? 'Undo the latest visible shared-history step' : action === 'redo' ? 'Redo the next visible shared-history step' : 'Save a recoverable project version and keep editing that new copy'
-      return { ok: true, token, tool: tool.name, summary: `${label} using ${tool.name}${typeof args.path === 'string' ? ` at ${args.path}` : ''}. This is one-use approval; a native revision conflict fails instead of guessing.`, expiresAt: expiresAt(expires) }
+      const label = action === 'undo' ? 'Undo the latest visible shared-history step' : action === 'redo' ? 'Redo the next visible shared-history step' : action === 'make-vertical' ? 'Change the project profile to 1080×1920; this profile change is immediate and is not a normal Undo step, while clip reframing remains a separate exact reviewed plan' : 'Save a recoverable project version and keep editing that new copy'
+      return { ok: true, token, tool: tool.name, summary: `${label} using ${tool.name}${typeof args.path === 'string' ? ` at ${args.path}` : ''}. This is one-use approval; a native revision conflict fails instead of guessing.`,  expiresAt: expiresAt(expires) }
     } catch (error) { return { ok: false, error: (error as Error).message } }
   }
   const decideKdenliveAction = async (owner: number, token: string, decision: 'allow' | 'deny'): Promise<{ ok: boolean; answer: string }> => {
@@ -1181,7 +1316,8 @@ export function createVideoStudioService(options: {
         const folder = await safeProjectDirectory('OddBrain Versions'), destination = join(folder, basename(String(ticket.args.path || '')))
         if (destination !== ticket.args.path) throw Error('The reviewed version destination changed. Nothing was saved.')
       }
-      const result = await callTool(connection, ticket.tool, ticket.args, controller.signal)
+      const prepared = prepareNativeOperation(owner, ticket.tool, ticket.args, current, `Run reviewed ${ticket.action} action`)
+      const result = await dispatchNativeOperation(prepared, connection, controller.signal)
       const next = projectSnapshot(result)
       if (ticket.tool === 'desktop_project_save_as') {
         // The pinned native contract keeps this editing session while changing
@@ -1190,8 +1326,11 @@ export function createVideoStudioService(options: {
         try { openedPath = await realpath(fileURLToPath(next.documentUrl)) } catch { /* verified below */ }
         const reviewedPath = await realpath(String(ticket.args.path || '')).catch(() => '')
         if (!openedPath || openedPath !== reviewedPath || next.documentUrl === current.documentUrl || next.sessionId !== current.sessionId || next.sequenceId !== current.sequenceId || next.revision <= current.revision) throw Error('Kdenlive did not return the exact reviewed saved-project path and expected revision. Refresh state and history; completion is not claimed.')
-      } else assertNativeTransition(current, next, ticket.action)
-      return { ok: true, answer: ticket.action === 'undo' ? 'Kdenlive reported that the reviewed Undo completed with a new verified revision.' : ticket.action === 'redo' ? 'Kdenlive reported that the reviewed Redo completed with a new verified revision.' : 'Kdenlive reported a new saved-project identity for the reviewed version.' }
+      } else {
+        assertNativeTransition(current, next, ticket.action)
+        if (ticket.tool === 'desktop_project_profile' && (next.profile.width !== 1080 || next.profile.height !== 1920)) throw Error('Kdenlive did not return the reviewed 1080×1920 project profile. Completion is not claimed.')
+      }
+      return { ok: true, answer: ticket.action === 'undo' ? 'Kdenlive reported that the reviewed Undo completed with a new verified revision.' : ticket.action === 'redo' ? 'Kdenlive reported that the reviewed Redo completed with a new verified revision.' : ticket.action === 'make-vertical' ? 'Kdenlive reported the reviewed 1080×1920 profile. Clips are not claimed reframed; inspect them and approve a separate exact reframe plan.' : 'Kdenlive reported a new saved-project identity for the reviewed version.' }
     } catch (error) { return { ok: false, answer: controller.signal.aborted ? 'Stop was requested while Kdenlive was answering. The outcome is uncertain; refresh state and history before retrying.' : (error as Error).message } }
     finally { if (mcpJobs.get(owner) === controller) mcpJobs.delete(owner) }
   }
@@ -1219,7 +1358,7 @@ export function createVideoStudioService(options: {
       const transfer = transfers.get(owner), operation = mcpJobs.get(owner), aiOperation = mcpJobs.get(-1), render = [...activeRenders].reverse().find(([, value]) => (value.owner === owner || value.owner === -1) && !/^(?:complete|completed|done|finished|succeeded|failed|cancelled|canceled)$/i.test(value.status))
       transfer?.abort(); operation?.abort(); aiOperation?.abort(); options.stopVideoAnalysis?.(owner)
       let renderAnswer = ''
-      if (render) try { const connection = await nativeConnection(); await callTool(connection, 'desktop_render_cancel', { path: render[0] }); render[1].status = 'aborted'; renderAnswer = ` Kdenlive reported that render cancellation was requested for ${render[0]}.`; try { saveRenderReceipts() } catch (error) { renderAnswer += ` The recovered receipt could not be updated: ${(error as Error).message}` } } catch (error) { renderAnswer = ` The render cancellation could not be confirmed: ${(error as Error).message}` }
+      if (render) try { const connection = await nativeConnection(), state = await readNativeState(connection); const prepared = prepareNativeOperation(owner, 'desktop_render_cancel', { path: render[0] }, state, `Cancel retained render ${basename(render[0])}`); await dispatchNativeOperation(prepared, connection); render[1].status = 'aborted'; renderAnswer = ` Kdenlive reported that render cancellation was requested for ${render[0]}.`; try { saveRenderReceipts() } catch (error) { renderAnswer += ` The recovered receipt could not be updated: ${(error as Error).message}` } } catch (error) { renderAnswer = ` The render cancellation could not be confirmed: ${(error as Error).message}` }
       if (!transfer && !operation && !aiOperation && !render) return { ok: true, answer: 'No Video Studio transfer, evidence retrieval, Kdenlive operation, or owner-approved render is known to be running. Any local media analysis owned by this window was also asked to stop.' }
       return { ok: true, answer: `Stop requested for ${[transfer ? 'transfer' : '', operation || aiOperation ? 'evidence/editor operation' : '', render ? 'native render' : ''].filter(Boolean).join(', ')}. An interrupted editor call stays uncertain until state and history are refreshed.${renderAnswer}` }
     },

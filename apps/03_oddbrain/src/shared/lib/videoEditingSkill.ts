@@ -28,8 +28,9 @@ owner approval; never create a second timeline or rewrite an open project file.
    frame/audio windows and preserve descriptions as unconfirmed notes. For
    style analysis, sample the opening, ending, scene changes and representative
    points across the full duration; never infer continuous vision from one still.
-2. Call oddbrain_kdenlive_state. Record documentUrl, sequenceId, revision,
-   profile, Undo state and returned history. Then call
+2. Call oddbrain_kdenlive_state. Record its opaque projectHandle, sequenceId,
+   revision, profile, Undo state and returned history. OddBrain deliberately keeps
+   the full local project path private. Then call
    oddbrain_kdenlive_timeline for only the tracks, clips, bin items, subtitles,
    effects or range needed by this edit. Use its real IDs; never guess them.
    OddBrain removes native editing secrets and bin file paths, so direct editing
@@ -46,7 +47,11 @@ Create one oddbrain_edit_plan_propose object with the exact current project
 identity and native batch commands. Prefer stable track tags such as V1 and A2.
 Keep linked camera audio grouped. Put cuts, B-roll, music, ducking, titles,
 fades, effects and reframing into clear passes when one huge pass would be hard
-to inspect. For reviewed burned-in captions, use exact timed title_create commands and the
+to inspect. For a vertical conversion, first require the owner-reviewed 1080×1920
+profile action, then propose exact reframe commands with start/end focus points.
+Use evidence across the clip and request opening/middle/ending frame checks. One
+linear pan cannot promise object tracking through complex motion; name a manual
+Kdenlive step instead of inventing automatic tracking. For reviewed burned-in captions, use exact timed title_create commands and the
 owner’s chosen local caption style, then inspect readability. The pinned protocol
 reads subtitles but does not write a native sequence caption track, so preserve
 caption text/style files and name that visible manual Kdenlive step when the
@@ -64,9 +69,10 @@ oddbrain_kdenlive_frame at the opening, cuts, titles and ending without moving
 the playhead. Ask the owner to approve a ten-second-or-shorter Kdenlive preview
 for ranges where motion or sound matters. After Kdenlive reports and verifies
 completion, the owner must separately approve **Inspect verified preview**.
-That creates a distinct durable evidence map; use oddbrain_evidence_inventory,
-oddbrain_evidence_search and oddbrain_evidence_expand to inspect its complete
-mixed-audio transcript/delivery and selected frames. You cannot start, cancel or
+That creates a distinct durable evidence map; use oddbrain_video_sources,
+oddbrain_video_locate, oddbrain_video_evidence and
+oddbrain_video_evidence_expand to inspect its complete mixed-audio
+transcript/delivery and selected frames. You cannot start, cancel or
 approve either operation. Judge caption readability, pacing, reframing,
 supported fades/effects, speech/music balance and visual continuity. The pinned protocol cannot create cross-track
 compositions, so mark those transitions as manual Kdenlive steps rather than
@@ -89,6 +95,8 @@ export function kdenliveEditingSkill(engine: 'claude-code' | 'agy'): SkillDraft 
     description: 'Read OddBrain video evidence, propose exact native Kdenlive batches, wait for owner review, inspect previews, improve, and verify export while Kdenlive remains authoritative.',
     body: KDENLIVE_EDITING_SKILL_BODY,
     requirements: `Separate installed Kdenlive native MCP compatible with reviewed reference ${KDENLIVE_SKILL_REFERENCE.commit}; OddBrain video-review MCP; no paid provider.`,
-    replaceExisting: false,
+    // Built-in updates are never silent: an existing file produces an exact
+    // replacement diff and still requires the owner's one-use approval.
+    replaceExisting: true,
   }
 }
