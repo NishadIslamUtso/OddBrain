@@ -18,7 +18,9 @@ export type VideoStudioPreferences = {
 
 export const DEFAULT_VIDEO_STUDIO: VideoStudioPreferences = {
   kdenlive: '',
-  mcpUrl: 'http://127.0.0.1:8765/mcp',
+  // OddBrain's established browser companion owns 8765. Configure the
+  // separately installed Kdenlive fork to 8766 so both local services work.
+  mcpUrl: 'http://127.0.0.1:8766/mcp',
   projectFolder: '',
   ytDlp: '',
 }
@@ -305,7 +307,12 @@ export type VideoStudioBridge = {
  */
 export function adaptiveFramePoints(duration: number, sceneCandidates: Array<{ at: number; score: number }>, count = 3): Array<{ at: number; reason: 'overview' | 'scene-change'; score: number }> {
   if (!Number.isFinite(duration) || duration <= 0 || !Number.isInteger(count) || count < 1) return []
-  const wanted = Math.min(count, 12), margin = Math.min(1, duration * 0.02), gap = Math.max(1, duration / Math.max(12, wanted * 4))
+  const wanted = Math.min(count, 12)
+  // A one-second minimum spacing collapses sub-second and very short clips to a
+  // single frame. Scale spacing down with duration while retaining the existing
+  // one-second maximum for long material.
+  const margin = Math.min(1, duration / Math.max(4, wanted + 2))
+  const gap = Math.max(0.001, Math.min(1, duration / Math.max(12, wanted * 4)))
   const scenes = sceneCandidates
     .filter(item => Number.isFinite(item.at) && item.at >= margin && item.at <= duration - margin && Number.isFinite(item.score) && item.score >= 0)
     .sort((a, b) => b.score - a.score || a.at - b.at)

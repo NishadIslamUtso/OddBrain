@@ -36,6 +36,11 @@ import type {
   SaveInput,
 } from '../main/artifacts/store'
 
+const extensionPairApi = {
+  get: (): Promise<{ token: string }> => ipcRenderer.invoke('extension-pair:get'),
+  rotate: (): Promise<{ ok: boolean; token: string }> => ipcRenderer.invoke('extension-pair:rotate'),
+}
+
 /**
  * The only bridge between the window and the machine.
  *
@@ -185,10 +190,7 @@ const engineApi = {
       return () => ipcRenderer.removeListener('engine:download-event', channel)
     },
   },
-  extensionPair: {
-    get: (): Promise<{ token: string }> => ipcRenderer.invoke('extension-pair:get'),
-    rotate: (): Promise<{ ok: boolean; token: string }> => ipcRenderer.invoke('extension-pair:rotate'),
-  },
+  extensionPair: extensionPairApi,
   readTrust: {
     list: () => ipcRenderer.invoke('engine:read-trust:list'),
     approve: (requestId, mode) => ipcRenderer.invoke('engine:read-trust:approve', requestId, mode),
@@ -300,6 +302,10 @@ const api = {
   } satisfies WorkingNotesBridge,
   transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), image: (id: string, imageId: string) => ipcRenderer.invoke('transcripts:image', id, imageId), attachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:attachment', id, attachmentId), saveAttachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:save-attachment', id, attachmentId), recover: (chatIds: string[], knownTranscriptIds: string[], before?: string) => ipcRenderer.invoke('transcripts:recover', chatIds, knownTranscriptIds, before), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
   media: mediaApi, videoStudio: videoStudioApi, marketplace: marketplaceApi,
+  // Settings consumes pairing beside the other top-level services. Keep the
+  // engine alias below for older renderer bundles, but do not make the current
+  // desktop UI depend on an unrelated engine namespace.
+  extensionPair: extensionPairApi,
   automation: automationApi,
   memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,
   processing: { read: () => ipcRenderer.invoke('processing:read'), resume: id => ipcRenderer.invoke('processing:resume', id), setLimits: limits => ipcRenderer.invoke('processing:set-limits', limits) } satisfies ProcessingLedgerBridge,

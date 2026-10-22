@@ -6,8 +6,8 @@ import { copyRegularFileVerifiedSync, hashRegularFileSync, readRegularFileSync }
 const MANIFEST = 'oddbrain-app-data-backup.json'
 const MAX_FILES = 50_000
 const MAX_MANIFEST_BYTES = 20_000_000
-const DIRECTORIES = ['chats-v1', 'working-notes-v1', 'turn-transcripts', 'attachment-center', 'processing', 'artifacts', 'recipes', 'handoffs', 'workflows', 'command-runs', 'checkpoints', 'automation.json.reviews']
-const FILES = ['projects.json', 'battle-ledger.json', 'hooks.json', 'house-rules.json', 'sessions-board.json', 'automation.json', 'media.json', 'video-studio.json']
+const DIRECTORIES = ['chats-v1', 'working-notes-v1', 'turn-transcripts', 'attachment-center', 'processing', 'artifacts', 'recipes', 'handoffs', 'workflows', 'command-runs', 'checkpoints', 'automation.json.reviews', 'video-evidence-files']
+const FILES = ['projects.json', 'battle-ledger.json', 'hooks.json', 'house-rules.json', 'sessions-board.json', 'automation.json', 'media.json', 'video-studio.json', 'video-evidence-v1.json', 'video-render-receipts-v1.json']
 const EXCLUDED = ['credentials and API keys', 'extension pairing secrets', 'saved read approvals and project file grants', 'engine session IDs and installed engines/models', 'installed extension packages and caches', 'workflow signing secrets and schedule/queue attempts', 'unselected external files']
 const sha = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex')
 
@@ -19,7 +19,13 @@ function walk(root: string, relativePath: string, out: string[]): void {
   if (stat.isSymbolicLink()) throw Error(`Backup refused a linked path: ${relativePath}`)
   if (stat.isFile()) { out.push(relativePath.replaceAll('\\', '/')); return }
   if (!stat.isDirectory()) throw Error(`Backup refused a non-file entry: ${relativePath}`)
-  for (const name of readdirSync(full)) walk(root, join(relativePath, name), out)
+  for (const name of readdirSync(full)) {
+    // Evidence generations publish by renaming a complete .incoming directory.
+    // Never back up an in-flight or crash-left staging generation that no
+    // durable evidence index can reference.
+    if (relativePath.replaceAll('\\', '/').startsWith('video-evidence-files/') && name.startsWith('.incoming-')) continue
+    walk(root, join(relativePath, name), out)
+  }
 }
 function selectedFiles(root: string): string[] {
   const out: string[] = []

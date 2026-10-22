@@ -9,7 +9,16 @@ export function draftLease() {
   return { begin: () => ++generation, invalidate: () => { generation++ }, current: (request: number) => request === generation }
 }
 
-/** Template expansion happens before send. Native slash actions need Part 1's verified transport. */
+/** App-owned, read-only equivalents for a deliberately tiny command set.
+ * They are handled by the composer and are never forwarded to a native CLI. */
+export type SafeSlashAction = 'help' | 'status' | 'doctor' | 'cost'
+export function safeSlashAction(text: string): SafeSlashAction | null {
+  const match = /^\/(help|status|doctor|cost)\s*$/i.exec(text.trim())
+  return match ? match[1].toLowerCase() as SafeSlashAction : null
+}
+
+/** Template expansion happens before send. Every other leading slash command is
+ * refused rather than guessed or forwarded to an interactive terminal. */
 export function looksLikeNativeSlashCommand(text: string): boolean {
   return /^\/[a-z][a-z0-9_-]*(?:\s|$)/i.test(text.trimStart())
 }

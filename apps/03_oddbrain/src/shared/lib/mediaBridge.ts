@@ -1,6 +1,11 @@
 export const MAX_INLINE_MEDIA_BYTES = 8 * 1024 * 1024
 export const LARGE_SOURCE_CHOICE_BYTES = 64 * 1024 * 1024
+/** Above this size document text is offered as complete selectable sections
+ * instead of one automatic attachment. This is not an ingestion ceiling. */
 export const MAX_EXTRACTED_TEXT = 12_000
+/** Leaves room inside the main process's explicit 250k transport safety budget
+ * for the owner request, evidence envelope and app instructions. */
+export const MAX_SELECTED_ATTACHMENT_TEXT = 180_000
 export type MediaPreferences = {
   provider: string; model: string
   transcriptionProvider: string; transcriptionModel: string

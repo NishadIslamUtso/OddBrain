@@ -1,6 +1,8 @@
 /** These streams accept tasks, not the interactive terminal's command palette.
- * No model response may stand in for an executed command. Slash templates are
- * expanded in the composer before dispatch; literal paths in prose are fine. */
+ * No model response may stand in for an executed command. The composer handles
+ * its explicit read-only /help, /status, /doctor and /cost app controls before
+ * dispatch; this boundary still refuses every slash command it receives. Slash
+ * templates are expanded before dispatch and literal paths in prose are fine. */
 export function engineCommandRefusal(prompt: string): string | null {
   const match = /^\/([a-z][a-z0-9_-]*)(?:\s|$)/i.exec(prompt.trim())
   if (!match) return null

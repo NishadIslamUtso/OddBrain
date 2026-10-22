@@ -11,7 +11,7 @@
 
 import { execFile } from 'node:child_process'
 import { existsSync } from 'node:fs'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 
 /** The folders the app has always prepended — now the FALLBACK, not the whole answer.
  *  (Kept under its old name too: the pinned contract does not move.) */
@@ -132,6 +132,16 @@ export function resetBinaryOverrides(): void {
   overrides = null
 }
 
+/** Current global npm Claude packages put a native executable behind the
+ * `claude.cmd` compatibility shim. Resolve only that documented package layout;
+ * never execute or parse an arbitrary command script. */
+export function nativeEngineSelection(id: 'claude-code' | 'agy', selected: string): string {
+  if (!/\.(?:cmd|bat)$/i.test(selected)) return selected
+  if (id !== 'claude-code') return ''
+  const executable = join(dirname(selected), 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')
+  try { return existsSync(executable) ? executable : '' } catch { return '' }
+}
+
 /** Known absolute install spots on Windows, for probing and for spawning. */
 export function engineCandidates(id: 'claude-code' | 'agy', env: NodeJS.ProcessEnv = process.env): string[] {
   const npmDir = env['APPDATA'] ? join(env['APPDATA'], 'npm') : ''
@@ -152,18 +162,22 @@ export function engineCandidates(id: 'claude-code' | 'agy', env: NodeJS.ProcessE
   const pathText = env['PATH'] ?? ''
   // Split by the PATH's own shape, not the host OS: a Windows-shaped PATH
   // (`C:\x;C:\y`) can be probed from anywhere (tests, a migrated env).
-  const fromPath = pathText
+  const pathFolders = pathText
     .split(pathText.includes(';') ? ';' : pathText.includes(':') ? ':' : ';')
     .filter(Boolean)
     .slice(0, 64)
-    .flatMap((dir) => [join(dir, `${binary}.exe`), join(dir, `${binary}.cmd`), join(dir, `${binary}.bat`)])
+  const fromPath = pathFolders.flatMap((dir) => [
+    ...(id === 'claude-code' ? [join(dir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe')] : []),
+    join(dir, `${binary}.exe`), join(dir, `${binary}.cmd`), join(dir, `${binary}.bat`),
+  ])
   if (id === 'claude-code') {
     return [
-      ...(override ? [override] : []),
+      ...(override ? [nativeEngineSelection(id, override) || override] : []),
       ...staged,
       ...fromPath,
-      ...(npmDir ? [join(npmDir, 'claude.cmd'), join(npmDir, 'claude')] : []),
+      ...(npmDir ? [join(npmDir, 'node_modules', '@anthropic-ai', 'claude-code', 'bin', 'claude.exe'), join(npmDir, 'claude.cmd'), join(npmDir, 'claude')] : []),
       ...(localBin ? [join(localBin, 'claude.exe'), join(localBin, 'claude')] : []),
+      ...(programs ? [join(programs, 'Claude', 'claude.exe')] : []),
     ]
   }
   return [
@@ -184,30 +198,35 @@ export function engineCandidates(id: 'claude-code' | 'agy', env: NodeJS.ProcessE
  */
 export function resolveEngineCommand(id: 'claude-code' | 'agy', env: NodeJS.ProcessEnv = process.env): string {
   kickRefreshIfStale(process.platform, env)
-  // The owner's pointer is the first answer — before every probe.
+  // The owner's pointer is the first answer — before every probe. A selected
+  // current npm shim is converted to its package's real claude.exe; arbitrary
+  // command scripts remain visible to diagnostics but are never treated as a
+  // native launch target.
   const pointed = binaryOverride(id)
-  if (pointed) return pointed
+  if (pointed) {
+    const native = nativeEngineSelection(id, pointed)
+    if (native && !/\.(?:cmd|bat)$/i.test(native)) return native
+  }
   const candidates = engineCandidates(id, env)
-  // Prefer a real executable over an npm shell shim, even when npm appears
-  // earlier on PATH. Native stream/inspection launches never invoke a shell.
-  for (const candidate of [...candidates.filter(path => !/\.(cmd|bat)$/i.test(path)), ...candidates.filter(path => /\.(cmd|bat)$/i.test(path))]) {
+  // Command-script shims remain useful discovery clues, but native engine
+  // streams and inspections never execute them. Current Claude npm installs
+  // are reached through their adjacent package-owned claude.exe instead.
+  for (const candidate of candidates.filter(path => !/\.(cmd|bat)$/i.test(path))) {
     try {
       if (existsSync(candidate)) return candidate
     } catch {
       /* a hostile path string throws on some platforms — skip it */
     }
   }
+  if (process.platform === 'win32') return id === 'claude-code' ? 'claude.exe' : 'agy.exe'
   return id === 'claude-code' ? 'claude' : 'agy'
 }
 
 /**
- * Quote a command for a Windows shell spawn. The engines launch through the
- * shell there, and an absolute path like
- * `C:\Users\Nishad Islam Utso\.local\bin\claude.exe` dies at the first
- * space unquoted — the owner's own terminal proved it:
- * "Processing -File 'C:\Users\Nishad' failed". A quoted command rides
- * through `cmd /d /s /c` intact. Off Windows the array form needs no
- * quoting and nothing changes.
+ * Quote a command for a reviewed caller that explicitly uses a Windows shell.
+ * Native engine launch and discovery no longer use this helper: they execute a
+ * real binary with shell:false and refuse command-script shims. Off Windows the
+ * array form needs no quoting and nothing changes.
  */
 export function shellSafeCommand(command: string, platform: NodeJS.Platform = process.platform): string {
   if (platform !== 'win32') return command

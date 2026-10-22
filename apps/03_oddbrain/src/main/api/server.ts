@@ -41,6 +41,8 @@ export type LocalApiOptions = {
   cloud?: CloudStream
   /** Local, review-only MCP tools for video evidence/library/plan proposals. */
   videoMcp?: (request: unknown, session: string) => Promise<{ status: number; body: unknown; session?: string }>
+  /** Exact capability path written through owner-reviewed engine config. */
+  videoMcpPath?: string
 }
 
 /**
@@ -206,7 +208,12 @@ export function startLocalApi(options: LocalApiOptions): Promise<LocalApi> {
 
   function handle(request: IncomingMessage, response: ServerResponse): void {
     const pathname = (request.url || '/').split('?')[0]
-    if (pathname === '/api/video-studio-mcp') {
+    if (pathname.startsWith('/api/video-studio-mcp')) {
+      if (!options.videoMcpPath || pathname !== options.videoMcpPath) {
+        response.writeHead(403, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+        response.end(JSON.stringify({ error: 'A current owner-reviewed Video Studio connector capability is required.' }))
+        return
+      }
       void handleVideoMcp(request, response)
       return
     }
@@ -395,9 +402,7 @@ export function startLocalApi(options: LocalApiOptions): Promise<LocalApi> {
   }
 
   return new Promise<LocalApi>((resolvePromise, reject) => {
-    server.once('error', reject)
-    // Loopback only. This server is not part of the network, it is part of the app.
-    server.listen(options.port, '127.0.0.1', () => {
+    const ready = (): void => {
       const address = server.address()
       const port = typeof address === 'object' && address ? address.port : options.port
       resolvePromise({
@@ -408,6 +413,18 @@ export function startLocalApi(options: LocalApiOptions): Promise<LocalApi> {
           vault = next
         },
       })
-    })
+    }
+    const firstError = (error: NodeJS.ErrnoException): void => {
+      if (error.code !== 'EADDRINUSE' || options.port === 0) { reject(error); return }
+      // A stale process or another local app may own the preferred port. Let the
+      // OS choose a free loopback port and serve the renderer from that exact
+      // same origin; falling back to file:// would strand every relative API
+      // request. No remote interface is ever tried.
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', ready)
+    }
+    server.once('error', firstError)
+    // Loopback only. This server is not part of the network, it is part of the app.
+    server.listen(options.port, '127.0.0.1', ready)
   })
 }

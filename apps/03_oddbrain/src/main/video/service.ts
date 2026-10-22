@@ -4,6 +4,7 @@ import { lookup } from 'node:dns/promises'
 import { lstat, mkdir, open, readFile, realpath, rename, rm, statfs, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative } from 'node:path'
 import { spawn } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { boundedResponse } from '../network/boundedResponse'
 import { readRecoverableJson, writeRecoverableJson } from '../recoverableJson'
 import { runMediaCommand } from '../media/process'
@@ -50,9 +51,9 @@ import { NATIVE_KDENLIVE_REFERENCE, commandSummary, nativeCompatibility, normali
 
 type PrivateAsset = { public: CreativeAsset; previewUrl: string; downloadUrl: string; expires: number; owner: number }
 type AssetApproval = { asset: PrivateAsset; destination: string; preferences: string; expires: number; owner: number }
-type UrlApproval = { preflight: VideoUrlPreflight; source: URL; expires: number; owner: number }
+type UrlApproval = { preflight: VideoUrlPreflight; source: URL; preferences: string; expires: number; owner: number }
 type McpTool = { name: string; description?: string; inputSchema?: { properties?: Record<string, unknown>; required?: string[] } }
-type McpConnection = { session: string; tools: McpTool[]; serverInfo: unknown; protocol: string; native: ReturnType<typeof nativeCompatibility> }
+type McpConnection = { session: string; tools: McpTool[]; serverInfo: unknown; protocol: string; bearerRequired: boolean; native: ReturnType<typeof nativeCompatibility> }
 type StoredEvidence = Omit<VideoEvidenceSummary, 'audioWindows'> & {
   sourcePath: string
   sourceText: string
@@ -65,8 +66,8 @@ type StoredEvidence = Omit<VideoEvidenceSummary, 'audioWindows'> & {
   unconfirmed: { descriptions: Array<{ at: number; description: string; question: string; createdAt: string }> }
   confirmed: { descriptions: Array<{ at: number; description: string; confirmedAt: string }> }
 }
-type EditPlanApproval = { owner: number; plan: KdenliveEditPlan; state: KdenliveProjectSnapshot; validation: { valid: boolean; issues: string[]; unsupported: boolean }; preferences: string; expires: number }
-type RenderApproval = { owner: number; mode: KdenliveRenderMode; intent: KdenliveOutputIntent; state: KdenliveProjectSnapshot; destination: string; range?: { start: number; end: number }; preferences: string; expires: number }
+type EditPlanApproval = { owner: number; plan: KdenliveEditPlan; planDigest: string; state: KdenliveProjectSnapshot; validation: { valid: boolean; issues: string[]; unsupported: boolean }; authority: string; expires: number }
+type RenderApproval = { owner: number; mode: KdenliveRenderMode; intent: KdenliveOutputIntent; state: KdenliveProjectSnapshot; destination: string; range?: { start: number; end: number }; authority: string; expires: number }
 type PreviewInspectionApproval = { owner: number; path: string; videoOcr: boolean; size: number; dev: number; ino: number; mtimeMs: number; preferences: string; expires: number }
 type AiMcpReply = { status: number; body: unknown; session?: string }
 
@@ -79,7 +80,8 @@ const safePart = (value: string): string => value.normalize('NFKC').replace(/[^a
 const text = (value: unknown, max = 500): string => typeof value === 'string' && value.length <= max && !/[\u0000-\u001f]/.test(value) ? value.trim() : ''
 const finite = (value: unknown): number | undefined => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : undefined
 const plain = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
-const preferencesDigest = (value: VideoStudioPreferences): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+const payloadDigest = (value: unknown): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
+const preferencesDigest = (value: VideoStudioPreferences): string => payloadDigest(value)
 
 function publicAsset(input: Omit<CreativeAsset, 'token'>, token: string): CreativeAsset { return { ...input, token } }
 function providerNotice(provider: CreativeProvider): string {
@@ -167,10 +169,13 @@ export function createVideoStudioService(options: {
     }, []).value
   } catch { /* first use or an unrecoverable evidence index */ }
   const assets = new Map<string, PrivateAsset>(), approvals = new Map<string, AssetApproval>(), urls = new Map<string, UrlApproval>()
-  const editorActions = new Map<string, { owner: number; action: KdenliveAction; tool: string; args: Record<string, unknown>; preferences: string; expires: number }>(), editPlans = new Map<string, EditPlanApproval>(), renderApprovals = new Map<string, RenderApproval>(), activeRenders = new Map<string, { owner: number; mode: KdenliveRenderMode; range?: { start: number; end: number }; startedAt: string; status: string; verified?: boolean }>(), designKits = new Map<string, { owner: number; format: DesignKitFormat; destination: string; preferences: string; expires: number }>(), transfers = new Map<number, AbortController>(), mcpJobs = new Map<number, AbortController>()
+  const editorActions = new Map<string, { owner: number; action: KdenliveAction; tool: string; args: Record<string, unknown>; argsDigest: string; state: KdenliveProjectSnapshot; authority: string; expires: number }>(), editPlans = new Map<string, EditPlanApproval>(), renderApprovals = new Map<string, RenderApproval>(), activeRenders = new Map<string, { owner: number; mode: KdenliveRenderMode; range?: { start: number; end: number }; startedAt: string; status: string; verified?: boolean }>(), designKits = new Map<string, { owner: number; format: DesignKitFormat; destination: string; preferences: string; expires: number }>(), transfers = new Map<number, AbortController>(), mcpJobs = new Map<number, AbortController>()
   const previewInspections = new Map<string, PreviewInspectionApproval>()
   const aiSessions = new Map<string, number>()
-  const saveEvidence = (): void => writeRecoverableJson(evidenceFile, storedEvidence)
+  const saveEvidence = (next: StoredEvidence[] = storedEvidence): void => {
+    writeRecoverableJson(evidenceFile, next)
+    storedEvidence = next
+  }
   const renderReceiptsFile = join(dirname(options.file), 'video-render-receipts-v1.json')
   try {
     const retained = readRecoverableJson<{ schema: 1; renders: Array<{ path: string; mode: KdenliveRenderMode; range?: { start: number; end: number }; startedAt: string; status: string; verified?: boolean }> }>(renderReceiptsFile, value => {
@@ -210,7 +215,7 @@ export function createVideoStudioService(options: {
   }
   const save = (patch: Partial<VideoStudioPreferences>): VideoStudioPreferences => {
     for (const key of ['kdenlive', 'projectFolder', 'ytDlp'] as const) if (patch[key] !== undefined && (typeof patch[key] !== 'string' || patch[key]!.length > 4096 || /[\u0000\r\n]/.test(patch[key]!))) throw Error('Video path setting is invalid. Nothing was saved.')
-    if (patch.mcpUrl !== undefined && normalizeMcpUrl(patch.mcpUrl) !== String(patch.mcpUrl).trim()) throw Error('Kdenlive MCP must be credential-free loopback HTTP, such as http://127.0.0.1:8765/mcp. Nothing was saved.')
+    if (patch.mcpUrl !== undefined && normalizeMcpUrl(patch.mcpUrl) !== String(patch.mcpUrl).trim()) throw Error('Kdenlive MCP must be credential-free loopback HTTP, such as http://127.0.0.1:8766/mcp. Nothing was saved.')
     const next = normalizeVideoStudio({ ...preferences, ...patch })
     writeRecoverableJson(options.file, next); preferences = next; lastConnection = null; return { ...next }
   }
@@ -237,7 +242,7 @@ export function createVideoStudioService(options: {
     return current
   }
 
-  const mcpRequest = async (method: string, params: unknown, session = '', notification = false, signal?: AbortSignal): Promise<{ value: any; session: string }> => {
+  const mcpRequest = async (method: string, params: unknown, session = '', notification = false, signal?: AbortSignal, timeoutMs = 20_000): Promise<{ value: any; session: string }> => {
     const url = new URL(preferences.mcpUrl)
     if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.protocol !== 'http:') throw Error('Kdenlive MCP must use loopback HTTP.')
     const key = options.keys()?.get(MCP_KEY) || ''
@@ -245,8 +250,14 @@ export function createVideoStudioService(options: {
     if (key) headers.Authorization = `Bearer ${key}`
     if (session) headers['Mcp-Session-Id'] = session
     const request = { jsonrpc: '2.0', ...(notification ? {} : { id: randomUUID() }), method, params }
-    const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(20_000)]) : AbortSignal.timeout(20_000)
-    const response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(request), redirect: 'error', signal: requestSignal })
+    const boundedTimeout = Math.max(1_000, Math.min(180_000, timeoutMs))
+    const requestSignal = signal ? AbortSignal.any([signal, AbortSignal.timeout(boundedTimeout)]) : AbortSignal.timeout(boundedTimeout)
+    let response: Response
+    try { response = await fetchImpl(url, { method: 'POST', headers, body: JSON.stringify(request), redirect: 'error', signal: requestSignal }) }
+    catch (error) {
+      if ((error as Error).name === 'TimeoutError' || /timed?\s*out|timeout/i.test((error as Error).message)) throw Error(`Kdenlive did not answer this ${method === 'tools/call' ? 'tool call' : 'protocol request'} within ${Math.round(boundedTimeout / 1000)} seconds. If it could have changed the project, its outcome is uncertain; refresh native state, history, or render status before any retry.`)
+      throw error
+    }
     const raw = await boundedResponse(response, 8_000_000, 'Kdenlive MCP response exceeded the 8 MB local preview/evidence limit.')
     if (!response.ok) throw Error(`Kdenlive MCP refused the request (HTTP ${response.status}).`)
     const value = parseMcp(raw), nextSession = response.headers.get('mcp-session-id') || session
@@ -254,7 +265,21 @@ export function createVideoStudioService(options: {
     return { value: value?.result, session: nextSession }
   }
 
+  const bearerIsRequired = async (): Promise<boolean> => {
+    const url = new URL(preferences.mcpUrl)
+    if (!['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname) || url.protocol !== 'http:') throw Error('Kdenlive MCP must use loopback HTTP.')
+    // The pinned server authenticates before checking the method: an
+    // unauthenticated GET is 401 only when its bearer-token mode is truly on,
+    // while local/no-token mode is 405. GET cannot create an MCP session.
+    const response = await fetchImpl(url, { method: 'GET', headers: { Accept: 'application/json' }, redirect: 'error', signal: AbortSignal.timeout(10_000) })
+    await boundedResponse(response, 64_000, 'Kdenlive MCP authentication probe exceeded 64 KB.')
+    if (response.status === 401 && /^Bearer\b/i.test(response.headers.get('www-authenticate') || '')) return true
+    if (response.status === 405) return false
+    throw Error(`Kdenlive MCP returned unexpected HTTP ${response.status} while checking required bearer authentication.`)
+  }
+
   const connectMcp = async (): Promise<McpConnection> => {
+    const bearerRequired = await bearerIsRequired()
     const initialized = await mcpRequest('initialize', { protocolVersion: NATIVE_KDENLIVE_REFERENCE.protocol, capabilities: {}, clientInfo: { name: 'OddBrain', version: '0.9.0' } })
     await mcpRequest('notifications/initialized', {}, initialized.session, true)
     const listed = await mcpRequest('tools/list', {}, initialized.session)
@@ -262,19 +287,39 @@ export function createVideoStudioService(options: {
     if (reported.length > 500) throw Error('Kdenlive MCP exposed more than 500 tools; the inventory was refused as unsafe.')
     const tools: McpTool[] = reported.filter((item: any) => item && typeof item.name === 'string' && item.name.length <= 200 && !/[\u0000-\u001f]/.test(item.name)).map((item: any) => ({ name: item.name, description: text(item.description, 1000), inputSchema: item.inputSchema && typeof item.inputSchema === 'object' ? item.inputSchema : undefined }))
     const protocol = text(initialized.value?.protocolVersion, 100), serverInfo = initialized.value?.serverInfo
-    lastConnection = { session: listed.session, tools, serverInfo, protocol, native: nativeCompatibility(serverInfo, protocol, tools) }; return lastConnection
+    lastConnection = { session: listed.session, tools, serverInfo, protocol, bearerRequired, native: nativeCompatibility(serverInfo, protocol, tools) }; return lastConnection
   }
 
   const callTool = async (connection: McpConnection, name: string, args: Record<string, unknown>, signal?: AbortSignal): Promise<any> => {
     if (!connection.tools.some(tool => tool.name === name)) throw Error(`The connected Kdenlive server does not expose ${name}.`)
-    const called = await mcpRequest('tools/call', { name, arguments: args }, connection.session, false, signal)
+    // Import can intentionally wait 30 seconds, full render verification can
+    // probe and decode for about 75 seconds, and native batches/save operations
+    // can exceed a read request. A universal 20-second abort turns successful
+    // work into an uncertain retry hazard, so each consequential class gets a
+    // bounded protocol-aware deadline.
+    const timeoutMs = name === 'desktop_render_verify' ? 120_000
+      : ['desktop_batch', 'desktop_media_import', 'desktop_project_save_as', 'desktop_preview_render', 'desktop_render', 'desktop_frame_capture'].includes(name) ? 90_000
+        : 20_000
+    let called: Awaited<ReturnType<typeof mcpRequest>>
+    try { called = await mcpRequest('tools/call', { name, arguments: args }, connection.session, false, signal, timeoutMs) }
+    catch (error) {
+      if (['desktop_batch', 'desktop_media_import', 'desktop_project_save_as', 'desktop_undo', 'desktop_redo', 'desktop_preview_render', 'desktop_render', 'desktop_render_cancel'].includes(name) && !/outcome is uncertain/i.test((error as Error).message)) throw Error(`${(error as Error).message} The ${name} outcome is uncertain; refresh native state, history, or render status before any retry.`)
+      throw error
+    }
     return toolPayload(called.value)
   }
 
   const nativeConnection = async (): Promise<McpConnection> => {
     const connection = lastConnection || await connectMcp()
     if (!connection.native.compatible) throw Error(connection.native.reason)
+    if (!connection.bearerRequired) throw Error('Enable “Require access token” in the separately installed Kdenlive MCP settings. OddBrain verified that this endpoint currently accepts unauthenticated local requests, so native reads and actions remain locked.')
+    if (!options.keys()?.has(MCP_KEY)) throw Error('Save the bearer token from the separately installed Kdenlive MCP settings in OddBrain. Protocol identity alone does not authenticate the local editor endpoint.')
     return connection
+  }
+  const nativeAuthority = (connection: McpConnection): string => {
+    const key = options.keys()?.get(MCP_KEY) || ''
+    if (!key) throw Error('The authenticated Kdenlive authority is unavailable.')
+    return payloadDigest({ preferences, credential: payloadDigest(key), bearerRequired: connection.bearerRequired, session: connection.session, protocol: connection.protocol, serverInfo: connection.serverInfo, tools: connection.tools.map(tool => ({ name: tool.name, schema: tool.inputSchema || null })).sort((a, b) => a.name.localeCompare(b.name)) })
   }
 
   const readNativeState = async (provided?: McpConnection, signal?: AbortSignal): Promise<KdenliveProjectSnapshot> => {
@@ -285,7 +330,9 @@ export function createVideoStudioService(options: {
   const view = async (): Promise<VideoStudioView> => {
     const keys = options.keys(), kdenliveReady = await regularFile(preferences.kdenlive), projectReady = await realFolder(preferences.projectFolder)
     const native = lastConnection?.native || { compatible: false, missing: [], identity: 'Not connected', reason: `Connect the separately installed native Kdenlive MCP protocol reviewed at ${NATIVE_KDENLIVE_REFERENCE.commit.slice(0, 12)}. No editor build has been accepted on this machine yet.` }
-    return { preferences: { ...preferences }, kdenliveVersion: lastVersion, kdenliveReady, mcpConnected: !!lastConnection, mcpTools: (lastConnection?.tools || []).map(tool => tool.name), nativeKdenlive: { compatible: native.compatible, identity: native.identity, protocol: lastConnection?.protocol || '', referenceCommit: NATIVE_KDENLIVE_REFERENCE.commit, missingTools: native.missing, reason: native.reason }, aiToolsUrl, projectReady, hasMcpToken: !!keys?.has(MCP_KEY), hasPixabayKey: !!keys?.has(PIXABAY_KEY), keyEncryption: keys?.encryption || 'none', notice: lastNotice }
+    const tokenSaved = !!keys?.has(MCP_KEY), bearerRequired = lastConnection?.bearerRequired === true, compatible = native.compatible && bearerRequired && tokenSaved
+    const reason = native.compatible && !bearerRequired ? 'The endpoint matches the reviewed protocol shape, but OddBrain verified that bearer authentication is not required. Enable “Require access token” in Kdenlive MCP before any native read or action.' : native.compatible && !tokenSaved ? 'The endpoint requires bearer authentication, but its token is not saved here. Save the Kdenlive token before OddBrain reads state or offers native actions.' : native.reason
+    return { preferences: { ...preferences }, kdenliveVersion: lastVersion, kdenliveReady, mcpConnected: !!lastConnection, mcpTools: (lastConnection?.tools || []).map(tool => tool.name), nativeKdenlive: { compatible, identity: native.identity, protocol: lastConnection?.protocol || '', referenceCommit: NATIVE_KDENLIVE_REFERENCE.commit, missingTools: native.missing, reason }, aiToolsUrl, projectReady, hasMcpToken: tokenSaved, hasPixabayKey: !!keys?.has(PIXABAY_KEY), keyEncryption: keys?.encryption || 'none', notice: lastNotice }
   }
 
   const testKdenlive = async (): Promise<VideoStudioView> => {
@@ -296,8 +343,11 @@ export function createVideoStudioService(options: {
       const raw = await runCommand(preferences.kdenlive, ['--version'], signal, 15_000, 200_000)
       lastVersion = raw.toString('utf8').trim().replace(/\s+/g, ' ').slice(0, 300) || 'Kdenlive responded without a version label.'
     } catch (error) { lastVersion = ''; lastNotice = `Kdenlive could not be verified: ${(error as Error).message}`; return view() }
-    try { const connected = await connectMcp(); lastNotice = `Kdenlive verified. MCP exposed ${connected.tools.length} tool${connected.tools.length === 1 ? '' : 's'}. ${connected.native.reason}` }
-    catch (error) { lastConnection = null; lastNotice = `Kdenlive verified, but live MCP is unavailable: ${(error as Error).message}` }
+    try {
+      const connected = await connectMcp(), tokenSaved = options.keys()?.has(MCP_KEY) === true
+      lastNotice = `The selected executable answered. MCP exposed ${connected.tools.length} tool${connected.tools.length === 1 ? '' : 's'}. ${connected.native.reason}${connected.native.compatible && !connected.bearerRequired ? ' OddBrain verified that this endpoint does not require bearer authentication, so native reads and actions remain locked.' : connected.native.compatible && !tokenSaved ? ' The endpoint requires bearer authentication, but no Kdenlive token is saved here; native reads and actions remain locked.' : ''}`
+    }
+    catch (error) { lastConnection = null; lastNotice = `The selected executable answered, but live MCP is unavailable: ${(error as Error).message}` }
     return view()
   }
 
@@ -453,7 +503,7 @@ export function createVideoStudioService(options: {
     if (!state.documentUrl) throw Error('Save the visible Kdenlive project before importing the downloaded asset.')
     const result = await callTool(connection, 'desktop_media_import', { sessionId: state.sessionId, expectedRevision: state.revision, requestId: randomUUID(), path, wait: 30 })
     const next = projectSnapshot(result), binId = text(result?.binId, 200)
-    if (next.documentUrl !== state.documentUrl || next.sequenceId !== state.sequenceId || next.revision <= state.revision || !binId) throw Error('Kdenlive did not return the expected project revision and bin ID after media import.')
+    if (next.sessionId !== state.sessionId || next.documentUrl !== state.documentUrl || next.sequenceId !== state.sequenceId || next.revision <= state.revision || !binId) throw Error('Kdenlive did not return the expected project identity, revision, and bin ID after media import.')
     return { binId, ready: result?.ready === true, ...(finite(result?.duration) ? { duration: finite(result.duration) } : {}) }
   }
 
@@ -497,7 +547,7 @@ export function createVideoStudioService(options: {
         if (metadata?.availability === 'needs_auth') throw Error('This source requires authentication. OddBrain does not read browser cookies or bypass access controls.')
         result = { ok: true, url: url.toString(), provider, title: text(metadata?.title, 500) || `${provider} video`, duration: finite(metadata?.duration), uploader: text(metadata?.uploader || metadata?.channel, 300), mediaType: text(metadata?.ext, 50), estimatedBytes: finite(metadata?.filesize_approx || metadata?.filesize), method: 'yt-dlp-metadata', warnings: ['Only public, permitted content may be acquired. Site rules and creator rights still apply.', 'No cookies, login data, playlist expansion or DRM bypass is used.'], consequence: 'Approval asks the reviewed yt-dlp executable to acquire this one public video into the selected project folder and records its URL and file hash.' }
       }
-      const token = randomUUID(), complete = { ...result, token }; urls.set(token, { preflight: complete, source: url, expires: now() + 5 * 60_000, owner }); return complete
+      const token = randomUUID(), complete = { ...result, token }; urls.set(token, { preflight: complete, source: url, preferences: preferencesDigest(preferences), expires: now() + 5 * 60_000, owner }); return complete
     } catch (error) { return { ok: false, url: url.toString(), provider, title: '', method: 'none', warnings: [], consequence: '', error: (error as Error).message } }
   }
 
@@ -534,13 +584,15 @@ export function createVideoStudioService(options: {
     if (!intake) { registerEvidenceIntake(path, result.name, { ...input, sha256: result.source.sha256 }); intake = storedEvidence.at(-1)! }
     if (intake.sha256 && intake.sha256 !== result.source.sha256) throw Error('The retained source no longer matches its intake hash. It was not mixed with the earlier evidence; attach the changed file as a new source.')
     const id = intake.id, root = join(dirname(evidenceFile), 'video-evidence-files', id)
-    await rm(root, { recursive: true, force: true }).catch(() => undefined)
     await mkdir(root, { recursive: true, mode: 0o700 })
-    const moments: VideoEvidenceMoment[] = [], frameFiles: StoredEvidence['frameFiles'] = []
+    const generationName = `generation-${new Date(now()).toISOString().replace(/[:.]/g, '-')}-${randomUUID()}`
+    const staging = join(root, `.incoming-${randomUUID()}`), generation = join(root, generationName)
+    await mkdir(staging, { mode: 0o700 })
+    const moments: VideoEvidenceMoment[] = [], frameFiles: StoredEvidence['frameFiles'] = [], previousFrameFiles = [...intake.frameFiles]
     try {
       for (const [index, evidence] of (result.visualEvidence || []).entries()) {
-        const image = result.images?.[index], destination = join(root, `frame-${String(index + 1).padStart(3, '0')}.jpg`)
-        if (image) { const bytes = Buffer.from(image.data, 'base64'); await writeFile(destination, bytes, { flag: 'wx', mode: 0o600 }); frameFiles.push({ at: evidence.at, path: destination, mime: image.mime }) }
+        const image = result.images?.[index], name = `frame-${String(index + 1).padStart(3, '0')}.jpg`, temporary = join(staging, name), destination = join(generation, name)
+        if (image) { const bytes = Buffer.from(image.data, 'base64'); await writeFile(temporary, bytes, { flag: 'wx', mode: 0o600 }); frameFiles.push({ at: evidence.at, path: destination, mime: image.mime }) }
         moments.push({ at: evidence.at, reason: evidence.reason, score: evidence.score, ...(evidence.ocr ? { ocr: evidence.ocr } : {}), ...(image ? { frame: destination } : {}) })
       }
       const transcriptSegments = result.segments || (result.text ? [{ id: 'complete', label: 'Complete evidence timeline', text: result.text }] : [])
@@ -551,10 +603,21 @@ export function createVideoStudioService(options: {
         sourceText: result.text || transcriptSegments.map(section => `${section.label}\n${section.text}`).join('\n\n'), transcript: result.text || '', transcriptSegments,
         scenes: result.sceneMap || [], audioWindows: result.audioMap || [], frameFiles, raw: { ...intake.raw, ...(input.receipt ? { sourceReceipt: input.receipt } : {}) },
       }
-      storedEvidence = storedEvidence.map(value => value.id === id ? stored : value); saveEvidence()
+      // Publish complete frames as one generation, then commit the index that
+      // points at them. The previous generation is not touched until both steps
+      // succeed, so a crash or failed index write cannot leave ready evidence
+      // pointing at deleted files.
+      await rename(staging, generation)
+      const nextEvidence = storedEvidence.map(value => value.id === id ? stored : value)
+      try { saveEvidence(nextEvidence) }
+      catch (error) { await rm(generation, { recursive: true, force: true }).catch(() => undefined); throw error }
+      for (const old of previousFrameFiles) {
+        const inside = relative(root, old.path)
+        if (inside && !inside.startsWith('..') && !isAbsolute(inside)) await rm(old.path, { force: true }).catch(() => undefined)
+      }
       lastNotice = `Video evidence is ready for ${result.name}: complete selected audio coverage, ${stored.transcriptSections} transcript section(s), ${stored.audioWindows.length} delivery interval(s), ${stored.sceneChanges} scene change(s), and ${stored.moments.length} initial frame(s). The AI can request more timestamps.`
       return publicEvidence(stored)
-    } catch (error) { await rm(root, { recursive: true, force: true }).catch(() => undefined); throw error }
+    } catch (error) { await rm(staging, { recursive: true, force: true }).catch(() => undefined); throw error }
   }
 
   const recordEvidenceFailure = (path: string, name: string, input: { sourceKind: 'file' | 'url'; sourceUrl?: string; receipt?: string; sha256?: string; videoOcr?: boolean }, error: string): VideoEvidenceSummary => {
@@ -564,6 +627,12 @@ export function createVideoStudioService(options: {
       catch { return { id: randomUUID(), name, sourceKind: input.sourceKind, ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}), sha256: input.sha256 || '', duration: 0, createdAt: new Date(now()).toISOString(), transcriptSections: 0, sceneChanges: 0, moments: [], disclosure: 'The source was preserved, but the full 256-record evidence index refused another intake. Nothing was evicted.', status: 'blocked', error: `${error} The blocked attempt could not be indexed.` } }
     }
     if (!item) throw Error('The video evidence intake could not be recovered after registration.')
+    if (item.status === 'ready') {
+      // A replacement failure must not demote or rewrite the last complete,
+      // indexed generation. The caller still reports this attempt's real error.
+      lastNotice = `Fresh evidence was not accepted for ${item.name}: ${error} The prior ready generation remains available.`
+      return publicEvidence(item)
+    }
     item.status = 'blocked'; item.error = error; item.updatedAt = new Date(now()).toISOString()
     item.disclosure = 'The approved source and its provenance remain linked in Video Studio, but the local evidence read did not complete. Retry does not reattach or redownload it.'
     if (input.receipt) item.raw.sourceReceipt = input.receipt
@@ -594,20 +663,28 @@ export function createVideoStudioService(options: {
     if (!options.expandVideoEvidence) return { ok: false, answer: 'Question-driven local frame retrieval is not available in this runtime.' }
     if (!question) return { ok: false, answer: 'Say what the extra evidence should help answer.' }
     const moments = Array.isArray(momentsInput) ? [...new Set(momentsInput.map(Number))] : []
-    if (moments.length < 1 || moments.length > 6 || moments.some(at => !Number.isFinite(at) || at < 0 || at > item.duration)) return { ok: false, answer: `Choose 1–6 timestamps within 0–${item.duration.toFixed(1)} seconds.` }
+    if (moments.length < 1 || moments.length > 6 || moments.some(at => !Number.isFinite(at) || at < 0 || at >= item.duration)) return { ok: false, answer: `Choose 1–6 timestamps from 0 up to, but not including, ${item.duration.toFixed(3)} seconds.` }
     const controller = new AbortController(); mcpJobs.get(_owner)?.abort(); mcpJobs.set(_owner, controller)
     try {
       const expanded = await options.expandVideoEvidence(item.sourcePath, moments, item.raw.videoOcr === true, controller.signal)
       if (expanded.sha256 !== item.sha256) throw Error('The source hash no longer matches the evidence map. Reprocess the source instead of mixing versions.')
-      const root = join(dirname(evidenceFile), 'video-evidence-files', item.id), added: VideoEvidenceMoment[] = [], images: NonNullable<EvidenceExpansion['images']> = []
-      for (const [index, evidence] of expanded.visualEvidence.entries()) {
-        const image = expanded.images[index], destination = join(root, `question-${Date.now()}-${String(index + 1).padStart(2, '0')}.jpg`), bytes = Buffer.from(image.data, 'base64')
-        await writeFile(destination, bytes, { flag: 'wx', mode: 0o600 })
-        const moment: VideoEvidenceMoment = { at: evidence.at, reason: 'question', score: 0, frame: destination, ...(evidence.ocr ? { ocr: evidence.ocr } : {}) }
-        item.moments.push(moment); item.frameFiles.push({ at: evidence.at, path: destination, mime: image.mime }); added.push(moment); images.push({ at: evidence.at, mime: image.mime, data: image.data })
-      }
-      item.moments.sort((a, b) => a.at - b.at); saveEvidence()
-      return { ok: true, evidence: publicEvidence(item), moments: added, images, audio: expanded.audio || [], answer: `Retrieved ${added.length} additional local frame${added.length === 1 ? '' : 's'}${expanded.audio?.length ? ` and ${expanded.audio.length} matching four-second audio window${expanded.audio.length === 1 ? '' : 's'}` : ''} for “${question}”. They remain raw evidence until described and confirmed.` }
+      const root = join(dirname(evidenceFile), 'video-evidence-files', item.id), added: VideoEvidenceMoment[] = [], images: NonNullable<EvidenceExpansion['images']> = [], addedFiles: StoredEvidence['frameFiles'] = []
+      await mkdir(root, { recursive: true, mode: 0o700 })
+      const generationName = `question-${new Date(now()).toISOString().replace(/[:.]/g, '-')}-${randomUUID()}`, staging = join(root, `.incoming-${randomUUID()}`), generation = join(root, generationName)
+      await mkdir(staging, { mode: 0o700 })
+      try {
+        for (const [index, evidence] of expanded.visualEvidence.entries()) {
+          const image = expanded.images[index], name = `frame-${String(index + 1).padStart(2, '0')}.jpg`, destination = join(generation, name), bytes = Buffer.from(image.data, 'base64')
+          await writeFile(join(staging, name), bytes, { flag: 'wx', mode: 0o600 })
+          const moment: VideoEvidenceMoment = { at: evidence.at, reason: 'question', score: 0, frame: destination, ...(evidence.ocr ? { ocr: evidence.ocr } : {}) }
+          addedFiles.push({ at: evidence.at, path: destination, mime: image.mime }); added.push(moment); images.push({ at: evidence.at, mime: image.mime, data: image.data })
+        }
+        await rename(staging, generation)
+        const updated: StoredEvidence = { ...item, moments: [...item.moments, ...added].sort((a, b) => a.at - b.at), frameFiles: [...item.frameFiles, ...addedFiles] }
+        try { saveEvidence(storedEvidence.map(value => value.id === item.id ? updated : value)) }
+        catch (error) { await rm(generation, { recursive: true, force: true }).catch(() => undefined); throw error }
+        return { ok: true, evidence: publicEvidence(updated), moments: added, images, audio: expanded.audio || [], answer: `Retrieved ${added.length} additional local frame${added.length === 1 ? '' : 's'}${expanded.audio?.length ? ` and ${expanded.audio.length} matching four-second audio window${expanded.audio.length === 1 ? '' : 's'}` : ''} for “${question}”. They remain raw evidence until described and confirmed.` }
+      } catch (error) { await rm(staging, { recursive: true, force: true }).catch(() => undefined); throw error }
     } catch (error) { return { ok: false, answer: controller.signal.aborted ? 'Stopped. No unfinished evidence was accepted.' : (error as Error).message } }
     finally { if (mcpJobs.get(_owner) === controller) mcpJobs.delete(_owner) }
   }
@@ -644,6 +721,7 @@ export function createVideoStudioService(options: {
     prune(); const approval = urls.get(token); urls.delete(token)
     if (!approval || approval.owner !== owner) return { ok: false, answer: 'That video-link approval expired. Nothing was downloaded.' }
     if (decision !== 'allow') return { ok: true, answer: 'Cancelled. Nothing was downloaded.' }
+    if (approval.preferences !== preferencesDigest(preferences)) return { ok: false, answer: 'Video source, downloader, or project settings changed after review. Review the link again; nothing was downloaded.' }
     if (!await realFolder(preferences.projectFolder)) return { ok: false, answer: 'The selected project folder is no longer available. Nothing was downloaded.' }
     const controller = new AbortController(); transfers.get(owner)?.abort(); transfers.set(owner, controller)
     let staging = '', path = '', resolvedUrl = approval.source.toString()
@@ -712,6 +790,9 @@ export function createVideoStudioService(options: {
     const { sessionId: _sessionId, ...visible } = state
     return visible
   }
+  const assertNativeTransition = (before: KdenliveProjectSnapshot, after: KdenliveProjectSnapshot, label: string): void => {
+    if (after.sessionId !== before.sessionId || after.sequenceId !== before.sequenceId || after.documentUrl !== before.documentUrl || after.revision <= before.revision) throw Error(`Kdenlive returned an unexpected project identity or revision after ${label}. Refresh state and history before any retry; completion is not claimed.`)
+  }
 
   const historyFrom = (value: any): KdenliveHistoryEntry[] => (Array.isArray(value?.entries) ? value.entries : Array.isArray(value?.history) ? value.history : []).slice(-100).flatMap((entry: any) => {
     if (!entry || !Number.isSafeInteger(Number(entry.undoIndex))) return []
@@ -722,7 +803,7 @@ export function createVideoStudioService(options: {
     const position = Number(positionInput)
     if (!Number.isSafeInteger(position) || position < 0) return { ok: false, position: 0, error: 'Choose a non-negative timeline frame.' }
     try {
-      const connection = await nativeConnection(), called = await mcpRequest('tools/call', { name: 'desktop_frame_capture', arguments: { position, width: 960 } }, connection.session)
+      const connection = await nativeConnection(), called = await mcpRequest('tools/call', { name: 'desktop_frame_capture', arguments: { position, width: 960 } }, connection.session, false, undefined, 90_000)
       if (called.value?.isError) throw Error('Kdenlive reported that frame capture failed.')
       const image = Array.isArray(called.value?.content) ? called.value.content.find((item: any) => item?.type === 'image' && typeof item.data === 'string' && typeof item.mimeType === 'string') : null
       if (!image || image.data.length > 6_000_000 || !/^image\/(?:png|jpeg)$/.test(image.mimeType)) throw Error('Kdenlive returned no bounded PNG/JPEG frame.')
@@ -753,7 +834,7 @@ export function createVideoStudioService(options: {
       const root = await realpath(preferences.projectFolder), folder = mode === 'preview' ? 'OddBrain Previews' : 'OddBrain Exports'
       const destination = join(root, folder, `${mode === 'export' ? intent : mode}-${new Date(now()).toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}.mp4`)
       const token = randomUUID(), expires = now() + 5 * 60_000
-      renderApprovals.set(token, { owner, mode, intent, state, destination, ...(range ? { range } : {}), preferences: preferencesDigest(preferences), expires })
+      renderApprovals.set(token, { owner, mode, intent, state, destination, ...(range ? { range } : {}), authority: nativeAuthority(connection), expires })
       const profile = { width: state.profile.width, height: state.profile.height, ...(state.profile.fps ? { fps: state.profile.fps } : {}), ...(durationSeconds ? { durationSeconds } : {}) }
       return { ok: true, token, mode, intent, destination, profile, ...(range ? { range } : {}), consequence: mode === 'preview' ? `Kdenlive will render only frames ${range!.start}–${range!.end} with mixed timeline audio to one new review file. It will not overwrite a file or change the playhead.` : intent === 'vertical-short' ? `Kdenlive will render the complete visible ${state.profile.width}×${state.profile.height} portrait sequence${durationSeconds ? ` (${durationSeconds.toFixed(1)} seconds)` : ''} to a new MP4. This checks shape, not changing platform upload rules; inspect the platform’s current duration/codec requirements before publishing.` : `Kdenlive will render the complete visible ${state.profile.width}×${state.profile.height} sequence${durationSeconds ? ` (${durationSeconds.toFixed(1)} seconds)` : ''} to one new MP4. Existing files are not overwritten.`, expiresAt: expiresAt(expires) }
     } catch (error) { return { ok: false, error: (error as Error).message } }
@@ -763,10 +844,11 @@ export function createVideoStudioService(options: {
     prune(); const ticket = renderApprovals.get(token); renderApprovals.delete(token)
     if (!ticket || ticket.owner !== owner) return { ok: false, answer: 'That render review expired or belongs to another window. Nothing was rendered.' }
     if (decision !== 'allow') return { ok: true, answer: 'Denied. No render was started.' }
-    if (ticket.preferences !== preferencesDigest(preferences)) return { ok: false, answer: 'Kdenlive settings changed after review. Nothing was rendered.' }
     const controller = new AbortController(); mcpJobs.get(owner)?.abort(); mcpJobs.set(owner, controller)
     try {
-      const connection = await nativeConnection(), current = await readNativeState(connection, controller.signal)
+      const connection = await nativeConnection()
+      if (ticket.authority !== nativeAuthority(connection)) throw Error('The authenticated Kdenlive endpoint, token, session, tool inventory, or project settings changed after review. Nothing was rendered; review again.')
+      const current = await readNativeState(connection, controller.signal)
       if (current.sessionId !== ticket.state.sessionId || current.sequenceId !== ticket.state.sequenceId || current.documentUrl !== ticket.state.documentUrl || current.revision !== ticket.state.revision || current.profile.width !== ticket.state.profile.width || current.profile.height !== ticket.state.profile.height || current.profile.fps !== ticket.state.profile.fps) throw Error('The visible Kdenlive project or output profile changed after render review. Review a fresh render; nothing was started.')
       const folder = await safeProjectDirectory(ticket.mode === 'preview' ? 'OddBrain Previews' : 'OddBrain Exports'), destination = join(folder, basename(ticket.destination))
       if (destination !== ticket.destination) throw Error('The reviewed render destination changed. Nothing was started.')
@@ -883,7 +965,7 @@ export function createVideoStudioService(options: {
       }
       if (!validation.valid && !validation.unsupported) return { ok: false, plan, project: withoutSession(state), commandSummary: commandSummary(plan.commands), validation, error: 'Kdenlive rejected this batch during preflight. Fix every reported issue before review.' }
       const token = randomUUID(), expires = now() + 5 * 60_000
-      editPlans.set(token, { owner, plan, state, validation, preferences: preferencesDigest(preferences), expires })
+      editPlans.set(token, { owner, plan, planDigest: payloadDigest(plan), state, validation, authority: nativeAuthority(connection), expires })
       return { ok: true, token, plan, project: withoutSession(state), commandSummary: commandSummary(plan.commands), validation, consequence: `${plan.commands.length} exact command${plan.commands.length === 1 ? '' : 's'} will be sent as one native Kdenlive batch and one shared Undo step. ${plan.sourceEvidenceIds.length ? `${plan.sourceEvidenceIds.length} ready source-evidence map${plan.sourceEvidenceIds.length === 1 ? ' is' : 's are'} cited.` : 'No Video Studio evidence map is cited; review whether this is intentionally a project-only edit.'} ${validation.valid ? 'Kdenlive preflight accepted the supported insertions.' : 'Kdenlive reports that separate preflight does not cover one or more command types; the native batch still validates its schema and rolls back atomically on failure.'} Any project change invalidates this one-use approval.`, expiresAt: expiresAt(expires) }
     } catch (error) { return { ok: false, error: (error as Error).message } }
   }
@@ -892,13 +974,16 @@ export function createVideoStudioService(options: {
     prune(); const ticket = editPlans.get(token); editPlans.delete(token)
     if (!ticket || ticket.owner !== owner) return { ok: false, answer: 'That edit-plan approval expired or belongs to another window. Nothing was sent.' }
     if (decision !== 'allow') return { ok: true, answer: 'Denied. Nothing was sent to Kdenlive.' }
-    if (ticket.preferences !== preferencesDigest(preferences)) return { ok: false, answer: 'Kdenlive settings changed after review. Nothing was sent.' }
     const controller = new AbortController(); mcpJobs.get(owner)?.abort(); mcpJobs.set(owner, controller)
     try {
-      const connection = await nativeConnection(), current = await readNativeState(connection, controller.signal)
+      if (ticket.planDigest !== payloadDigest(ticket.plan)) throw Error('The reviewed edit plan changed in memory. Nothing was sent; review a fresh plan.')
+      const connection = await nativeConnection()
+      if (ticket.authority !== nativeAuthority(connection)) throw Error('The authenticated Kdenlive endpoint, token, session, tool inventory, or project settings changed after review. Nothing was sent; review again.')
+      const current = await readNativeState(connection, controller.signal)
       if (current.sessionId !== ticket.state.sessionId || current.sequenceId !== ticket.state.sequenceId || current.documentUrl !== ticket.state.documentUrl || current.revision !== ticket.state.revision) throw Error('The visible Kdenlive project changed after review. Re-read and review a fresh plan; nothing was applied.')
       const applied = await callTool(connection, 'desktop_batch', { sessionId: current.sessionId, expectedRevision: current.revision, requestId: randomUUID(), commands: ticket.plan.commands }, controller.signal)
       const next = projectSnapshot(applied)
+      assertNativeTransition(current, next, 'the reviewed batch')
       proposedPlan = null
       return { ok: true, answer: `Kdenlive reported that the reviewed ${ticket.plan.commands.length}-command batch completed as one Undo step. Revision ${current.revision} → ${next.revision}. Inspect captured frames and the result in Kdenlive’s monitor before exporting.`, project: withoutSession(next) }
     } catch (error) {
@@ -1053,32 +1138,29 @@ export function createVideoStudioService(options: {
     } catch (error) { return aiError(id, (error as Error).message) }
   }
 
-  const actionTools: Record<KdenliveAction, string[]> = {
-    undo: ['desktop_undo', 'desktop_timeline_undo', 'timeline_undo', 'undo'],
-    redo: ['desktop_redo', 'desktop_timeline_redo', 'timeline_redo', 'redo'],
-    'save-version': ['desktop_project_save_as'],
-  }
+  const actionTools: Record<KdenliveAction, string> = { undo: 'desktop_undo', redo: 'desktop_redo', 'save-version': 'desktop_project_save_as' }
   const prepareKdenliveAction = async (owner: number, action: KdenliveAction): Promise<KdenliveToolReview> => {
     prune()
     if (!actionTools[action]) return { ok: false, error: 'Unknown Kdenlive action.' }
     try {
-      const connection = lastConnection || await connectMcp(), tool = connection.tools.find(item => actionTools[action].includes(item.name))
-      if (!tool) return { ok: false, error: `This Kdenlive MCP server does not expose a reviewed ${action === 'undo' ? 'Undo' : action === 'redo' ? 'Redo' : 'save-version'} tool. Use Kdenlive’s own control instead.` }
-      let args: Record<string, unknown> = {}
-      if (connection.native.compatible && (tool.name === 'desktop_undo' || tool.name === 'desktop_redo')) {
-        const state = await readNativeState(connection)
-        if (tool.name === 'desktop_undo' && !state.undo.canUndo) return { ok: false, error: 'The visible Kdenlive project has nothing to Undo.' }
-        if (tool.name === 'desktop_redo' && !state.undo.canRedo) return { ok: false, error: 'The visible Kdenlive project has nothing to Redo.' }
+      // Generic servers and guessed aliases never receive project actions. Only
+      // the authenticated pinned native protocol may prepare one.
+      const connection = await nativeConnection(), toolName = actionTools[action], tool = connection.tools.find(item => item.name === toolName)
+      if (!tool) return { ok: false, error: `The reviewed native Kdenlive protocol does not expose ${toolName}. Use Kdenlive’s own control instead.` }
+      const state = await readNativeState(connection)
+      let args: Record<string, unknown>
+      if (toolName === 'desktop_undo' || toolName === 'desktop_redo') {
+        if (toolName === 'desktop_undo' && !state.undo.canUndo) return { ok: false, error: 'The visible Kdenlive project has nothing to Undo.' }
+        if (toolName === 'desktop_redo' && !state.undo.canRedo) return { ok: false, error: 'The visible Kdenlive project has nothing to Redo.' }
         args = { sessionId: state.sessionId, expectedRevision: state.revision, requestId: randomUUID(), count: 1 }
-      } else if (connection.native.compatible && tool.name === 'desktop_project_save_as') {
+      } else {
         if (!await realFolder(preferences.projectFolder)) return { ok: false, error: 'Choose an existing project folder before saving a version.' }
-        const state = await readNativeState(connection)
         if (!state.documentUrl) return { ok: false, error: 'Save the visible Kdenlive project before creating a version.' }
         const root = await realpath(preferences.projectFolder), destination = join(root, 'OddBrain Versions', `version-${new Date(now()).toISOString().replace(/[:.]/g, '-')}-${randomUUID().slice(0, 8)}.kdenlive`)
         args = { sessionId: state.sessionId, expectedRevision: state.revision, requestId: randomUUID(), path: destination }
-      } else if (tool.inputSchema?.required?.length) return { ok: false, error: `${tool.name} needs server-specific inputs. OddBrain will not guess them; use Kdenlive or a reviewed native protocol.` }
+      }
       const token = randomUUID(), expires = now() + 2 * 60_000
-      editorActions.set(token, { owner, action, tool: tool.name, args, preferences: preferencesDigest(preferences), expires })
+      editorActions.set(token, { owner, action, tool: tool.name, args, argsDigest: payloadDigest(args), state, authority: nativeAuthority(connection), expires })
       const label = action === 'undo' ? 'Undo the latest visible shared-history step' : action === 'redo' ? 'Redo the next visible shared-history step' : 'Save a recoverable project version and keep editing that new copy'
       return { ok: true, token, tool: tool.name, summary: `${label} using ${tool.name}${typeof args.path === 'string' ? ` at ${args.path}` : ''}. This is one-use approval; a native revision conflict fails instead of guessing.`, expiresAt: expiresAt(expires) }
     } catch (error) { return { ok: false, error: (error as Error).message } }
@@ -1087,25 +1169,29 @@ export function createVideoStudioService(options: {
     prune(); const ticket = editorActions.get(token); editorActions.delete(token)
     if (!ticket || ticket.owner !== owner) return { ok: false, answer: 'That Kdenlive action review expired. Nothing was changed.' }
     if (decision !== 'allow') return { ok: true, answer: 'Denied. Nothing was sent to Kdenlive.' }
-    if (ticket.preferences !== preferencesDigest(preferences)) return { ok: false, answer: 'Kdenlive settings changed after review. Nothing was sent.' }
     const controller = new AbortController(); mcpJobs.get(owner)?.abort(); mcpJobs.set(owner, controller)
     try {
-      const connection = lastConnection || await connectMcp()
+      if (ticket.argsDigest !== payloadDigest(ticket.args)) throw Error('The reviewed Kdenlive action changed in memory. Nothing was sent; review again.')
+      const connection = await nativeConnection()
+      if (ticket.authority !== nativeAuthority(connection)) throw Error('The authenticated Kdenlive endpoint, token, session, tool inventory, or project settings changed after review. Nothing was sent; review again.')
       if (!connection.tools.some(item => item.name === ticket.tool)) throw Error('The reviewed tool is no longer exposed by this Kdenlive server.')
-      if (connection.native.compatible && ['desktop_undo', 'desktop_redo', 'desktop_project_save_as'].includes(ticket.tool)) {
-        const expected = Number(ticket.args.expectedRevision), current = await readNativeState(connection, controller.signal)
-        if (current.sessionId !== ticket.args.sessionId || current.revision !== expected) throw Error('The Kdenlive project changed after review. Nothing was sent; review again.')
-        if (ticket.tool === 'desktop_project_save_as') {
-          const folder = await safeProjectDirectory('OddBrain Versions'), destination = join(folder, basename(String(ticket.args.path || '')))
-          if (destination !== ticket.args.path) throw Error('The reviewed version destination changed. Nothing was saved.')
-        }
+      const expected = Number(ticket.args.expectedRevision), current = await readNativeState(connection, controller.signal)
+      if (current.sessionId !== ticket.state.sessionId || current.sessionId !== ticket.args.sessionId || current.sequenceId !== ticket.state.sequenceId || current.documentUrl !== ticket.state.documentUrl || current.revision !== ticket.state.revision || current.revision !== expected) throw Error('The Kdenlive project identity or revision changed after review. Nothing was sent; review again.')
+      if (ticket.tool === 'desktop_project_save_as') {
+        const folder = await safeProjectDirectory('OddBrain Versions'), destination = join(folder, basename(String(ticket.args.path || '')))
+        if (destination !== ticket.args.path) throw Error('The reviewed version destination changed. Nothing was saved.')
       }
-      if (connection.native.compatible) await callTool(connection, ticket.tool, ticket.args, controller.signal)
-      else {
-        const called = await mcpRequest('tools/call', { name: ticket.tool, arguments: ticket.args }, connection.session, false, controller.signal)
-        if (called.value?.isError) throw Error('Kdenlive MCP reported that the action failed.')
-      }
-      return { ok: true, answer: ticket.action === 'undo' ? 'Kdenlive reported that the reviewed Undo completed.' : ticket.action === 'redo' ? 'Kdenlive reported that the reviewed Redo completed.' : 'Kdenlive reported that the reviewed project-version save completed.' }
+      const result = await callTool(connection, ticket.tool, ticket.args, controller.signal)
+      const next = projectSnapshot(result)
+      if (ticket.tool === 'desktop_project_save_as') {
+        // The pinned native contract keeps this editing session while changing
+        // the open document URL and advancing its revision.
+        let openedPath = ''
+        try { openedPath = await realpath(fileURLToPath(next.documentUrl)) } catch { /* verified below */ }
+        const reviewedPath = await realpath(String(ticket.args.path || '')).catch(() => '')
+        if (!openedPath || openedPath !== reviewedPath || next.documentUrl === current.documentUrl || next.sessionId !== current.sessionId || next.sequenceId !== current.sequenceId || next.revision <= current.revision) throw Error('Kdenlive did not return the exact reviewed saved-project path and expected revision. Refresh state and history; completion is not claimed.')
+      } else assertNativeTransition(current, next, ticket.action)
+      return { ok: true, answer: ticket.action === 'undo' ? 'Kdenlive reported that the reviewed Undo completed with a new verified revision.' : ticket.action === 'redo' ? 'Kdenlive reported that the reviewed Redo completed with a new verified revision.' : 'Kdenlive reported a new saved-project identity for the reviewed version.' }
     } catch (error) { return { ok: false, answer: controller.signal.aborted ? 'Stop was requested while Kdenlive was answering. The outcome is uncertain; refresh state and history before retrying.' : (error as Error).message } }
     finally { if (mcpJobs.get(owner) === controller) mcpJobs.delete(owner) }
   }

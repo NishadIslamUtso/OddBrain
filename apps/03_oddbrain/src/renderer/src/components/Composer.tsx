@@ -1,6 +1,6 @@
 import CommandPanel from '../ui/CommandPanel'
 import PromptEditor from '../ui/PromptEditor'
-import { draftLease, replaceDraft, looksLikeNativeSlashCommand } from '@shared/lib/chatDraft'
+import { draftLease, replaceDraft, looksLikeNativeSlashCommand, safeSlashAction } from '@shared/lib/chatDraft'
 import { insertFileMentions } from '@shared/lib/fileMentions'
 import SavedDrafts from '../ui/SavedDrafts'
 import { AGY_APPROVAL_CHOICES, AGY_APPROVAL_NOTE } from '@shared/lib/engineApproval'
@@ -84,9 +84,27 @@ export default function Composer({
   const [editor, setEditor] = useState<{ scope: string; text: string } | null>(null)
   const cookBase = useRef({ scope: draftScope, text: value })
   const lease = useRef(draftLease()), picking = useRef(false), currentScope = useRef(draftScope)
+  const engine = useEngine()
   if (currentScope.current !== draftScope) { currentScope.current = draftScope; lease.current.invalidate() }
   useEffect(() => { if (busy || preparing) lease.current.invalidate() }, [busy, preparing])
-  const sendDraft = () => { if (looksLikeNativeSlashCommand(liveDraft.current)) { setFileNote('Native slash commands need a verified engine action. Choose a saved prompt template or use the engine’s supported controls; nothing was sent.'); return }; lease.current.invalidate(); onSend() }
+  const runSafeSlash = (action: NonNullable<ReturnType<typeof safeSlashAction>>): void => {
+    lease.current.invalidate(); onChange('')
+    if (action === 'help') { setFileNote('Safe app commands: /status checks the selected connection, /doctor re-scans installed engines, and /cost shows usage this window. They run app controls and are never forwarded to a native terminal.'); return }
+    if (action === 'cost') { const totals = engine.totals; setFileNote(`Usage seen by this window: ${totals.turns} completed turn${totals.turns === 1 ? '' : 's'}, ${totals.inTokens.toLocaleString()} input tokens, ${totals.outTokens.toLocaleString()} output tokens${totals.costUsd ? `, $${totals.costUsd.toFixed(4)} reported cost` : ', no reported dollar cost'}.`); return }
+    if (action === 'status') {
+      setFileNote('Checking the selected engine…')
+      void getEngineApi().read().then(view => setFileNote(`${view.engine.id} · ${view.running || view.busy ? 'working' : 'idle'} · model ${view.engine.model || 'engine default'} · ${view.engine.workspace || 'default working folder'}. No native slash command was sent.`)).catch(() => setFileNote('The engine status could not be read. Nothing was sent.'))
+      return
+    }
+    setFileNote('Re-scanning installed engines…')
+    void getEngineApi().detect(true).then(found => setFileNote(found.map(item => `${item.id}: ${item.found ? item.version || 'found' : 'not found'}`).join(' · ') + '. Nothing was sent to a model.')).catch(() => setFileNote('The installed-engine check could not finish. Nothing was sent.'))
+  }
+  const sendDraft = () => {
+    const action = safeSlashAction(liveDraft.current)
+    if (action) { runSafeSlash(action); return }
+    if (looksLikeNativeSlashCommand(liveDraft.current)) { setFileNote('That native slash command is not a verified app action. Use /help for the safe read-only controls or the engine’s own terminal; nothing was sent.'); return }
+    lease.current.invalidate(); onSend()
+  }
   const [savedDrafts, setSavedDrafts] = useState(false)
   const [fileNote, setFileNote] = useState(''), [pickingFiles, setPickingFiles] = useState(false)
   const liveDraft = useRef(value); liveDraft.current = value
@@ -125,7 +143,7 @@ export default function Composer({
   const [slashDismissed, setSlashDismissed] = useState(false), [slashIndex, setSlashIndex] = useState(0)
   useEffect(() => { setSlashDismissed(false); setSlashIndex(0) }, [value])
   const promptChoices = value.startsWith('/') && !/\s/.test(value.slice(1)) ? filterPrompts(loadPrompts(), value.slice(1)) : []
-  const slashOpen = !slashDismissed && !busy && !preparing && !listening && promptChoices.length > 0
+  const slashOpen = !safeSlashAction(value) && !slashDismissed && !busy && !preparing && !listening && promptChoices.length > 0
   const pickPrompt = (index: number): void => { const chosen = promptChoices[index]; if (chosen) { onChange(chosen.body); setSlashDismissed(true); box.current?.focus() } }
   // A running native turn does not lock the composer: another text request can
   // be durably queued and will run only after the active turn finishes. Exact
@@ -289,7 +307,7 @@ export default function Composer({
       {savedDrafts ? <SavedDrafts draft={value} insert={text => onChange(liveDraft.current ? `${liveDraft.current}\n\n${text}` : text)} close={() => setSavedDrafts(false)} /> : null}
       {cook ? <CookDialog draft={value} onDone={next => { if (next !== null) { try { onChange(replaceDraft({ scope: currentScope.current, text: liveDraft.current }, cookBase.current, next)) } catch { setFileNote('Cook result was not inserted because the draft changed. Reopen Cook context for the current draft; your draft and attachments are unchanged.') } } setCook(false) }} /> : null}
       {preview ? <p className="px-1 pt-2 text-[12px] text-muted">{preview}</p> : null}
-      {looksLikeNativeSlashCommand(value) && !slashOpen ? <p className="ob-control-scope">Native slash commands cannot be sent as ordinary prompts. Use a verified engine action.</p> : null}
+      {looksLikeNativeSlashCommand(value) && !slashOpen ? <p className="ob-control-scope">{safeSlashAction(value) ? 'This safe command runs an OddBrain control and is not sent to the model.' : 'This native slash command is not forwarded. Use /help for safe app controls.'}</p> : null}
       {fileNote ? <p role="status" className="px-1 pt-2 text-[12px] text-muted">{fileNote}</p> : null}
       {notice ? <p className="px-1 pt-2 text-[12px] text-warn">{notice}</p> : null}
     </div>

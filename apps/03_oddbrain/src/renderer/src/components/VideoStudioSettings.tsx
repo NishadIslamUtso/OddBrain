@@ -19,7 +19,7 @@ export default function VideoStudioSettings() {
     setBusy(true); setNote('')
     try {
       const saved = await bridge.videoStudio.read(); setView(saved); if (!saved.aiToolsUrl) throw Error('OddBrain’s local video-review tools are not running.')
-      if (!saved.mcpConnected) throw Error('Save and test this exact loopback Kdenlive MCP address first.')
+      if (!saved.mcpConnected) throw Error('Save and test this exact loopback Kdenlive MCP address first. Evidence and library tools can still be registered when native edit compatibility is not yet available; Kdenlive reads remain locked.')
       const current = await bridge.mcp.read(); if (current.problem) throw Error(current.problem)
       const servers = current.servers.filter(server => !['kdenlive', 'oddbrain-video'].includes(server.name))
       servers.push({ name: 'oddbrain-video', url: saved.aiToolsUrl })
@@ -56,7 +56,8 @@ export default function VideoStudioSettings() {
       <h3>Live MCP connection</h3>
       <label className="ob-form-line">Loopback address <input aria-label="Kdenlive MCP address" value={view.preferences.mcpUrl} onChange={event => setView(old => ({ ...old, preferences: { ...old.preferences, mcpUrl: event.target.value } }))} /></label>
       <div className="ob-inline-actions"><button type="button" disabled={busy} onClick={saveUrl}>Save address</button></div>
-      <form className="ob-form-line" onSubmit={event => { event.preventDefault(); secret('mcp', mcpToken, () => setMcpToken('')) }}><label htmlFor="video-mcp-token">Optional bearer token</label><input id="video-mcp-token" type="password" value={mcpToken} onChange={event => setMcpToken(event.target.value)} placeholder={view.hasMcpToken ? 'Token saved' : 'Only if your MCP build requires one'} /><button type="submit" disabled={busy || !mcpToken}>Save</button>{view.hasMcpToken ? <button type="button" onClick={() => void run(() => bridge.videoStudio.clearSecret('mcp'))}>Remove</button> : null}</form>
+      <p className="ob-control-scope">Use port 8766 in the separately installed Kdenlive MCP settings; OddBrain’s browser companion keeps its established port 8765.</p>
+      <form className="ob-form-line" onSubmit={event => { event.preventDefault(); secret('mcp', mcpToken, () => setMcpToken('')) }}><label htmlFor="video-mcp-token">Required bearer token</label><input id="video-mcp-token" type="password" value={mcpToken} onChange={event => setMcpToken(event.target.value)} placeholder={view.hasMcpToken ? 'Token saved' : 'Enable Require access token in Kdenlive'} /><button type="submit" disabled={busy || !mcpToken}>Save</button>{view.hasMcpToken ? <button type="button" onClick={() => void run(() => bridge.videoStudio.clearSecret('mcp'))}>Remove</button> : null}</form>
       <p className="ob-control-scope">Public or LAN MCP addresses are refused. Native edit batches require the pinned protocol identity <strong>{view.nativeKdenlive.identity}</strong>. {view.nativeKdenlive.reason}</p>
       <button type="button" disabled={isDemo || busy || !view.mcpConnected || !view.aiToolsUrl} onClick={() => void reviewEngineConnector()}>Review adding safe video evidence, library and Kdenlive read/propose tools to AI chat…</button>
       <p className="ob-control-scope">The AI connector receives only OddBrain’s read/search/proposal tools, never native Kdenlive Apply or asset download. Apply/Undo stay in the app’s exact owner review. {view.hasMcpToken ? 'The protected Kdenlive token is not copied into project files.' : ''}</p>

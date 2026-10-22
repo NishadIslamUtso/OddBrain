@@ -76,7 +76,8 @@ export function createWorkQueue(root: string, route: () => string, authority: ()
     view,
     enqueue(owner: number, prompt: string, conversation?: NativeConversation) {
       healthy()
-      if (typeof prompt !== 'string' || !prompt.trim() || prompt.length > 20_000) throw Error('Queue tasks need text up to 20,000 characters. Nothing was clipped or saved.')
+      if (typeof prompt !== 'string' || !prompt.trim()) throw Error('Queue tasks need text. Nothing was saved.')
+      if (prompt.length > 250_000) throw Error('The complete queued request exceeds the 250,000-character desktop transport safety limit. Nothing was shortened or saved.')
       const refusal = engineCommandRefusal(prompt); if (refusal) throw Error(refusal)
       const context = checkNativeConversation(conversation), currentRoute = route()
       if (context?.expectedRoute && context.expectedRoute !== currentRoute) throw Error('The engine selection changed. Your draft was not queued.')

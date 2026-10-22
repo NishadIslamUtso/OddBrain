@@ -213,7 +213,10 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
           scenes = parseSceneMetadata(metadata.toString('utf8')).map(item => ({ ...item, at: item.at + start }))
         } catch { scenes = [] }
         sceneMap = scenes.slice(0, 10_000)
-        const wanted = Math.min(videoFrameBudget, Math.max(1, Math.ceil(selectedDuration / 120)))
+        // Even a short clip needs beginning/middle/end visual evidence. Longer
+        // material grows toward the reviewed route's budget; it never falls to
+        // one frame merely because its duration is under two minutes.
+        const wanted = Math.min(videoFrameBudget, Math.max(Math.min(3, videoFrameBudget), Math.ceil(selectedDuration / 120)))
         const planned = adaptiveFramePoints(selectedDuration, scenes.map(item => ({ at: item.at - start, score: item.score })), wanted)
         let adapterIdentity: { bytes: number; sha256: string } | null = null
         if (videoOcr) {
@@ -260,7 +263,8 @@ export function createMediaService(options: { file: string; sourceRoot?: string;
     try { const read = (await sourceFile.read(head, 0, head.length, 0)).bytesRead; format = mediaKind(head.subarray(0, read)) } finally { await sourceFile.close() }
     if (format.kind !== 'video') throw Error('Question-driven frame retrieval needs a verified video source.')
     const prefs = { ...preferences }, details = await probe(path, prefs.ffmpeg, format.mime, signal, runCommand)
-    const points = [...new Set(moments.map(at => Math.min(details.duration, Math.max(0, Math.round(at * 1000) / 1000))))]
+    const latestFrame = Math.max(0, details.duration - Math.min(0.001, details.duration / 2))
+    const points = [...new Set(moments.map(at => Math.min(latestFrame, Math.max(0, Math.round(at * 1000) / 1000))))]
     const temp = await (await import('node:fs/promises')).mkdtemp(join(tmpdir(), 'oddbrain-question-evidence-'))
     const images: NonNullable<MediaResult['images']> = [], audio: Array<{ at: number; mime: string; data: string }> = [], visualEvidence: NonNullable<MediaResult['visualEvidence']> = []
     let adapterIdentity: { bytes: number; sha256: string } | null = null

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 
 import type { Attachment } from '@shared/types'
 import { newId } from '@shared/lib/storage'
 import { readAttachment } from '@shared/lib/attachments'
-import { DEFAULT_MEDIA, LARGE_SOURCE_CHOICE_BYTES, MAX_EXTRACTED_TEXT, MAX_INLINE_MEDIA_BYTES, type MediaInput, type MediaPreferences, type MediaRange, type MediaResult, type MediaSourceHandle, type MediaTextSegment } from '@shared/lib/mediaBridge'
+import { DEFAULT_MEDIA, LARGE_SOURCE_CHOICE_BYTES, MAX_INLINE_MEDIA_BYTES, MAX_SELECTED_ATTACHMENT_TEXT, type MediaInput, type MediaPreferences, type MediaRange, type MediaResult, type MediaSourceHandle, type MediaTextSegment } from '@shared/lib/mediaBridge'
 import { bridge, isDemo } from '../platform/bridge'
 import { extractFrames } from '../lib/videoFrames'
 
@@ -83,7 +83,7 @@ export default function useMediaAttachments(attachments: Attachment[], setAttach
     const chosen = (source.segments || []).filter(segment => source.selected?.includes(segment.id))
     if (!chosen.length) { setSources(old => old.map(item => item.id === source.id ? { ...item, note: 'Choose at least one complete document section.' } : item)); return }
     const text = chosen.map(segment => `${segment.label}\n${segment.text}`).join('\n\n')
-    if (text.length > MAX_EXTRACTED_TEXT) { setSources(old => old.map(item => item.id === source.id ? { ...item, note: `The selected complete sections total ${text.length.toLocaleString()} characters, above the ${MAX_EXTRACTED_TEXT.toLocaleString()}-character attachment limit. Choose fewer sections; nothing was shortened.` } : item)); return }
+    if (text.length > MAX_SELECTED_ATTACHMENT_TEXT) { setSources(old => old.map(item => item.id === source.id ? { ...item, note: `The selected complete sections total ${text.length.toLocaleString()} characters, above the ${MAX_SELECTED_ATTACHMENT_TEXT.toLocaleString()}-character attachment transport safety budget. Choose fewer complete sections; the source remains fully available and nothing was shortened.` } : item)); return }
     const evidence = current.current.filter(file => source.attachments.includes(file.id) && file.kind === 'image')
     const remaining = current.current.filter(file => !source.attachments.includes(file.id))
     if (remaining.length + evidence.length + 1 > 4) { setSources(old => old.map(item => item.id === source.id ? { ...item, note: 'The selected text and visual evidence need more attachment slots. Remove another attachment; nothing was silently dropped.' } : item)); return }

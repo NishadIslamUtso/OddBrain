@@ -61,7 +61,7 @@ import { randomBytes, randomUUID, createHash } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
 import { loadAppFlags, readAppFlagsStrict, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
-import { registerStagingRoot, setBinaryOverride, binaryOverride, resolveEngineCommand } from './engine/enginePath'
+import { registerStagingRoot, setBinaryOverride, binaryOverride, nativeEngineSelection, resolveEngineCommand } from './engine/enginePath'
 import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
 import { basename, dirname, join, resolve, relative, isAbsolute } from 'node:path'
 import { closeSync, constants, existsSync, fstatSync, fsyncSync, openSync, statSync, lstatSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -1097,7 +1097,6 @@ function registerBridges(): void {
       let context: ReturnType<typeof checkNativeConversation>
       try { context = checkNativeConversation(conversation) } catch (error) { return { ok: false, answer: (error as Error).message } }
       const text = typeof prompt === 'string' ? prompt : ''
-      if (text.length > 20000) return { ok: false, answer: 'The prompt exceeds 20,000 characters. Nothing was sent or shortened.' }
       if (!text.trim()) return { ok: false, answer: 'Write what the engine should do first.' }
       const commandRefusal = engineCommandRefusal(text)
       if (commandRefusal) return { ok: false, answer: commandRefusal }
@@ -1424,14 +1423,16 @@ function registerBridges(): void {
       filters: [{ name: 'Executable', extensions: ['exe', 'cmd', 'bat'] }],
     })
     if (picked.canceled || !picked.filePaths[0]) return { ok: false, answer: 'Nothing was picked.' }
-    const file = picked.filePaths[0]
-    if (!existsSync(file)) return { ok: false, answer: 'That file does not exist.' }
+    const pickedFile = picked.filePaths[0]
+    if (!existsSync(pickedFile)) return { ok: false, answer: 'That file does not exist.' }
+    const file = nativeEngineSelection(id, pickedFile)
+    if (!file) return { ok: false, answer: id === 'claude-code' ? 'That command shim has no current @anthropic-ai/claude-code bin/claude.exe beside it. Choose the native executable or reinstall the current package; no shell script was trusted.' : 'Choose the native agy executable. Command-script shims are not accepted for engine launches.' }
     const next = { 'claude-code': binaryOverride('claude-code'), 'agy': binaryOverride('agy'), [id]: file }
     try { writeRecoverableJson(join(app.getPath('userData'), 'engine-binaries.json'), next) }
     catch (error) { return { ok: false, answer: `The engine path was not changed because it could not be saved recoverably: ${(error as Error).message}` } }
     setBinaryOverride(id, file)
     detectEngine(id, true).catch(() => {})
-    return { ok: true, answer: `${id} is pointed at ${file}. Launches and detection prefer it from now on.`, path: file }
+    return { ok: true, answer: `${id} is pointed at ${file}.${file !== pickedFile ? ' The npm shim was safely resolved to its package’s native executable.' : ''} Launches and detection prefer it from now on.`, path: file }
   })
 
   handle('engine:clear-binary', (_event, id: EngineId): { ok: boolean; answer: string } => {
@@ -1484,11 +1485,11 @@ function registerBridges(): void {
   const battleLedgerPath = (): string => join(app.getPath('userData'), 'battle-ledger.json')
   type BattleEntry = { prompt: string; winner: string; loser: string; tie: boolean; blind: boolean; at: string }
   const readLedger = (): BattleEntry[] => readRecoverableJson(battleLedgerPath(), value => {
-    if (!Array.isArray(value) || value.some(row => !row || typeof row !== 'object' || typeof row.prompt !== 'string' || row.prompt.length > 20_000 || typeof row.winner !== 'string' || typeof row.loser !== 'string' || typeof row.tie !== 'boolean' || typeof row.blind !== 'boolean' || typeof row.at !== 'string')) throw Error('The battle ledger is damaged.')
+    if (!Array.isArray(value) || value.some(row => !row || typeof row !== 'object' || typeof row.prompt !== 'string' || row.prompt.length > 250_000 || typeof row.winner !== 'string' || typeof row.loser !== 'string' || typeof row.tie !== 'boolean' || typeof row.blind !== 'boolean' || typeof row.at !== 'string')) throw Error('The battle ledger is damaged.')
     return value as BattleEntry[]
   }, []).value
   handle('battle:record', (_event, entry: Partial<BattleEntry>): { ok: boolean; answer: string } => {
-    const prompt = typeof entry?.prompt === 'string' && entry.prompt.length <= 20_000 ? entry.prompt : ''
+    const prompt = typeof entry?.prompt === 'string' && entry.prompt.length <= 250_000 ? entry.prompt : ''
     const winner = typeof entry?.winner === 'string' && entry.winner.length <= 300 ? entry.winner : ''
     const loser = typeof entry?.loser === 'string' && entry.loser.length <= 300 ? entry.loser : ''
     const tie = entry?.tie === true
@@ -1902,7 +1903,7 @@ function registerBridges(): void {
       if (parent.canceled || !parent.filePaths[0]) return { ok: false, answer: 'Cancelled. Nothing changed.' }
       const destination = join(parent.filePaths[0], `OddBrain-app-data-${operation === 'create' ? 'backup' : 'restored'}-${Date.now()}-${randomUUID().slice(0, 8)}`)
       const exclusions = appDataBackupExclusions().join('; ')
-      const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', operation === 'create' ? 'Create app-data backup' : 'Restore to new folder'], defaultId: 0, cancelId: 0, message: operation === 'create' ? 'Back up selected app-private owner data?' : 'Verify and restore app data into a separate new folder?', detail: `Source: ${source}\nDestination: ${destination}\n\nIncluded: app chats, exact native transcripts, Working Notes and review differences, artifacts, projects, recipes, handoffs, reviewed command outcomes, checkpoints, review reports, and supplied non-secret interface preferences.\n\nExcluded: ${exclusions}.\n\nThe vault is a separate backup domain. Restore never replaces live app data automatically.` })
+      const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', operation === 'create' ? 'Create app-data backup' : 'Restore to new folder'], defaultId: 0, cancelId: 0, message: operation === 'create' ? 'Back up selected app-private owner data?' : 'Verify and restore app data into a separate new folder?', detail: `Source: ${source}\nDestination: ${destination}\n\nIncluded: app chats, exact native transcripts, Working Notes and review differences, artifacts, projects, recipes, handoffs, reviewed command outcomes, checkpoints, review reports, durable Video Studio evidence/frames/render receipts, and supplied non-secret interface preferences.\n\nExcluded: ${exclusions}.\n\nThe vault is a separate backup domain. Restore never replaces live app data automatically.` })
       if (confirmation.response !== 1) return { ok: false, answer: 'Cancelled. Nothing changed.' }
       const preferences = operation === 'create' && rendererPreferences && typeof rendererPreferences === 'object' && !Array.isArray(rendererPreferences) ? rendererPreferences as Record<string, string> : {}
       const result = operation === 'create' ? createAppDataBackup(source, destination, preferences) : restoreAppDataBackup(source, destination)
@@ -2805,11 +2806,22 @@ app.whenReady().then(async () => {
         : `[vault] nothing at ${vault.root}; captures will report that rather than create one.`
     )
     try {
+      // The AI-facing video review MCP is a local capability, not an
+      // unauthenticated loopback service. Its random path is OS-protected with
+      // other connector secrets when possible and is written to engine config
+      // only through the existing exact owner review.
+      const videoCapabilityId = 'oddbrain-video-review-capability'
+      let videoCapability = keyStore.get(videoCapabilityId)
+      if (!/^[a-f0-9]{64}$/.test(videoCapability)) {
+        videoCapability = randomBytes(32).toString('hex')
+        try { keyStore.set(videoCapabilityId, videoCapability) } catch { /* this-run capability remains usable */ }
+      }
+      const videoMcpPath = `/api/video-studio-mcp/${videoCapability}`
       // The API is handed the cloud client, so a chat whose model names a
       // provider streams from there — through the same address, as the same
       // records, with no second path for the interface to know about.
-      api = await startLocalApi({ port: API_PORT, rendererDir, vault, cloud: cloud || undefined, videoMcp: (request, session) => videoStudioService ? videoStudioService.aiMcp(request, session) : Promise.resolve({ status: 503, body: { error: 'Video Studio is not ready.' } }), onInferenceActivity: busy => { foregroundApiRequests = Math.max(0, foregroundApiRequests + (busy ? 1 : -1)); if (busy) memoryOrganizer?.cancel() } })
-      videoStudioService?.setAiToolsUrl(`${api.url}/api/video-studio-mcp`)
+      api = await startLocalApi({ port: API_PORT, rendererDir, vault, cloud: cloud || undefined, videoMcpPath, videoMcp: (request, session) => videoStudioService ? videoStudioService.aiMcp(request, session) : Promise.resolve({ status: 503, body: { error: 'Video Studio is not ready.' } }), onInferenceActivity: busy => { foregroundApiRequests = Math.max(0, foregroundApiRequests + (busy ? 1 : -1)); if (busy) memoryOrganizer?.cancel() } })
+      videoStudioService?.setAiToolsUrl(`${api.url}${videoMcpPath}`)
       if (api.port !== API_PORT) {
         console.log(`[api] port ${API_PORT} was busy; listening on ${api.port} instead.`)
       }
