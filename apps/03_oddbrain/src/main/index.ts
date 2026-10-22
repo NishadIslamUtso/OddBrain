@@ -2099,6 +2099,7 @@ function registerBridges(): void {
         const scope = {
           bundleSource: join(app.getAppPath(), 'out', 'memmory-ob', 'memmory-ob-mcp.cjs'),
           bundleTarget: join(adapterRoot, 'memmory-ob-mcp.cjs'),
+          skillSource: join(app.getAppPath(), 'out', 'memmory-ob', 'memmory-ob-memory.skill.md'),
           receiptPath: join(adapterRoot, 'goose-adapter.json'),
           catalogueRoot: memmoryObRoot,
           chatsRoot: chatRoot,

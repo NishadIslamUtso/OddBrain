@@ -136,6 +136,8 @@ export type MemmoryProjectView = {
 export type MemmorySearchHit = {
   recordId: string
   kind: MemmoryObjectKind
+  /** Authority label shown with the hit. Confirmed memory is owner fact only within stated uncertainty; raw and draft material is evidence, never authority. */
+  authority: 'confirmed-owner-memory' | 'raw-unconfirmed-evidence' | 'draft-working-note'
   title: string
   projectId: string | null
   chatId?: string

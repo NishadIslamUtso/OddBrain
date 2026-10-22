@@ -440,7 +440,7 @@ export function createMemmoryObStore(root: string) {
         if (!score) continue
         const slice = excerpt(message.content, terms), digest = sha(message.content)
         const coverage = slice.start === 0 && slice.end === message.content.length ? 'Complete stored message' : `Exact characters ${slice.start}–${slice.end} of ${message.content.length}; open the source for the remainder`
-        hits.push({ recordId: recordId('app-chat', chat.id), kind: 'app-chat', title: chat.title, projectId: chat.projectId || null, chatId: chat.id, messageId: message.id, role: message.role, text: slice.text, start: slice.start, end: slice.end, totalCharacters: message.content.length, sha256: digest, coverage: message.origin === 'import' ? `Imported raw unconfirmed evidence; ${coverage}` : coverage, score })
+        hits.push({ recordId: recordId('app-chat', chat.id), kind: 'app-chat', authority: 'raw-unconfirmed-evidence', title: chat.title, projectId: chat.projectId || null, chatId: chat.id, messageId: message.id, role: message.role, text: slice.text, start: slice.start, end: slice.end, totalCharacters: message.content.length, sha256: digest, coverage: message.origin === 'import' ? `Imported raw unconfirmed evidence; ${coverage}` : coverage, score })
       }
     }
     if (!input.kinds || input.kinds.includes('working-note')) for (const [chatId, note] of workingNoteText) {
@@ -449,7 +449,7 @@ export function createMemmoryObStore(root: string) {
       const score = scoreText(note.text, terms)
       if (!score) continue
       const slice = excerpt(note.text, terms), digest = sha(note.text)
-      hits.push({ recordId: record.id, kind: 'working-note', title: record.title, projectId: chat?.projectId || null, chatId, speaker: note.author, text: slice.text, start: slice.start, end: slice.end, totalCharacters: note.text.length, sha256: digest, coverage: slice.start === 0 && slice.end === note.text.length ? `Complete normalized Working Notes revision ${note.revisionId}` : `Exact characters ${slice.start}–${slice.end} of normalized Working Notes revision ${note.revisionId}; open the source for the remainder`, score })
+      hits.push({ recordId: record.id, kind: 'working-note', authority: 'draft-working-note', title: record.title, projectId: chat?.projectId || null, chatId, speaker: note.author, text: slice.text, start: slice.start, end: slice.end, totalCharacters: note.text.length, sha256: digest, coverage: slice.start === 0 && slice.end === note.text.length ? `Complete normalized Working Notes revision ${note.revisionId}` : `Exact characters ${slice.start}–${slice.end} of normalized Working Notes revision ${note.revisionId}; open the source for the remainder`, score })
     }
     return hits.sort((a, b) => b.score - a.score || b.end - b.start - (a.end - a.start) || a.recordId.localeCompare(b.recordId)).slice(0, limit)
   }

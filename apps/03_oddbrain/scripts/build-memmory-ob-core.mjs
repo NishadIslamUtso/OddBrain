@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url'
 const appRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const packageRoot = resolve(appRoot, '..', '..', 'packages', 'Memmory_OB')
 const outputRoot = join(appRoot, 'out', 'memmory-ob', 'core-package')
-const files = ['package.json', 'README.md', 'LICENSE', 'src/index.ts']
+const files = ['package.json', 'README.md', 'LICENSE', 'src/index.ts', 'goose-skill/SKILL.md']
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex')
 
 const metadata = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8'))
