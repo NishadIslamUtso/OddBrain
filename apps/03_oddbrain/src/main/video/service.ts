@@ -1,7 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto'
 import { isIP } from 'node:net'
 import { lookup } from 'node:dns/promises'
-import { lstat, mkdir, open, realpath, rename, rm, statfs, writeFile } from 'node:fs/promises'
+import { lstat, mkdir, open, readFile, realpath, rename, rm, statfs, writeFile } from 'node:fs/promises'
 import { basename, dirname, extname, isAbsolute, join, relative } from 'node:path'
 import { spawn } from 'node:child_process'
 import { boundedResponse } from '../network/boundedResponse'
@@ -53,7 +53,7 @@ type AssetApproval = { asset: PrivateAsset; destination: string; preferences: st
 type UrlApproval = { preflight: VideoUrlPreflight; source: URL; expires: number; owner: number }
 type McpTool = { name: string; description?: string; inputSchema?: { properties?: Record<string, unknown>; required?: string[] } }
 type McpConnection = { session: string; tools: McpTool[]; serverInfo: unknown; protocol: string; native: ReturnType<typeof nativeCompatibility> }
-type StoredEvidence = VideoEvidenceSummary & {
+type StoredEvidence = Omit<VideoEvidenceSummary, 'audioWindows'> & {
   sourcePath: string
   sourceText: string
   transcript: string
@@ -78,6 +78,7 @@ const expiresAt = (milliseconds: number): string => new Date(milliseconds).toISO
 const safePart = (value: string): string => value.normalize('NFKC').replace(/[^a-zA-Z0-9._ -]+/g, '_').replace(/\s+/g, ' ').trim().slice(0, 90) || 'asset'
 const text = (value: unknown, max = 500): string => typeof value === 'string' && value.length <= max && !/[\u0000-\u001f]/.test(value) ? value.trim() : ''
 const finite = (value: unknown): number | undefined => Number.isFinite(Number(value)) && Number(value) >= 0 ? Number(value) : undefined
+const plain = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value)
 const preferencesDigest = (value: VideoStudioPreferences): string => createHash('sha256').update(JSON.stringify(value)).digest('hex')
 
 function publicAsset(input: Omit<CreativeAsset, 'token'>, token: string): CreativeAsset { return { ...input, token } }
@@ -516,13 +517,13 @@ export function createVideoStudioService(options: {
       saveEvidence(); return publicEvidence(item)
     }
     if (storedEvidence.length >= 256) throw Error('The durable video-evidence index already contains 256 records. Nothing was evicted; archive the project evidence deliberately before adding another source.')
-    item = {
+    const created: StoredEvidence = {
       id: randomUUID(), name: name || basename(path), sourceKind: input.sourceKind, ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}), sourcePath: path,
       sha256, duration: 0, createdAt: updatedAt, updatedAt, attempts: 1, transcriptSections: 0, sceneChanges: 0, moments: [],
       disclosure: 'The approved source is retained in Video Studio and is being read locally. No AI description is confirmed automatically.', status: 'processing',
       sourceText: '', transcript: '', transcriptSegments: [], scenes: [], audioWindows: [], frameFiles: [], raw: { ...(input.receipt ? { sourceReceipt: input.receipt } : {}), ...(input.videoOcr !== undefined ? { videoOcr: input.videoOcr } : {}) }, unconfirmed: { descriptions: [] }, confirmed: { descriptions: [] },
     }
-    storedEvidence = [...storedEvidence, item]; saveEvidence(); return publicEvidence(item)
+    storedEvidence = [...storedEvidence, created]; saveEvidence(); return publicEvidence(created)
   }
 
   const recordEvidence = async (_owner: number, path: string, result: MediaResult, input: { sourceKind: 'file' | 'url'; sourceUrl?: string; receipt?: string; dedupe?: boolean }): Promise<VideoEvidenceSummary> => {
@@ -562,6 +563,7 @@ export function createVideoStudioService(options: {
       try { registerEvidenceIntake(path, name, input); item = storedEvidence.at(-1)! }
       catch { return { id: randomUUID(), name, sourceKind: input.sourceKind, ...(input.sourceUrl ? { sourceUrl: input.sourceUrl } : {}), sha256: input.sha256 || '', duration: 0, createdAt: new Date(now()).toISOString(), transcriptSections: 0, sceneChanges: 0, moments: [], disclosure: 'The source was preserved, but the full 256-record evidence index refused another intake. Nothing was evicted.', status: 'blocked', error: `${error} The blocked attempt could not be indexed.` } }
     }
+    if (!item) throw Error('The video evidence intake could not be recovered after registration.')
     item.status = 'blocked'; item.error = error; item.updatedAt = new Date(now()).toISOString()
     item.disclosure = 'The approved source and its provenance remain linked in Video Studio, but the local evidence read did not complete. Retry does not reattach or redownload it.'
     if (input.receipt) item.raw.sourceReceipt = input.receipt
@@ -835,8 +837,8 @@ export function createVideoStudioService(options: {
       if (info.size !== ticket.size || info.dev !== ticket.dev || info.ino !== ticket.ino || info.mtimeMs !== ticket.mtimeMs) throw Error('The preview file changed after review. Refresh native render status and review inspection again; nothing was read.')
       const ready = storedEvidence.find(item => item.status === 'ready' && item.sourcePath === actual)
       if (ready) return ticket.videoOcr && ready.raw.videoOcr !== true ? { ok: false, answer: 'That exact preview already has a ready evidence map created without OCR. OddBrain kept it unchanged instead of destructively replacing it; use its retained frames or render a new preview for a separate OCR review.', evidence: publicEvidence(ready) } : { ok: true, answer: 'That exact Kdenlive preview already has a ready evidence map. Nothing was reprocessed.', evidence: publicEvidence(ready) }
-      const name = `Kdenlive preview · ${basename(actual)}`, input = { sourceKind: 'file' as const, receipt: renderReceiptFile, videoOcr: ticket.videoOcr, dedupe: false as const }
-      const intake = registerEvidenceIntake(actual, name, input)
+      const name = `Kdenlive preview · ${basename(actual)}`, input = { sourceKind: 'file' as const, receipt: renderReceiptsFile, videoOcr: ticket.videoOcr, dedupe: false as const }
+      registerEvidenceIntake(actual, name, input)
       if (!options.analyzeVideo) {
         const evidence = recordEvidenceFailure(actual, name, input, 'This runtime has no connected local evidence reader.')
         return { ok: false, answer: 'The preview intake was retained, but this runtime has no connected local evidence reader. Retry remains available.', evidence }

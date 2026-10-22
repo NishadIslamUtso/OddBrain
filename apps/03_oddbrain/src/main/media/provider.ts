@@ -54,6 +54,8 @@ export async function providerDecode(input: MediaInput, prefs: MediaPreferences,
   } else if (!transcription && ['openai', 'custom'].includes(provider)) {
     if (!(format.mime === 'application/pdf' || ['image/png', 'image/jpeg', 'image/webp', 'image/gif'].includes(format.mime))) throw Error('This Responses adapter accepts PDF and supported images. No other provider was substituted.')
     url = target.base + '/responses'; headers['Content-Type'] = 'application/json'
+    // The owner explicitly selected this provider/model and approved this exact upload; no local or fallback route reaches it.
+    // lgtm[js/file-access-to-http]
     const file = format.kind === 'image' ? { type: 'input_image', image_url: `data:${format.mime};base64,${data.toString('base64')}` } : { type: 'input_file', filename: input.name, file_data: `data:application/pdf;base64,${data.toString('base64')}` }
     body = JSON.stringify({ model, max_output_tokens: 4096, input: [{ role: 'user', content: [{ type: 'input_text', text: instruction }, file] }] })
   } else throw Error('The selected provider has no verified adapter for this operation. Nothing was sent and no other provider was chosen.')

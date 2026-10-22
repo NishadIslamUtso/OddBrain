@@ -42,7 +42,7 @@ export function excluded(url: string | undefined | null, patterns: string[]): bo
     const [host, ...rest] = value.split('/')
     // A subdomain is part of the same site; a look-alike suffix is not, because
     // it would have to end with ".bank.com" or be exactly "bank.com".
-    const hostRegex = new RegExp(`^(?:[^.]+\.)*${escapePattern(host)}$`, 'i')
+    const hostRegex = new RegExp(`^(?:[^.]+\\.)*${escapePattern(host)}$`, 'i')
     if (!hostRegex.test(parsed.hostname)) return false
     if (!rest.length) return true
     return new RegExp(`^/${escapePattern(rest.join('/'))}$`, 'i').test(parsed.pathname + parsed.search)
