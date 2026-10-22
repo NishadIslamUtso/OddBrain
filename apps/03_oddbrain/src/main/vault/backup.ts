@@ -75,6 +75,8 @@ function destinationOutside(source: string, destination: string): string {
   return target
 }
 function manifestAt(root: string): Manifest {
+  const top = readdirSync(root).sort()
+  if (top.length !== 2 || top[0] !== 'data' || top[1] !== MANIFEST) throw Error('The vault backup root contains files not listed by its format.')
   noLinks(join(root, MANIFEST))
   if (lstatSync(join(root, MANIFEST)).size > 20_000_000) throw Error('The backup manifest exceeds the safety limit.')
   const m = JSON.parse(readFileSync(join(root, MANIFEST), 'utf8')) as Manifest
@@ -88,6 +90,14 @@ function manifestAt(root: string): Manifest {
   if (!Number.isSafeInteger(bytes)) throw Error('The backup byte total is not safely representable.')
   return m
 }
+export function verifyVaultBackup(source: string): BackupResult {
+  try {
+    const root = noLinks(source), manifest = manifestAt(root), data = noLinks(join(root, 'data'))
+    check(data, manifest.files)
+    return { ok: true, destination: root, count: manifest.files.length, bytes: manifest.files.reduce((total, entry) => total + entry.bytes, 0) }
+  } catch (error) { return { ok: false, answer: error instanceof Error ? error.message : 'The vault backup could not be verified.' } }
+}
+
 export function backupVault(source: string, destination: string): BackupResult {
   let owned = false, target = ''
   try {

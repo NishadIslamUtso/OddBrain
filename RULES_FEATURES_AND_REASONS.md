@@ -30,6 +30,12 @@ The browser extension is the PC companion. It captures only supported, visible m
 
 ## Memory and recall
 
+`Memmory_OB` is the versioned shared owner-memory authority. App chats and retained transcripts are owner-memory sources even when their exact bytes remain in protected app-private stores. Its catalogue must retain stable source, speaker/message, Project, lifecycle, coverage and hash identity without turning raw evidence into confirmed memory. Projects are stable scopes independent of folders. Separate Project chats keep separate transcripts, Working Notes, provider/resume history, sources and attachment permissions; only relevant approved scope may be shared.
+
+Current connected behavior catalogues app chats, chat-linked and archive-only transcript headers, imported turns, Working Notes, Attachment Center records, Projects, Branch links, resumable Jobs, model/native context receipts, raw browser/import review sources, People, and pending/rejected/confirmed interpretations with revision history. It provides exact Project chat/Working Notes search and bounded same-Project native raw recall, excluding the current chat, per-chat Working Notes and Trash; every excerpt is labelled untrusted raw conversation evidence. A separately built dependency-free `@oddbrain/memmory-ob@1.0.0` core package supplies the shared contracts, and a reviewed read-only Goose stdio MCP adapter exposes status, bounded exact confirmed-memory/raw-chat search and Project counts with no writer, deletion, permission or Send tool. Stock Goose Memory stays enabled until measured parity; mobile intake, richer conflict workflows and full graphs remain incomplete and must not be claimed complete.
+
+Removing an app chat, Project, or engine-memory note moves it to recoverable owner-visible Trash. OddBrain and its AI have no permanent-delete path. Restoration preserves stable IDs and refuses to replace an active same-named engine note.
+
 ### Personal assistance order
 
 1. The owner’s current request and current Working Notes.
@@ -46,6 +52,8 @@ Relevance ranks items within each tier. A stale or retracted confirmed record is
 3. Owner-confirmed interpretation only as separately labelled owner context.
 
 Cited packets never present an AI interpretation as source evidence. Explicit extension context search uses the same confirmed/raw policy and visible preview. Automatic typing suggestions remain limited to suggestion-safe capsules.
+
+On owner-approved sites, permitted visible page or conversation scans may remain useful as bounded, untrusted retrieval queries and quoted evidence for suggesting context, capsules, entities, memories, or source packets. Page text never becomes an instruction and cannot expand retrieval, reveal unrelated private records, grant permission, change memory/capsules, run tools, insert, upload, or Send. Automatic scanning excludes hidden/private/editable material; exact retained text receives invisible/instruction-like warnings and stays source-labelled. Scanning, capture/save, retrieval, model sharing, insertion, and Send remain separate authorities. Suggestions show their reason and exact preview, and suspicious content is quarantined rather than silently promoted or allowed to disable all safe context assistance. Heuristic scanning is only a warning layer; app-enforced roles, scope, sensitivity, `Never Send`, no-tool, and no-send boundaries are the real guards.
 
 ## Working Notes
 
@@ -121,13 +129,13 @@ Native source-bearing turns require the engine’s Plan mode and run in a fresh 
 
 ## Backup and restore domains
 
-Vault backup and app-private backup are separate and verified by size and SHA-256.
+Vault backup and app-private backup remain independently usable and verified by size and SHA-256. **Complete Memory Backup** is their coordinator: it records one `Memmory_OB` revision, runs both domains without an interleaving app-data write, hashes both nested manifests, and writes a top-level manifest with explicit external-file handling and exclusions.
 
-The app-private backup includes selected app chats, native transcripts, Working Notes/review differences, Attachment Center private copies and inventory, processing state, artifacts, projects, recipes, handoffs, reviewed command outcomes, checkpoints, review reports, non-secret interface preferences, and non-secret Video Studio paths/settings, evidence index, retained evidence frames, render receipts and the non-secret native-operation recovery journal. It excludes credentials and API keys, extension pairing secrets, Kdenlive bearer tokens, AI-connector capability secrets, read approvals and folder/project grants, engine sessions, installed engines/models, extension packages, caches, workflow signing secrets, schedule/queue attempts, and external files used in place.
+The app-private domain includes the `Memmory_OB` catalogue, selected app chats, native transcripts, Working Notes/review differences, Attachment Center private copies and inventory, processing state, artifacts, projects, recipes, handoffs, reviewed command outcomes, checkpoints, review reports, non-secret interface preferences, and non-secret Video Studio paths/settings, evidence index, retained evidence frames, render receipts and the non-secret native-operation recovery journal. It excludes credentials and API keys, extension pairing secrets, Kdenlive bearer tokens, AI-connector capability secrets, read approvals and folder/project grants, engine sessions, installed engines/models, extension packages, caches, workflow signing secrets, schedule/queue attempts, and external files used in place. External sources enter a Complete Memory Backup only where OddBrain already owns an expressly retained private copy; excluded sources require later owner reconnection/re-authorization.
 
 Both backup domains stream and hash complete files in bounded memory and no longer impose the former 2 GiB total ceiling. Manifest/file-count checks, path safety, source stability, and actual storage remain explicit operational limits.
 
-Restore always creates and verifies a new folder. It never replaces the live vault or live app data automatically.
+Complete restore validates the top manifest, both nested manifests, and all listed payloads before it creates a destination. It then restores into a new inactive vault/app-data profile and writes `ACTIVATION-REVIEW.json`. It never replaces or activates live data automatically; reviewed activation is a separate owner action.
 
 ## Review target
 

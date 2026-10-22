@@ -1,0 +1,19 @@
+{
+  "name": "@oddbrain/memmory-ob",
+  "version": "1.0.0",
+  "description": "Memmory_OB owner-memory core schema and validation contracts",
+  "license": "Apache-2.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "files": [
+    "src",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "node": ">=24 <25"
+  },
+  "sideEffects": false
+}

@@ -10,10 +10,10 @@ const validate = (value: unknown): ProcessingLedger => {
 }
 
 /** Main-process durable ledger shared by attachment, document and media processors. */
-export function createProcessingLedger(root: string, clock: () => string = () => new Date().toISOString()) {
+export function createProcessingLedger(root: string, clock: () => string = () => new Date().toISOString(), onChanged?: (ledger: ProcessingLedger) => void) {
   const file = join(root, 'processing', 'ledger.json')
   const load = (): ProcessingLedger => readRecoverableJson(file, validate, emptyProcessingLedger(clock())).value
-  const save = (ledger: ProcessingLedger): ProcessingLedger => { writeRecoverableJson(file, ledger); return ledger }
+  const save = (ledger: ProcessingLedger): ProcessingLedger => { writeRecoverableJson(file, ledger); onChanged?.(structuredClone(ledger)); return ledger }
   const mutate = <T>(change: (ledger: ProcessingLedger) => T): T => {
     const ledger = load(), result = change(ledger); save(ledger); return result
   }

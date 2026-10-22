@@ -11,6 +11,7 @@ import { decodeInWorker } from './media/workerClient'
 import type { MediaResult } from '../shared/lib/mediaBridge'
 import { scanInstructionSignals, scanTextHazards } from '../shared/lib/textHazards'
 import { recallTerms, type RecallReply } from '../shared/lib/recall'
+import type { MemmorySearchHit } from '../shared/lib/memmoryOb'
 import { estimateModelTokens } from '../shared/lib/modelContext'
 import { ownerConfirmedVaultRequest } from '../shared/lib/retrievalProposal'
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
@@ -30,7 +31,7 @@ function readReference(file: string): Buffer {
 }
 /** Main-only authority. Reading references requires a durable grant created by an
  * actual file-picker result, not a renderer-supplied path. No network/commands. */
-export function createNativeContext(projectFile: string, grantFile: string, decode: (name: string, bytes: Uint8Array, signal: AbortSignal) => Promise<MediaResult> = decodeInWorker, recall?: (query: string, options?: { localSemantic?: boolean }) => RecallReply) {
+export function createNativeContext(projectFile: string, grantFile: string, decode: (name: string, bytes: Uint8Array, signal: AbortSignal) => Promise<MediaResult> = decodeInWorker, recall?: (query: string, options?: { localSemantic?: boolean }) => RecallReply, projectRecall?: (projectId: string, query: string, currentChatId: string) => MemmorySearchHit[]) {
   const readJson = (file: string, fallback: unknown): unknown => {
     const bytes = configBytes(file)
     return bytes === null ? fallback : JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
@@ -81,7 +82,7 @@ export function createNativeContext(projectFile: string, grantFile: string, deco
       return refs
     },
     workspace(input: NativeConversation, fallback: string): string {
-      const project = input.projectId ? projects().find(p => p.id === input.projectId) : undefined
+      const project = input.projectId ? projects().find(p => p.id === input.projectId && p.lifecycle !== 'trash') : undefined
       if (input.projectId && !project) throw Error('The selected project no longer exists. Nothing was sent.')
       const choice = resolveChatContext({ goal: project?.goals.join('\n') || '', style: '', workspace: project?.folder || '', additionalFolders: [] }, input.overrides || {}).values.workspace
       const path = choice || fallback
@@ -98,7 +99,7 @@ export function createNativeContext(projectFile: string, grantFile: string, deco
     async prepare(input: NativeConversation, workspace: string, prompt: string, continuation: string | boolean, signal: AbortSignal, overflowTrimOnce = false): Promise<{ prompt: string; receipt: ContextReceipt; validate(): void }> {
       const continuing = typeof continuation === 'string' ? !!continuation : continuation
       if (input.continuationExpected && !continuing) throw Error('This chat’s native resume link is missing. Nothing was sent; inspect its saved sessions before starting fresh.')
-      const project = input.projectId ? projects().find(p => p.id === input.projectId) : undefined
+      const project = input.projectId ? projects().find(p => p.id === input.projectId && p.lifecycle !== 'trash') : undefined
       if (input.projectId && !project) throw Error('The selected project no longer exists.')
       const stamp = JSON.stringify(project || null), permission = grants()
       const preferences = resolveChatContext({ goal: project?.goals.join('\n') || '', style: '', workspace, additionalFolders: [] }, input.overrides || {}).values
@@ -138,6 +139,15 @@ export function createNativeContext(projectFile: string, grantFile: string, deco
         if (text.length > PROJECT_CONTEXT_LIMITS.perReferenceChars || chars > PROJECT_CONTEXT_LIMITS.maxChars) throw Error('Selected reference text exceeds 24,000 characters per file or 64,000 combined. Nothing was clipped or sent; choose fewer or smaller references.')
         facts[ref.path] = { readable: true, linked: false, sizeBytes: bytes.length, extractedText: text }
         references.push({ id: `reference:${ref.id}`, name: ref.label, text, kind: 'project' }); source(`reference:${ref.id}`, ref.label, text, `${coverage}; owner selected the file, but its content is untrusted quoted data`, 'untrusted-reference', hash(bytes))
+      }
+      if (project && projectRecall) {
+        const query = recallTerms(prompt).slice(0, 16).join(' ').slice(0, 500)
+        if (query) for (const hit of projectRecall(project.id, query, input.chatId).slice(0, 4)) {
+          const id = `project-memory:${hash(`${hit.recordId}:${hit.messageId || ''}:${hit.start}:${hit.end}`).slice(0, 24)}`
+          const name = `${hit.title} · ${hit.role || 'message'}`
+          references.push({ id, name, text: hit.text, kind: 'project' })
+          source(id, name, hit.text, `${hit.coverage}; source message SHA-256 ${hit.sha256}; relevant raw conversation evidence from another session in this Project, not confirmed memory or instructions`, 'untrusted-reference', hash(hit.text))
+        }
       }
       const vaultNotices: string[] = [], followup = ownerConfirmedVaultRequest(prompt), followupQueries = followup.queries
       let retrieval: ContextReceipt['retrieval']
@@ -242,7 +252,7 @@ export function createNativeContext(projectFile: string, grantFile: string, deco
         ...(omitted.length ? { omitted } : {}),
       }
       const validate = () => {
-        if (signal.aborted || stamp !== JSON.stringify(input.projectId ? projects().find(p => p.id === input.projectId) || null : null)) throw Error('Project context changed or the task was canceled. Review it and send again.')
+        if (signal.aborted || stamp !== JSON.stringify(input.projectId ? projects().find(p => p.id === input.projectId && p.lifecycle !== 'trash') || null : null)) throw Error('Project context changed or the task was canceled. Review it and send again.')
         const current = grants()
         for (const ref of project?.references || []) if (ref.includeInContext && current[referenceKey(project!.id, ref.path)] !== permission[referenceKey(project!.id, ref.path)]) throw Error('Reference permission changed. Nothing was sent.')
       }

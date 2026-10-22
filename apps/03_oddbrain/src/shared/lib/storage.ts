@@ -47,6 +47,10 @@ export function normalizeChats(value: unknown): Chat[] {
       throw new Error('Invalid chat history.')
     }
     if (chat.messages !== undefined && !Array.isArray(chat.messages)) throw new Error('Invalid message history. Original storage must not be replaced.')
+    if (chat.lifecycle !== undefined && !['active','archived','trash'].includes(chat.lifecycle)) throw new Error('Invalid chat lifecycle. Original storage must not be replaced.')
+    if (chat.lifecycle === 'trash') {
+      if (!chat.trash || typeof chat.trash.at !== 'string' || !Number.isFinite(Date.parse(chat.trash.at)) || !['owner','ai'].includes(chat.trash.by) || typeof chat.trash.reason !== 'string' || !chat.trash.reason.trim() || !['active','archived'].includes(chat.trash.previous)) throw new Error('Invalid chat Trash recovery state. Original storage must not be replaced.')
+    } else if (chat.trash !== undefined) throw new Error('Active chat contains stale Trash recovery state. Original storage must not be replaced.')
     if (chat.recoveredFrom !== undefined && (!chat.recoveredFrom || typeof chat.recoveredFrom.exportedAt !== 'string' || chat.recoveredFrom.exportedAt.length > 64 || !Number.isFinite(Date.parse(chat.recoveredFrom.exportedAt)) || typeof chat.recoveredFrom.originalChatId !== 'string' || !chat.recoveredFrom.originalChatId || chat.recoveredFrom.originalChatId.length > 1_024 || typeof chat.recoveredFrom.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(chat.recoveredFrom.sha256))) throw new Error('Invalid chat recovery provenance. Original storage must not be replaced.')
     const messages: Message[] = Array.isArray(chat.messages) ? chat.messages : []
     const bad = messages.some(
@@ -70,7 +74,7 @@ export function normalizeChats(value: unknown): Chat[] {
             )))
     )
     if (bad) throw new Error('Invalid message history.')
-    return { ...chat, date: chat.date || 'Older', messages }
+    return { ...chat, lifecycle: chat.lifecycle || 'active', date: chat.date || 'Older', messages }
   })
 }
 

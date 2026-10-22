@@ -6,6 +6,7 @@ import type { NativeConversation, NativeSessionLink, NativeContextTarget } from 
 import { type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
 import type { ThinkingMode } from '../shared/lib/engine'
 import type { MemoryBridge } from '../shared/lib/memoryWorkspace'
+import type { MemmoryObBridge } from '../shared/lib/memmoryOb'
 import type { ProcessingLedgerBridge } from '../shared/lib/processingLedger'
 import type { AttachmentCenterBridge } from '../shared/lib/attachmentCenter'
 import type { FolderAccessBridge } from '../shared/lib/folderAccess'
@@ -110,7 +111,9 @@ const engineApi = {
     defaultFolder: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:default-folder'),
     list: (): Promise<{ ok: boolean; folder?: string; files?: Array<{ name: string; path: string; updated: string; content: string; clipped: boolean }> }> =>
       ipcRenderer.invoke('memory:list'),
+    listTrash: (): Promise<{ ok: boolean; folder?: string; files?: Array<{ id: string; name: string; path: string; trashedAt: string; updated: string; content: string; clipped: boolean }> }> => ipcRenderer.invoke('memory:trash-list'),
     remove: (name: string, expectedFolder?: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:remove', name, expectedFolder),
+    restore: (id: string, expectedFolder?: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:restore', id, expectedFolder),
   },
   journal: {
     list: (): Promise<{ ok: boolean; entries: Array<{ at: string; prompt: string; answer: string; sessionId: string | null; usage: string; workspace: string }> }> =>
@@ -290,6 +293,7 @@ const api = {
   } satisfies ChatStoreBridge,
   appData: {
     backup: (operation: 'create' | 'restore', rendererPreferences: Record<string, string> = {}) => ipcRenderer.invoke('app-data:backup', operation, rendererPreferences),
+    completeMemoryBackup: (operation: 'create' | 'restore', rendererPreferences: Record<string, string> = {}) => ipcRenderer.invoke('complete-memory:backup', operation, rendererPreferences),
   },
   workingNotes: {
     read: chatId => ipcRenderer.invoke('working-notes:read', chatId),
@@ -308,6 +312,13 @@ const api = {
   extensionPair: extensionPairApi,
   automation: automationApi,
   memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,
+  memmoryOb: {
+    read: input => ipcRenderer.invoke('memmory-ob:read', input),
+    project: projectId => ipcRenderer.invoke('memmory-ob:project', projectId),
+    search: input => ipcRenderer.invoke('memmory-ob:search', input),
+    goosePreview: () => ipcRenderer.invoke('memmory-ob:goose-preview'),
+    gooseDecide: (token, decision) => ipcRenderer.invoke('memmory-ob:goose-decide', token, decision),
+  } satisfies MemmoryObBridge,
   processing: { read: () => ipcRenderer.invoke('processing:read'), resume: id => ipcRenderer.invoke('processing:resume', id), setLimits: limits => ipcRenderer.invoke('processing:set-limits', limits) } satisfies ProcessingLedgerBridge,
   attachmentCenter: { read: () => ipcRenderer.invoke('attachments:read'), previewDelete: id => ipcRenderer.invoke('attachments:preview-delete', id), confirmDelete: token => ipcRenderer.invoke('attachments:confirm-delete', token) } satisfies AttachmentCenterBridge,
   folderAccess: { read: () => ipcRenderer.invoke('folders:read'), choose: input => ipcRenderer.invoke('folders:choose', input), revoke: id => ipcRenderer.invoke('folders:revoke', id), list: id => ipcRenderer.invoke('folders:list', id) } satisfies FolderAccessBridge,

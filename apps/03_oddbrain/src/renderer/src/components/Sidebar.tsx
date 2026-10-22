@@ -413,7 +413,7 @@ function ChatRow({
               />
               <div className="my-0.5 border-t border-line" />
               <MenuItem
-                label="Delete"
+                label="Move to Trash"
                 hint="D"
                 danger
                 onClick={() => {

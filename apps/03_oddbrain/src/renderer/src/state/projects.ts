@@ -36,6 +36,9 @@ export default function useProjects(active: boolean) {
     catch (failure) { setError((failure as Error).message); return false }
   }
   const update = (id: string, patch: Partial<Omit<Project, 'id' | 'createdAt'>>) => persist(current.current.map(p => p.id === id ? { ...p, ...patch } : p))
-  const remove = (id: string) => persist(current.current.filter(p => p.id !== id))
-  return { projects, loading, error, create, update, remove, reload: load }
+  /** Project removal is recoverable. Dependencies remain linked to this stable ID. */
+  const remove = (id: string) => persist(current.current.map(project => project.id === id ? { ...project, lifecycle: 'trash' as const, trash: { at: new Date().toISOString(), by: 'owner' as const, reason: 'Moved from Projects', previous: project.lifecycle === 'archived' ? 'archived' as const : 'active' as const } } : project))
+  const restore = (id: string) => persist(current.current.map(project => project.id === id && project.lifecycle === 'trash' ? { ...project, lifecycle: project.trash?.previous || 'active', trash: undefined } : project))
+  const visible = projects.filter(project => project.lifecycle !== 'trash')
+  return { projects: visible, allProjects: projects, loading, error, create, update, remove, restore, reload: load }
 }

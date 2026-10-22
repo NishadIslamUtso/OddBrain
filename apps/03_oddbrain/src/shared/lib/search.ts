@@ -54,6 +54,7 @@ export function searchChats(chats: Chat[] | unknown, query: string): SearchResul
   if (!list.length) return []
   const results: SearchResult[] = []
   for (const chat of Array.isArray(chats) ? (chats as Chat[]) : []) {
+    if (chat?.lifecycle === 'trash' || chat?.lifecycle === 'archived') continue
     const title = String(chat?.title || '')
     const titleHit = recallMatches(title, list)
     const matches: SearchMatch[] = []

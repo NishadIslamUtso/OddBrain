@@ -1,18 +1,19 @@
 import { useSyncExternalStore } from 'react'
 import { getEngineApi } from '@/platform/bridge'
 import { engineStore, subscribeEngine } from './engine'
-import { buildMemoryOrder, MEMORY_DIR, type MemoryFile } from '@shared/lib/memory'
+import { buildMemoryOrder, MEMORY_DIR, type MemoryFile, type MemoryTrashFile } from '@shared/lib/memory'
 
 /**
  * Auto memory, orchestrated. The pass is ONE normal turn: the order asks the
  * engine to note what matters into the vault's memory file — through its own
  * Write/Edit tools, which means through this app's permission cards, a
  * visible diff before anything lands (his rule: the engine may write, but in
- * the open). The pane lists what exists; deleting is real and per file.
+ * the open). The pane lists what exists; removal is recoverable and per file.
  */
 
 export type MemoryState = {
   files: MemoryFile[]
+  trash: MemoryTrashFile[]
   folder: string
   loaded: boolean
   running: boolean
@@ -22,6 +23,7 @@ export type MemoryState = {
 
 let state: MemoryState = {
   files: [],
+  trash: [],
   folder: '',
   loaded: false,
   running: false,
@@ -43,7 +45,12 @@ const patch = (part: Partial<MemoryState>): void => {
 }
 
 export async function loadMemory(): Promise<void> {
-  try { const answer = await getEngineApi().memory.list(); if (!answer.ok) throw Error(answer.answer || 'Memory could not be read.'); patch({ files: answer.files ?? [], folder: answer.folder ?? '', loaded: true, error: '' }) } catch (failure) { patch({ error: String((failure as Error).message || failure), loaded: true }) }
+  try {
+    const [answer, trash] = await Promise.all([getEngineApi().memory.list(), getEngineApi().memory.listTrash()])
+    if (!answer.ok) throw Error(answer.answer || 'Memory could not be read.')
+    if (!trash.ok) throw Error(trash.answer || 'Recoverable memory Trash could not be read.')
+    patch({ files: answer.files ?? [], trash: trash.files ?? [], folder: answer.folder ?? trash.folder ?? '', loaded: true, error: '' })
+  } catch (failure) { patch({ error: String((failure as Error).message || failure), loaded: true }) }
 }
 
 /**
@@ -79,6 +86,17 @@ export async function runMemoryPass(): Promise<boolean> {
 
 export async function removeMemory(name: string): Promise<boolean> {
   const answer = await getEngineApi().memory.remove(name, state.folder)
+  if (!answer.ok) {
+    patch({ error: answer.answer })
+    return false
+  }
+  await loadMemory()
+  patch({ status: answer.answer, error: '' })
+  return true
+}
+
+export async function restoreMemory(id: string): Promise<boolean> {
+  const answer = await getEngineApi().memory.restore(id, state.folder)
   if (!answer.ok) {
     patch({ error: answer.answer })
     return false

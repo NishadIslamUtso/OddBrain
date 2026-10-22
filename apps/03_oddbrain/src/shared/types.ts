@@ -121,6 +121,10 @@ export type Chat = {
   pinned?: boolean
   /** null means "no project", which is different from "not loaded yet". */
   projectId?: string | null
+  /** Recoverable lifecycle. Missing on older chats means active. */
+  lifecycle?: 'active' | 'archived' | 'trash'
+  /** Moving to Trash preserves the exact chat and records how to restore it. */
+  trash?: { at: string; by: 'owner' | 'ai'; reason: string; previous: 'active' | 'archived' }
   /** The chat this one was branched from, if any. */
   branchOf?: string
   /** Epoch milliseconds, used for ordering search results. */

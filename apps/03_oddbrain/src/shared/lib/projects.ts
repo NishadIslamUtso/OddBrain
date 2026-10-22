@@ -17,6 +17,9 @@ export type Project = {
   /** Where the engine works for this project. Empty = the vault. */
   folder: string
   createdAt: string
+  /** Recoverable lifecycle. Missing in older project files means active. */
+  lifecycle?: 'active' | 'archived' | 'trash'
+  trash?: { at: string; by: 'owner' | 'ai'; reason: string; previous: 'active' | 'archived' }
   /** What this project is trying to achieve, in the owner's words. Optional. */
   goals: string[]
   /** Reference files/knowledge the owner attached to this project. */
@@ -60,6 +63,14 @@ const cleanFolder = (value: unknown): string => {
   // flag, a URL, or a newline smuggler.
   if (/[\n\r]|\bhttps?:\/\//.test(trimmed)) return ''
   return trimmed.slice(0, 4096)
+}
+
+const cleanLifecycle = (record: Record<string, unknown>): Pick<Project, 'lifecycle' | 'trash'> => {
+  const lifecycle = record.lifecycle === 'archived' || record.lifecycle === 'trash' ? record.lifecycle : 'active'
+  if (lifecycle !== 'trash') return record.lifecycle === undefined ? {} : { lifecycle }
+  const trash = record.trash as Partial<NonNullable<Project['trash']>> | undefined
+  if (!trash || typeof trash.at !== 'string' || !Number.isFinite(Date.parse(trash.at)) || !['owner','ai'].includes(String(trash.by)) || typeof trash.reason !== 'string' || !trash.reason.trim() || !['active','archived'].includes(String(trash.previous))) throw Error('A trashed project has invalid recovery information.')
+  return { lifecycle, trash: { at: trash.at, by: trash.by as 'owner' | 'ai', reason: trash.reason.slice(0, 500), previous: trash.previous as 'active' | 'archived' } }
 }
 
 const cleanGoals = (value: unknown): string[] => {
@@ -123,6 +134,7 @@ export function normalizeProject(value: unknown): Project | null {
       typeof record.createdAt === 'string' && !Number.isNaN(new Date(record.createdAt).getTime())
         ? record.createdAt
         : new Date().toISOString(),
+    ...cleanLifecycle(record),
     // Older stored projects have neither field; they gain empty lists,
     // which is the truth — nothing was attached, nothing is invented.
     goals: cleanGoals(record.goals),
@@ -149,7 +161,7 @@ export function newProject(name: string): Project {
   const id =
     globalThis.crypto?.randomUUID?.().replace(/-/g, '').slice(0, 24) ??
     `p${Date.now().toString(36)}${Math.random().toString(36).slice(2, 10)}`
-  return { id, name: name.trim().slice(0, 80) || 'New project', instruction: '', folder: '', createdAt: new Date().toISOString(), goals: [], references: [] }
+  return { id, name: name.trim().slice(0, 80) || 'New project', instruction: '', folder: '', createdAt: new Date().toISOString(), lifecycle: 'active', goals: [], references: [] }
 }
 
 /** A fresh reference id, same shape as a project id. */
@@ -161,8 +173,8 @@ export function newReferenceId(): string {
 }
 
 /** The chats that belong to a project, newest activity first. */
-export function chatsOf<T extends { projectId?: string | null; updatedAt?: number }>(chats: T[], projectId: string): T[] {
+export function chatsOf<T extends { projectId?: string | null; updatedAt?: number; lifecycle?: 'active' | 'archived' | 'trash' }>(chats: T[], projectId: string): T[] {
   return chats
-    .filter((chat) => chat.projectId === projectId)
+    .filter((chat) => chat.projectId === projectId && chat.lifecycle !== 'trash' && chat.lifecycle !== 'archived')
     .sort((first, second) => (second.updatedAt ?? 0) - (first.updatedAt ?? 0))
 }

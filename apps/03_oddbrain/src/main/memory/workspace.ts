@@ -7,7 +7,7 @@ import { scanInstructionSignals, scanTextHazards } from '../../shared/lib/textHa
 const hash = (s: string): string => createHash('sha256').update(s).digest('hex')
 const STATE = '06 Review/Organizer/state.json'
 const AI = new Set(['oddbrain','chatgpt','claude','gemini','aistudio','deepseek','arena','glm','kimi','grok','qwen','mistral','perplexity','copilot','poe'])
-export function createMemoryWorkspace(files: VaultFiles, clock: () => string = () => new Date().toISOString()) {
+export function createMemoryWorkspace(files: VaultFiles, clock: () => string = () => new Date().toISOString(), onChanged?: (workspace: MemoryWorkspace) => void) {
   function read(): MemoryWorkspace {
     const raw = files.read(STATE)
     if (!raw && !files.exists(STATE)) return emptyMemory()
@@ -20,7 +20,7 @@ export function createMemoryWorkspace(files: VaultFiles, clock: () => string = (
     s.discoveryWarnings ||= []
     return s
   }
-  function save(s: MemoryWorkspace): void { files.writeAtomic(STATE, JSON.stringify(s)) }
+  function save(s: MemoryWorkspace): void { files.writeAtomic(STATE, JSON.stringify(s)); onChanged?.(structuredClone(s)) }
   function discover(): MemoryWorkspace {
     const state = read(), known = new Set(state.jobs.map(j => j.id))
     const browser = files.walkFiles('02 Sources/Conversations/Browser', '.json', 15000), app = files.walkFiles('02 Sources/Conversations/App', '.json', 15000)

@@ -8,10 +8,10 @@ import { readRecoverableJson, writeRecoverableJson } from '../recoverableJson'
 const inside = (root: string, path: string): boolean => { const value = relative(resolve(root), resolve(path)); return value !== '..' && !value.startsWith(`..${sep}`) }
 const validate = (value: unknown): AttachmentCenterState => { const problem = attachmentCenterProblem(value); if (problem) throw Error(`Attachment inventory needs repair: ${problem}. It was not reset.`); return value as AttachmentCenterState }
 
-export function createAttachmentCenter(file: string, privateRoot: string, clock: () => string = () => new Date().toISOString()) {
+export function createAttachmentCenter(file: string, privateRoot: string, clock: () => string = () => new Date().toISOString(), onChanged?: (state: AttachmentCenterState) => void) {
   const previews = new Map<string, AttachmentDeletePreview>()
   const readStored = (): AttachmentCenterState => readRecoverableJson(file, validate, emptyAttachmentCenter()).value
-  const save = (state: AttachmentCenterState): void => writeRecoverableJson(file, state)
+  const save = (state: AttachmentCenterState): void => { writeRecoverableJson(file, state); onChanged?.(structuredClone(state)) }
   const refreshed = (): AttachmentCenterState => {
     const state = readStored(); let changed = false
     const records = state.records.map(row => {

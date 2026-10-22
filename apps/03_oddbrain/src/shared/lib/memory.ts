@@ -43,6 +43,12 @@ export type MemoryFile = {
   clipped: boolean
 }
 
+/** A memory note moved out of the active folder without destroying its bytes. */
+export type MemoryTrashFile = MemoryFile & {
+  id: string
+  trashedAt: string
+}
+
 export const MEMORY_READ_CAP = 20_000
 
 /** The vault-relative path is validated against tricks before any read. */

@@ -226,9 +226,10 @@ export default function App() {
   // already on screen still shows that it did something.
   const [highlight, setHighlight] = useState('')
 
+  const activeChats = useMemo(() => chats.chats.filter(entry => entry.lifecycle !== 'trash' && entry.lifecycle !== 'archived'), [chats.chats])
   const chat = useMemo(
-    () => chats.chats.find(entry => entry.id === chats.currentChat) || null,
-    [chats.chats, chats.currentChat]
+    () => activeChats.find(entry => entry.id === chats.currentChat) || null,
+    [activeChats, chats.currentChat]
   )
   const [settingsOpen, setSettingsOpen] = useState(false)
   /** Which pane Settings opens onto; 'models' when the account menu's
@@ -671,7 +672,7 @@ export default function App() {
   const navigation = useNavigationHistory(location, locationKey, savedTarget => {
     const target = migrateHistoryLocation(savedTarget)
     setView(resolveSavedView(target.view))
-    chats.open(chats.chats.some(chat => chat.id === target.chatId) ? target.chatId : '')
+    chats.open(activeChats.some(chat => chat.id === target.chatId) ? target.chatId : '')
     setProjectFocus(target.projectFocus); setArtifactFocus(target.artifactFocus)
     if (target.settings) setSettingsSection(target.settings)
     setSettingsOpen(target.settings !== null)
@@ -681,10 +682,10 @@ export default function App() {
   useEffect(() => { const open = () => { setSettingsOpen(false); setView('vault'); requestAnimationFrame(() => window.dispatchEvent(new Event('app:vault-sources-select'))) }; window.addEventListener('app:capture-sources', open); return () => window.removeEventListener('app:capture-sources', open) }, [])
   const openSettings = (section: SectionId = 'appearance'): void => { setSettingsSection(section); setSettingsOpen(true) }
   const openChat = (id: string): void => { chats.open(id); setView('chat') }
-  useEffect(() => { const open = (event: Event) => { const id = (event as CustomEvent<string>).detail; if (chats.chats.some(c => c.id === id)) { chats.open(id); setView('chat'); setPendingProject(null) } }; window.addEventListener('app:open-chat', open); return () => window.removeEventListener('app:open-chat', open) }, [chats])
+  useEffect(() => { const open = (event: Event) => { const id = (event as CustomEvent<string>).detail; if (activeChats.some(c => c.id === id)) { chats.open(id); setView('chat'); setPendingProject(null) } }; window.addEventListener('app:open-chat', open); return () => window.removeEventListener('app:open-chat', open) }, [chats, activeChats])
   const newChat = (): void => { chats.create(); setView('chat'); setSettingsOpen(false); setPendingProject(null); setNotice(''); requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label=Message]')?.focus()) }
-  const items: ShellItem[] = view === 'projects' ? projects.map(p => ({ id: p.id, title: p.name, detail: p.folder, open: () => { setProjectFocus(p.id); setView('projects') } })) : view === 'artifacts' ? library.items.map(item => ({ id: item.id, title: item.title, detail: item.type.toUpperCase(), open: () => { setArtifactFocus(item.id); setView('artifacts') } })) : chats.chats.map(c => ({ id: c.id, title: c.title, detail: c.recoveredFrom ? `${c.date || 'Older'} · recovered copy` : c.date, open: () => openChat(c.id) }))
-  const commands: CommandItem[] = [{ id: 'memory-inbox', title: 'Memory inbox', detail: 'Review interpretations, people and your life story', run: () => window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' })) }, ...screenCommands(setView), ...chats.chats.slice(0, 6).map(c => ({ id: 'chat-' + c.id, title: c.title, detail: 'Conversation', run: () => openChat(c.id) })), ...SECTIONS.map(section => ({ id: 'settings-' + section.id, title: section.id === 'models' ? 'Models & API keys' : section.id === 'connectors' ? 'Apps & extensions' : section.title, detail: section.id === 'maps' ? 'Vault' : 'Settings', run: () => section.id === 'maps' ? window.dispatchEvent(new Event('app:capture-sources')) : openSettings(section.id) }))]
+  const items: ShellItem[] = view === 'projects' ? projects.map(p => ({ id: p.id, title: p.name, detail: p.folder, open: () => { setProjectFocus(p.id); setView('projects') } })) : view === 'artifacts' ? library.items.map(item => ({ id: item.id, title: item.title, detail: item.type.toUpperCase(), open: () => { setArtifactFocus(item.id); setView('artifacts') } })) : activeChats.map(c => ({ id: c.id, title: c.title, detail: c.recoveredFrom ? `${c.date || 'Older'} · recovered copy` : c.date, open: () => openChat(c.id) }))
+  const commands: CommandItem[] = [{ id: 'memory-inbox', title: 'Memory inbox', detail: 'Review interpretations, people and your life story', run: () => window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' })) }, ...screenCommands(setView), ...activeChats.slice(0, 6).map(c => ({ id: 'chat-' + c.id, title: c.title, detail: 'Conversation', run: () => openChat(c.id) })), ...SECTIONS.map(section => ({ id: 'settings-' + section.id, title: section.id === 'models' ? 'Models & API keys' : section.id === 'connectors' ? 'Apps & extensions' : section.title, detail: section.id === 'maps' ? 'Vault' : 'Settings', run: () => section.id === 'maps' ? window.dispatchEvent(new Event('app:capture-sources')) : openSettings(section.id) }))]
   const [sourceRequest, setSourceRequest] = useState<{ path: string; root: string; title?: string } | null>(null)
   useEffect(() => {
     const open = (event: Event) => { const detail = (event as CustomEvent).detail, path = typeof detail === 'string' ? detail : detail?.path; if (typeof path !== 'string') return; setSourceRequest({ path, root: vault.path, title: typeof detail?.title === 'string' ? detail.title : undefined }); setSettingsOpen(false); setView('vault') }
@@ -711,7 +712,7 @@ export default function App() {
           artifactQuery={artifactQuery}
           onArtifactQuery={setArtifactQuery}
           artifactCount={library.items.length}
-          chats={chats.chats}
+          chats={activeChats}
           currentChat={chats.currentChat}
           onOpen={openChat}
           onNew={newChat}
@@ -731,7 +732,7 @@ export default function App() {
         {view === 'video' ? (
           <VideoStudioView onSettings={() => openSettings('video')} onChat={prompt => { setDraft(prompt); setView('chat'); setNotice('Video edit request added. Review it, attach the source video if needed, then send.') }} />
         ) : view === 'brain' ? (
-          <BrainView vault={vault} isDemo={isDemo && !sampleEnabled()} onOpenVault={() => setView('vault')} />
+          <BrainView vault={vault} isDemo={isDemo && !sampleEnabled()} onOpenVault={() => setView('vault')} chats={chats.chats} onRestoreChat={chats.restore} />
         ) : view === 'vault' ? (
           <VaultView key={vault.path} sourceRequest={sourceRequest?.root === vault.path ? sourceRequest : null}
             onAddToComposer={(path, content) => {
@@ -749,7 +750,7 @@ export default function App() {
           <ProjectsView
             focusId={projectFocus}
             onClearFocus={() => setProjectFocus('')}
-            chats={chats.chats}
+            chats={activeChats}
             onOpenChat={openChat}
             onNewChatInProject={(projectId) => {
               setPendingProject(projectId)
@@ -767,7 +768,7 @@ export default function App() {
         ) : view === 'today' ? (
           <TodayView
             onOpenMaps={() => window.dispatchEvent(new Event('app:capture-sources'))}
-            chats={chats.chats}
+            chats={activeChats}
             artifacts={library.items}
             artifactsLoading={library.loading}
             onOpenChat={openChat}

@@ -9,6 +9,7 @@ import { chatsOf, type Project } from '@shared/lib/projects'
 import type { Chat } from '@shared/types'
 import ProjectSessions from './ProjectSessions'
 import ProjectContextPanel from './ProjectContextPanel'
+import ProjectMemoryPanel from './ProjectMemoryPanel'
 
 /**
  * Projects — the owner's named homes for related work, Claude-app style.
@@ -223,7 +224,7 @@ export default function ProjectsView({
                         >
                           <Play size={11} aria-hidden /> Work here
                         </button>
-                        <button type="button" onClick={() => remove(project.id)} aria-label={`Delete ${project.name}`} className="rounded-lg p-1.5 text-muted hover:text-warn">
+                        <button type="button" onClick={() => remove(project.id)} aria-label={`Move ${project.name} to Trash`} title="Move to recoverable Trash" className="rounded-lg p-1.5 text-muted hover:text-warn">
                           <Trash2 size={12} />
                         </button>
                       </div>
@@ -411,6 +412,7 @@ export default function ProjectsView({
                         <ProjectContextPanel project={project} onToggleReference={(referenceId, include) => toggleReference(project, referenceId, include)} />
                       </div>
                     ) : null}
+                    <ProjectMemoryPanel projectId={project.id} />
                     {sessionsOpen && project.folder ? (
                       <div className="mt-2">
                         <ProjectSessions focusFolder={project.folder} />

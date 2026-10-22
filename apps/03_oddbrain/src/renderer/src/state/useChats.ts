@@ -64,7 +64,9 @@ export type ChatState = {
   openStorageLocation: () => Promise<{ ok: boolean; answer: string }>
   open: (chatId: string) => void
   create: () => string
+  /** Move to recoverable Trash; this never purges the stored conversation. */
   remove: (chatId: string) => void
+  restore: (chatId: string) => void
   rename: (chatId: string, title: string) => void
   pin: (chatId: string, pinned: boolean) => void
   setProject: (chatId: string, projectId: string | null) => void
@@ -279,9 +281,13 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
   const create = useCallback(() => { setCurrentChat(''); return '' }, [setCurrentChat])
 
   const remove = useCallback((chatId: string) => {
-    setChats(previous => previous.filter(chat => chat.id !== chatId))
+    setChats(previous => previous.map(chat => chat.id === chatId ? { ...chat, lifecycle: 'trash', trash: { at: new Date().toISOString(), by: 'owner', reason: 'Moved from app chats', previous: chat.lifecycle === 'archived' ? 'archived' : 'active' } } : chat))
     if (currentRef.current === chatId) setCurrentChat('')
   }, [setChats, setCurrentChat])
+
+  const restore = useCallback((chatId: string) => {
+    setChats(previous => previous.map(chat => chat.id === chatId && chat.lifecycle === 'trash' ? { ...chat, lifecycle: chat.trash?.previous || 'active', trash: undefined } : chat))
+  }, [setChats])
 
   const pin = useCallback((chatId: string, pinned: boolean) => {
     setChats(previous => previous.map(chat => chat.id === chatId ? { ...chat, pinned } : chat))
@@ -385,8 +391,8 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
   }, [])
 
   return useMemo<ChatState>(
-    () => ({ commit, chats, setChats, currentChat, ready, storage, retryStorage, exportRecovery, importRecovery, openStorageLocation, open, create, remove, rename, pin, setProject }),
-    [commit, chats, setChats, currentChat, ready, storage, retryStorage, exportRecovery, importRecovery, openStorageLocation, open, create, remove, rename, pin, setProject]
+    () => ({ commit, chats, setChats, currentChat, ready, storage, retryStorage, exportRecovery, importRecovery, openStorageLocation, open, create, remove, restore, rename, pin, setProject }),
+    [commit, chats, setChats, currentChat, ready, storage, retryStorage, exportRecovery, importRecovery, openStorageLocation, open, create, remove, restore, rename, pin, setProject]
   )
 }
 
@@ -394,6 +400,7 @@ export function useChats(onWarning?: (message: string) => void): ChatState {
 export function groupChats(chats: Chat[]): Array<{ label: string; chats: Chat[] }> {
   const pinned: Chat[] = [], today: Chat[] = [], earlier: Chat[] = []
   for (const chat of chats) {
+    if (chat.lifecycle === 'trash' || chat.lifecycle === 'archived') continue
     if (chat.pinned) pinned.push(chat)
     else (chat.date === 'Today' ? today : earlier).push(chat)
   }

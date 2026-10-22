@@ -299,25 +299,38 @@ function Switch({
   )
 }
 
+function safeBackupPreferences(): Record<string, string> {
+  const kept: Record<string, string> = {}
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index); if (!key || key.includes('read-trust') || key.startsWith('oddbrain.sample.')) continue
+    if (!key.startsWith('ai-assistant.') && !key.startsWith('oddbrain.') && !['ai_assistant_prompts', 'claude_exact_skills'].includes(key)) continue
+    const value = localStorage.getItem(key); if (value !== null) kept[key] = value
+  }
+  return kept
+}
+
 function AppDataBackupControls(): React.JSX.Element {
   const [busy, setBusy] = useState(''), [notice, setNotice] = useState('')
-  const safePreferences = (): Record<string, string> => {
-    const kept: Record<string, string> = {}
-    for (let index = 0; index < localStorage.length; index++) {
-      const key = localStorage.key(index); if (!key || key.includes('read-trust') || key.startsWith('oddbrain.sample.')) continue
-      if (!key.startsWith('ai-assistant.') && !key.startsWith('oddbrain.') && !['ai_assistant_prompts', 'claude_exact_skills'].includes(key)) continue
-      const value = localStorage.getItem(key); if (value !== null) kept[key] = value
-    }
-    return kept
-  }
   const run = async (operation: 'create' | 'restore'): Promise<void> => {
     if (busy) return
     setBusy(operation); setNotice('')
-    try { const answer = await bridge.appData.backup(operation, operation === 'create' ? safePreferences() : {}); setNotice(answer.answer) }
+    try { const answer = await bridge.appData.backup(operation, operation === 'create' ? safeBackupPreferences() : {}); setNotice(answer.answer) }
     catch { setNotice('The app-data operation failed. No complete backup or restore is reported.') }
     finally { setBusy('') }
   }
   return <div><p className="text-[12px] leading-relaxed text-muted">A verified app-data backup is separate from the vault. It includes app chats, native transcripts, Working Notes and review differences, artifacts, projects, recipes, handoffs, reviewed outcomes, durable Video Studio evidence/frames/render receipts, and non-secret interface preferences.</p><p className="mt-1 text-[11.5px] text-muted">It excludes credentials, pairing secrets, saved access grants, engine sessions, installed engines/models, caches, schedule/queue attempts, and external files. Restore creates a separate folder; it never replaces live data automatically.</p><div className="ob-inline-actions mt-2"><button type="button" disabled={!!busy} onClick={() => void run('create')}>{busy === 'create' ? 'Backing up…' : 'Back up app data'}</button><button type="button" disabled={!!busy} onClick={() => void run('restore')}>{busy === 'restore' ? 'Verifying…' : 'Restore app data to new folder'}</button></div>{notice ? <p className="ob-inline-note" role="status">{notice}</p> : null}</div>
+}
+
+function CompleteMemoryBackupControls(): React.JSX.Element {
+  const [busy, setBusy] = useState(''), [notice, setNotice] = useState('')
+  const run = async (operation: 'create' | 'restore'): Promise<void> => {
+    if (busy) return
+    setBusy(operation); setNotice('')
+    try { const answer = await bridge.appData.completeMemoryBackup(operation, operation === 'create' ? safeBackupPreferences() : {}); setNotice(answer.answer) }
+    catch { setNotice('The Complete Memory operation failed. No complete backup or restore is reported.') }
+    finally { setBusy('') }
+  }
+  return <div><p className="text-[12px] leading-relaxed text-muted">The recommended backup coordinates the full vault and app-private data, including <strong>Memmory_OB</strong>, chats, transcripts, Projects, Working Notes, private attachment copies and manifests, under one revision receipt.</p><p className="mt-1 text-[11.5px] text-muted">Every listed file is hashed. Use-in-place external files and secrets are explicitly excluded. Restore verifies both domains first, then creates an inactive new profile; live data is never replaced or activated automatically.</p><div className="ob-inline-actions mt-2"><button type="button" disabled={!!busy} onClick={() => void run('create')}>{busy === 'create' ? 'Creating…' : 'Create Complete Memory Backup'}</button><button type="button" disabled={!!busy} onClick={() => void run('restore')}>{busy === 'restore' ? 'Verifying…' : 'Verify and restore to new profile'}</button></div>{notice ? <p className="ob-inline-note" role="status">{notice}</p> : null}</div>
 }
 
 function ChatStorageControls({ storage }: { storage: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'importRecovery' | 'openStorageLocation'> }): React.JSX.Element {
@@ -708,6 +721,7 @@ export default function SettingsView({
         ),
       },
       ...(!isDemo ? [
+        { label: 'Complete Memory Backup', terms: 'complete coordinated backup restore memmory vault chats transcripts projects attachments revision verify inactive profile', body: <CompleteMemoryBackupControls /> },
         { label: 'App-data backup', terms: 'backup restore app private data transcripts working notes artifacts projects preferences', body: <AppDataBackupControls /> },
         { label: 'App-chat storage', terms: 'chat conversation storage recovery export import restore merge retry folder backup', body: <ChatStorageControls storage={chatStorage} /> },
       ] : []),

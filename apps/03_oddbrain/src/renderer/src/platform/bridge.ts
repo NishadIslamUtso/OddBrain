@@ -14,6 +14,7 @@ import type { EngineSourceFile } from '@shared/lib/media'
 import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
 import type { ThinkingMode } from '@shared/lib/engine'
 import type { MemoryBridge } from '@shared/lib/memoryWorkspace'
+import type { MemmoryObBridge } from '@shared/lib/memmoryOb'
 import type { ProcessingLedgerBridge } from '@shared/lib/processingLedger'
 import type { AttachmentCenterBridge } from '@shared/lib/attachmentCenter'
 import type { FolderAccessBridge } from '@shared/lib/folderAccess'
@@ -68,13 +69,17 @@ import type {
 /** What the preload script exposes today. It grows as the main process does. */
 export type DesktopBridge = {
   chats: ChatStoreBridge
-  appData: { backup: (operation: 'create' | 'restore', rendererPreferences?: Record<string, string>) => Promise<{ ok: boolean; answer: string }> }
+  appData: {
+    backup: (operation: 'create' | 'restore', rendererPreferences?: Record<string, string>) => Promise<{ ok: boolean; answer: string }>
+    completeMemoryBackup: (operation: 'create' | 'restore', rendererPreferences?: Record<string, string>) => Promise<{ ok: boolean; answer: string }>
+  }
   workingNotes: WorkingNotesBridge
   transcripts: TranscriptBridge
   media: MediaBridge
   videoStudio: VideoStudioBridge
   marketplace: MarketplaceBridge
   memoryWorkspace: MemoryBridge
+  memmoryOb: MemmoryObBridge
   processing: ProcessingLedgerBridge
   attachmentCenter: AttachmentCenterBridge
   folderAccess: FolderAccessBridge
@@ -331,7 +336,10 @@ const demoBridge: DesktopBridge = {
     importRecovery: async () => ({ ok: false, answer: 'Chat recovery import requires the installed app.' }),
     openLocation: async () => ({ ok: false, answer: 'Chat storage folders require the installed app.' }),
   },
-  appData: { backup: async () => ({ ok: false, answer: 'App-data backup requires the installed app.' }) },
+  appData: {
+    backup: async () => ({ ok: false, answer: 'App-data backup requires the installed app.' }),
+    completeMemoryBackup: async () => ({ ok: false, answer: 'Complete Memory Backup requires the installed app.' }),
+  },
   workingNotes: {
     read: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes storage requires the installed app.' }),
     save: async () => ({ ok: false, current: null, revisions: [], answer: 'Working Notes storage requires the installed app.' }),
@@ -384,6 +392,13 @@ const demoBridge: DesktopBridge = {
   marketplace: { inspect: unavailableMarket, sources: async () => [], browse: unavailableMarket, probe: unavailableMarket, installed: unavailableMarket, plan: unavailableMarket, confirm: unavailableMarket, cancel: async () => {} },
   automation: demoAutomation,
   memoryWorkspace: demoMemoryWorkspace,
+  memmoryOb: {
+    read: async () => ({ ok: false, error: 'Memmory_OB requires the desktop app.' }),
+    project: async () => ({ ok: false, error: 'Project memory requires the desktop app.' }),
+    search: async () => ({ ok: false, error: 'Memmory_OB search requires the desktop app.' }),
+    goosePreview: async () => ({ ok: false, answer: 'Goose adapter setup requires the desktop app.' }),
+    gooseDecide: async () => ({ ok: false, answer: 'Goose adapter setup requires the desktop app.' }),
+  },
   processing: {
     read: async () => ({ ok: false, error: 'Durable processing jobs require the installed app.' }),
     resume: async () => ({ ok: false, error: 'Durable processing jobs require the installed app.' }),
@@ -612,7 +627,9 @@ export type EngineBridge = {
     chooseFolder?: () => Promise<{ ok: boolean; answer: string; folder?: string; canceled?: boolean }>
     defaultFolder?: () => Promise<{ ok: boolean; answer: string }>
     list: () => Promise<{ ok: boolean; answer?: string; folder?: string; files?: Array<{ name: string; path: string; updated: string; content: string; clipped: boolean }> }>
+    listTrash: () => Promise<{ ok: boolean; answer?: string; folder?: string; files?: Array<{ id: string; name: string; path: string; trashedAt: string; updated: string; content: string; clipped: boolean }> }>
     remove: (name: string, expectedFolder?: string) => Promise<{ ok: boolean; answer: string }>
+    restore: (id: string, expectedFolder?: string) => Promise<{ ok: boolean; answer: string }>
   }
   journal: {
     list: () => Promise<{ ok: boolean; entries: Array<{ at: string; prompt: string; answer: string; sessionId: string | null; usage: string; workspace: string }> }>
@@ -722,7 +739,9 @@ const demoEngineBridge: EngineBridge = {
     chooseFolder: async () => ({ ok: false, answer: 'Choosing a memory folder uses the installed app.' }),
     defaultFolder: async () => ({ ok: false, answer: 'Memory locations are saved by the installed app.' }),
     list: async () => ({ ok: true, files: [] }),
+    listTrash: async () => ({ ok: true, files: [] }),
     remove: async () => ({ ok: false, answer: 'Memories live in the desktop app.' }),
+    restore: async () => ({ ok: false, answer: 'Recoverable memories live in the desktop app.' }),
   },
   journal: {
     list: async () => ({ ok: true, entries: [] }),
