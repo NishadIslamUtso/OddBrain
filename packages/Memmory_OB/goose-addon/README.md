@@ -82,6 +82,31 @@ Memmory_OB/
   adapter/          the adapter bundle + ownership receipt
 ```
 
+## The Brain Window (your screens on your brain)
+
+```
+node brain-window.mjs
+```
+
+One command opens the **same OddBrain screens** in your browser, on your brain
+folder (default `~/Memmory_OB`, change with `--brain <folder>`):
+
+- **Projects screen** — create and edit Projects, their goals and attached
+  reference files; shared Project memory is one catalogue for Goose and the app.
+- **Vault screen** — your brain's files, vault search, and the memory graph with
+  an honest link check (dead and ambiguous links are reported, never repaired
+  behind your back).
+- **Review screen** — doubts, confirmations, interpretations: the only place
+  memory is ever confirmed. Decisions are saved immediately.
+- **Brain screen** — memory checking at a glance: chats, trash, and what memory
+  holds.
+- **First run** — selecting a folder (your memory folder / data folder) and
+  deciding what to do with it: prepare it as a brain, or leave it untouched.
+
+It is local-only (127.0.0.1): nothing on your network can reach it. No desktop
+app is installed or required. Anything that needs the real desktop app keeps
+saying so out loud instead of pretending.
+
 ## Still coming next (built on this)
 
 - **History import**: one command to pull your existing Goose sessions into the

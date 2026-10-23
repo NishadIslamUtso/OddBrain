@@ -19,6 +19,7 @@ import type { ProcessingLedgerBridge } from '@shared/lib/processingLedger'
 import type { AttachmentCenterBridge } from '@shared/lib/attachmentCenter'
 import type { FolderAccessBridge } from '@shared/lib/folderAccess'
 import { demoMemoryWorkspace } from './sampleMemory'
+import { createBrainHostBridge } from './brainHost'
 import { DEFAULT_MEDIA, type MediaBridge } from '@shared/lib/mediaBridge'
 import { DEFAULT_VIDEO_STUDIO, type VideoStudioBridge } from '@shared/lib/videoStudio'
 import type { MarketplaceBridge } from '@shared/lib/marketplace'
@@ -310,6 +311,14 @@ declare global {
 export const hasDesktopBridge = (): boolean =>
   typeof window !== 'undefined' && typeof window.api === 'object' && window.api !== null
 
+/**
+ * True when the local Brain Window server is behind the page: the same built
+ * renderer, a real brain folder, no desktop shell. The host marks the page by
+ * setting one flag before any application code runs.
+ */
+export const hasBrainHost = (): boolean =>
+  typeof window !== 'undefined' && (window as unknown as { __ODDBRAIN_BRAIN_HOST__?: boolean }).__ODDBRAIN_BRAIN_HOST__ === true
+
 /** Empty, and honest about it. See rule 2 above. */
 let demoAutomationPreferences = { ...DEFAULT_AUTOMATION }
 try { if (typeof localStorage !== 'undefined') demoAutomationPreferences = normalizeAutomation(JSON.parse(localStorage.getItem('oddbrain.automation-preview') || 'null')) } catch {}
@@ -590,7 +599,7 @@ artifacts: {
   },
 }
 
-export const bridge: DesktopBridge = hasDesktopBridge() ? (window.api as DesktopBridge) : demoBridge
+export const bridge: DesktopBridge = hasDesktopBridge() ? (window.api as DesktopBridge) : hasBrainHost() ? createBrainHostBridge(demoBridge) : demoBridge
 
 /**
  * The engine bridge, exactly as the preload exposes it. The browser preview has
@@ -807,7 +816,7 @@ export const getEngineApi = (): EngineBridge => {
 }
 
 /** True in the browser preview, where there is no main process behind the UI. */
-export const isDemo = !hasDesktopBridge()
+export const isDemo = !hasDesktopBridge() && !hasBrainHost()
 
 /** The preload's operational service, with an honest browser-only fallback. */
 export const getAutomationApi = (): AutomationBridge => {

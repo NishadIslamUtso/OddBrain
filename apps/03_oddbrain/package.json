@@ -17,9 +17,10 @@
   "scripts": {
     "dev": "electron-vite dev",
     "dev:web": "vite --config vite.web.config.ts",
-    "build": "npm run typecheck && electron-vite build && node scripts/build-memmory-ob-mcp.mjs && node scripts/build-memmory-ob-core.mjs && node scripts/check-renderer-chunks.mjs && node scripts/build-ui-preview.mjs",
+    "build": "npm run typecheck && electron-vite build && node scripts/build-memmory-ob-mcp.mjs && node scripts/build-memmory-ob-core.mjs && node scripts/build-brain-window.mjs && node scripts/check-renderer-chunks.mjs && node scripts/build-ui-preview.mjs",
     "build:web": "node scripts/build-ui-preview.mjs && vite build --config vite.web.config.ts",
     "build:memmory-ob": "node scripts/build-memmory-ob-mcp.mjs && node scripts/build-memmory-ob-core.mjs",
+    "build:brain-window": "node scripts/build-brain-window.mjs",
     "start": "electron-vite preview",
     "preview:web": "vite preview --config vite.web.config.ts --port 4174",
     "typecheck": "tsc --noEmit -p tsconfig.json",
