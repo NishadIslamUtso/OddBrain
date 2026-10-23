@@ -33,7 +33,7 @@ try {
 // Every input the package is built from. Missing inputs fail loudly — the
 // package is never assembled from stale or partial builds.
 const inputs = [
-  ['dist/memory-ob-mcp.cjs', join(appRoot, 'out', 'memory-ob', 'memory-ob-mcp.cjs'), 'adapter: the four Memory_OB tools for Goose'],
+  ['dist/memory-ob-mcp.cjs', join(appRoot, 'out', 'memory-ob', 'memory-ob-mcp.cjs'), 'adapter: the Memory_OB tools for Goose'],
   ['dist/goose-import-core.cjs', join(appRoot, 'out', 'memory-ob', 'goose-import', 'goose-import-core.cjs'), 'one-time Goose-history import engine'],
   ['dist/brain-window-server.cjs', join(appRoot, 'out', 'memory-ob', 'brain-window', 'brain-window-server.cjs'), 'Brain Window host (Projects, Vault, Review)'],
   ['dist/memory-ob-semantic.cjs', join(appRoot, 'out', 'memory-ob', 'semantic', 'memory-ob-semantic.cjs'), 'optional meaning-search engine (separate module)'],
@@ -41,6 +41,7 @@ const inputs = [
   ['ui/', join(appRoot, 'dist-web'), 'the built Brain Window interface'],
   ['install.mjs', join(addonSrc, 'install.mjs'), 'installer (type ALLOW to write)'],
   ['import-goose-history.mjs', join(addonSrc, 'import-goose-history.mjs'), 'import CLI'],
+  ['fix-goose-extensions.mjs', join(addonSrc, 'fix-goose-extensions.mjs'), 'restores extensions Goose dropped from its config (type ALLOW to write)'],
   ['brain-window.mjs', join(addonSrc, 'brain-window.mjs'), 'Brain Window launcher'],
   ['README.md', join(addonSrc, 'README.md'), 'owner guide'],
   ['goose-skill/SKILL.md', join(repoRoot, 'packages', 'Memory_OB', 'goose-skill', 'SKILL.md'), 'the Memory_OB skill Goose reads'],
@@ -96,11 +97,13 @@ Targets: Windows 11 + Node.js 24 (works on macOS/Linux too). No paid services. N
 One folder you can copy anywhere. It makes plain Goose work with your one
 memory (\`Memory_OB\`) without installing or maintaining any app:
 
-- \`install.mjs\` — installs the four read-only tools + the skill into Goose and
+- \`install.mjs\` — installs the read-only tools + the in-chat screens + the skill into Goose and
   switches Goose's stock memory off, in one reviewed change (type \`ALLOW\`).
 - \`import-goose-history.mjs\` — the one-time import of your existing Goose
   sessions and memory, run BEFORE installing. Everything imported is labelled
   raw unconfirmed evidence.
+- \`fix-goose-extensions.mjs\` — rebuilds extensions that Goose dropped from
+  its config because their old shape stopped parsing (type \`ALLOW\`).
 - \`brain-window.mjs\` — the local Brain Window: Projects, Vault (files, search,
   graph, link check, folder choose-and-decide) and Review (the only place
   memory is confirmed).

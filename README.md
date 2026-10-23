@@ -25,6 +25,11 @@ It imports your Goose history into `Documents\OddBrain\Memory_OB` **first**
 installs. The `ALLOW` in the line is your approval — the exact change is
 printed before anything is written. Restart Goose afterwards.
 
+**If Goose ever drops your own extensions from its Extensions page** (its
+config writer discards entries whose old shape no longer parses), one line
+brings them back rebuilt in the current schema — ask for the
+`fix-goose-extensions.mjs` line.
+
 **Your screens live inside Goose itself.** Ask Goose *"show my memory
 screens"* and Projects, Vault and Review render **in the conversation** (the
 MCP Apps contract: the `memory_ob_screens` tool returns a `ui://` app). The
