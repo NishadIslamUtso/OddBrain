@@ -11,12 +11,16 @@
  * An install record (.installed.json) lists every engine file an install
  * wrote, so removing a pack can undo exactly that and nothing else.
  */
-import { cpSync, existsSync, readFileSync, readdirSync, rmSync, rmdirSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, readFileSync, readdirSync, rmSync, rmdirSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve, sep } from 'node:path'
 import { normalizePack, type Pack } from '../../shared/lib/packs'
-import { deploySkill, parseSkillMd, type VaultSkill } from './deploy'
+import { readRegularFileSync } from '../safeFile'
+import { deploySkill, parseSkillMd, toAgySkill, toClaudeSkill, type VaultSkill } from './deploy'
 
 const MAX_FILE_BYTES = 200_000
+const MAX_PACK_FILE_BYTES = 2_000_000
+const MAX_PACK_BYTES = 20_000_000
+const MAX_PACK_FILES = 200
 
 export type PackPrompt = { name: string; body: string }
 export type PackTheme = {
@@ -38,10 +42,51 @@ export type InstallAnswer =
   | { ok: true; pack: Pack; folder: string; prompts: PackPrompt[]; themes: PackTheme[]; written: string[] }
   | { ok: false; answer: string }
 
+const pathEntryExists = (path: string): boolean => {
+  try { lstatSync(path); return true } catch { return false }
+}
+
 const readCapped = (path: string): { text?: string; problem?: string } => {
-  const size = statSync(path).size
-  if (size > MAX_FILE_BYTES) return { problem: `${basename(path)} is too large for a pack file (over ${Math.floor(MAX_FILE_BYTES / 1000)} kB).` }
-  return { text: readFileSync(path, 'utf8') }
+  try {
+    const { bytes } = readRegularFileSync(path, MAX_FILE_BYTES)
+    return { text: bytes.toString('utf8') }
+  } catch {
+    return { problem: `${basename(path)} could not be read as a pack file.` }
+  }
+}
+
+/** Refuse links, special files and oversized trees before anything is copied. */
+const inspectPackTree = (root: string): string => {
+  let files = 0
+  let bytes = 0
+  let entries = 0
+  const rootPath = resolve(root)
+  const walk = (folder: string, depth: number): void => {
+    if (depth > 32) throw new Error('The pack folder tree is more than 32 levels deep.')
+    for (const entry of readdirSync(folder)) {
+      entries += 1
+      if (entries > MAX_PACK_FILES * 2) throw new Error('The pack contains too many folders and files.')
+      const path = join(folder, entry)
+      const info = lstatSync(path)
+      const relative = path.slice(rootPath.length + 1)
+      if (info.isSymbolicLink()) throw new Error(`The pack contains a symbolic link (${relative}); links are not installable.`)
+      if (info.isDirectory()) walk(path, depth + 1)
+      else if (info.isFile()) {
+        files += 1
+        bytes += info.size
+        if (files > MAX_PACK_FILES) throw new Error(`The pack contains more than ${MAX_PACK_FILES} files.`)
+        if (info.size > MAX_PACK_FILE_BYTES) throw new Error(`The pack contains a file larger than ${MAX_PACK_FILE_BYTES.toLocaleString()} bytes (${relative}).`)
+        if (bytes > MAX_PACK_BYTES) throw new Error(`The pack contains more than ${MAX_PACK_BYTES.toLocaleString()} bytes.`)
+      } else throw new Error(`The pack contains an unsupported filesystem entry (${relative}).`)
+    }
+  }
+  try {
+    if (!lstatSync(rootPath).isDirectory()) return 'The selected pack is not a folder.'
+    walk(rootPath, 0)
+    return files ? '' : 'The pack folder is empty.'
+  } catch (error) {
+    return error instanceof Error ? error.message : 'The pack folder could not be inspected.'
+  }
 }
 
 /** Inside the pack folder, and only there — the check every read goes through. */
@@ -111,6 +156,8 @@ export type PackTargets = {
 }
 
 export function installPackFromFolder(folder: string, targets: PackTargets, via?: 'index' | 'starter'): InstallAnswer {
+  const treeProblem = inspectPackTree(folder)
+  if (treeProblem) return { ok: false, answer: treeProblem }
   const manifestPath = join(folder, 'manifest.json')
   if (!existsSync(manifestPath)) return { ok: false, answer: 'That folder has no manifest.json, a pack is a folder with one.' }
   const manifestFile = readCapped(manifestPath)
@@ -155,30 +202,45 @@ export function installPackFromFolder(folder: string, targets: PackTargets, via?
     themes.push(theme.theme)
   }
 
-  // The readable record, where the app said it would be.
   const destination = join(targets.storeRoot, pack.id)
-  if (existsSync(destination)) return { ok: false, answer: `A pack with the id ${pack.id} is already installed. Remove it first.` }
+  if (pathEntryExists(destination)) return { ok: false, answer: `A pack with the id ${pack.id} is already installed. Remove it first.` }
+
+  // Know every engine path before writing any. A pack never overwrites a skill
+  // the owner (or another pack) already has, and two contributions that
+  // normalize to the same command are an invalid pack rather than last-wins.
+  const claudePlanned = skills.map(skill => join(targets.claudeSkillsDir, toClaudeSkill(skill).relative))
+  const agyPlanned = skills.map(skill => join(targets.agySkillsDir, toAgySkill(skill).relative))
+  const planned = claudePlanned.flatMap((path, index) => [path, agyPlanned[index]!])
+  if (new Set(planned).size !== planned.length) return { ok: false, answer: 'Two skills in this pack resolve to the same engine path.' }
+  const conflict = planned.find(pathEntryExists) || claudePlanned.map(dirname).find(pathEntryExists)
+  if (conflict) return { ok: false, answer: `The pack would overwrite an existing engine skill (${conflict}). Remove or rename that skill first; nothing was changed.` }
+
+  // The readable record, where the app said it would be.
   try {
-    cpSync(folder, destination, { recursive: true })
+    cpSync(folder, destination, { recursive: true, errorOnExist: true, force: false })
   } catch {
+    rmSync(destination, { recursive: true, force: true })
     return { ok: false, answer: 'The pack folder could not be copied. Nothing was changed.' }
   }
 
-  // Skills deploy to the engines; the record remembers exactly what was written.
+  // Skills and the removal record form one transaction. Every planned path was
+  // absent above, so a failed deployment can safely remove anything it began.
   let written: string[] = []
   try {
     written = skills.map(skill => deploySkill(skill, { claudeSkillsDir: targets.claudeSkillsDir, agySkillsDir: targets.agySkillsDir })).flat()
-  } catch {
-    rmSync(destination, { recursive: true, force: true })
-    return { ok: false, answer: 'Deploying the skills failed. The pack was not kept.' }
-  }
-  try {
     // How this arrived: an index means a checksum was verified against a
     // store's pin; 'starter' means the app shipped it. Absent = installed
     // straight from a folder the person picked — the badge says so.
     writeFileSync(join(destination, '.installed.json'), JSON.stringify({ written, installedAt: new Date().toISOString(), ...(via ? { via } : {}) }, null, 2), 'utf8')
   } catch {
-    // The record is a convenience; the install itself stands.
+    for (const path of planned) {
+      try { rmSync(path, { force: true }) } catch {}
+    }
+    for (const folder of claudePlanned.map(dirname)) {
+      try { if (readdirSync(folder).length === 0) rmdirSync(folder) } catch {}
+    }
+    rmSync(destination, { recursive: true, force: true })
+    return { ok: false, answer: 'Deploying or recording the skills failed. The partial install was rolled back.' }
   }
   return { ok: true, pack, folder: destination, prompts, themes, written }
 }

@@ -1,29 +1,47 @@
 ---
-id: audit-2026-10
-scope: last 60 days + linked older
-started: 2026-10-10
-status: dry-run | approved | applied
+id: audit-YYYY-MM
+scope: last 60 days + directly linked older evidence
+started: YYYY-MM-DD
+status: review-open
 ---
 
-# Monthly Audit 2026-10
+# Monthly interpretation review YYYY-MM
 
-## Scope
-- 2026-08-10 to 2026-10-10 + linked older memories
+OddBrain’s executable review lives at **Brain → Review** and writes an immutable generated run report under `06 Review/OddBrain Review/Runs/`. This note is only for optional owner commentary; it does not make a review run or apply changes.
 
-## Findings
-- Duplicates: ...
-- Superseded: ...
-- Stale summaries: ...
-- Weak support: ...
+## Scope chosen
 
-## Proposals (dry-run, nothing applied until approval)
-- [ ] correct [[claim-id]] - reason, source
-- [ ] supersede [[claim-id]] with newer
-- [ ] merge [[entity-a]] + [[entity-b]]
-- [ ] archive [[note-id]]
-- [ ] expire currentness [[claim-id]]
-- [ ] forget derived [[claim-id]]
-- [ ] delete source [[source-id]] (separate confirmation)
+- [ ] Last 60 days + directly linked older evidence (default)
+- [ ] Owner-selected broader range: ...
 
-## Approved
+Models and imported external responses may not broaden this scope.
+
+## Owner questions
+
 - ...
+
+## Conflicts and connections to inspect
+
+- ...
+
+## Keep-or-forget / cleanup candidates
+
+- ...
+
+Candidates are not archive or deletion decisions. Raw sources remain separate.
+
+## External AI handoff, if used
+
+- Provider label: ...
+- Exact outgoing packet SHA-256: ...
+- Page/time/source coverage: ...
+- Imported response status: unconfirmed
+
+The owner previews, copies/exports, opens the consumer AI, and presses Send. OddBrain does not automate the account or upload.
+
+## Owner decisions
+
+- Answered questions: ...
+- Confirmed corrections made separately in Memory inbox: ...
+- Archive actions confirmed separately: ...
+- Deletion actions confirmed after dependency preview: ...

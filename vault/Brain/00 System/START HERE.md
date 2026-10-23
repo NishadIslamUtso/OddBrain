@@ -21,6 +21,8 @@
 
 **Extension UX:** Capsule Hub style: capture as Capsule, library, drag-drop inject, version/branch, attachments. Quillbot style: inline suggestions in any text field, highlight for context.
 
+**Video boundary:** OddBrain may keep source-linked video/audio/frame/OCR evidence and plans, but Kdenlive alone owns timeline, preview, undo, project, render, and export state. Video-link and Creative Library downloads always need visible approval; see [[Privacy & Access]].
+
 **Key docs:** [[Priority & Retention]],  [[Memory Schema]], [[Privacy & Access]], [[Source Capture Map]], [[User Setup Defaults]], [[Model Registry]], [[Claude Feature Audit]]
 
 **One-line check:** Is app driver, vault organizer, extension collector+suggester, default check everything with blacklist, Capsule + inline suggestions, auto-capture via templates, asks only when uncertain, local by default? If yes, doing it right.

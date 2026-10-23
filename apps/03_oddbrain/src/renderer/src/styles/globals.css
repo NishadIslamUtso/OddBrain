@@ -176,3 +176,26 @@ body {
   background-color: rgba(224, 164, 74, 0.75);
   color: #141417;
 }
+
+/* Related settings stay together without adding another page or card layer. */
+.ob-settings-subsections { display: flex; flex-direction: column; gap: 2px; margin: 0 0 8px 30px; }
+.ob-settings-area-description { display: block; margin-top: 3px; font-size: 11px; line-height: 1.4; color: var(--color-muted); }
+.ob-settings-area > svg { flex-shrink: 0; margin-top: 2px; }
+.ob-settings-subsections button { padding: 5px 8px; text-align: left; }
+.ob-settings-subsections [aria-current="page"] { color: var(--color-ink); text-decoration: underline; text-underline-offset: 6px; }
+#ob-person-management:not([hidden]) { margin-block: 12px; padding-block: 12px; border-block: 1px solid var(--color-line); }
+
+/* Reading and review use the existing typography and separators, not another dashboard. */
+.ob-review-group, .ob-memory-timeline { margin-top: 24px; }
+.ob-review-group > h3, .ob-memory-timeline > h3 { font-size: 15px; font-weight: 600; }
+.ob-memory-batch-preview { border-top: 1px solid var(--color-line); padding: 16px 0; }
+.ob-memory-batch-preview article { margin: 16px 0; }
+.ob-memory-batch-preview p, .ob-memory-batch-preview blockquote { white-space: pre-wrap; overflow-wrap: anywhere; }
+.ob-memory-reading-search { display: block; margin: 20px 0 8px; max-width: 480px; }
+.ob-command-results .ob-recall-result small { white-space: normal; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; }
+.ob-extension-install h3 { font-size: 14px; font-weight: 600; }
+.ob-extension-install details { margin-top: 12px; }
+.ob-extension-steps { list-style: decimal; padding-left: 20px; font-size: 12.5px; line-height: 1.7; }
+.ob-extension-steps li { margin: 6px 0; }
+
+.ob-command-results > [aria-selected="true"] { background: var(--color-card); outline: 1px solid var(--color-line); outline-offset: -1px; }

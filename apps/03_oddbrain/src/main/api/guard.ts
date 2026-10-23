@@ -26,10 +26,20 @@ export const LOCAL_API_ROUTES = new Map<string, string[]>([
   ['/api/vault/capsules', ['GET']],
   // Content search — Cook This Prompt reads the vault through it.
   ['/api/vault/grep', ['GET']],
+  ['/api/vault/recall', ['GET']],
+  ['/api/vault/research', ['GET']],
   ['/api/vault/onui', ['GET']],
   ['/api/vault/links', ['GET']],
-  // The Vault screen's file list.
+  // Owner-opened interpretation review. Writes only scan, record an answer, or
+  // import a provider-labelled suggestion; archive/delete are not exposed here.
+  ['/api/vault/review-center', ['GET']],
+  ['/api/vault/review-packet', ['GET']],
+  ['/api/vault/review-scan', ['POST']],
+  ['/api/vault/review-action', ['POST']],
+  ['/api/vault/review-import', ['POST']],
+  // The Vault screen's file list, and one file's text for a preview.
   ['/api/vault/files', ['GET']],
+  ['/api/vault/file', ['GET']],
   ['/api/vault/status', ['GET']],
   ['/api/vault/today', ['GET']],
   ['/api/vault/blacklist', ['GET', 'POST']],
@@ -76,9 +86,29 @@ export function protectLocalApi(
   if (!LOCAL_API_ROUTES.get(pathname)?.includes(request.method || '')) {
     return deny(
       403,
-      'This local API operation is not enabled. No model downloads, deletes, shell or cloud actions are exposed.'
+      `This local API operation is not enabled (${request.method || 'GET'} ${pathname}). No model downloads, deletes, shell or cloud actions are exposed.`
     )
   }
+  // A browser-controlled Host name can resolve to 127.0.0.1 after a DNS
+  // rebinding. Same-origin comparison alone would then bless that hostile name
+  // and expose this unauthenticated local service. The authority itself must be
+  // a literal loopback name, except for an explicitly enabled Arena preview.
+  const host = header(request.headers.host).split(',')[0].trim()
+  const forwarded = process.env.ALLOW_PREVIEW_ORIGINS === '1'
+    ? header(request.headers['x-forwarded-host']).split(',')[0].trim()
+    : ''
+  const authority = forwarded || host
+  let authorityUrl: URL
+  try {
+    authorityUrl = new URL(`http://${authority}`)
+  } catch {
+    return deny(403, 'The local API requires a valid loopback Host header.')
+  }
+  const previewHost = process.env.ALLOW_PREVIEW_ORIGINS === '1' && authorityUrl.hostname.endsWith('.e2b.app')
+  if (!previewHost && !['127.0.0.1', 'localhost', '[::1]'].includes(authorityUrl.hostname)) {
+    return deny(403, 'The local API accepts only a literal loopback Host. DNS aliases are refused.')
+  }
+
   const originHeader = header(request.headers.origin)
   if (originHeader) {
     let origin: URL
@@ -93,11 +123,8 @@ export function protectLocalApi(
     // Strict same-origin by default. A forwarded/preview host is only trusted
     // when ALLOW_PREVIEW_ORIGINS=1 is set explicitly, for running the dev server
     // behind a tunnel or a hosted preview.
-    const host = header(request.headers['x-forwarded-host'] || request.headers.host)
-      .split(',')[0]
-      .trim()
-    const preview = process.env.ALLOW_PREVIEW_ORIGINS === '1' && origin.hostname.endsWith('.e2b.app')
-    if (!preview && origin.host !== host) {
+    const preview = previewHost && origin.hostname.endsWith('.e2b.app')
+    if (!preview && origin.host !== authority) {
       return deny(403, 'Cross-origin API requests are not authorized.')
     }
   }

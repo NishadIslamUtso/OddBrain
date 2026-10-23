@@ -1,60 +1,44 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { bridge } from '@/platform/bridge'
 import { normalizeProjects, type Project } from '@shared/lib/projects'
-
-/**
- * The projects, as one hook. Reads once, keeps the list in memory, writes
- * the whole list on every change — the file is small and the app is
- * single-user, so last-write-wins is the honest simplest truth.
- */
+/** Saved project edits are acknowledged before the UI treats them as durable. */
 export default function useProjects(active: boolean) {
-  const [projects, setProjects] = useState<Project[]>([])
-  const [loading, setLoading] = useState(active)
-
+  const [projects, setProjects] = useState<Project[]>([]), [loading, setLoading] = useState(active), [error, setError] = useState('')
+  const current = useRef(projects), ready = useRef(false), busy = useRef(false), generation = useRef(0)
+  const load = useCallback(async () => {
+    const own = ++generation.current
+    try {
+      const value = normalizeProjects(await bridge.projects.read())
+      if (own !== generation.current) return
+      current.current = value; ready.current = true; setProjects(value); setError('')
+    } catch (failure) { if (own === generation.current) { ready.current = false; setError((failure as Error).message || 'Projects could not be read. Originals are unchanged.') } }
+    finally { if (own === generation.current) setLoading(false) }
+  }, [])
   useEffect(() => {
     if (!active) return
-    let cancelled = false
-    bridge.projects
-      .read()
-      .then((list) => {
-        if (!cancelled) {
-          setProjects(normalizeProjects(list))
-          setLoading(false)
-        }
-      })
-      .catch(() => {
-        if (!cancelled) setLoading(false)
-      })
-    return () => {
-      cancelled = true
-    }
-  }, [active])
-
-  const persist = useCallback((next: Project[]): void => {
-    setProjects(next)
-    void bridge.projects.write(next)
-  }, [])
-
-  const create = useCallback(
-    (name: string): void => {
-      void bridge.projects.blank(name).then((project) => persist([...projects, project]))
-    },
-    [projects, persist],
-  )
-
-  const update = useCallback(
-    (id: string, patch: Partial<Omit<Project, 'id' | 'createdAt'>>): void => {
-      persist(projects.map((project) => (project.id === id ? { ...project, ...patch } : project)))
-    },
-    [projects, persist],
-  )
-
-  const remove = useCallback(
-    (id: string): void => {
-      persist(projects.filter((project) => project.id !== id))
-    },
-    [projects, persist],
-  )
-
-  return { projects, loading, create, update, remove }
+    void load(); const changed = () => { void load() }
+    window.addEventListener('app:projects-changed', changed)
+    return () => { generation.current++; window.removeEventListener('app:projects-changed', changed) }
+  }, [active, load])
+  const persist = async (next: Project[]): Promise<boolean> => {
+    if (!ready.current || busy.current) { setError('Wait for projects to finish loading or saving.'); return false }
+    busy.current = true
+    try {
+      const answer = await bridge.projects.write(next, current.current)
+      if (!answer.ok) throw Error('Projects were not saved. Originals are unchanged.')
+      current.current = answer.projects; setProjects(answer.projects); setError('')
+      window.dispatchEvent(new Event('app:projects-changed')); return true
+    } catch (failure) { setError((failure as Error).message); return false }
+    finally { busy.current = false }
+  }
+  const create = async (name: string) => {
+    try { const project = await bridge.projects.blank(name); return persist([...current.current, project]) }
+    catch (failure) { setError((failure as Error).message); return false }
+  }
+  const update = (id: string, patch: Partial<Omit<Project, 'id' | 'createdAt'>>) => persist(current.current.map(p => p.id === id ? { ...p, ...patch } : p))
+  /** Project removal is recoverable. Dependencies remain linked to this stable ID. */
+  const remove = (id: string) => persist(current.current.map(project => project.id === id ? { ...project, lifecycle: 'trash' as const, trash: { at: new Date().toISOString(), by: 'owner' as const, reason: 'Moved from Projects', previous: project.lifecycle === 'archived' ? 'archived' as const : 'active' as const } } : project))
+  const restore = (id: string) => persist(current.current.map(project => project.id === id && project.lifecycle === 'trash' ? { ...project, lifecycle: project.trash?.previous || 'active', trash: undefined } : project))
+  const visible = projects.filter(project => project.lifecycle !== 'trash')
+  return { projects: visible, allProjects: projects, loading, error, create, update, remove, restore, reload: load }
 }

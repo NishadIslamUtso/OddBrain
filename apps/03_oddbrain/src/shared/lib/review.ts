@@ -10,7 +10,7 @@
 
 /** The review order. The CLEAN contract makes "nothing wrong" sayable. */
 export const REVIEW_ORDER =
-  'Review the work from your last turn — report only, change nothing. Look for what is wrong, risky, unfinished, or claimed but not shown. ' +
+  'Review only the supplied completed request and reported result — report only, change nothing. Look for what is wrong, risky, unfinished, or claimed but not shown. ' +
   'Answer with REVIEW: followed by one short line per finding. If and only if nothing at all is wrong, answer exactly CLEAN.'
 
 export type ReviewVerdict =
@@ -30,11 +30,7 @@ export function parseVerdict(text: string): ReviewVerdict {
   if (at < 0) {
     return {
       kind: 'issues',
-      lines: [
-        trimmed.length > 400
-          ? `${trimmed.slice(0, 400)}…`
-          : trimmed || '(the review said nothing)',
-      ],
+      lines: [trimmed || '(the review said nothing)'],
     }
   }
   const block = trimmed.slice(at + 'REVIEW:'.length)
@@ -42,7 +38,6 @@ export function parseVerdict(text: string): ReviewVerdict {
     .split('\n')
     .map(line => line.replace(/^\s*(REVIEW:\s*)?[-*\d.)\s]*/i, '').trim())
     .filter(Boolean)
-    .slice(0, 10)
   if (!lines.length) {
     // "REVIEW:" with nothing after it is not a clean bill; it is a shrug.
     return { kind: 'issues', lines: ['(the review named no findings but did not say CLEAN)'] }

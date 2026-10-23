@@ -2,22 +2,22 @@
 #
 # Deliberately small, and every line here is a decision rather than a default:
 #
-# - The payload is `out/` and nothing else. `out/` is what electron-vite builds:
-#   the main process, the preload script and the renderer. `node_modules` is not
-#   shipped because nothing in the packaged app needs it — the dependencies that
-#   do (React, Tailwind) are compiled into `out/renderer` by Vite, and the main
-#   process uses only Node built-ins and Electron itself.
+# - The app payload is `out/` plus only production runtime dependencies. React
+#   is bundled into the renderer; document/media readers used by the main process
+#   remain runtime packages. Source maps and TypeScript sources are explicitly
+#   excluded from both the app and dependency payload.
 # - `asar` on, so the app's own files are not laid out loose in the install
 #   directory where a stray edit by hand would change behaviour silently.
 # - One target: NSIS. Per-user, not per-machine, so installing does not ask for
 #   administrator rights; and it lets the person choose the folder, because an app
 #   that writes notes into a vault is an app whose owner will have opinions about
 #   where it lives.
-# - No code-signing certificate is configured, and that is stated rather than
-#   left to be discovered: an unsigned installer makes Windows show the "unknown
-#   publisher" warning. Signing needs a certificate this project does not have.
+# - The protected release job supplies CSC_LINK and CSC_KEY_PASSWORD and blocks
+#   public/tagged output unless Authenticode verifies. Ordinary branch builds may
+#   remain unsigned test artifacts; they are never published as releases.
 appId: com.oddbrain.desktop
 productName: OddBrain
+copyright: Copyright © 2026 NishadIslamUtso
 
 directories:
   output: dist
@@ -36,11 +36,24 @@ directories:
 files:
   - out/**/*
   - package.json
+  - '!**/*.map'
+  - '!**/*.ts'
+  - '!**/*.tsx'
+  - '!**/test/**'
+  - '!**/tests/**'
+# Native bindings must remain real files for Windows to load. This is explicit
+# rather than relying on electron-builder's smart-unpack heuristic.
+asarUnpack:
+  - node_modules/**/*.node
 
 # The browser extension ships with the app: it lands in the install folder as
 # `resources/extension` so "Load unpacked" at chrome://extensions has a folder to
 # point at. It is not packed into the asar — Chrome needs real files on disk.
 extraResources:
+  - from: ../../THIRD_PARTY_NOTICES
+    to: THIRD_PARTY_NOTICES
+  - from: resources/oddbrain-preview.html
+    to: oddbrain-preview.html
   - from: ../../extension
     to: extension
     filter:
@@ -50,6 +63,7 @@ extraResources:
       - lib/**
       - popup/**
       - icons/**
+      - assets/**
   # The community store ships with the app too: a real folder index at
   # resources/store, so the Plugins pane offers packs that exist on the
   # person's disk from the first run — offline, no account, no network.
@@ -74,7 +88,8 @@ npmRebuild: false
 # build must not be sandboxed away from loopback.
 asar: true
 # Fuses are flipped on the packaged binary by @electron/fuses (scripts/apply-fuses.cjs):
-# no ELECTRON_RUN_AS_NODE, no NODE_OPTIONS, no --inspect in production.
+# no ELECTRON_RUN_AS_NODE, NODE_OPTIONS or --inspect in production; only app.asar
+# can load, with embedded ASAR integrity enabled on platforms that support it.
 afterPack: scripts/apply-fuses.cjs
 
 win:
@@ -85,9 +100,13 @@ win:
   # The .ico carries every size Windows asks for (16 → 256) instead of one big
   # PNG it has to scale, which is how a taskbar icon goes blurry.
   icon: resources/icon.ico
-  # A person running this on Windows will see "Windows protected your PC" until
-  # the project has a signing certificate. There is no certificate, so nothing
-  # here pretends otherwise — the README says what to expect.
+  # electron-builder signs whenever the protected job supplies CSC_LINK and
+  # CSC_KEY_PASSWORD. The release job separately refuses an absent/invalid
+  # Authenticode signature before uploading anything publicly.
+  signAndEditExecutable: true
+  signtoolOptions:
+    signingHashAlgorithms:
+      - sha256
 
 nsis:
   installerIcon: resources/icon.ico

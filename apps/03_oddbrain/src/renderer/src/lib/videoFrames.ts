@@ -1,44 +1,32 @@
-/**
- * Video, as the engine can read it: evenly spaced still frames.
- *
- * No engine takes a video file on its wire; every engine reads pictures.
- * So a clip is decoded by the window's own player onto a canvas and sent as
- * its story in stills. The seek points are pure (`framePoints` in shared
- * media) and tested; this piece is the browser work around them.
- */
 import { framePoints } from '../../../shared/lib/media'
-
-export async function extractFrames(file: File, count = 4): Promise<File[]> {
-  const url = URL.createObjectURL(file)
+/** Browser-preview fallback. Still frames only; no claim to have heard audio. */
+export async function extractFrames(file: File, count = 3): Promise<File[]> {
+  // Object URLs let the browser decoder read on demand; do not turn this
+  // preview fallback into another arbitrary whole-file ingestion ceiling.
+  const url = URL.createObjectURL(file), video = document.createElement('video')
+  const wait = (event: 'loadedmetadata' | 'seeked', begin: () => void): Promise<void> => new Promise((resolve, reject) => {
+    const clean = (): void => { clearTimeout(timer); video.removeEventListener(event, done); video.removeEventListener('error', fail) }
+    const done = (): void => { clean(); resolve() }
+    const fail = (): void => { clean(); reject(Error(`${file.name}: decoding failed; the format may be unsupported, encrypted or corrupt.`)) }
+    const timer = setTimeout(() => { clean(); reject(Error(`${file.name}: video ${event === 'seeked' ? 'seek' : 'decode'} timed out.`)) }, 10_000)
+    video.addEventListener(event, done, { once: true }); video.addEventListener('error', fail, { once: true }); begin()
+  })
   try {
-    const video = document.createElement('video')
-    video.muted = true
-    video.src = url
-    await new Promise<void>((resolve, reject) => {
-      video.onloadedmetadata = () => resolve()
-      video.onerror = () => reject(new Error(`${file.name}: this window could not open the video.`))
-    })
-    const points = framePoints(video.duration, count)
-    if (!points.length) throw new Error(`${file.name}: the video has no readable length.`)
-    const canvas = document.createElement('canvas')
-    canvas.width = video.videoWidth || 640
-    canvas.height = video.videoHeight || 360
-    const pen = canvas.getContext('2d')
+    video.muted = true; video.preload = 'metadata'
+    await wait('loadedmetadata', () => { video.src = url })
+    if (!Number.isFinite(video.duration) || video.duration <= 0 || video.videoWidth * video.videoHeight > 40_000_000) throw Error(`${file.name}: invalid length or video larger than 40 megapixels.`)
+    const points = framePoints(video.duration, Math.max(1, Math.min(3, count)))
+    const ratio = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight))
+    const canvas = document.createElement('canvas'); canvas.width = Math.max(1, Math.round(video.videoWidth * ratio)); canvas.height = Math.max(1, Math.round(video.videoHeight * ratio))
+    const pen = canvas.getContext('2d'); if (!pen) throw Error('Canvas video decoding is unavailable.')
     const shots: File[] = []
-    for (let index = 0; index < points.length; index += 1) {
-      await new Promise<void>((resolve) => {
-        video.onseeked = () => resolve()
-        video.currentTime = points[index]
-      })
-      pen?.drawImage(video, 0, 0, canvas.width, canvas.height)
-      const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, 'image/png'))
-      if (blob) {
-        shots.push(new File([blob], `${file.name.replace(/\.[^.]+$/, '')}-frame-${index + 1}.png`, { type: 'image/png' }))
-      }
+    for (let index = 0; index < points.length; index++) {
+      await wait('seeked', () => { video.currentTime = points[index] })
+      pen.drawImage(video, 0, 0, canvas.width, canvas.height)
+      const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', .85))
+      if (!blob || blob.size > 2 * 1024 * 1024) throw Error('A video frame could not be encoded within the image limit.')
+      shots.push(new File([blob], `${file.name}-at-${points[index].toFixed(1)}s.jpg`, { type: 'image/jpeg' }))
     }
-    if (!shots.length) throw new Error(`${file.name}: no frame could be read from it.`)
     return shots
-  } finally {
-    URL.revokeObjectURL(url)
-  }
+  } finally { video.pause(); video.removeAttribute('src'); video.load(); URL.revokeObjectURL(url) }
 }

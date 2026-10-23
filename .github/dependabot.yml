@@ -1,0 +1,24 @@
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /apps/03_oddbrain
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:00"
+      timezone: Asia/Dhaka
+    open-pull-requests-limit: 5
+    versioning-strategy: increase
+    groups:
+      production-runtime:
+        dependency-type: production
+      development-toolchain:
+        dependency-type: development
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "04:30"
+      timezone: Asia/Dhaka
+    open-pull-requests-limit: 3

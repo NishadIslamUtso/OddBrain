@@ -14,6 +14,8 @@
 import { CLOUD_PROVIDERS } from './providers'
 
 export type Permissions = {
+  /** App-owned OS commands, each requiring an explicit one-use review. Off by default. */
+  manualCommands: boolean
   /** The model on this machine may answer questions. */
   local: boolean
   /** The browser extension may post captures to this app's extension port. */
@@ -29,6 +31,7 @@ export type Permissions = {
 }
 
 export const DEFAULT_PERMISSIONS: Permissions = {
+  manualCommands: false,
   local: true,
   browserCapture: true,
   keepConversations: true,
@@ -50,6 +53,7 @@ export function normalizePermissions(value: unknown): Permissions {
   const flag = (key: keyof Permissions): boolean =>
     typeof raw[key] === 'boolean' ? (raw[key] as boolean) : (DEFAULT_PERMISSIONS[key] as boolean)
   return {
+    manualCommands: raw.manualCommands === true,
     local: flag('local'),
     browserCapture: flag('browserCapture'),
     keepConversations: flag('keepConversations'),
@@ -66,4 +70,28 @@ export function cloudEnabled(permissions: Permissions, id: string, hasKey: boole
 }
 
 /** The permission names that exist, for a test or a sentence to count. */
-export const PERMISSION_NAMES = ['local', 'browserCapture', 'keepConversations'] as const
+export const PERMISSION_NAMES = ['local', 'browserCapture', 'keepConversations', 'manualCommands'] as const
+
+/** UI intent, not a replacement for other windows' newer access choices. */
+export function permissionChanges(before: Permissions, after: Permissions): Partial<Permissions> {
+  const patch: Partial<Permissions> = {}
+  for (const key of PERMISSION_NAMES) if (before[key] !== after[key]) patch[key] = after[key]
+  const cloud = Object.fromEntries(Object.entries(after.cloud).filter(([id, allowed]) => before.cloud[id] !== allowed))
+  if (Object.keys(cloud).length) patch.cloud = cloud
+  return patch
+}
+/** Merge only explicit, well-typed flags. Missing flags never re-enable access. */
+export function applyPermissionPatch(current: Permissions, patch: unknown): Permissions {
+  if (!patch || typeof patch !== 'object' || Array.isArray(patch)) throw Error('Invalid access change. Nothing was changed.')
+  const value = patch as Record<string, unknown>, next = { ...current, cloud: { ...current.cloud } }
+  for (const [key, allowed] of Object.entries(value)) {
+    if (key === 'cloud') {
+      if (!allowed || typeof allowed !== 'object' || Array.isArray(allowed)) throw Error('Invalid provider access change.')
+      for (const [id, flag] of Object.entries(allowed)) { if (!PROVIDER_IDS.includes(id) || typeof flag !== 'boolean') throw Error('Unknown or invalid provider access change.'); next.cloud[id] = flag }
+    } else {
+      if (!(PERMISSION_NAMES as readonly string[]).includes(key) || typeof allowed !== 'boolean') throw Error('Unknown or invalid access change.')
+      next[key as typeof PERMISSION_NAMES[number]] = allowed
+    }
+  }
+  return next
+}

@@ -6,6 +6,8 @@ export type ArtifactOptions = {
   messageId?: string
   chatId?: string
   title?: string
+  /** Stable origin time for transcript recovery; defaults to now for live replies. */
+  createdAt?: string
   includePartial?: boolean
 }
 
@@ -28,7 +30,7 @@ const FENCE = /```(html|svg)\s*\r?\n([\s\S]*?)(?:```|$)/gi
  */
 export function artifactsIn(
   content: string,
-  { requested, messageId, chatId, title, includePartial = false }: ArtifactOptions = {}
+  { requested, messageId, chatId, title, createdAt = new Date().toISOString(), includePartial = false }: ArtifactOptions = {}
 ): Artifact[] {
   if (!requested || typeof content !== 'string') return []
   const artifacts: Artifact[] = []
@@ -43,8 +45,8 @@ export function artifactsIn(
     artifacts.push({
       id: `${messageId}-artifact-${artifacts.length}`, chatId, messageId, type,
       title: htmlTitle || String(title || '').slice(0, 60) || (type === 'html' ? 'HTML Application' : 'SVG Image'),
-      createdAt: new Date().toISOString(), partial: !closed,
-      versions: closed ? [{ content: source, savedAt: new Date().toISOString() }] : [{ content: source, savedAt: new Date().toISOString(), draft: true }],
+      createdAt, partial: !closed,
+      versions: closed ? [{ content: source, savedAt: createdAt }] : [{ content: source, savedAt: createdAt, draft: true }],
     })
   }
   // A model that answers with a document and no fence still produced an artifact.
@@ -57,8 +59,8 @@ export function artifactsIn(
       artifacts.push({
         id: `${messageId}-artifact-0`, chatId, messageId, type: 'html',
         title: htmlTitle || String(title || '').slice(0, 60) || 'HTML Application',
-        createdAt: new Date().toISOString(), partial: unfinished,
-        versions: [{ content: trimmed, savedAt: new Date().toISOString(), ...(unfinished ? { draft: true } : {}) }],
+        createdAt, partial: unfinished,
+        versions: [{ content: trimmed, savedAt: createdAt, ...(unfinished ? { draft: true } : {}) }],
       })
     }
   }
@@ -275,8 +277,9 @@ export function previewScript(channel: string): string {
     if (!element) return;
     event.preventDefault(); event.stopPropagation();
     var box = element.getBoundingClientRect();
+    if (element.outerHTML.length > 4000) { post({ type: 'ai-assistant-artifact-error', message: 'That element exceeds 4,000 characters. Choose a smaller element; nothing was shortened.' }); return; }
     post({
-      type: 'oddbrain-pick', path: pathOf(element), outerHTML: element.outerHTML.slice(0, 4000),
+      type: 'oddbrain-pick', path: pathOf(element), outerHTML: element.outerHTML,
       width: Math.round(box.width), height: Math.round(box.height), picked: label(element),
     });
   }, true);
@@ -378,16 +381,13 @@ export function parseElementPick(payload: any, channel: string): ElementPick | n
   if (!payload || payload.channel !== channel || payload.type !== 'oddbrain-pick') return null
   if (!Array.isArray(payload.path) || payload.path.length > 40) return null
   if (payload.path.some((index: number) => !Number.isInteger(index) || index < 0 || index > 5000)) return null
-  if (typeof payload.outerHTML !== 'string') return null
+  if (typeof payload.outerHTML !== 'string' || payload.outerHTML.length > 4000) return null
+  const picked = { tag: String(payload.picked?.tag || ''), id: String(payload.picked?.id || ''), classes: String(payload.picked?.classes || ''), text: String(payload.picked?.text || '') }
+  if (picked.tag.length > 40 || picked.id.length > 60 || picked.classes.length > 80 || picked.text.length > 120) return null
   return {
-    path: payload.path, outerHTML: payload.outerHTML.slice(0, 4000),
+    path: payload.path, outerHTML: payload.outerHTML,
     width: Number(payload.width) || 0, height: Number(payload.height) || 0,
-    picked: {
-      tag: String(payload.picked?.tag || '').slice(0, 40),
-      id: String(payload.picked?.id || '').slice(0, 60),
-      classes: String(payload.picked?.classes || '').slice(0, 80),
-      text: String(payload.picked?.text || '').slice(0, 120),
-    },
+    picked,
   }
 }
 
@@ -403,6 +403,8 @@ export function rewritePrompt({
   source: string
   type?: ArtifactType
 }): string {
+  if (comment.trim().length > 500) throw new Error('The element instruction exceeds 500 characters. Nothing was shortened or sent.')
+  if (pick.outerHTML.length > 4000) throw new Error('The selected element exceeds 4,000 characters. Nothing was shortened or sent; choose a smaller element.')
   const lines = [
     'You are editing exactly one element of an existing single-file document.',
     'Return ONLY the replacement element: the same tag, the opening tag through its closing tag.',
@@ -410,8 +412,8 @@ export function rewritePrompt({
     `The element is at ${describePath(pick.path)} in the document body.`,
   ]
   if (pick.picked.text) lines.push(`Its visible text starts: ${JSON.stringify(pick.picked.text)}`)
-  lines.push(`The person's instruction about this element: ${comment.trim().slice(0, 500)}`)
-  lines.push('', 'Current element:', pick.outerHTML.slice(0, 3000))
+  lines.push(`The person's instruction about this element: ${comment.trim()}`)
+  lines.push('', 'Current element:', pick.outerHTML)
   // Enough surrounding document for context, without shipping a 200 KB file to a 4k context.
   const budget = 3500
   if (source.length <= budget) lines.push('', `The rest of the ${type === 'svg' ? 'SVG' : 'document'} for context:`, source)

@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Brain, Trash2 } from 'lucide-react'
+import { ArchiveRestore, Brain, Trash2 } from 'lucide-react'
 import { buildMemoryOrder } from '@shared/lib/memory'
-import { clearMemoryNotice, loadMemory, removeMemory, runMemoryPass, useMemory } from '@/state/memory'
+import { chooseMemoryFolder, clearMemoryNotice, loadMemory, removeMemory, restoreMemory, runMemoryPass, useMemory } from '@/state/memory'
 
 /**
  * The Memory pane: what the engine has remembered, in his vault, every line
  * visible. Run a pass on press; the writes ride the permission cards. A
- * memory file can be deleted whole — the lines are markdown in his vault,
- * editable anywhere he edits notes.
+ * memory file can be moved whole to recoverable Trash — the lines are
+ * markdown in his vault, editable anywhere he edits notes.
  */
 export default function MemorySection() {
   const memory = useMemory()
@@ -26,13 +26,13 @@ export default function MemorySection() {
         </h2>
         <p className="mt-1 text-[12.5px] leading-relaxed text-muted">
           What the engine remembers between sessions, kept as plain markdown at{' '}
-          <code className="text-ink">{memory.folder ? memory.folder.split(/[\\/]/).slice(-3).join('/') : '06 Review/Memory'}</code> — inside the
-          engine's own working folder (your vault, unless you pointed its workspace elsewhere). A pass asks the
+          <code className="text-ink">{memory.folder || '06 Review/Memory'}</code> — at the location shown above. By default it follows the working folder; an explicit folder can be selected independently. A pass asks the
           engine to note decisions, preferences, facts and open work — and its writes ride the same permission cards as every edit: you see the
-          diff before it lands. Everything here is yours to read, edit, or delete.
+          diff before it lands. Everything here is yours to read, edit, move to recoverable Trash, or restore.
         </p>
       </header>
 
+      <div className="ob-form-line" style={{ marginTop: 14 }}><button type="button" className="ob-small-button" onClick={() => void chooseMemoryFolder()}>Change memory folder</button><button type="button" className="ob-small-button" onClick={() => void chooseMemoryFolder(true)}>Use working-folder default</button><button type="button" className="ob-text-button" onClick={() => window.dispatchEvent(new Event('app:show-journal'))}>View in turn journal</button></div><p className="ob-control-scope">Choosing a different folder changes where new memory is read/written. Existing notes are not moved or overwritten.</p>
       {memory.status ? (
         <p role="status" className="mt-3 rounded-lg border border-line bg-bg px-3 py-2 text-[12px] text-ink">
           {memory.status}
@@ -45,7 +45,7 @@ export default function MemorySection() {
         <p className="text-[12px] font-medium text-ink">Run a pass now</p>
         <p className="mt-1 text-[11.5px] leading-relaxed text-muted">It sends this work order, as a normal turn in the chat:</p>
         <pre className="mt-1.5 max-h-[120px] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-line bg-bg p-2.5 text-[11.5px] leading-relaxed text-muted">
-          {buildMemoryOrder()}
+          {buildMemoryOrder(memory.folder)}
         </pre>
         <button
           type="button"
@@ -78,7 +78,7 @@ export default function MemorySection() {
                     onClick={() => { setConfirming(''); void removeMemory(file.path) }}
                     className="rounded-lg border border-warn px-2 py-1 text-[11px] text-warn hover:bg-warn/10"
                   >
-                    Really remove
+                    Move to Trash
                   </button>
                   <button type="button" onClick={() => setConfirming('')} className="text-[11px] text-muted hover:text-ink">Keep it</button>
                 </div>
@@ -86,7 +86,7 @@ export default function MemorySection() {
                 <button
                   type="button"
                   onClick={() => setConfirming(file.path)}
-                  aria-label={`Remove ${file.name}`}
+                  aria-label={`Move ${file.name} to Trash`}
                   className="shrink-0 rounded-lg border border-line p-1.5 text-muted hover:text-warn"
                 >
                   <Trash2 size={12} aria-hidden />
@@ -102,9 +102,31 @@ export default function MemorySection() {
         ) : null}
       </ul>
 
+      {memory.trash.length ? (
+        <section className="mt-5" aria-labelledby="memory-trash-heading">
+          <h3 id="memory-trash-heading" className="text-[12px] font-semibold text-ink">Recoverable Trash</h3>
+          <p className="mt-1 text-[11.5px] text-muted">These notes are outside active engine memory. OddBrain never permanently deletes them.</p>
+          <ul className="mt-2 space-y-2">
+            {memory.trash.map(file => (
+              <li key={file.id} className="flex items-start justify-between gap-3 rounded-xl border border-line bg-card px-3 py-2.5">
+                <div className="min-w-0">
+                  <p className="truncate text-[12.5px] font-medium text-ink">{file.name}</p>
+                  <p className="mt-0.5 text-[11px] text-muted">Moved {file.trashedAt.slice(0, 16).replace('T', ' ')}</p>
+                  <pre className="mt-1 max-h-[90px] overflow-y-auto whitespace-pre-wrap break-words text-[11px] leading-relaxed text-muted">{file.content}</pre>
+                  {file.clipped ? <p className="mt-1 text-[11px] text-warn">Preview only; the retained file contains more.</p> : null}
+                </div>
+                <button type="button" onClick={() => void restoreMemory(file.id)} className="ob-small-button shrink-0" aria-label={`Restore ${file.name}`}>
+                  <ArchiveRestore size={12} aria-hidden /> Restore
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
       <p className="mt-4 text-[11.5px] leading-relaxed text-muted">
-        The lines are markdown in your vault: edit them in any notes app, and the engine appends under dated headings without ever rewriting what
-        is already there.
+        The active lines are markdown in your vault: edit them in any notes app, and the engine appends under dated headings without ever rewriting what
+        is already there. Trashed notes remain recoverable in a private subfolder until you restore them.
       </p>
     </div>
   )
