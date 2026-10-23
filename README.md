@@ -23,12 +23,12 @@ $z=(Get-ChildItem "$env:USERPROFILE\Downloads" -Filter "Memory_OB-addon-*.zip" |
 It imports your Goose history into `Documents\OddBrain\Memory_OB` **first**
 (history must go in before install switches Goose's stock memory off), then
 installs. The `ALLOW` in the line is your approval — the exact change is
-printed before anything is written. Restart Goose afterwards. To open your
-screens (Projects, Vault, Review), run:
+printed before anything is written. Restart Goose afterwards.
 
-```powershell
-node "$env:USERPROFILE\Memory_OB-addon\brain-window.mjs" --brain "$env:USERPROFILE\Documents\OddBrain\Memory_OB"
-```
+**Your screens live inside Goose itself** — after the restart, Memory_OB
+appears in Goose's Apps sidebar (next to the Clock app) with Projects, Vault
+and Review, always showing live memory state. The full window version is
+still there when you want it: `Documents\OddBrain\Memory_OB\Open Screens.cmd`.
 
 **Every future module ships the same way** — this is the pattern:
 

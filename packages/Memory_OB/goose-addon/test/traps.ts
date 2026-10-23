@@ -352,6 +352,24 @@ const run = async (): Promise<void> => {
     check('trap18: a quotation that is not an exact message is refused', bogus.isError === true && /not an exact message/.test(bogus.text), bogus.text)
     mcp.close()
   }
+
+  {
+    // The Memory_OB screens as a Goose App: a view-only ui:// resource the
+    // Goose desktop lists in its Apps sidebar and renders inside the app.
+    const mcp = new Mcp()
+    const init = await mcp.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'traps-app', version: '1' } })
+    check('trap19: the app screens resource capability is declared', init.result?.capabilities?.resources !== undefined, JSON.stringify(init.result?.capabilities ?? {}))
+    const listed = await mcp.request('resources/list', {})
+    const resources = listed.result?.resources ?? []
+    check('trap19: Memory_OB offers its screens as a Goose app resource', resources.length === 1 && resources[0].uri === 'ui://apps/memory-ob' && resources[0].mimeType === 'text/html;profile=mcp-app', JSON.stringify(resources))
+    const read = await mcp.request('resources/read', { uri: 'ui://apps/memory-ob' })
+    const html = String(read.result?.contents?.[0]?.text ?? '')
+    check('trap19: the app html carries GooseApp metadata for the sidebar', /"@type":\s*"GooseApp"/.test(html) && /"name":\s*"Memory_OB"/.test(html), html.slice(0, 300))
+    check('trap19: the screens show Projects, Vault, and Review', /Projects/.test(html) && /Vault/.test(html) && /Review/.test(html), html.slice(0, 300))
+    check('trap19: the app is view-only and points approvals to the chat cards', /read-only/i.test(html) && /confirmation card/i.test(html), html.slice(0, 600))
+    check('trap19: an unknown app resource is refused', Boolean((await mcp.request('resources/read', { uri: 'ui://apps/evil' })).error), 'missing refusal')
+    mcp.close()
+  }
 }
 
 run().then(() => {
