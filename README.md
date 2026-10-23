@@ -17,19 +17,26 @@ https://raw.githubusercontent.com/NishadIslamUtso/OddBrain/arena/81a07155-oddbra
 **2 — Open PowerShell and paste this one line:**
 
 ```powershell
-$z=(Get-ChildItem "$env:USERPROFILE\Downloads" -Filter "Memory_OB-addon-*.zip" | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName; Expand-Archive $z $env:USERPROFILE -Force; Set-Location "$env:USERPROFILE\Memory_OB-addon"; $cfg="$env:APPDATA\Block\goose\config\config.yaml"; if(!(Test-Path $cfg)){$cfg="$env:APPDATA\Block\goose\config.yaml"}; if(!(Test-Path $cfg)){$cfg="$env:USERPROFILE\.config\goose\config.yaml"}; $brain="$env:USERPROFILE\Documents\OddBrain"; node import-goose-history.mjs --brain $brain --apply --yes; "ALLOW" | node install.mjs --goose-config $cfg --brain $brain
+$z=(Get-ChildItem "$env:USERPROFILE\Downloads" -Filter "Memory_OB-addon-*.zip" | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName; Expand-Archive $z $env:USERPROFILE -Force; Set-Location "$env:USERPROFILE\Memory_OB-addon"; $cfg="$env:APPDATA\Block\goose\config\config.yaml"; if(!(Test-Path $cfg)){$cfg="$env:APPDATA\Block\goose\config.yaml"}; if(!(Test-Path $cfg)){$cfg="$env:USERPROFILE\.config\goose\config.yaml"}; $brain="$env:USERPROFILE\Documents\OddBrain\Memory_OB"; node import-goose-history.mjs --brain $brain --apply --yes; "ALLOW" | node install.mjs --goose-config $cfg --brain $brain
 ```
 
-It imports your Goose history into `Documents\OddBrain` **first** (history must
-go in before install switches Goose's stock memory off), then installs. The
-`ALLOW` in the line is your approval — the exact change is printed before
-anything is written. Restart Goose afterwards.
+It imports your Goose history into `Documents\OddBrain\Memory_OB` **first**
+(history must go in before install switches Goose's stock memory off), then
+installs. The `ALLOW` in the line is your approval — the exact change is
+printed before anything is written. Restart Goose afterwards. To open your
+screens (Projects, Vault, Review), run:
+
+```powershell
+node "$env:USERPROFILE\Memory_OB-addon\brain-window.mjs" --brain "$env:USERPROFILE\Documents\OddBrain\Memory_OB"
+```
 
 **Every future module ships the same way** — this is the pattern:
 
 1. A ready-to-run package on GitHub: `release/<module>-<version>.zip`.
 2. One download link + one PowerShell line in that module's README section —
    history/import steps always come before anything that changes a tool.
+3. Each module's data lives in its own folder under `Documents\OddBrain\<Module>`
+   — never mixed with the owner's other files.
 
 ## In this repo
 
