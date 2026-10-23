@@ -186,11 +186,12 @@ export function importGooseHistory(options: GooseImportOptions): GooseImportRepo
   const chatStore = createChatStore(join(brainRoot, 'chats'))
   const snapshot = chatStore.read()
   const existing = new Map(snapshot.chats.map(chat => [chat.id, chat]))
-  const upserts: Record<string, Chat> = {}
+  // write() takes upserts as an ARRAY of chats (normalizeChats enforces it).
+  const upserts: Chat[] = []
   for (const chat of chats) {
     const previous = existing.get(chat.id)
     if (previous && previous.messages.length === chat.messages.length) { report.written.skipped.push(chat.id); continue }
-    upserts[chat.id] = chat
+    upserts.push(chat)
     report.written.chats += 1
     report.written.messages += chat.messages.length
   }
@@ -204,7 +205,7 @@ export function importGooseHistory(options: GooseImportOptions): GooseImportRepo
     after = chatStore.migrate({ chats: initial, currentChat: initial[0]?.id ?? '', rawChats: JSON.stringify(initial), rawCurrentChat: JSON.stringify(initial[0]?.id ?? '') }).snapshot
   } else {
     const order = [...snapshot.chats.map(chat => chat.id), ...chats.map(chat => chat.id).filter(id => !existing.has(id))]
-    if (Object.keys(upserts).length) after = chatStore.write({ order, upserts, currentChat: snapshot.currentChat, expectedRevision: snapshot.revision })
+    if (upserts.length) after = chatStore.write({ order, upserts, currentChat: snapshot.currentChat, expectedRevision: snapshot.revision })
   }
   createMemoryObStore(join(brainRoot, 'store')).syncChats(after.chats, after.revision)
   report.ok = true

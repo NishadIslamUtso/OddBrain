@@ -81,6 +81,22 @@ echo "$OUT" | grep -q "skipped (already imported): 4" && pass "import: re-run sk
 # ---- 5) memory copies never overwrite ----
 [ "$(ls "$MEMCOPY" | wc -l)" -eq 2 ] && pass "import: memory copy area holds one copy per category" || fail "import: duplicate memory copies"
 
+# ---- 6) a brand-new Goose session merges into the already-initialized store ----
+node - "$GOOS/sessions/sessions.db" "$WORKDIR" <<'EOF'
+const { DatabaseSync } = require('node:sqlite')
+const db = new DatabaseSync(process.argv[2])
+db.prepare('INSERT INTO sessions (id,name,description,working_dir,created_at,updated_at) VALUES (?,?,?,?,?,?)')
+  .run('sess-2', 'later', 'later session', process.argv[3], 1777000100000, 1777000100000)
+db.prepare('INSERT INTO messages (message_id,session_id,role,content_json,created_timestamp) VALUES (?,?,?,?,?)')
+  .run('m1', 'sess-2', 'user', JSON.stringify([{ type: 'text', text: 'the drop is scheduled at dawn' }]), 1777000100000)
+db.close()
+EOF
+[ $? -eq 0 ] || fail "fixture: second session added"
+OUT=$(node "$CLI" --brain "$BRAIN" --goose-data "$GOOS" --goose-config "$GOOS" --core "$CORE" --apply --yes 2>&1)
+echo "$OUT" | grep -q "chats written or updated: 1" && pass "import: a new session merges into the live store" || fail "import: merge write: $OUT"
+grep -q "the drop is scheduled at dawn" "$BRAIN"/chats/items/*.json && pass "import: merged session content preserved" || fail "import: merged content missing"
+[ "$(ls "$BRAIN/chats/items" | wc -l)" -eq 5 ] && pass "import: merged store holds 5 chats" || fail "import: merge count $(ls "$BRAIN/chats/items" | wc -l)"
+
 echo "---"
 echo "passed: $PASSED  failed: $FAILED"
 [ "$FAILED" -eq 0 ]

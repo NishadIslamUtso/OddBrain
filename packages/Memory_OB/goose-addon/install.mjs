@@ -144,6 +144,7 @@ const blockFor = () => [
   '      - memory_ob_search',
   '      - memory_ob_project',
   '      - memory_ob_evidence',
+  '      - memory_ob_propose',
   '',
 ].join('\n')
 
@@ -229,8 +230,8 @@ function patchConfig(before) {
 
 const { after, notes } = patchConfig(before)
 
-// Sanity: the result must contain exactly our four tools and the memory switch.
-for (const needle of ['memory_ob_status', 'memory_ob_search', 'memory_ob_project', 'memory_ob_evidence']) {
+// Sanity: the result must contain exactly our five tools and the memory switch.
+for (const needle of ['memory_ob_status', 'memory_ob_search', 'memory_ob_project', 'memory_ob_evidence', 'memory_ob_propose']) {
   if (!after.includes(`- ${needle}`)) fail('Patch safety check failed: the prepared config is missing tool entries. Nothing was changed.')
 }
 if (after.replace(blockFor(), '').includes('memory_ob:\n    type: stdio\n    name: memory_ob') && before.includes('memory_ob:')) {
