@@ -43,6 +43,14 @@ const writeObject = (identity: string, row: Record<string, unknown>): void => {
 }
 writeObject(`project:${projectId}`, { id: `project:${projectId}`, kind: 'project', lifecycle: 'active', authority: 'raw', source: { domain: 'generated', externalId: projectId, locator: 'projects.json' }, neverSend: false, sensitivity: 'ordinary' })
 writeObject('project:proj-other', { id: 'project:proj-other', kind: 'project', lifecycle: 'active', authority: 'raw', source: { domain: 'generated', externalId: 'proj-other', locator: 'projects.json' }, neverSend: false, sensitivity: 'ordinary' })
+writeObject('interpretation:hidden-1', {
+  id: 'interpretation:hidden-1', kind: 'interpretation', title: 'Hidden title SECRET-TITLE',
+  authority: 'pending', lifecycle: 'active', neverSend: true, sensitivity: 'ordinary',
+  text: 'HIDDEN-NEVER-SEND-SECRET content', projectIds: [projectId],
+  source: { domain: 'brain-memory', externalId: 'hidden-1' },
+  relationshipIds: [], attachmentIds: [], summary: {}, useCount: 0,
+  createdAt: '2026-10-22T03:00:00.000Z', updatedAt: '2026-10-22T03:00:00.000Z', revision: 1, contentHash: sha('hidden-1'),
+})
 
 const m1 = { id: 'm1', role: 'user', content: 'When is the Lantern launch?', at: '2026-10-22T01:00:00.000Z' }
 const m3 = { id: 'm3', role: 'user', content: 'purplemonkey\u200Bdishwasher notes', at: '2026-10-22T01:02:00.000Z' }
@@ -364,10 +372,15 @@ const run = async (): Promise<void> => {
     check('trap19: Memory_OB offers its screens as a Goose app resource', resources.length === 1 && resources[0].uri === 'ui://apps/memory-ob/main' && resources[0].mimeType === 'text/html;profile=mcp-app', JSON.stringify(resources))
     const shown = await mcp.request('tools/call', { name: 'memory_ob_screens', arguments: {} })
     check('trap19: the screens tool tells the host to render the app', shown.result?._meta?.ui?.resourceUri === 'ui://apps/memory-ob/main', JSON.stringify(shown.result?._meta ?? {}))
+    const toolsList = await mcp.request('tools/list', {})
+    const screensTool = (toolsList.result?.tools ?? []).find((tool: any) => tool.name === 'memory_ob_screens')
+    check('trap19: the tool definition links the app screen too', screensTool?._meta?.ui?.resourceUri === 'ui://apps/memory-ob/main', JSON.stringify(screensTool?._meta ?? {}))
     const read = await mcp.request('resources/read', { uri: 'ui://apps/memory-ob/main' })
     const html = String(read.result?.contents?.[0]?.text ?? '')
     check('trap19: the app html carries GooseApp metadata for the sidebar', /"@type":\s*"GooseApp"/.test(html) && /"name":\s*"Memory_OB"/.test(html), html.slice(0, 300))
     check('trap19: the screens show Projects, Vault, and Review', /Projects/.test(html) && /Vault/.test(html) && /Review/.test(html), html.slice(0, 300))
+    check('trap19: the screens are navigable tabs with a refresh path', /id="tab-projects"/.test(html) && /id="tab-vault"/.test(html) && /id="tab-review"/.test(html) && /ui\/message/.test(html), html.slice(0, 400))
+    check('trap19: never-send records never reach the screens html', !/HIDDEN-NEVER-SEND-SECRET/.test(html) && !/SECRET-TITLE/.test(html) && !/interpretation:hidden-1/.test(html) && /Never Send/.test(html), html.slice(0, 600))
     check('trap19: the app is view-only and points approvals to the chat cards', /read-only/i.test(html) && /confirmation card/i.test(html), html.slice(0, 600))
     check('trap19: the app carries the sandbox bridge contract', /ui\/initialize/.test(html) && /ui\/notifications\/size-changed/.test(html), html.slice(0, 200))
     check('trap19: the resource read declares csp and border metadata', Boolean(read.result?.contents?.[0]?._meta?.ui?.csp) && read.result?.contents?.[0]?._meta?.ui?.prefersBorder === true, JSON.stringify(read.result?.contents?.[0]?._meta ?? {}))

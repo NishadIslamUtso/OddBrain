@@ -12,7 +12,7 @@ There is no OddBrain app. Goose is the platform; features arrive as modules.
 
 **1 — Download the package** (it saves to your Downloads folder):
 
-https://raw.githubusercontent.com/NishadIslamUtso/OddBrain/arena/81a07155-oddbrain/release/Memory_OB-addon-0.9.1.zip
+https://raw.githubusercontent.com/NishadIslamUtso/OddBrain/arena/81a07155-oddbrain/release/Memory_OB-addon-0.9.7.zip
 
 **2 — Open PowerShell and paste this one line:**
 
@@ -31,11 +31,16 @@ brings them back rebuilt in the current schema — ask for the
 `fix-goose-extensions.mjs` line.
 
 **Your screens live inside Goose itself.** Ask Goose *"show my memory
-screens"* and Projects, Vault and Review render **in the conversation** (the
-MCP Apps contract: the `memory_ob_screens` tool returns a `ui://` app). The
-installer also enables Goose's built-in **Apps** extension, so the screens are
-on the sidebar's Apps page too (next to the Clock). The full window version is
-still there when you want it: `Documents\OddBrain\Memory_OB\Open Screens.cmd`.
+screens"* and one app renders **in the conversation** with **Projects, Vault
+and Review as tabs** — live memory state every time you ask (the MCP Apps
+contract: the `memory_ob_screens` tool is linked to a `ui://` screen). Its
+**Refresh** button asks the chat for the screens again. Records marked Never
+Send never appear in any screen. The installer also drops a stamped snapshot
+beside your other apps (`data\apps\memory-ob.html`, on the sidebar's Apps
+page) that says when it was captured and how to get live screens. Approving
+or denying memory always happens on the confirmation card in the chat. The
+full interactive window is still there when you want it:
+`Documents\OddBrain\Memory_OB\Open Screens.cmd`.
 
 **Every future module ships the same way** — this is the pattern:
 

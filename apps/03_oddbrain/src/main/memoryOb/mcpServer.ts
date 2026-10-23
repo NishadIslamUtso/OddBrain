@@ -658,6 +658,10 @@ const tools = [
     name: 'memory_ob_screens',
     description: 'Show the Memory_OB screens — Projects, Vault, and Review — as an interactive app inside the chat. Read-only live memory state; approvals stay on the owner’s confirmation card. Call this whenever the owner asks to see their memory screens, projects, vault, or review.',
     inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+    // Goose v1.55 links a tool to its app screen from the TOOL DEFINITION meta
+    // (the autovisualiser builtin does exactly this, and also repeats it on the
+    // result). Both are set — result-only meta does not attach the screen.
+    _meta: { ui: { resourceUri: APP_URI } },
   },
 ]
 
@@ -774,7 +778,10 @@ const collectAppState = (): AppScreenState => {
   const projectCounts = new Map<string, { title: string; records: number; pending: number }>()
   const review: { pending: AppReviewRow[]; rejected: AppReviewRow[]; confirmed: AppReviewRow[] } = { pending: [], rejected: [], confirmed: [] }
   for (const row of rows) {
-    if (row.neverSend === true) counts.neverSend += 1
+    // Never Send records are never handed to an agent — and this HTML is
+    // readable through MCP, so the record's title, text, id and project must
+    // not surface here at all. Only the fact that hidden records exist is kept.
+    if (row.neverSend === true) { counts.neverSend += 1; continue }
     if (row.authority === 'confirmed') counts.confirmed += 1
     else if (row.authority === 'pending') counts.pending += 1
     else if (row.authority === 'rejected') counts.rejected += 1
