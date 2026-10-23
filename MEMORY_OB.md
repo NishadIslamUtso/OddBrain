@@ -52,6 +52,16 @@ Goose history. After install, Goose never touches its old memory again.
   memory suggestions with exact quotes for you to approve — nothing lands
   without you.
 - Owner tools: `never-send` / `allow-send` / `list` on any record.
+- **Anything, no matter the module:** any module (video, documents, browser,
+  whatever comes next) hands memory its sources through one intake door.
+  Memory keeps an untouched copy, labels it `raw-unconfirmed-evidence` (never
+  a confirmed fact or instruction), finds it by search, and quotes it only
+  hash-verified and inside a Project scope — exactly like chat evidence.
+- **Meaning search (optional module):** finds candidates by meaning, sits
+  BESIDE the exact word search, never replaces it. Candidates are labelled
+  UNVERIFIED; every quote still passes evidence. Uses any free
+  embeddings endpoint you connect (for example Ollama Cloud) — no local model
+  is ever downloaded.
 - One ready-to-download folder with a checksummed MANIFEST (every file's
   fingerprint, versions, commands).
 
@@ -62,9 +72,6 @@ Goose history. After install, Goose never touches its old memory again.
    nothing confirmed by Goose itself.
 2. **Your acceptance run** — install on your real Windows machine with plain
    Goose (import first), and check everything live.
-3. **On the list, not now:** semantic/meaning-based search — a separate
-   optional search module beside the exact word search (your decision: keep on
-   the list).
 
 Not building (your call): per-chat "notes for AI" — Goose's own notes play
 that role; Memory_OB does not rebuild it.
@@ -74,3 +81,9 @@ that role; Memory_OB does not rebuild it.
 Memory_OB is the first of several modules that make Goose work the way you
 want. It must keep adapting to the rest as they arrive — one memory, one
 trust model, smooth to activate, done once and forgotten.
+
+Every module's memory side flows through the same door: any module can hand
+memory its raw sources (`memory_ob` module intake), and the same laws apply
+everywhere — raw stays labelled raw and unconfirmed, quotes only ever come
+hash-verified, Never Send and local-only records never travel, and nothing is
+ever an instruction. New module, same door, no new trust model.

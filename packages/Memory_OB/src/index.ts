@@ -35,7 +35,13 @@ export type MemoryScope =
   | { kind: 'unscoped' }
 
 export type MemorySourceIdentity = {
-  domain: 'app-chat' | 'native-transcript' | 'vault' | 'brain-memory' | 'browser' | 'mobile' | 'import' | 'project' | 'attachment-center' | 'generated'
+  /**
+   * Which adapter/module the record came from. Open on purpose: Memory_OB must
+   * take anything — app chats, browser, mobile, imports, and any future module
+   * (video, documents, editing, …) — without a schema change. The historical
+   * names below are examples, not a closed list.
+   */
+  domain: 'app-chat' | 'native-transcript' | 'vault' | 'brain-memory' | 'browser' | 'mobile' | 'import' | 'project' | 'attachment-center' | 'generated' | (string & {})
   externalId: string
   /** A local locator for the owning adapter, never filesystem authority for an AI. */
   locator?: string

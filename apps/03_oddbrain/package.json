@@ -17,9 +17,9 @@
   "scripts": {
     "dev": "electron-vite dev",
     "dev:web": "vite --config vite.web.config.ts",
-    "build": "npm run typecheck && electron-vite build && node scripts/build-memory-ob-mcp.mjs && node scripts/build-memory-ob-core.mjs && node scripts/build-brain-window.mjs && node scripts/build-goose-import.mjs && node scripts/check-renderer-chunks.mjs && node scripts/build-ui-preview.mjs",
+    "build": "npm run typecheck && electron-vite build && node scripts/build-memory-ob-mcp.mjs && node scripts/build-memory-ob-core.mjs && node scripts/build-brain-window.mjs && node scripts/build-goose-import.mjs && node scripts/build-semantic.mjs && node scripts/check-renderer-chunks.mjs && node scripts/build-ui-preview.mjs",
     "build:web": "node scripts/build-ui-preview.mjs && vite build --config vite.web.config.ts",
-    "build:memory-ob": "node scripts/build-memory-ob-mcp.mjs && node scripts/build-memory-ob-core.mjs && node scripts/build-goose-import.mjs",
+    "build:memory-ob": "node scripts/build-memory-ob-mcp.mjs && node scripts/build-memory-ob-core.mjs && node scripts/build-goose-import.mjs && node scripts/build-semantic.mjs",
     "build:brain-window": "node scripts/build-brain-window.mjs",
     "package:addon": "node scripts/package-addon.mjs",
     "start": "electron-vite preview",

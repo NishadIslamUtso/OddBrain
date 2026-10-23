@@ -124,6 +124,34 @@ screen like any other evidence. Goose's folders are never changed; re-running
 skips what is already imported. Tool calls and tool results are counted and
 skipped — only the conversation itself is kept.
 
+## Anything, no matter the module
+
+Any module can hand memory its raw sources (video, documents, browser —
+whatever you add next). Memory keeps an untouched copy, labels it raw
+unconfirmed evidence (never a confirmed fact or instruction), finds it in
+search, and quotes it only hash-verified and inside a Project scope — exactly
+like chat evidence. The same Never Send and local-only rules apply.
+
+## Meaning search (optional)
+
+A separate optional module that finds candidates by *meaning*. It sits beside
+the exact word search and never replaces it — word-match results stay exactly
+as they are. Meaning candidates are labelled UNVERIFIED; confirm exact wording
+with `memory_ob_evidence` before quoting anything.
+
+Enable it from the standalone folder (or the addon):
+
+```
+node semantic-search.mjs --brain "C:\Users\you\Memory_OB" enable
+node semantic-search.mjs --brain "C:\Users\you\Memory_OB" rebuild
+node semantic-search.mjs --brain "C:\Users\you\Memory_OB" search "what did we decide about the trailer"
+```
+
+It uses any free embeddings endpoint you connect (for example your Ollama
+Cloud allowance) via `ODDBRAIN_MODEL_BASE_URL` and `ODDBRAIN_EMBED_MODEL` —
+no local model is ever downloaded. The vector index is a rebuildable
+derivative; deleting it loses nothing.
+
 ## Still coming next (built on this)
 
 - **Engine-notes proposals**: the organizer drafts memory proposals from

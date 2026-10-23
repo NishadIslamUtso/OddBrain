@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { createChatStore } from '../../../../apps/03_oddbrain/src/main/chats/store'
+import { createMemoryObStore } from '../../../../apps/03_oddbrain/src/main/memoryOb/store'
 
 const sha = (v: string): string => createHash('sha256').update(v).digest('hex')
 let pass = 0, fail = 0
@@ -137,7 +138,10 @@ class Mcp {
   }
   request(method: string, params: Record<string, unknown>): Promise<any> {
     const id = this.nextId++
-    const promise = new Promise(resolve => this.pending.set(id, resolve))
+    const promise = new Promise(resolve => {
+      const guard = setTimeout(() => { this.pending.delete(id); resolve({ id, error: { message: 'MCP request timed out — the adapter did not answer.' } }) }, 30_000)
+      this.pending.set(id, (value: any) => { clearTimeout(guard); resolve(value) })
+    })
     this.proc.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id, method, params })}\n`)
     return promise
   }
@@ -266,6 +270,40 @@ const run = async (): Promise<void> => {
     const evidenceTrash = await mcp.call('memory_ob_evidence', { statement: 'the moon is made of green cheese' })
     const evText = evidenceTrash.text || ''
     check('trap16: trashed chat produces no evidence record', !evText.includes('green cheese, half-eaten') && !evText.includes('chat-trash-1'), evText)
+    mcp.close()
+  }
+
+  // ---- trap17: module intake — memory takes anything ----
+  {
+    const moduleRoot = mkdtempSync('/tmp/memory-modules-')
+    const catalogue = join(moduleRoot, 'store'), chatsDir = join(moduleRoot, 'chats')
+    mkdirSync(catalogue, { recursive: true }); mkdirSync(chatsDir, { recursive: true })
+    const at = new Date().toISOString()
+    writeFileSync(join(catalogue, 'manifest.json'), JSON.stringify({ format: 'oddbrain-memory-ob', version: 1, revision: 0, createdAt: at, updatedAt: at, records: 0, relationships: 0, lastChatStoreRevision: 0 }, null, 2) + '\n')
+    const store = createMemoryObStore(catalogue)
+    store.syncProjects([{ id: 'proj-mod', name: 'Module project', instruction: '', folder: '', createdAt: at, goals: [], references: [] }] as never)
+    const text = 'The video review says the launch trailer renders at 1080p after the Tuesday change.'
+    store.syncSources([{ id: 'shot-1', module: 'video', title: 'Trailer render check', text, projectId: 'proj-mod', speaker: 'owner' }])
+    const hits = store.search({ query: 'trailer renders 1080p', projectId: 'proj-mod' })
+    const hit = hits.find(h => h.recordId === 'raw-source:video:shot-1')
+    check('trap17: any module can hand memory a source', Boolean(hit), JSON.stringify(hits).slice(0, 160))
+    check('trap17: module source is labelled raw unconfirmed evidence', Boolean(hit) && hit!.authority === 'raw-unconfirmed-evidence' && /video module/.test(hit!.coverage), hit?.coverage)
+    check('trap17: word-match finds the module source like any evidence', store.search({ query: 'trailer renders 1080p' }).some(h => h.recordId === 'raw-source:video:shot-1'), '')
+    const mcp = new Mcp(catalogue, chatsDir, moduleRoot)
+    await mcp.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'traps-5', version: '1' } })
+    const ok = await mcp.call('memory_ob_evidence', { recordId: 'raw-source:video:shot-1', expectedSha256: sha(text), projectId: 'proj-mod' })
+    check('trap17: evidence verifies the module source by hash', !ok.isError && /Trailer render check/.test(ok.text), ok.text)
+    const wrong = await mcp.call('memory_ob_evidence', { recordId: 'raw-source:video:shot-1', expectedSha256: sha(text + '!'), projectId: 'proj-mod' })
+    check('trap17: a wrong expected hash is refused', wrong.isError === true, wrong.text)
+    const denied = await mcp.call('memory_ob_evidence', { recordId: 'raw-source:video:shot-1', expectedSha256: sha(text) })
+    check('trap17: module evidence needs the Project scope', denied.isError === true && /Project scope/.test(denied.text), denied.text)
+    writeFileSync(join(catalogue, 'sources', `${sha(text)}.txt`), `${text} tampered`)
+    const tampered = await mcp.call('memory_ob_evidence', { recordId: 'raw-source:video:shot-1', expectedSha256: sha(text), projectId: 'proj-mod' })
+    check('trap17: a tampered source copy is refused', tampered.isError === true && /changed|Nothing/.test(tampered.text), tampered.text)
+    const meaning = await mcp.call('memory_ob_search', { query: 'trailer renders', meaning: true, projectId: 'proj-mod' })
+    const meaningBlock = meaning.json?.meaning ?? {}
+    check('trap17: meaning without an index is honest', !meaning.isError && /unchanged/i.test(String(meaningBlock.notice || '')), meaning.text)
+    check('trap17: meaning never replaces word-match hits', Array.isArray(meaning.json?.hits), meaning.text)
     mcp.close()
   }
 }

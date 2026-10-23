@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto'
-import { existsSync, lstatSync, mkdirSync, readdirSync } from 'node:fs'
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import type { Chat, Message } from '../../shared/types'
 import type { Project } from '../../shared/lib/projects'
@@ -28,7 +28,7 @@ import { readRecoverableJson, writeRecoverableJson } from '../recoverableJson'
 
 const sha = (value: string): string => createHash('sha256').update(value).digest('hex')
 const nowIso = (): string => new Date().toISOString()
-const recordId = (kind: 'app-chat' | 'native-transcript' | 'imported-conversation' | 'project' | 'working-note' | 'attachment' | 'job', id: string): string => `${kind}:${id}`
+const recordId = (kind: 'app-chat' | 'native-transcript' | 'imported-conversation' | 'project' | 'working-note' | 'attachment' | 'job' | 'raw-source', id: string): string => `${kind}:${id}`
 const words = (value: string): string[] => [...new Set(value.toLocaleLowerCase().match(/[\p{L}\p{N}_-]{2,}/gu) || [])].slice(0, 32)
 const excerpt = (text: string, terms: string[], maximum = 3_000): { text: string; start: number; end: number } => {
   if (text.length <= maximum) return { text, start: 0, end: text.length }
@@ -459,7 +459,98 @@ export function createMemoryObStore(root: string) {
       const slice = excerpt(note.text, terms), digest = sha(note.text)
       hits.push({ recordId: record.id, kind: 'working-note', authority: 'draft-working-note', title: record.title, projectId: chat?.projectId || null, chatId, speaker: note.author, text: slice.text, start: slice.start, end: slice.end, totalCharacters: note.text.length, sha256: digest, coverage: slice.start === 0 && slice.end === note.text.length ? `Complete normalized Working Notes revision ${note.revisionId}` : `Exact characters ${slice.start}–${slice.end} of normalized Working Notes revision ${note.revisionId}; open the source for the remainder`, score })
     }
+    if (!input.kinds || input.kinds.includes('raw-source')) for (const row of records.values()) {
+      if (row.kind !== 'raw-source' || row.lifecycle !== 'active' || row.neverSend === true || row.sensitivity === 'local-only') continue
+      if (input.currentChatId && row.scope.kind === 'chat' && row.scope.chatId === input.currentChatId) continue
+      if (input.projectId && !row.projectIds.includes(input.projectId) && !(row.scope.kind === 'project' && row.scope.projectId === input.projectId)) continue
+      const text = readSourceCopy(row.source.locator)
+      // A copy that changed since it was catalogued is never quoted.
+      if (text === null || sha(text) !== row.contentHash) continue
+      const score = scoreText(text, terms)
+      if (!score) continue
+      const slice = excerpt(text, terms), digest = sha(text)
+      const coverage = slice.start === 0 && slice.end === text.length ? 'Complete stored source copy' : `Exact characters ${slice.start}–${slice.end} of ${text.length}; open the source for the remainder`
+      hits.push({ recordId: row.id, kind: 'raw-source', authority: 'raw-unconfirmed-evidence', title: row.title, projectId: row.scope.kind === 'project' ? row.scope.projectId : null, chatId: row.scope.kind === 'chat' ? row.scope.chatId : undefined, speaker: row.source.speaker, text: slice.text, start: slice.start, end: slice.end, totalCharacters: text.length, sha256: digest, coverage: `Raw unconfirmed evidence from the ${row.source.domain} module; ${coverage}`, score })
+    }
     return hits.sort((a, b) => b.score - a.score || b.end - b.start - (a.end - a.start) || a.recordId.localeCompare(b.recordId)).slice(0, limit)
+  }
+
+  /**
+   * Generic module intake — the "memory takes anything" door. Any module
+   * (video, documents, editing, browser capture, or one that does not exist
+   * yet) hands over captured text with its identity and provenance. The store
+   * takes a byte-preserving copy, catalogues it as raw unconfirmed evidence,
+   * and never turns it into confirmed memory. Hashes are re-verified on every
+   * read; a changed copy is never quoted.
+   */
+  const sourceCopyFor = (text: string): string => {
+    const locator = `sources/${sha(text)}.txt`
+    const path = join(root, locator)
+    if (!existsSync(path)) {
+      mkdirSync(join(root, 'sources'), { recursive: true, mode: 0o700 })
+      try { writeFileSync(path, text, { encoding: 'utf8', flag: 'wx', mode: 0o600 }) } catch { /* an identical copy already landed */ }
+    }
+    return locator
+  }
+  const readSourceCopy = (locator: unknown): string | null => {
+    if (typeof locator !== 'string' || !/^sources\/[a-f0-9]{64}\.txt$/.test(locator)) return null
+    try { return readFileSync(join(root, locator), 'utf8') } catch { return null }
+  }
+  const syncSources = (sources: MemoryModuleSource[]): void => {
+    const changed: MemoryObject[] = []
+    for (const source of sources) {
+      if (!source || typeof source.module !== 'string' || typeof source.id !== 'string' || typeof source.title !== 'string' || typeof source.text !== 'string') throw Error('A module source needs module, id, title and text. Nothing was written.')
+      if (!/^[a-z0-9][a-z0-9._-]{0,48}$/i.test(source.module) || !/\S/.test(source.title) || !source.text.length) throw Error('A module source has an invalid module name, title or empty text. Nothing was written.')
+      const id = recordId('raw-source', `${source.module}:${source.id}`)
+      const locator = sourceCopyFor(source.text)
+      const candidate: Omit<MemoryObject, 'revision' | 'createdAt' | 'updatedAt' | 'useCount'> = {
+        id, kind: 'raw-source', title: source.title,
+        scope: source.projectId ? { kind: 'project', projectId: source.projectId } : source.chatId ? { kind: 'chat', chatId: source.chatId } : { kind: 'unscoped' },
+        authority: 'raw', lifecycle: 'active',
+        source: {
+          domain: source.module, externalId: source.externalId || source.id, locator,
+          provider: source.provider || source.module,
+          ...(source.speaker ? { speaker: source.speaker } : {}),
+          ...(source.chatId ? { conversation: source.chatId } : {}),
+        },
+        projectIds: source.projectId ? [source.projectId] : [],
+        relationshipIds: [], attachmentIds: [],
+        contentHash: sha(source.text), summary: { characters: source.text.length },
+        sensitivity: source.sensitivity || 'ordinary', neverSend: source.neverSend === true,
+      }
+      const next = nextObject(records.get(id), candidate)
+      if (next) changed.push(next)
+    }
+    commit(changed)
+  }
+
+  /**
+   * Every piece of text the semantic index may cover. Derivative data only:
+   * the index built from this is always rebuildable, never the only copy.
+   */
+  const indexables = (): MemoryIndexable[] => {
+    const out: MemoryIndexable[] = []
+    for (const chat of chats.values()) {
+      if (memoryChatLifecycle(chat) !== 'active') continue
+      for (const message of chat.messages) {
+        if (message.role !== 'user' && message.role !== 'assistant') continue
+        if (typeof message.content !== 'string' || !message.content.trim()) continue
+        out.push({ id: `app-chat:${chat.id}#${message.id}`, title: chat.title || 'Conversation', text: message.content, sha256: sha(message.content) })
+      }
+    }
+    for (const [chatId, note] of workingNoteText) {
+      if (!note.text.trim()) continue
+      out.push({ id: `working-note:${chatId}`, title: 'Working Notes', text: note.text, sha256: sha(note.text) })
+    }
+    for (const row of records.values()) {
+      if (row.kind === 'raw-source' && row.lifecycle === 'active') {
+        const text = readSourceCopy(row.source.locator)
+        if (text !== null && sha(text) === row.contentHash) out.push({ id: row.id, title: row.title, text, sha256: row.contentHash })
+      } else if (row.text && row.lifecycle === 'active' && ['confirmed', 'pending', 'raw', 'draft'].includes(row.authority)) {
+        out.push({ id: row.id, title: row.title, text: row.text, sha256: sha(row.text) })
+      }
+    }
+    return out
   }
 
   const project = (projectId: string): MemoryProjectView => {
@@ -483,7 +574,29 @@ export function createMemoryObStore(root: string) {
     return { manifest: structuredClone(state), records: structuredClone(selected), relationships: structuredClone(selectedRelationships), notice: selected.length === limit && records.size > selected.length ? `Showing ${limit.toLocaleString()} records; originals were not clipped or evicted.` : 'Memory_OB catalogue loaded.', root }
   }
 
-  return { read, project, search, syncChats, syncProjects, syncWorkingNotes, syncTranscriptHeaders, syncAttachments, syncJobs, syncMemoryWorkspace, revision: () => state.revision }
+  return { read, project, search, syncChats, syncProjects, syncWorkingNotes, syncTranscriptHeaders, syncAttachments, syncJobs, syncMemoryWorkspace, syncSources, indexables, revision: () => state.revision }
 }
 
 export type MemoryObStore = ReturnType<typeof createMemoryObStore>
+
+/** What any module hands Memory_OB: captured text plus its identity and provenance. */
+export type MemoryModuleSource = {
+  /** The module's stable id for this source, unique within the module. */
+  id: string
+  /** The module's name — becomes the record's source domain. Anything goes. */
+  module: string
+  title: string
+  /** The exact captured text. Memory_OB keeps a byte-preserving copy. */
+  text: string
+  externalId?: string
+  provider?: string
+  speaker?: string
+  observedAt?: string
+  projectId?: string
+  chatId?: string
+  sensitivity?: 'ordinary' | 'sensitive' | 'local-only'
+  neverSend?: boolean
+}
+
+/** One indexable unit of text for semantic search (a rebuildable derivative). */
+export type MemoryIndexable = { id: string; title: string; text: string; sha256: string }

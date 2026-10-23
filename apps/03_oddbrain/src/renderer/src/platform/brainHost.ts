@@ -111,9 +111,9 @@ export function createBrainHostBridge(demo: DesktopBridge): DesktopBridge {
     },
     memoryOb: {
       ...demo.memoryOb,
-      read: async () => call('memory', { action: 'read' }),
-      project: async (projectId: string) => call('memory', { action: 'project', projectId }),
-      search: async input => call('memory', { action: 'search', ...(input as Record<string, unknown>) }),
+      read: async () => call('memory-ob', { action: 'read' }),
+      project: async (projectId: string) => call('memory-ob', { action: 'project', projectId }),
+      search: async input => call('memory-ob', { action: 'search', ...(input as Record<string, unknown>) }),
     },
     chats: {
       ...demo.chats,

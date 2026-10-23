@@ -23,6 +23,7 @@ import { startLocalApi, type LocalApi } from './api/server'
 import { createChatStore } from './chats/store'
 import { createMemoryWorkspace } from './memory/workspace'
 import { createMemoryObStore } from './memoryOb/store'
+import { createSemantic } from './memoryOb/semantic'
 import { draftEngineNotes } from './memoryOb/engineNotes'
 import { classifyBrainRoot, defaultVaultPath, planBrainApply, planBrainRefresh } from '../shared/lib/brainStructure'
 
@@ -218,11 +219,33 @@ export async function startBrainWindow(options: BrainWindowOptions): Promise<{ u
         return respond(res, { ok: true, snapshot: { initialized: snapshot.initialized, revision: snapshot.revision, chats: snapshot.chats, currentChat: snapshot.currentChat, notice: snapshot.notice } })
       } catch (error) { return respond(res, { ok: false, error: (error as Error).message }) }
     }
-    if (op === 'memory') {
+    if (op === 'memory-ob') {
       try {
         const store = memoryObStore()
         if (body.action === 'project') return respond(res, store.project(String(body.projectId || '')))
-        if (body.action === 'search') return respond(res, store.search(body as never))
+        if (body.action === 'search') {
+          const hits = store.search(body as never)
+          if (body.meaning !== true) return respond(res, hits)
+          // Optional meaning candidates beside the unchanged word-match hits.
+          Promise.resolve((async () => {
+            const semantic = createSemantic(join(brainRoot, 'store'), { chatsRoot: join(brainRoot, 'chats') })
+            const view = semantic.status()
+            const candidates = view.enabled && view.connected && view.indexed ? await semantic.search(String(body.query || ''), 5) : []
+            return {
+              hits,
+              meaning: {
+                candidates: candidates.map(candidate => ({ recordId: candidate.id, title: candidate.title, score: Math.round(candidate.score * 1000) / 1000, preview: candidate.text.replace(/\s+/g, ' ').slice(0, 400), sha256: candidate.sha256 })),
+                notice: view.enabled && view.connected && view.indexed
+                  ? 'Meaning candidates — UNVERIFIED. Confirm exact wording with the evidence tool before quoting. Word-match hits are unchanged.'
+                  : `${view.notice} Word-match hits are unchanged.`,
+              },
+            }
+          })()).then(
+            result => respond(res, result),
+            error => respond(res, { hits, meaning: { candidates: [], notice: `Meaning search is unavailable: ${(error as Error).message} Word-match hits are unchanged.` } }),
+          )
+          return
+        }
         return respond(res, store.read())
       } catch (error) { return respond(res, { ok: false, error: (error as Error).message }) }
     }

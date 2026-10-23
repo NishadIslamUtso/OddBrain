@@ -36,6 +36,8 @@ const inputs = [
   ['dist/memory-ob-mcp.cjs', join(appRoot, 'out', 'memory-ob', 'memory-ob-mcp.cjs'), 'adapter: the four Memory_OB tools for Goose'],
   ['dist/goose-import-core.cjs', join(appRoot, 'out', 'memory-ob', 'goose-import', 'goose-import-core.cjs'), 'one-time Goose-history import engine'],
   ['dist/brain-window-server.cjs', join(appRoot, 'out', 'memory-ob', 'brain-window', 'brain-window-server.cjs'), 'Brain Window host (Projects, Vault, Review)'],
+  ['dist/memory-ob-semantic.cjs', join(appRoot, 'out', 'memory-ob', 'semantic', 'memory-ob-semantic.cjs'), 'optional meaning-search engine (separate module)'],
+  ['semantic-search.mjs', join(addonSrc, 'semantic-search.mjs'), 'meaning-search CLI (optional module)'],
   ['ui/', join(appRoot, 'dist-web'), 'the built Brain Window interface'],
   ['install.mjs', join(addonSrc, 'install.mjs'), 'installer (type ALLOW to write)'],
   ['import-goose-history.mjs', join(addonSrc, 'import-goose-history.mjs'), 'import CLI'],
@@ -171,7 +173,55 @@ with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
             z.write(p, os.path.relpath(p, root))
 `, outRoot, folderName, zipPath])
 
+// ---------- the semantic module as its own small download ----------
+// LEGO: meaning search is optional. This zip stands alone beside any brain.
+const semanticFolder = 'Memory_OB-semantic'
+const semanticStage = join(outRoot, semanticFolder)
+rmSync(semanticStage, { recursive: true, force: true })
+mkdirSync(join(semanticStage, 'dist'), { recursive: true })
+cpSync(join(stage, 'semantic-search.mjs'), join(semanticStage, 'semantic-search.mjs'))
+cpSync(join(stage, 'dist', 'memory-ob-semantic.cjs'), join(semanticStage, 'dist', 'memory-ob-semantic.cjs'))
+writeFileSync(join(semanticStage, 'README.md'), `# Memory_OB meaning search (optional module)
+
+Semantic candidates beside the exact word-match search — it helps FIND things
+by meaning and never verifies anything. Every quote still passes the evidence
+tool; word-match search is unchanged.
+
+Enable it:
+
+\`\`\`
+node semantic-search.mjs enable
+\`\`\`
+
+Connect a free embeddings endpoint (any OpenAI-compatible /embeddings service —
+for example your free Ollama Cloud allowance if it offers embeddings). No local
+model is downloaded.
+
+\`\`\`
+ODDBRAIN_MODEL_BASE_URL=https://your-endpoint.example/v1
+ODDBRAIN_MODEL_API_KEY=...        (only if the endpoint needs one)
+ODDBRAIN_EMBED_MODEL=your-embeddings-model
+node semantic-search.mjs rebuild
+node semantic-search.mjs search "what did I decide about the launch"
+\`\`\`
+
+The vector index lives inside the memory store as a rebuildable derivative —
+deleting it loses nothing. Candidates are labelled UNVERIFIED everywhere.
+`, 'utf8')
+const semanticZip = join(outRoot, `${semanticFolder}-${appVersion}.zip`)
+rmSync(semanticZip, { force: true })
+execFileSync('python3', ['-c', `
+import os, sys, zipfile
+root, folder, out = sys.argv[1], sys.argv[2], sys.argv[3]
+with zipfile.ZipFile(out, 'w', zipfile.ZIP_DEFLATED) as z:
+    for base, _, names in os.walk(os.path.join(root, folder)):
+        for name in sorted(names):
+            p = os.path.join(base, name)
+            z.write(p, os.path.relpath(p, root))
+`, outRoot, semanticFolder, semanticZip])
+
 console.log('\nPackaged.')
 console.log(`  folder: ${stage}`)
 console.log(`  zip:    ${zipPath} (${statSync(zipPath).size} bytes)`)
+console.log(`  module: ${semanticZip} (${statSync(semanticZip).size} bytes) — optional meaning search`)
 console.log(`  files:  ${files.length}`)
