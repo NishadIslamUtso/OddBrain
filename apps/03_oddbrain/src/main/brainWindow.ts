@@ -6,7 +6,7 @@
  * only, and backs it with the SAME main-process services the app uses: the
  * vault service (files, recall, grep, capsules, privacy list, link graph), the
  * memory workspace (the Review screen's doubts/confirmations/interpretations),
- * the chat store, and the Memmory_OB catalogue — all rooted at ONE brain
+ * the chat store, and the Memory_OB catalogue — all rooted at ONE brain
  * folder the owner chooses. Everything it cannot do honestly (native dialogs,
  * engines, media) stays behind the bridge's own truthful "needs the desktop
  * app" answers; nothing pretends.
@@ -22,7 +22,8 @@ import { createVaultService, type VaultService } from './vault/service'
 import { startLocalApi, type LocalApi } from './api/server'
 import { createChatStore } from './chats/store'
 import { createMemoryWorkspace } from './memory/workspace'
-import { createMemmoryObStore } from './memmoryOb/store'
+import { createMemoryObStore } from './memoryOb/store'
+import { draftEngineNotes } from './memoryOb/engineNotes'
 import { classifyBrainRoot, defaultVaultPath, planBrainApply, planBrainRefresh } from '../shared/lib/brainStructure'
 
 export type BrainWindowOptions = {
@@ -66,7 +67,7 @@ export async function startBrainWindow(options: BrainWindowOptions): Promise<{ u
   let vaultService: VaultService = createVaultService({ vaultPath: brainRoot })
   let memoryStore = (): ReturnType<typeof createMemoryWorkspace> => createMemoryWorkspace(vaultService.files())
   let chatStore = (): ReturnType<typeof createChatStore> => createChatStore(join(brainRoot, 'chats'))
-  let memmoryStore = (): ReturnType<typeof createMemmoryObStore> => createMemmoryObStore(join(brainRoot, 'store'))
+  let memoryObStore = (): ReturnType<typeof createMemoryObStore> => createMemoryObStore(join(brainRoot, 'store'))
 
   const reroot = (nextRoot: string): void => {
     brainRoot = resolve(nextRoot)
@@ -157,14 +158,24 @@ export async function startBrainWindow(options: BrainWindowOptions): Promise<{ u
     }
     if (op === 'memory') {
       // The Review screen: real doubts/confirmations/interpretations, and the
-      // only place a confirmation is ever decided. Organizer model-drafting
-      // stays out until a model connection is wired; discovery is local.
+      // only place a confirmation is ever decided. `run` is the engine-notes
+      // proposal-only writer: it drafts pending proposals (quote pass, or the
+      // connected model when ODDBRAIN_MODEL_* is configured) and never
+      // confirms anything.
       const store = memoryStore()
       const answer = (work: () => unknown): void => {
-        try { respond(res, { ok: true, view: work() }) } catch (error) { respond(res, { ok: false, error: (error as Error).message }) }
+        try {
+          Promise.resolve(work()).then(
+            view => respond(res, { ok: true, view }),
+            error => respond(res, { ok: false, error: (error as Error).message }),
+          )
+        } catch (error) { respond(res, { ok: false, error: (error as Error).message }) }
       }
       if (body.action === 'act') return answer(() => store.act(body as never))
-      if (body.action === 'run') return answer(() => { store.discover(); return store.read() })
+      if (body.action === 'run') return answer(async () => {
+        const drafted = await draftEngineNotes(brainRoot)
+        return { ...store.read(), drafted }
+      })
       return answer(() => store.read())
     }
     if (op === 'projects') {
@@ -176,7 +187,7 @@ export async function startBrainWindow(options: BrainWindowOptions): Promise<{ u
         const saveProjects = (projects: Array<Record<string, unknown>>): void => {
           mkdirSync(dirname(file), { recursive: true })
           writeFileSync(file, `${JSON.stringify(projects, null, 2)}\n`, 'utf8')
-          try { memmoryStore().syncProjects(projects as never) } catch { /* catalogue intake is best-effort; the list is saved */ }
+          try { memoryObStore().syncProjects(projects as never) } catch { /* catalogue intake is best-effort; the list is saved */ }
         }
         if (req.method === 'POST' && body.action === 'attach') {
           const projects = readProjects()
@@ -207,9 +218,9 @@ export async function startBrainWindow(options: BrainWindowOptions): Promise<{ u
         return respond(res, { ok: true, snapshot: { initialized: snapshot.initialized, revision: snapshot.revision, chats: snapshot.chats, currentChat: snapshot.currentChat, notice: snapshot.notice } })
       } catch (error) { return respond(res, { ok: false, error: (error as Error).message }) }
     }
-    if (op === 'memmory') {
+    if (op === 'memory') {
       try {
-        const store = memmoryStore()
+        const store = memoryObStore()
         if (body.action === 'project') return respond(res, store.project(String(body.projectId || '')))
         if (body.action === 'search') return respond(res, store.search(body as never))
         return respond(res, store.read())

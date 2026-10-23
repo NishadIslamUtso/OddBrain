@@ -6,7 +6,7 @@ import { copyRegularFileVerifiedSync, hashRegularFileSync, readRegularFileSync }
 const MANIFEST = 'oddbrain-app-data-backup.json'
 const MAX_FILES = 50_000
 const MAX_MANIFEST_BYTES = 20_000_000
-const DIRECTORIES = ['memmory-ob-v1', 'chats-v1', 'working-notes-v1', 'turn-transcripts', 'attachment-center', 'processing', 'artifacts', 'recipes', 'handoffs', 'workflows', 'command-runs', 'checkpoints', 'automation.json.reviews', 'video-evidence-files']
+const DIRECTORIES = ['memory-ob-v1', 'chats-v1', 'working-notes-v1', 'turn-transcripts', 'attachment-center', 'processing', 'artifacts', 'recipes', 'handoffs', 'workflows', 'command-runs', 'checkpoints', 'automation.json.reviews', 'video-evidence-files']
 const FILES = ['projects.json', 'battle-ledger.json', 'hooks.json', 'house-rules.json', 'sessions-board.json', 'automation.json', 'media.json', 'video-studio.json', 'video-evidence-v1.json', 'video-render-receipts-v1.json', 'video-native-operations-v1.json']
 const EXCLUDED = ['credentials and API keys', 'extension pairing secrets', 'saved read approvals and project file grants', 'engine session IDs and installed engines/models', 'installed extension packages and caches', 'workflow signing secrets and schedule/queue attempts', 'unselected external files']
 const sha = (bytes: Buffer): string => createHash('sha256').update(bytes).digest('hex')

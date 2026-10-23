@@ -9,7 +9,7 @@ await build({
   logLevel: 'warn',
   build: {
     ssr: resolve(root, 'src/main/brainWindow.ts'),
-    outDir: resolve(root, 'out/memmory-ob/brain-window'),
+    outDir: resolve(root, 'out/memory-ob/brain-window'),
     emptyOutDir: true,
     sourcemap: false,
     minify: false,

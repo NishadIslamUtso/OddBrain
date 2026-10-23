@@ -36,8 +36,8 @@ import { selectEngine } from '../shared/lib/engine'
 import { configBytes, noLinkedPath, commitConfigs, preserveConfig } from './engine/configTransaction'
 import { createMemoryWorkspace } from './memory/workspace'
 import { createMemoryOrganizer } from './memory/organizer'
-import { createMemmoryObStore } from './memmoryOb/store'
-import { createGooseMemoryReview } from './memmoryOb/gooseReview'
+import { createMemoryObStore } from './memoryOb/store'
+import { createGooseMemoryReview } from './memoryOb/gooseReview'
 import { createProcessingLedger } from './processing/ledger'
 import { createAttachmentCenter } from './attachments/center'
 import { createFolderAccess } from './folders/access'
@@ -361,27 +361,27 @@ let videoStudioService: ReturnType<typeof createVideoStudioService> | undefined
 let attachmentCenterService: ReturnType<typeof createAttachmentCenter> | undefined
 let marketplaceService: ReturnType<typeof createMarketplaceService> | undefined
 let agyMarketplaceService: ReturnType<typeof createAgyMarketplaceService> | undefined
-let memmoryObService: ReturnType<typeof createMemmoryObStore> | undefined
+let memoryObService: ReturnType<typeof createMemoryObStore> | undefined
 function registerBridges(): void {
   const chatRoot = join(app.getPath('userData'), 'chats-v1')
   const chatStore = createChatStore(chatRoot)
-  const memmoryObRoot = join(app.getPath('userData'), 'memmory-ob-v1')
-  const memmoryOb = createMemmoryObStore(memmoryObRoot)
-  memmoryObService = memmoryOb
-  const memmoryAnswer = (run: () => object) => { try { return { ok: true as const, ...run() } } catch (error) { return { ok: false as const, error: (error as Error).message || 'Memmory_OB could not complete this request. Originals were not changed.' } } }
-  handle('memmory-ob:read', (_event, input?: { lifecycle?: 'active' | 'archived' | 'trash'; projectId?: string; limit?: number }) => memmoryAnswer(() => ({ view: memmoryOb.read(input) })))
-  handle('memmory-ob:project', (_event, projectId: string) => memmoryAnswer(() => ({ view: memmoryOb.project(String(projectId || '')) })))
-  handle('memmory-ob:search', (_event, input: { query: string; projectId?: string; currentChatId?: string; limit?: number }) => memmoryAnswer(() => ({ hits: memmoryOb.search(input), revision: memmoryOb.revision() })))
-  try { const snapshot = chatStore.read(); memmoryOb.syncChats(snapshot.chats, snapshot.revision) } catch (error) { console.error(`[memmory-ob] app-chat intake paused: ${(error as Error).message}`) }
+  const memoryObRoot = join(app.getPath('userData'), 'memory-ob-v1')
+  const memoryOb = createMemoryObStore(memoryObRoot)
+  memoryObService = memoryOb
+  const memoryObAnswer = (run: () => object) => { try { return { ok: true as const, ...run() } } catch (error) { return { ok: false as const, error: (error as Error).message || 'Memory_OB could not complete this request. Originals were not changed.' } } }
+  handle('memory-ob:read', (_event, input?: { lifecycle?: 'active' | 'archived' | 'trash'; projectId?: string; limit?: number }) => memoryObAnswer(() => ({ view: memoryOb.read(input) })))
+  handle('memory-ob:project', (_event, projectId: string) => memoryObAnswer(() => ({ view: memoryOb.project(String(projectId || '')) })))
+  handle('memory-ob:search', (_event, input: { query: string; projectId?: string; currentChatId?: string; limit?: number }) => memoryObAnswer(() => ({ hits: memoryOb.search(input), revision: memoryOb.revision() })))
+  try { const snapshot = chatStore.read(); memoryOb.syncChats(snapshot.chats, snapshot.revision) } catch (error) { console.error(`[memory-ob] app-chat intake paused: ${(error as Error).message}`) }
   const processingLedger = createProcessingLedger(app.getPath('userData'), undefined, ledger => {
-    try { memmoryOb.syncJobs(ledger) } catch (error) { console.error(`[memmory-ob] processing-job intake paused: ${(error as Error).message}`) }
+    try { memoryOb.syncJobs(ledger) } catch (error) { console.error(`[memory-ob] processing-job intake paused: ${(error as Error).message}`) }
   })
   const attachmentCenterRoot = join(app.getPath('userData'), 'attachment-center', 'originals')
   const attachmentCenter = createAttachmentCenter(join(app.getPath('userData'), 'attachment-center', 'index.json'), attachmentCenterRoot, undefined, state => {
-    try { memmoryOb.syncAttachments(state) } catch (error) { console.error(`[memmory-ob] attachment intake paused: ${(error as Error).message}`) }
+    try { memoryOb.syncAttachments(state) } catch (error) { console.error(`[memory-ob] attachment intake paused: ${(error as Error).message}`) }
   })
   attachmentCenterService = attachmentCenter
-  try { memmoryOb.syncAttachments(attachmentCenter.read()) } catch (error) { console.error(`[memmory-ob] attachment startup intake paused: ${(error as Error).message}`) }
+  try { memoryOb.syncAttachments(attachmentCenter.read()) } catch (error) { console.error(`[memory-ob] attachment startup intake paused: ${(error as Error).message}`) }
   const folderAccess = createFolderAccess(join(app.getPath('userData'), 'folder-access.json'))
   try { processingLedger.recover() } catch (error) { console.error(`[processing] ${(error as Error).message}`) }
   const processingAnswer = (run: () => unknown) => { try { return { ok: true as const, ledger: run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
@@ -410,15 +410,15 @@ function registerBridges(): void {
   }
   handle('chats:read', event => chatAnswer(() => {
     const snapshot = chatStore.read((done, total) => { if (!event.sender.isDestroyed()) event.sender.send('chats:load-progress', { done, total }) })
-    memmoryOb.syncChats(snapshot.chats, snapshot.revision)
+    memoryOb.syncChats(snapshot.chats, snapshot.revision)
     return { snapshot }
   }))
   handle('chats:migrate', (_event, input: ChatStoreMigration) => chatAnswer(() => {
-    const result = chatStore.migrate(input); memmoryOb.syncChats(result.snapshot.chats, result.snapshot.revision); return result
+    const result = chatStore.migrate(input); memoryOb.syncChats(result.snapshot.chats, result.snapshot.revision); return result
   }))
   handle('chats:write', (_event, input: ChatStoreWrite) => chatAnswer(() => {
     const snapshot = chatStore.write(input)
-    memmoryOb.syncChats(snapshot.chats, snapshot.revision)
+    memoryOb.syncChats(snapshot.chats, snapshot.revision)
     return { receipt: { initialized: true as const, revision: snapshot.revision, currentChat: snapshot.currentChat, ...(snapshot.notice ? { notice: snapshot.notice } : {}) } }
   }))
   handle('chats:export-recovery', async (_event, input: ChatStoreMigration) => {
@@ -464,7 +464,7 @@ function registerBridges(): void {
       })
       if (confirmation.response !== 1) return { ok: false, answer: 'Import cancelled. Nothing was changed.' }
       const snapshot = chatStore.importRecovery(plan)
-      memmoryOb.syncChats(snapshot.chats, snapshot.revision)
+      memoryOb.syncChats(snapshot.chats, snapshot.revision)
       return { ok: true, answer: `${plan.merge.imported.toLocaleString()} recovered chat(s) imported${plan.merge.conflicts ? `; ${plan.merge.conflicts.toLocaleString()} ID conflict(s) were kept as separate copies` : ''}. The library now contains ${snapshot.chats.length.toLocaleString()} chat(s).`, snapshot }
     } catch (error) { return { ok: false, answer: `${(error as Error).message || 'Chat recovery data could not be imported.'} The selected recovery file was not changed.` } }
   })
@@ -478,7 +478,7 @@ function registerBridges(): void {
 
   const workingNotes = new WorkingNotesStore(join(app.getPath('userData'), 'working-notes-v1'))
   const notesAnswer = (run: () => ReturnType<WorkingNotesStore['read']>) => {
-    try { const result = run(); memmoryOb.syncWorkingNotes(result); return result } catch (error) { return { ok: false as const, current: null, revisions: [], answer: (error as Error).message || 'Working Notes could not be read. Originals were kept.' } }
+    try { const result = run(); memoryOb.syncWorkingNotes(result); return result } catch (error) { return { ok: false as const, current: null, revisions: [], answer: (error as Error).message || 'Working Notes could not be read. Originals were kept.' } }
   }
   handle('working-notes:read', (_event, chatId: string) => notesAnswer(() => workingNotes.read(chatId)))
   handle('working-notes:save', (_event, input: { chatId: string; expected: string | null; notes: WorkingNotes; proposal?: WorkingNotes }) => notesAnswer(() => workingNotes.save(input)))
@@ -506,10 +506,10 @@ function registerBridges(): void {
   })
   try {
     for (const chat of chatStore.read().chats) {
-      try { memmoryOb.syncWorkingNotes(workingNotes.read(chat.id)) }
-      catch (error) { console.error(`[memmory-ob] Working Notes intake paused for ${chat.id}: ${(error as Error).message}`) }
+      try { memoryOb.syncWorkingNotes(workingNotes.read(chat.id)) }
+      catch (error) { console.error(`[memory-ob] Working Notes intake paused for ${chat.id}: ${(error as Error).message}`) }
     }
-  } catch (error) { console.error(`[memmory-ob] Working Notes startup intake paused: ${(error as Error).message}`) }
+  } catch (error) { console.error(`[memory-ob] Working Notes startup intake paused: ${(error as Error).message}`) }
 
   const workQueue = createWorkQueue(join(app.getPath('userData'), 'work-queue'), () => JSON.stringify(settings.engine), () => createHash('sha256').update(JSON.stringify([settings.engine, settings.permissions, automation?.preferences().allowCloudInference !== false, resolveEngineCommand(settings.engine.id), settings.engine.cloudProvider === 'anthropic' ? keyStore?.get('anthropic') || '' : ''])).digest('hex'))
   const permissionTickets = createPermissionTickets(() => engine?.current() || null)
@@ -558,9 +558,9 @@ function registerBridges(): void {
     join(app.getPath('userData'), 'project-context-grants.json'),
     undefined,
     (query, options) => searchVault(currentVaultService().files(), query, options),
-    (projectId, query, currentChatId) => memmoryOb.search({ projectId, query, currentChatId, limit: 4, kinds: ['app-chat'] }),
+    (projectId, query, currentChatId) => memoryOb.search({ projectId, query, currentChatId, limit: 4, kinds: ['app-chat'] }),
   )
-  try { memmoryOb.syncProjects(nativeContext.projects()) } catch (error) { console.error(`[memmory-ob] Project intake paused: ${(error as Error).message}`) }
+  try { memoryOb.syncProjects(nativeContext.projects()) } catch (error) { console.error(`[memory-ob] Project intake paused: ${(error as Error).message}`) }
   // Deliberately memory-only: each app start requires fresh folder trust. A
   // changed declaration fingerprint invalidates trust within the same process.
   const nativeLaunchTrust = new Map<string, { digest: string; fullSpeed: boolean }>()
@@ -573,10 +573,10 @@ function registerBridges(): void {
     setImmediate(() => {
       try {
         const page = turnArchive.list(before)
-        memmoryOb.syncTranscriptHeaders(page.entries)
-        if (page.notice) console.error(`[memmory-ob] transcript intake notice: ${page.notice}`)
+        memoryOb.syncTranscriptHeaders(page.entries)
+        if (page.notice) console.error(`[memory-ob] transcript intake notice: ${page.notice}`)
         if (page.next && page.next !== before) syncTranscriptPage(page.next)
-      } catch (error) { console.error(`[memmory-ob] transcript intake paused: ${(error as Error).message}`) }
+      } catch (error) { console.error(`[memory-ob] transcript intake paused: ${(error as Error).message}`) }
     })
   }
   syncTranscriptPage()
@@ -1974,18 +1974,18 @@ function registerBridges(): void {
         type: 'question', buttons: ['Cancel', operation === 'create' ? 'Create complete backup' : 'Verify and restore'], defaultId: 0, cancelId: 0,
         message: operation === 'create' ? 'Create one revision-consistent Complete Memory Backup?' : 'Verify the complete backup before creating an inactive restored profile?',
         detail: operation === 'create'
-          ? `Vault: ${vaultRoot()}\nApp-private data: ${app.getPath('userData')}\nDestination: ${destination}\n\nIncludes the Memmory_OB catalogue, app chats/transcripts, Projects, Working Notes, private attachment copies and the full vault through separate hashed domain manifests. Use-in-place external files, credentials, access grants, engine sessions and installed engines/models are explicitly excluded. Keep this sensitive backup private.`
+          ? `Vault: ${vaultRoot()}\nApp-private data: ${app.getPath('userData')}\nDestination: ${destination}\n\nIncludes the Memory_OB catalogue, app chats/transcripts, Projects, Working Notes, private attachment copies and the full vault through separate hashed domain manifests. Use-in-place external files, credentials, access grants, engine sessions and installed engines/models are explicitly excluded. Keep this sensitive backup private.`
           : `Backup: ${source}\nNew inactive profile: ${destination}\n\nBoth domains and their hashes are checked before the new folder is created. Live app data and the live vault remain unchanged. Activation requires a later, separate owner review.`,
       })
       if (confirmation.response !== 1) return { ok: false, answer: 'Cancelled. Nothing changed.' }
       const preferences = operation === 'create' && rendererPreferences && typeof rendererPreferences === 'object' && !Array.isArray(rendererPreferences) ? rendererPreferences as Record<string, string> : {}
       const result = operation === 'create'
         ? (() => {
-            const revision = memmoryOb.revision()
-            return createCompleteMemoryBackup({ vaultRoot: vaultRoot(), appDataRoot: app.getPath('userData'), destination, rendererPreferences: preferences, revisionBefore: revision, revisionAfter: () => memmoryOb.revision() })
+            const revision = memoryOb.revision()
+            return createCompleteMemoryBackup({ vaultRoot: vaultRoot(), appDataRoot: app.getPath('userData'), destination, rendererPreferences: preferences, revisionBefore: revision, revisionAfter: () => memoryOb.revision() })
           })()
         : restoreCompleteMemoryBackup(source, destination)
-      return { ok: true, answer: `${(result.vaultFiles + result.appDataFiles).toLocaleString()} listed file(s), ${(result.bytes / 1_000_000).toFixed(1)} MB, verified at ${result.destination}. Memmory_OB revision ${result.revision}. ${operation === 'restore' ? 'This is an inactive new profile; live data was not replaced. Review ACTIVATION-REVIEW.json before any separate activation.' : 'External use-in-place files and sensitive exclusions are recorded in the top-level manifest.'}` }
+      return { ok: true, answer: `${(result.vaultFiles + result.appDataFiles).toLocaleString()} listed file(s), ${(result.bytes / 1_000_000).toFixed(1)} MB, verified at ${result.destination}. Memory_OB revision ${result.revision}. ${operation === 'restore' ? 'This is an inactive new profile; live data was not replaced. Review ACTIVATION-REVIEW.json before any separate activation.' : 'External use-in-place files and sensitive exclusions are recorded in the top-level manifest.'}` }
     } catch (error) { return { ok: false, answer: `${(error as Error).message} No Complete Memory Backup or restore is reported.` } }
   })
 
@@ -2095,13 +2095,13 @@ function registerBridges(): void {
     const owner = track(sender); let service = gooseMemoryReviews.get(owner)
     if (!service) {
       service = createGooseMemoryReview(() => {
-        const adapterRoot = join(memmoryObRoot, 'adapters', 'goose', 'v1')
+        const adapterRoot = join(memoryObRoot, 'adapters', 'goose', 'v1')
         const scope = {
-          bundleSource: join(app.getAppPath(), 'out', 'memmory-ob', 'memmory-ob-mcp.cjs'),
-          bundleTarget: join(adapterRoot, 'memmory-ob-mcp.cjs'),
-          skillSource: join(app.getAppPath(), 'out', 'memmory-ob', 'memmory-ob-memory.skill.md'),
+          bundleSource: join(app.getAppPath(), 'out', 'memory-ob', 'memory-ob-mcp.cjs'),
+          bundleTarget: join(adapterRoot, 'memory-ob-mcp.cjs'),
+          skillSource: join(app.getAppPath(), 'out', 'memory-ob', 'memory-ob-memory.skill.md'),
           receiptPath: join(adapterRoot, 'goose-adapter.json'),
-          catalogueRoot: memmoryObRoot,
+          catalogueRoot: memoryObRoot,
           chatsRoot: chatRoot,
           vaultRoot: vaultRoot(),
         }
@@ -2111,14 +2111,14 @@ function registerBridges(): void {
     }
     return service
   }
-  handle('memmory-ob:goose-preview', async event => {
+  handle('memory-ob:goose-preview', async event => {
     if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Wait for active work before changing Goose configuration.' }
     const selected = await dialog.showOpenDialog({ title: 'Choose Goose config.yaml', properties: ['openFile'], filters: [{ name: 'Goose YAML configuration', extensions: ['yaml', 'yml'] }] })
     if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true, answer: 'Goose adapter setup cancelled. Nothing changed.' }
     try { return { ok: true, review: gooseMemoryReview(event.sender).preview(selected.filePaths[0]) } }
     catch (error) { return { ok: false, answer: `${(error as Error).message} Nothing changed.` } }
   })
-  handle('memmory-ob:goose-decide', (event, token: string, decision: 'allow' | 'deny') => {
+  handle('memory-ob:goose-decide', (event, token: string, decision: 'allow' | 'deny') => {
     if (decision !== 'allow' && decision !== 'deny') return { ok: false, answer: 'Choose Allow or Deny.' }
     if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Wait for active work before changing Goose configuration.' }
     return gooseMemoryReview(event.sender).decide(String(token || ''), decision)
@@ -2300,10 +2300,10 @@ function registerBridges(): void {
   // Projects: the owner's named homes for related work. Stored once,
   // validated on the way in and the way out; a damaged file means "no
   // projects yet", never a failed launch.
-  handle('projects:read', () => { const projects = nativeContext.projects(); memmoryOb.syncProjects(projects); return projects })
+  handle('projects:read', () => { const projects = nativeContext.projects(); memoryOb.syncProjects(projects); return projects })
   handle('projects:write', (_event, projects: unknown, expected?: unknown) => {
     if (!Array.isArray(expected)) throw Error('Read projects before saving; no current data was replaced.')
-    const saved = nativeContext.write(projects, expected); memmoryOb.syncProjects(saved); return { ok: true, projects: saved }
+    const saved = nativeContext.write(projects, expected); memoryOb.syncProjects(saved); return { ok: true, projects: saved }
   })
   handle('projects:attach', async (_event, projectId: string) => {
     if (!nativeContext.projects().some(p => p.id === projectId)) throw Error('Choose an existing project first.')
@@ -2922,10 +2922,10 @@ app.whenReady().then(async () => {
     memoryOrganizer = createMemoryOrganizer({
       store: () => {
         const changed = (workspace: ReturnType<ReturnType<typeof createMemoryWorkspace>['read']>) => {
-          try { memmoryObService?.syncMemoryWorkspace(workspace) } catch (error) { console.error(`[memmory-ob] reviewed-memory intake paused: ${(error as Error).message}`) }
+          try { memoryObService?.syncMemoryWorkspace(workspace) } catch (error) { console.error(`[memory-ob] reviewed-memory intake paused: ${(error as Error).message}`) }
         }
         const store = createMemoryWorkspace(currentVaultService().files(), undefined, changed)
-        try { changed(store.read()) } catch (error) { console.error(`[memmory-ob] reviewed-memory startup intake paused: ${(error as Error).message}`) }
+        try { changed(store.read()) } catch (error) { console.error(`[memory-ob] reviewed-memory startup intake paused: ${(error as Error).message}`) }
         return store
       },
       busy: () => dispatchingWork || !!engine?.turnBusy() || foregroundApiRequests > 0 || !!automation?.view().current,

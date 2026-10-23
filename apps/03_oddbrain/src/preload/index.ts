@@ -6,7 +6,7 @@ import type { NativeConversation, NativeSessionLink, NativeContextTarget } from 
 import { type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
 import type { ThinkingMode } from '../shared/lib/engine'
 import type { MemoryBridge } from '../shared/lib/memoryWorkspace'
-import type { MemmoryObBridge } from '../shared/lib/memmoryOb'
+import type { MemoryObBridge } from '../shared/lib/memoryOb'
 import type { ProcessingLedgerBridge } from '../shared/lib/processingLedger'
 import type { AttachmentCenterBridge } from '../shared/lib/attachmentCenter'
 import type { FolderAccessBridge } from '../shared/lib/folderAccess'
@@ -312,13 +312,13 @@ const api = {
   extensionPair: extensionPairApi,
   automation: automationApi,
   memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,
-  memmoryOb: {
-    read: input => ipcRenderer.invoke('memmory-ob:read', input),
-    project: projectId => ipcRenderer.invoke('memmory-ob:project', projectId),
-    search: input => ipcRenderer.invoke('memmory-ob:search', input),
-    goosePreview: () => ipcRenderer.invoke('memmory-ob:goose-preview'),
-    gooseDecide: (token, decision) => ipcRenderer.invoke('memmory-ob:goose-decide', token, decision),
-  } satisfies MemmoryObBridge,
+  memoryOb: {
+    read: input => ipcRenderer.invoke('memory-ob:read', input),
+    project: projectId => ipcRenderer.invoke('memory-ob:project', projectId),
+    search: input => ipcRenderer.invoke('memory-ob:search', input),
+    goosePreview: () => ipcRenderer.invoke('memory-ob:goose-preview'),
+    gooseDecide: (token, decision) => ipcRenderer.invoke('memory-ob:goose-decide', token, decision),
+  } satisfies MemoryObBridge,
   processing: { read: () => ipcRenderer.invoke('processing:read'), resume: id => ipcRenderer.invoke('processing:resume', id), setLimits: limits => ipcRenderer.invoke('processing:set-limits', limits) } satisfies ProcessingLedgerBridge,
   attachmentCenter: { read: () => ipcRenderer.invoke('attachments:read'), previewDelete: id => ipcRenderer.invoke('attachments:preview-delete', id), confirmDelete: token => ipcRenderer.invoke('attachments:confirm-delete', token) } satisfies AttachmentCenterBridge,
   folderAccess: { read: () => ipcRenderer.invoke('folders:read'), choose: input => ipcRenderer.invoke('folders:choose', input), revoke: id => ipcRenderer.invoke('folders:revoke', id), list: id => ipcRenderer.invoke('folders:list', id) } satisfies FolderAccessBridge,

@@ -14,7 +14,7 @@ import type { EngineSourceFile } from '@shared/lib/media'
 import { unverifiedCapabilities, type EngineCapabilityReport } from '@shared/lib/engineCapabilities'
 import type { ThinkingMode } from '@shared/lib/engine'
 import type { MemoryBridge } from '@shared/lib/memoryWorkspace'
-import type { MemmoryObBridge } from '@shared/lib/memmoryOb'
+import type { MemoryObBridge } from '@shared/lib/memoryOb'
 import type { ProcessingLedgerBridge } from '@shared/lib/processingLedger'
 import type { AttachmentCenterBridge } from '@shared/lib/attachmentCenter'
 import type { FolderAccessBridge } from '@shared/lib/folderAccess'
@@ -80,7 +80,7 @@ export type DesktopBridge = {
   videoStudio: VideoStudioBridge
   marketplace: MarketplaceBridge
   memoryWorkspace: MemoryBridge
-  memmoryOb: MemmoryObBridge
+  memoryOb: MemoryObBridge
   processing: ProcessingLedgerBridge
   attachmentCenter: AttachmentCenterBridge
   folderAccess: FolderAccessBridge
@@ -401,10 +401,10 @@ const demoBridge: DesktopBridge = {
   marketplace: { inspect: unavailableMarket, sources: async () => [], browse: unavailableMarket, probe: unavailableMarket, installed: unavailableMarket, plan: unavailableMarket, confirm: unavailableMarket, cancel: async () => {} },
   automation: demoAutomation,
   memoryWorkspace: demoMemoryWorkspace,
-  memmoryOb: {
-    read: async () => ({ ok: false, error: 'Memmory_OB requires the desktop app.' }),
+  memoryOb: {
+    read: async () => ({ ok: false, error: 'Memory_OB requires the desktop app.' }),
     project: async () => ({ ok: false, error: 'Project memory requires the desktop app.' }),
-    search: async () => ({ ok: false, error: 'Memmory_OB search requires the desktop app.' }),
+    search: async () => ({ ok: false, error: 'Memory_OB search requires the desktop app.' }),
     goosePreview: async () => ({ ok: false, answer: 'Goose adapter setup requires the desktop app.' }),
     gooseDecide: async () => ({ ok: false, answer: 'Goose adapter setup requires the desktop app.' }),
   },

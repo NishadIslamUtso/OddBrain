@@ -11,7 +11,7 @@ import { decodeInWorker } from './media/workerClient'
 import type { MediaResult } from '../shared/lib/mediaBridge'
 import { scanInstructionSignals, scanTextHazards } from '../shared/lib/textHazards'
 import { recallTerms, type RecallReply } from '../shared/lib/recall'
-import type { MemmorySearchHit } from '../shared/lib/memmoryOb'
+import type { MemorySearchHit } from '../shared/lib/memoryOb'
 import { estimateModelTokens } from '../shared/lib/modelContext'
 import { ownerConfirmedVaultRequest } from '../shared/lib/retrievalProposal'
 const hash = (value: string | Buffer) => createHash('sha256').update(value).digest('hex')
@@ -31,7 +31,7 @@ function readReference(file: string): Buffer {
 }
 /** Main-only authority. Reading references requires a durable grant created by an
  * actual file-picker result, not a renderer-supplied path. No network/commands. */
-export function createNativeContext(projectFile: string, grantFile: string, decode: (name: string, bytes: Uint8Array, signal: AbortSignal) => Promise<MediaResult> = decodeInWorker, recall?: (query: string, options?: { localSemantic?: boolean }) => RecallReply, projectRecall?: (projectId: string, query: string, currentChatId: string) => MemmorySearchHit[]) {
+export function createNativeContext(projectFile: string, grantFile: string, decode: (name: string, bytes: Uint8Array, signal: AbortSignal) => Promise<MediaResult> = decodeInWorker, recall?: (query: string, options?: { localSemantic?: boolean }) => RecallReply, projectRecall?: (projectId: string, query: string, currentChatId: string) => MemorySearchHit[]) {
   const readJson = (file: string, fallback: unknown): unknown => {
     const bytes = configBytes(file)
     return bytes === null ? fallback : JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))

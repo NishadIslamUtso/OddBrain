@@ -6,7 +6,7 @@ import { changeMemory, chapterEvidence, staleBasis, mergedProfiles, emptyMemory,
 import { scanInstructionSignals, scanTextHazards } from '../../shared/lib/textHazards'
 const hash = (s: string): string => createHash('sha256').update(s).digest('hex')
 const STATE = '06 Review/Organizer/state.json'
-const AI = new Set(['oddbrain','chatgpt','claude','gemini','aistudio','deepseek','arena','glm','kimi','grok','qwen','mistral','perplexity','copilot','poe'])
+const AI = new Set(['oddbrain','goose','chatgpt','claude','gemini','aistudio','deepseek','arena','glm','kimi','grok','qwen','mistral','perplexity','copilot','poe'])
 export function createMemoryWorkspace(files: VaultFiles, clock: () => string = () => new Date().toISOString(), onChanged?: (workspace: MemoryWorkspace) => void) {
   function read(): MemoryWorkspace {
     const raw = files.read(STATE)
@@ -126,6 +126,41 @@ export function createMemoryWorkspace(files: VaultFiles, clock: () => string = (
     // Approved memory capsules are explicit-selection only, never typing suggestions.
     for (const p of approved.filter(p => p.kind === 'capsule')) {
       write(`03 Memory/Entities/memory-${p.id}.md`, yamlDocument({ id: `memory-${p.id}`, type: 'capsule', title: p.title, version: p.revision, status: 'active', background: p.text, sources: [p.source.path], memory_approved: true, suggestion_safe: false }, `# ${p.title}\n\n${paragraph(p)}`))
+    }
+    // Approved engine-notes are appended as short dated lines to the memory
+    // file the owner reads. Append-only: a line that is already there is never
+    // deleted or rewritten — the owner's own edits survive byte for byte.
+    {
+      const notePath = '06 Review/Memory/engine-notes.md'
+      const notes = approved.filter(p => p.kind === 'note')
+      if (notes.length) {
+        let file = files.read(notePath) || ''
+        const existing = new Set(file.split('\n').map(line => line.trim()))
+        const additions = new Map<string, string[]>()
+        for (const p of notes) {
+          const line = `- ${p.text.replace(/\s+/g, ' ').trim()}`
+          if (!line.slice(2).trim() || existing.has(line)) continue
+          const day = /^\d{4}-\d{2}-\d{2}$/.test(p.date) ? p.date : p.source.observed.slice(0, 10)
+          additions.set(day, [...(additions.get(day) || []), line])
+        }
+        if (additions.size) {
+          if (!file.trim()) file = '# Engine notes\n\nWhat matters, kept as short dated lines. Every line is yours to see and delete.\n'
+          for (const day of [...additions.keys()].sort()) {
+            const lines = additions.get(day)!
+            const heading = `## ${day}`
+            const at = file.indexOf(heading)
+            if (at < 0) {
+              file = `${file.trimEnd()}\n\n${heading}\n\n${lines.join('\n')}\n`
+            } else {
+              const next = file.indexOf('\n## ', at + heading.length)
+              const insertAt = next < 0 ? file.length : next + 1
+              file = `${file.slice(0, insertAt).trimEnd()}\n\n${lines.join('\n')}\n${insertAt < file.length ? '\n' + file.slice(insertAt) : ''}`
+            }
+          }
+          files.writeAtomic(notePath, file)
+          manifest[notePath] = hash(file)
+        }
+      }
     }
     for (const p of state.proposals.filter(p => p.state === 'rejected')) {
       for (const path of [`03 Memory/Entities/memory-${p.id}.md`, `03 Memory/Life Story/Chapters/${p.id}.md`]) if (manifest[path]) write(path, yamlDocument({ type: 'withdrawn', status: 'withdrawn', id: `memory-${p.id}`, title: `Withdrawn: ${p.title}`, suggestion_safe: false }, '# Withdrawn interpretation\n\nThe previous text and review history remain in the Organizer state; original observations were not removed.'))

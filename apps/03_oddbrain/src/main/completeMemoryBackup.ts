@@ -1,7 +1,7 @@
 /**
  * One coordinator for the two authoritative owner-data backup domains.
  * Creation runs synchronously on the Electron main thread, so app writes cannot
- * interleave between the Memmory_OB revision checks. Restore verifies both
+ * interleave between the Memory_OB revision checks. Restore verifies both
  * nested manifests before creating a new, inactive profile folder.
  */
 import { closeSync, existsSync, fsyncSync, mkdirSync, openSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
@@ -27,7 +27,7 @@ type Domain = {
 export type CompleteMemoryManifest = {
   format: 'oddbrain-complete-memory-backup-v1'
   createdAt: string
-  memmoryOb: { schema: 1; revision: number; package?: '@oddbrain/memmory-ob'; packageVersion?: '1.0.0' }
+  memoryOb: { schema: 1; revision: number; package?: '@oddbrain/memory-ob'; packageVersion?: '1.0.0' }
   domains: { vault: Domain; appData: Domain }
   externalFiles: {
     handling: 'excluded-unless-private-copy'
@@ -67,7 +67,7 @@ const readManifest = (source: string): { manifest: CompleteMemoryManifest; manif
   const path = join(source, MANIFEST)
   const opened = readRegularFileSync(path, LIMIT)
   const manifest = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(opened.bytes)) as CompleteMemoryManifest
-  if (manifest?.format !== 'oddbrain-complete-memory-backup-v1' || typeof manifest.createdAt !== 'string' || Number.isNaN(Date.parse(manifest.createdAt)) || manifest.memmoryOb?.schema !== 1 || (manifest.memmoryOb.package !== undefined && manifest.memmoryOb.package !== '@oddbrain/memmory-ob') || (manifest.memmoryOb.packageVersion !== undefined && manifest.memmoryOb.packageVersion !== '1.0.0') || (manifest.memmoryOb.package === undefined) !== (manifest.memmoryOb.packageVersion === undefined) || !Number.isSafeInteger(manifest.memmoryOb.revision) || manifest.memmoryOb.revision < 0 || !validDomain(manifest.domains?.vault, 'vault', VAULT_MANIFEST) || !validDomain(manifest.domains?.appData, 'app-data', APP_DATA_MANIFEST) || manifest.activation !== 'review-required' || manifest.externalFiles?.handling !== 'excluded-unless-private-copy' || !Array.isArray(manifest.externalFiles.included) || manifest.externalFiles.included.some(value => typeof value !== 'string' || value.length > 2_000) || !Array.isArray(manifest.externalFiles.excluded) || manifest.externalFiles.excluded.some(value => typeof value !== 'string' || value.length > 2_000) || typeof manifest.externalFiles.restore !== 'string' || manifest.externalFiles.restore.length > 4_000) throw Error('This is not a supported Complete Memory Backup.')
+  if (manifest?.format !== 'oddbrain-complete-memory-backup-v1' || typeof manifest.createdAt !== 'string' || Number.isNaN(Date.parse(manifest.createdAt)) || manifest.memoryOb?.schema !== 1 || (manifest.memoryOb.package !== undefined && manifest.memoryOb.package !== '@oddbrain/memory-ob') || (manifest.memoryOb.packageVersion !== undefined && manifest.memoryOb.packageVersion !== '1.0.0') || (manifest.memoryOb.package === undefined) !== (manifest.memoryOb.packageVersion === undefined) || !Number.isSafeInteger(manifest.memoryOb.revision) || manifest.memoryOb.revision < 0 || !validDomain(manifest.domains?.vault, 'vault', VAULT_MANIFEST) || !validDomain(manifest.domains?.appData, 'app-data', APP_DATA_MANIFEST) || manifest.activation !== 'review-required' || manifest.externalFiles?.handling !== 'excluded-unless-private-copy' || !Array.isArray(manifest.externalFiles.included) || manifest.externalFiles.included.some(value => typeof value !== 'string' || value.length > 2_000) || !Array.isArray(manifest.externalFiles.excluded) || manifest.externalFiles.excluded.some(value => typeof value !== 'string' || value.length > 2_000) || typeof manifest.externalFiles.restore !== 'string' || manifest.externalFiles.restore.length > 4_000) throw Error('This is not a supported Complete Memory Backup.')
   const vaultManifest = join(source, manifest.domains.vault.folder, manifest.domains.vault.manifest)
   const appManifest = join(source, manifest.domains.appData.folder, manifest.domains.appData.manifest)
   hashRegularFileSync(vaultManifest, { bytes: manifest.domains.vault.manifestBytes, sha256: manifest.domains.vault.manifestSha256 })
@@ -101,13 +101,13 @@ export function createCompleteMemoryBackup(input: {
     if (!vault.ok) throw Error(`Vault backup failed: ${vault.answer}`)
     const appData = createAppDataBackup(input.appDataRoot, join(input.destination, 'app-data'), input.rendererPreferences)
     const finalRevision = input.revisionAfter()
-    if (finalRevision !== input.revisionBefore) throw Error('Memmory_OB changed during backup. Nothing is reported complete; pause changes and retry.')
+    if (finalRevision !== input.revisionBefore) throw Error('Memory_OB changed during backup. Nothing is reported complete; pause changes and retry.')
     const vaultManifest = hashRegularFileSync(join(input.destination, 'vault', VAULT_MANIFEST))
     const appManifest = hashRegularFileSync(join(input.destination, 'app-data', APP_DATA_MANIFEST))
     const manifest: CompleteMemoryManifest = {
       format: 'oddbrain-complete-memory-backup-v1',
       createdAt: new Date().toISOString(),
-      memmoryOb: { schema: 1, revision: finalRevision, package: '@oddbrain/memmory-ob', packageVersion: '1.0.0' },
+      memoryOb: { schema: 1, revision: finalRevision, package: '@oddbrain/memory-ob', packageVersion: '1.0.0' },
       domains: {
         vault: { folder: 'vault', manifest: VAULT_MANIFEST, manifestBytes: vaultManifest.bytes, manifestSha256: vaultManifest.sha256, files: vault.count, bytes: vault.bytes },
         appData: { folder: 'app-data', manifest: APP_DATA_MANIFEST, manifestBytes: appManifest.bytes, manifestSha256: appManifest.sha256, files: appData.files, bytes: appData.bytes },
@@ -143,15 +143,15 @@ export function restoreCompleteMemoryBackup(source: string, destination: string)
       format: 'oddbrain-complete-memory-restored-v1',
       createdAt: new Date().toISOString(),
       sourceManifest: { file: MANIFEST, bytes: verified.manifestHash.bytes, sha256: verified.manifestHash.sha256 },
-      memmoryObRevision: verified.manifest.memmoryOb.revision,
-      memmoryObPackage: verified.manifest.memmoryOb.package ? `${verified.manifest.memmoryOb.package}@${verified.manifest.memmoryOb.packageVersion}` : 'legacy embedded schema 1',
+      memoryObRevision: verified.manifest.memoryOb.revision,
+      memoryObPackage: verified.manifest.memoryOb.package ? `${verified.manifest.memoryOb.package}@${verified.manifest.memoryOb.packageVersion}` : 'legacy embedded schema 1',
       liveProfileChanged: false,
       activation: 'review-required',
       vault: 'vault',
       appDataProfile: 'app-data-profile',
       note: 'This verified restored copy is inactive. Review it before choosing either restored folder in OddBrain; activation is a separate owner decision.',
     })
-    return { destination, vaultFiles: vault.count, appDataFiles: appData.files, bytes: vault.bytes + appData.bytes, revision: verified.manifest.memmoryOb.revision }
+    return { destination, vaultFiles: vault.count, appDataFiles: appData.files, bytes: vault.bytes + appData.bytes, revision: verified.manifest.memoryOb.revision }
   } catch (error) {
     try { rmSync(destination, { recursive: true, force: true }) } catch { throw Error('Restore failed and its incomplete new profile could not be removed. Live OddBrain data is unchanged.') }
     throw error

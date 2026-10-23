@@ -1,13 +1,13 @@
 // Package the Goose addon as ONE ready-to-download folder: the pre-built
 // adapter (four-tool MCP core), the Brain Window server + interface, the import
 // core, the installer, and the skill. Generated output only — never committed
-// (see .gitignore: packages/Memmory_OB/dist-addon/).
+// (see .gitignore: packages/Memory_OB/dist-addon/).
 //
 //   npm run package:addon
 //
 // Output:
-//   packages/Memmory_OB/dist-addon/Memmory_OB-addon/        the folder
-//   packages/Memmory_OB/dist-addon/Memmory_OB-addon-<v>.zip  the download
+//   packages/Memory_OB/dist-addon/Memory_OB-addon/        the folder
+//   packages/Memory_OB/dist-addon/Memory_OB-addon-<v>.zip  the download
 import { createHash } from 'node:crypto'
 import { execFileSync } from 'node:child_process'
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync, readdirSync, openSync, readSync, closeSync } from 'node:fs'
@@ -15,9 +15,9 @@ import { dirname, join, relative, resolve } from 'node:path'
 
 const appRoot = resolve(import.meta.dirname, '..')
 const repoRoot = resolve(appRoot, '..', '..')
-const addonSrc = join(repoRoot, 'packages', 'Memmory_OB', 'goose-addon')
-const outRoot = join(repoRoot, 'packages', 'Memmory_OB', 'dist-addon')
-const folderName = 'Memmory_OB-addon'
+const addonSrc = join(repoRoot, 'packages', 'Memory_OB', 'goose-addon')
+const outRoot = join(repoRoot, 'packages', 'Memory_OB', 'dist-addon')
+const folderName = 'Memory_OB-addon'
 const stage = join(outRoot, folderName)
 
 const fail = (message) => { console.error(`\n${message}`); process.exit(1) }
@@ -33,19 +33,19 @@ try {
 // Every input the package is built from. Missing inputs fail loudly — the
 // package is never assembled from stale or partial builds.
 const inputs = [
-  ['dist/memmory-ob-mcp.cjs', join(appRoot, 'out', 'memmory-ob', 'memmory-ob-mcp.cjs'), 'adapter: the four Memmory_OB tools for Goose'],
-  ['dist/goose-import-core.cjs', join(appRoot, 'out', 'memmory-ob', 'goose-import', 'goose-import-core.cjs'), 'one-time Goose-history import engine'],
-  ['dist/brain-window-server.cjs', join(appRoot, 'out', 'memmory-ob', 'brain-window', 'brain-window-server.cjs'), 'Brain Window host (Projects, Vault, Review)'],
+  ['dist/memory-ob-mcp.cjs', join(appRoot, 'out', 'memory-ob', 'memory-ob-mcp.cjs'), 'adapter: the four Memory_OB tools for Goose'],
+  ['dist/goose-import-core.cjs', join(appRoot, 'out', 'memory-ob', 'goose-import', 'goose-import-core.cjs'), 'one-time Goose-history import engine'],
+  ['dist/brain-window-server.cjs', join(appRoot, 'out', 'memory-ob', 'brain-window', 'brain-window-server.cjs'), 'Brain Window host (Projects, Vault, Review)'],
   ['ui/', join(appRoot, 'dist-web'), 'the built Brain Window interface'],
   ['install.mjs', join(addonSrc, 'install.mjs'), 'installer (type ALLOW to write)'],
   ['import-goose-history.mjs', join(addonSrc, 'import-goose-history.mjs'), 'import CLI'],
   ['brain-window.mjs', join(addonSrc, 'brain-window.mjs'), 'Brain Window launcher'],
   ['README.md', join(addonSrc, 'README.md'), 'owner guide'],
-  ['goose-skill/SKILL.md', join(repoRoot, 'packages', 'Memmory_OB', 'goose-skill', 'SKILL.md'), 'the Memmory_OB skill Goose reads'],
-  ['LICENSE', join(repoRoot, 'packages', 'Memmory_OB', 'LICENSE'), 'license'],
+  ['goose-skill/SKILL.md', join(repoRoot, 'packages', 'Memory_OB', 'goose-skill', 'SKILL.md'), 'the Memory_OB skill Goose reads'],
+  ['LICENSE', join(repoRoot, 'packages', 'Memory_OB', 'LICENSE'), 'license'],
 ]
 for (const [target, source] of inputs) {
-  if (!existsSync(source)) fail(`Missing build input for ${target}:\n  ${source}\nBuild it first: cd apps/03_oddbrain && npm run build:memmory-ob && npm run build:brain-window && npm run build:web`)
+  if (!existsSync(source)) fail(`Missing build input for ${target}:\n  ${source}\nBuild it first: cd apps/03_oddbrain && npm run build:memory-ob && npm run build:brain-window && npm run build:web`)
 }
 
 // ---------- assemble ----------
@@ -83,7 +83,7 @@ walk(stage)
 files.sort((a, b) => a.name.localeCompare(b.name))
 
 const builtAt = new Date().toISOString()
-const manifest = `# Memmory_OB Goose addon — package manifest
+const manifest = `# Memory_OB Goose addon — package manifest
 
 Built: ${builtAt}
 Version: ${appVersion} (${commit}${dirty ? ', uncommitted changes in the build checkout' : ''})
@@ -92,7 +92,7 @@ Targets: Windows 11 + Node.js 24 (works on macOS/Linux too). No paid services. N
 ## What this folder is
 
 One folder you can copy anywhere. It makes plain Goose work with your one
-memory (\`Memmory_OB\`) without installing or maintaining any app:
+memory (\`Memory_OB\`) without installing or maintaining any app:
 
 - \`install.mjs\` — installs the four read-only tools + the skill into Goose and
   switches Goose's stock memory off, in one reviewed change (type \`ALLOW\`).
@@ -108,12 +108,12 @@ memory (\`Memmory_OB\`) without installing or maintaining any app:
 
 | Part | Source | Version |
 | --- | --- | --- |
-| Adapter + tools (dist/memmory-ob-mcp.cjs) | OddBrain ${appRoot.includes('03_oddbrain') ? 'apps/03_oddbrain' : 'OddBrain'} main/memmoryOb | ${appVersion} |
-| Import engine (dist/goose-import-core.cjs) | OddBrain main/memmoryOb/gooseImport | ${appVersion} |
+| Adapter + tools (dist/memory-ob-mcp.cjs) | OddBrain ${appRoot.includes('03_oddbrain') ? 'apps/03_oddbrain' : 'OddBrain'} main/memoryOb | ${appVersion} |
+| Import engine (dist/goose-import-core.cjs) | OddBrain main/memoryOb/gooseImport | ${appVersion} |
 | Brain Window host (dist/brain-window-server.cjs) | OddBrain main/brainWindow | ${appVersion} |
 | Interface (ui/) | OddBrain renderer (dist-web build) | ${appVersion} |
 | Goose storage formats | Goose v1.55.0 (sessions.db, .jsonl sessions, memory/*.txt) | v1.55.0 |
-| Skill (goose-skill/SKILL.md) | packages/Memmory_OB/goose-skill | ${appVersion} |
+| Skill (goose-skill/SKILL.md) | packages/Memory_OB/goose-skill | ${appVersion} |
 
 ## Commands
 
@@ -123,7 +123,7 @@ memory (\`Memmory_OB\`) without installing or maintaining any app:
 | \`node import-goose-history.mjs --apply\` | Import it (type ALLOW) |
 | \`node install.mjs --goose-config <config.yaml>\` | Review the exact change, type ALLOW to install |
 | \`node brain-window.mjs\` | Open Projects · Vault · Review in your browser |
-| \`node dist/memmory-ob-mcp.cjs --catalogue <store> --chats <chats> owner list\` | Owner commands (never-send / allow-send) |
+| \`node dist/memory-ob-mcp.cjs --catalogue <store> --chats <chats> owner list\` | Owner commands (never-send / allow-send) |
 
 ## File checksums (SHA-256)
 
@@ -139,7 +139,7 @@ ${files.map(file => `| \`${file.name}\` | ${file.bytes} | \`${file.sha}\` |`).jo
   smoke 10/10, \`security:release\` and \`security:policy\` passed on the build
   this package was cut from.
 - The package itself is verified end-to-end by
-  \`packages/Memmory_OB/goose-addon/test/package-smoke.sh\` in the repository:
+  \`packages/Memory_OB/goose-addon/test/package-smoke.sh\` in the repository:
   it copies THIS folder to a clean place and runs import + install + Brain
   Window from it.
 

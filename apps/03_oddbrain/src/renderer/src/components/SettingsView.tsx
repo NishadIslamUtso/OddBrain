@@ -330,7 +330,7 @@ function CompleteMemoryBackupControls(): React.JSX.Element {
     catch { setNotice('The Complete Memory operation failed. No complete backup or restore is reported.') }
     finally { setBusy('') }
   }
-  return <div><p className="text-[12px] leading-relaxed text-muted">The recommended backup coordinates the full vault and app-private data, including <strong>Memmory_OB</strong>, chats, transcripts, Projects, Working Notes, private attachment copies and manifests, under one revision receipt.</p><p className="mt-1 text-[11.5px] text-muted">Every listed file is hashed. Use-in-place external files and secrets are explicitly excluded. Restore verifies both domains first, then creates an inactive new profile; live data is never replaced or activated automatically.</p><div className="ob-inline-actions mt-2"><button type="button" disabled={!!busy} onClick={() => void run('create')}>{busy === 'create' ? 'Creating…' : 'Create Complete Memory Backup'}</button><button type="button" disabled={!!busy} onClick={() => void run('restore')}>{busy === 'restore' ? 'Verifying…' : 'Verify and restore to new profile'}</button></div>{notice ? <p className="ob-inline-note" role="status">{notice}</p> : null}</div>
+  return <div><p className="text-[12px] leading-relaxed text-muted">The recommended backup coordinates the full vault and app-private data, including <strong>Memory_OB</strong>, chats, transcripts, Projects, Working Notes, private attachment copies and manifests, under one revision receipt.</p><p className="mt-1 text-[11.5px] text-muted">Every listed file is hashed. Use-in-place external files and secrets are explicitly excluded. Restore verifies both domains first, then creates an inactive new profile; live data is never replaced or activated automatically.</p><div className="ob-inline-actions mt-2"><button type="button" disabled={!!busy} onClick={() => void run('create')}>{busy === 'create' ? 'Creating…' : 'Create Complete Memory Backup'}</button><button type="button" disabled={!!busy} onClick={() => void run('restore')}>{busy === 'restore' ? 'Verifying…' : 'Verify and restore to new profile'}</button></div>{notice ? <p className="ob-inline-note" role="status">{notice}</p> : null}</div>
 }
 
 function ChatStorageControls({ storage }: { storage: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'importRecovery' | 'openStorageLocation'> }): React.JSX.Element {
@@ -721,7 +721,7 @@ export default function SettingsView({
         ),
       },
       ...(!isDemo ? [
-        { label: 'Complete Memory Backup', terms: 'complete coordinated backup restore memmory vault chats transcripts projects attachments revision verify inactive profile', body: <CompleteMemoryBackupControls /> },
+        { label: 'Complete Memory Backup', terms: 'complete coordinated backup restore memory vault chats transcripts projects attachments revision verify inactive profile', body: <CompleteMemoryBackupControls /> },
         { label: 'App-data backup', terms: 'backup restore app private data transcripts working notes artifacts projects preferences', body: <AppDataBackupControls /> },
         { label: 'App-chat storage', terms: 'chat conversation storage recovery export import restore merge retry folder backup', body: <ChatStorageControls storage={chatStorage} /> },
       ] : []),

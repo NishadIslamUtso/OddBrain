@@ -6,7 +6,7 @@
  * with a truthful "needs the desktop app" sentence — and replaces exactly the
  * domains the real screens need with real answers from the brain: the folder
  * choose-and-decide flow, Projects, the Vault structure and link graph, the
- * Review screen's memory workspace, the chat store, and the Memmory_OB
+ * Review screen's memory workspace, the chat store, and the Memory_OB
  * catalogue. Nothing here invents capability; anything still missing keeps the
  * demo bridge's honest wording.
  */
@@ -109,11 +109,11 @@ export function createBrainHostBridge(demo: DesktopBridge): DesktopBridge {
       act: async action => call('memory', { action: 'act', ...(action as Record<string, unknown>) }),
       run: async () => call('memory', { action: 'run' }),
     },
-    memmoryOb: {
-      ...demo.memmoryOb,
-      read: async () => call('memmory', { action: 'read' }),
-      project: async (projectId: string) => call('memmory', { action: 'project', projectId }),
-      search: async input => call('memmory', { action: 'search', ...(input as Record<string, unknown>) }),
+    memoryOb: {
+      ...demo.memoryOb,
+      read: async () => call('memory', { action: 'read' }),
+      project: async (projectId: string) => call('memory', { action: 'project', projectId }),
+      search: async input => call('memory', { action: 'search', ...(input as Record<string, unknown>) }),
     },
     chats: {
       ...demo.chats,

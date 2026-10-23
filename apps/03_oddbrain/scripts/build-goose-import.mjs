@@ -8,8 +8,8 @@ await build({
   configFile: false,
   logLevel: 'warn',
   build: {
-    ssr: resolve(root, 'src/main/memmoryOb/gooseImport.ts'),
-    outDir: resolve(root, 'out/memmory-ob/goose-import'),
+    ssr: resolve(root, 'src/main/memoryOb/gooseImport.ts'),
+    outDir: resolve(root, 'out/memory-ob/goose-import'),
     emptyOutDir: true,
     sourcemap: false,
     minify: false,

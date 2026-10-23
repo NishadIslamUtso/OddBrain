@@ -133,7 +133,7 @@ function GooseMemoryAdapterSection(): React.JSX.Element {
     if (busy || review) return
     setBusy(true); setNote('')
     try {
-      const answer = await bridge.memmoryOb.goosePreview()
+      const answer = await bridge.memoryOb.goosePreview()
       if (answer.review) setReview(answer.review)
       else setNote(answer.answer || 'No Goose adapter change was prepared.')
     } catch { setNote('The Goose adapter review could not be prepared. Nothing changed.') }
@@ -142,17 +142,17 @@ function GooseMemoryAdapterSection(): React.JSX.Element {
   const decide = async (decision: 'allow' | 'deny'): Promise<void> => {
     if (!review || busy) return
     setBusy(true)
-    try { const answer = await bridge.memmoryOb.gooseDecide(review.token, decision); setNote(answer.answer) }
+    try { const answer = await bridge.memoryOb.gooseDecide(review.token, decision); setNote(answer.answer) }
     catch { setNote('The Goose adapter decision could not be completed. Reload and review again.') }
     finally { setReview(null); setBusy(false) }
   }
 
-  return <section className="ob-connector-row" aria-label="Goose Memmory_OB adapter">
-    <header><h3>Goose · Memmory_OB</h3><span>Read-only MCP</span></header>
-    <p className="ob-control-scope">Choose Goose’s existing <code>config.yaml</code>, review the exact <code>extensions.memmory_ob</code> block and the <code>memmory-ob-memory</code> skill file, then allow once. Both install in that single allow. The adapter reads OddBrain’s catalogue, app-chat store and reviewed Brain memory directly; exact search labels confirmed records separately from raw unconfirmed evidence, and evidence lookup verifies exact wording by SHA-256 and refuses changed sources. It exposes status, bounded search, Project counts and evidence verification, with no memory-write, confirmation, deletion, permission or Send tool. The skill binds the answering model to the same authority order: confirmed first, raw evidence second, pending and rejected never as facts, not found over guessing.</p>
+  return <section className="ob-connector-row" aria-label="Goose Memory_OB adapter">
+    <header><h3>Goose · Memory_OB</h3><span>Read-only MCP</span></header>
+    <p className="ob-control-scope">Choose Goose’s existing <code>config.yaml</code>, review the exact <code>extensions.memory_ob</code> block and the <code>memory-ob-memory</code> skill file, then allow once. Both install in that single allow. The adapter reads OddBrain’s catalogue, app-chat store and reviewed Brain memory directly; exact search labels confirmed records separately from raw unconfirmed evidence, and evidence lookup verifies exact wording by SHA-256 and refuses changed sources. It exposes status, bounded search, Project counts and evidence verification, with no memory-write, confirmation, deletion, permission or Send tool. The skill binds the answering model to the same authority order: confirmed first, raw evidence second, pending and rejected never as facts, not found over guessing.</p>
     <p className="ob-control-scope">This sits at Goose’s extension layer, so it is independent of the selected MCP-capable model/provider. Goose’s own CLI-provider mode does not expose its extension ecosystem. Stock Goose Memory is not disabled until measured parity.</p>
     <div className="ob-inline-actions"><button type="button" disabled={isDemo || busy || !!review} onClick={() => void prepare()}>{busy ? 'Preparing…' : 'Choose Goose config and review'}</button></div>
-    {review ? <section aria-label="Review Goose Memmory_OB adapter"><h4>Review Goose adapter</h4><p>{review.explanation}</p>{review.changes.map(change => <details key={change.path} open><summary>{change.path}</summary><pre className="whitespace-pre-wrap break-words">{change.diff}</pre></details>)}<div className="ob-inline-actions">{(['deny', 'allow'] as const).map(decision => <button key={decision} type="button" disabled={busy} onClick={() => void decide(decision)}>{decision === 'allow' ? 'Allow adapter changes once' : 'Deny changes'}</button>)}</div></section> : null}
+    {review ? <section aria-label="Review Goose Memory_OB adapter"><h4>Review Goose adapter</h4><p>{review.explanation}</p>{review.changes.map(change => <details key={change.path} open><summary>{change.path}</summary><pre className="whitespace-pre-wrap break-words">{change.diff}</pre></details>)}<div className="ob-inline-actions">{(['deny', 'allow'] as const).map(decision => <button key={decision} type="button" disabled={busy} onClick={() => void decide(decision)}>{decision === 'allow' ? 'Allow adapter changes once' : 'Deny changes'}</button>)}</div></section> : null}
     {isDemo ? <p className="ob-control-scope">Goose configuration requires the installed desktop app.</p> : null}
     {note ? <p role="status" className="ob-control-scope">{note}</p> : null}
   </section>
