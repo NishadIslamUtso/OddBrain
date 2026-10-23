@@ -160,7 +160,7 @@ const run = async (): Promise<void> => {
   await mcp.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'traps', version: '1' } })
   const listed = await mcp.request('tools/list', {})
   const names = (listed.result?.tools ?? []).map((tool: any) => tool.name).sort()
-  check('trap0: exactly four read-only tools', JSON.stringify(names) === JSON.stringify(['memory_ob_evidence', 'memory_ob_project', 'memory_ob_search', 'memory_ob_status']), JSON.stringify(names))
+  check('trap0: four read-only tools plus the one owner-gated propose tool', JSON.stringify(names) === JSON.stringify(['memory_ob_evidence', 'memory_ob_project', 'memory_ob_propose', 'memory_ob_search', 'memory_ob_status']), JSON.stringify(names))
 
   const s1 = await mcp.call('memory_ob_search', { query: 'Lantern launch date' })
   const hit = (s1.json?.hits ?? []).find((row: any) => row.authority === 'confirmed-owner-memory')
@@ -304,6 +304,52 @@ const run = async (): Promise<void> => {
     const meaningBlock = meaning.json?.meaning ?? {}
     check('trap17: meaning without an index is honest', !meaning.isError && /unchanged/i.test(String(meaningBlock.notice || '')), meaning.text)
     check('trap17: meaning never replaces word-match hits', Array.isArray(meaning.json?.hits), meaning.text)
+    mcp.close()
+  }
+
+  // ---- trap18: the owner's card — propose-approve in chat ----
+  {
+    const cardRoot = mkdtempSync('/tmp/memory-card-')
+    const catalogue = join(cardRoot, 'store'), chatsDir = join(cardRoot, 'chats'), vault = join(cardRoot, 'vault')
+    mkdirSync(catalogue, { recursive: true })
+    mkdirSync(join(vault, '00 System', 'Connectors'), { recursive: true })
+    mkdirSync(join(vault, '06 Review', 'Organizer'), { recursive: true })
+    const at = new Date().toISOString()
+    writeFileSync(join(catalogue, 'manifest.json'), JSON.stringify({ format: 'oddbrain-memory-ob', version: 1, revision: 0, createdAt: at, updatedAt: at, records: 0, relationships: 0, lastChatStoreRevision: 0 }, null, 2) + '\n')
+    writeFileSync(join(vault, '00 System', 'Privacy & Access.md'), '# Privacy & Access\n\nThe never-check list.\n\n```yaml\nexcluded_patterns:\n  - secret.example.com/*\n```\n')
+    writeFileSync(join(vault, '00 System', 'Connectors', 'Source Scope.md'), '# Source Scope\n\nNo scope patterns yet.\n')
+    const u1 = { id: 'u1', role: 'user', content: 'Remember: the launch moved to Tuesday and I prefer my tea without sugar.', at: '2026-10-23T01:00:00.000Z' }
+    const a1 = { id: 'a1', role: 'assistant', content: 'Understood — I will keep that in mind going forward.', at: '2026-10-23T01:00:01.000Z' }
+    const u2 = { id: 'u2', role: 'user', content: 'Remember: the launch moved to Tuesday and I prefer my tea without sugar.', at: '2026-10-23T01:02:00.000Z' }
+    const cardChat = { id: 'chat-card-1', title: 'Card chat', projectId: null, lifecycle: 'active', messages: [u1, a1, u2] }
+    createChatStore(chatsDir).migrate({ chats: [cardChat], currentChat: cardChat.id, rawChats: JSON.stringify([cardChat]), rawCurrentChat: JSON.stringify(cardChat.id) })
+    const mcp = new Mcp(catalogue, chatsDir, vault)
+    await mcp.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'traps-6', version: '1' } })
+
+    const ambiguous = await mcp.call('memory_ob_propose', { kind: 'memory', title: 'Launch day', text: 'The launch moved to Tuesday.', basis: { quote: 'the launch moved to Tuesday' } })
+    check('trap18: an ambiguous quotation is refused, nothing saved', ambiguous.isError === true && /more than one message/.test(ambiguous.text), ambiguous.text)
+    const saved = await mcp.call('memory_ob_propose', { kind: 'memory', title: 'Launch day', text: 'The launch moved to Tuesday.', basis: { quote: 'the launch moved to Tuesday', messageId: 'u1' } })
+    check('trap18: the card click saves exactly one confirmed memory', !saved.isError && saved.json?.saved === true && saved.json?.recordId?.startsWith('interpretation:'), saved.text)
+    check('trap18: it is labelled confirmed owner memory, not raw evidence', saved.json?.savedAs?.kind === 'memory' && saved.json?.approval?.by === 'owner', saved.text)
+    const found = await mcp.call('memory_ob_search', { query: 'launch moved to Tuesday' })
+    const confirmed = (found.json?.hits ?? []).find((row: any) => row.recordId === saved.json?.recordId)
+    check('trap18: word-match finds it as confirmed memory', confirmed?.authority === 'confirmed-owner-memory', found.text)
+    const ev = await mcp.call('memory_ob_evidence', { recordId: saved.json?.recordId, expectedSha256: saved.json?.sha256 })
+    check('trap18: evidence verifies the saved text by hash', !ev.isError && /launch moved to Tuesday/.test(ev.text), ev.text)
+    const wrongHash = await mcp.call('memory_ob_evidence', { recordId: saved.json?.recordId, expectedSha256: sha('different') })
+    check('trap18: a wrong hash is refused as changed', wrongHash.isError === true, wrongHash.text)
+    const again = await mcp.call('memory_ob_propose', { kind: 'memory', title: 'Launch day again', text: 'Duplicate attempt.', basis: { quote: 'the launch moved to Tuesday', messageId: 'u1' } })
+    check('trap18: the same quotation twice says already saved, never a second copy', !again.isError && again.json?.already === true && again.json?.saved === false, again.text)
+    const aiReply = await mcp.call('memory_ob_propose', { kind: 'memory', title: 'From the AI', text: 'Something the assistant said.', basis: { quote: 'keep that in mind going forward', messageId: 'a1' } })
+    check('trap18: an AI reply cannot become a personal fact', aiReply.isError === true && /capsule|personal fact/.test(aiReply.text), aiReply.text)
+    const capsule = await mcp.call('memory_ob_propose', { kind: 'capsule', title: 'Assistant acknowledgement', text: 'The assistant acknowledged the launch change.', basis: { quote: 'keep that in mind going forward', messageId: 'a1' } })
+    check('trap18: an AI reply may still become a capsule', !capsule.isError && capsule.json?.saved === true, capsule.text)
+    const invisible = await mcp.call('memory_ob_propose', { kind: 'journal', title: 'Sneaky', text: 'Visible\u200Binvisible', basis: { quote: 'prefer my tea without sugar', messageId: 'u1' } })
+    check('trap18: invisible characters in the memory text are refused', invisible.isError === true && /invisible/.test(invisible.text), invisible.text)
+    const journal = await mcp.call('memory_ob_propose', { kind: 'journal', title: 'Tea preference', text: 'I prefer my tea without sugar.', date: '2026-10-23', basis: { quote: 'prefer my tea without sugar', messageId: 'u2' } })
+    check('trap18: a journal lands as a journal with its event date', !journal.isError && journal.json?.saved === true && journal.json?.savedAs?.kind === 'journal', journal.text)
+    const bogus = await mcp.call('memory_ob_propose', { kind: 'memory', title: 'Made up', text: 'Invented memory.', basis: { quote: 'this was never said by anyone' } })
+    check('trap18: a quotation that is not an exact message is refused', bogus.isError === true && /not an exact message/.test(bogus.text), bogus.text)
     mcp.close()
   }
 }

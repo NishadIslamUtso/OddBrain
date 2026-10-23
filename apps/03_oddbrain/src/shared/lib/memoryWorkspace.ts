@@ -9,7 +9,7 @@ export type MemoryJob = { id: string; source: MemorySource; state: 'queued' | 'd
 export type MemoryPreferences = { enabled: boolean; model: string; allowExternal: boolean }
 export type MemoryWorkspace = { version: 1; revision: number; preferences: MemoryPreferences; proposals: MemoryProposal[]; people: MemoryPerson[]; accounts: MemoryAccount[]; jobs: MemoryJob[]; merges: Array<{ id: string; from: string; to: string; accounts: string[]; at: string; undone: boolean }>; scanCapped: boolean; discoveryWarnings: string[]; projectionWarnings: string[] }
 export type MemoryView = MemoryWorkspace & { desktop: boolean; running: boolean; status: string; root: string }
-export type MemoryAction = { type: 'preferences' | 'review-batch' | 'review' | 'person' | 'link' | 'merge' | 'undo-merge' | 'retry' | 'draft-chapter'; expectedRevision: number; [key: string]: unknown }
+export type MemoryAction = { type: 'preferences' | 'review-batch' | 'review' | 'person' | 'link' | 'merge' | 'undo-merge' | 'retry' | 'draft-chapter' | 'propose-memory'; expectedRevision: number; [key: string]: unknown }
 export type MemoryBridge = { read(): Promise<{ ok: boolean; view?: MemoryView; error?: string }>; act(action: MemoryAction): Promise<{ ok: boolean; view?: MemoryView; error?: string }>; run(): Promise<{ ok: boolean; view?: MemoryView; error?: string }> }
 export const emptyMemory = (): MemoryWorkspace => ({ version: 1, revision: 0, preferences: { enabled: true, model: '', allowExternal: false }, proposals: [], people: [], accounts: [], jobs: [], merges: [], scanCapped: false, discoveryWarnings: [], projectionWarnings: [] })
 const string = (v: unknown, label: string, max = 20000): string => { if (typeof v !== 'string' || v.length > max) throw Error(`Invalid ${label}.`); return v.trim() }
@@ -62,6 +62,39 @@ export function changeMemory(before: MemoryWorkspace, action: MemoryAction, now:
       item.date = date
     }
     item.revision++; item.reviewedAt = now
+  } else if (action.type === 'propose-memory') {
+    // Owner-gated intake: Memory_OB's chat confirmation card. This only ever
+    // INSERTS a pending proposal — the decision is still made by `review`, so
+    // a crash in between can never confirm anything. The proposal must carry
+    // its own source; nothing is invented here.
+    const p = action.proposal as Record<string, unknown>
+    const source = p?.source as MemorySource
+    if (!source || typeof source !== 'object') throw Error('A memory proposal needs its source.')
+    if (typeof source.path !== 'string' || !/^02 Sources\/Conversations\/(?:Browser|App)\/[a-f0-9]{64}\/revisions\/[a-f0-9]{64}-[a-f0-9]{64}\.json$/.test(source.path)) throw Error('Invalid memory source path.')
+    if (typeof source.hash !== 'string' || !/^[a-f0-9]{64}$/.test(source.hash)) throw Error('Invalid source hash.')
+    if (!['people', 'ai', 'classroom', 'confirmed'].includes(String(source.kind))) throw Error('Invalid source kind.')
+    const kind = String(p.kind)
+    if (!['profile', 'journal', 'story', 'capsule', 'note'].includes(kind)) throw Error('Unknown destination.')
+    const subject = String(p.subject)
+    if (subject !== 'self' && (!source.account || subject !== source.account)) throw Error('This memory must be about the owner.')
+    if (['journal', 'story', 'note'].includes(kind) && subject !== 'self') throw Error('Personal journal, Life Story and engine-notes records must be about the owner.')
+    if (source.kind === 'ai' && source.role !== 'user' && kind !== 'capsule') throw Error('AI replies cannot become personal facts.')
+    const quote = string(p.quote, 'source quotation', 6000)
+    if (!quote) throw Error('A memory proposal needs its exact quotation.')
+    const text = string(p.text, 'proposal text')
+    if (!text) throw Error('Empty interpretation.')
+    const title = string(p.title, 'title', 300)
+    if (!title) throw Error('A memory proposal needs a title.')
+    const date = string(p.date ?? '', 'event date', 10)
+    if (date && (!/^\d{4}-\d{2}-\d{2}$/.test(date) || (!Number.isFinite(Date.parse(date)) || new Date(date).toISOString().slice(0,10) !== date))) throw Error('Use an event date or leave it unknown.')
+    const uncertainty = string(p.uncertainty ?? '', 'uncertainty', 2000)
+    const model = string(p.model ?? 'memory_ob_propose', 'model', 300)
+    if (state.proposals.some(old => old.source.conversation === source.conversation && old.source.provider === source.provider && old.source.message === source.message && old.kind === kind && old.subject === subject && old.quote === quote)) throw Error('That quotation is already saved with this destination.')
+    state.proposals.push({ id: newId, source, kind: kind as MemoryKind, subject, title, text, quote, date, uncertainty, model, authored: 'ai', state: 'pending', revision: 1, history: [] })
+    if (typeof action.jobId === 'string') {
+      const job = state.jobs.find(j => j.id === action.jobId)
+      if (job && job.state === 'queued') { job.state = 'done'; job.error = '' }
+    }
   } else if (action.type === 'person') {
     const name = string(action.name, 'person name', 200)
     if (!name) throw Error('Name this person.')

@@ -62,15 +62,17 @@ Goose history. After install, Goose never touches its old memory again.
   UNVERIFIED; every quote still passes evidence. Uses any free
   embeddings endpoint you connect (for example Ollama Cloud) — no local model
   is ever downloaded.
+- **"Remember this" with one click:** Goose proposes a memory and a
+  confirmation card appears in the chat showing exactly what is saved and as
+  what (destination, title, text, and your exact quotation). Allow confirms it
+  on the spot — no second visit to Review. Deny saves nothing. Review keeps the
+  history for later changes (nothing is ever deleted).
 - One ready-to-download folder with a checksummed MANIFEST (every file's
   fingerprint, versions, commands).
 
 ## What's left
 
-1. **Goose's "remember this" tool** — Goose proposes memory through its tools
-   (smooth, few clicks), you approve each one in Review. Propose-and-approve,
-   nothing confirmed by Goose itself.
-2. **Your acceptance run** — install on your real Windows machine with plain
+1. **Your acceptance run** — install on your real Windows machine with plain
    Goose (import first), and check everything live.
 
 Not building (your call): per-chat "notes for AI" — Goose's own notes play

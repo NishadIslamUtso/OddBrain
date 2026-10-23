@@ -52,6 +52,28 @@ The installer:
 | `memory_ob_search` | Find exact word matches in confirmed memory and raw chat evidence. Every answer carries its authority label. |
 | `memory_ob_project` | Bounded counts for one Project. |
 | `memory_ob_evidence` | Return exact wording, only while the stored bytes still match the SHA-256 you were given. Changed source → refused. Raw chat evidence needs its Project ID — same boundary as search. |
+| `memory_ob_propose` | The ONE writer. Saves exactly one memory through your Allow click on the confirmation card — see below. |
+
+## Remember this — the card in chat
+
+When Goose wants to remember something, it calls `memory_ob_propose` and a
+confirmation card appears **in the chat** showing exactly what is being saved
+and as what: the destination (`memory`, `journal`, `capsule` or `life-story`),
+the title, the exact text, and the quotation it is based on.
+
+- **Allow** → it becomes confirmed owner memory right there. No second visit to
+  Review needed.
+- **Deny** → nothing is saved at all.
+- Change your mind later? The Review screen still holds the full history —
+  correct or withdraw anything there (withdrawal keeps history; nothing is
+  ever deleted).
+
+Two honest rules to keep this safe:
+
+- **Never set "always allow" for `memory_ob_propose`.** The card is the
+  approval; without it, saves would happen unseen. Keep it asking every time.
+- The quotation on the card must be your exact words from the conversation —
+  if Goose cannot quote you, nothing is saved.
 
 ## Hiding a record from Goose (Never Send)
 
@@ -155,8 +177,9 @@ derivative; deleting it loses nothing.
 ## Still coming next (built on this)
 
 - **Engine-notes proposals**: the organizer drafts memory proposals from
-  conversations and shows them for review — confirmation still only ever
-  happens in the Review screen.
+  conversations and shows them for review. You confirm each draft either in
+  the Review screen or — for single memories Goose proposes in chat — with
+  one click on the confirmation card.
 - **Real-machine acceptance** on your Windows machine with plain Goose.
 
 ## The ready-to-download folder

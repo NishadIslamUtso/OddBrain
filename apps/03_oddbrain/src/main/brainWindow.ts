@@ -158,8 +158,9 @@ export async function startBrainWindow(options: BrainWindowOptions): Promise<{ u
       return respond(res, { ok: false, error: 'Choose inspect, use, or fresh.' }, 400)
     }
     if (op === 'memory') {
-      // The Review screen: real doubts/confirmations/interpretations, and the
-      // only place a confirmation is ever decided. `run` is the engine-notes
+      // The Review screen: real doubts/confirmations/interpretations. A
+      // confirmation is decided only by the owner — here, or by their Allow on
+      // the memory_ob_propose card in chat. `run` is the engine-notes
       // proposal-only writer: it drafts pending proposals (quote pass, or the
       // connected model when ODDBRAIN_MODEL_* is configured) and never
       // confirms anything.
