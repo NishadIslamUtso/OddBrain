@@ -71,5 +71,20 @@ printf 'ALLOW\n' | node "$ADDON" --goose-config "$cfg" --brain "$W/brain" --adap
 [ $? -ne 0 ]; check "F: foreign adapter file refused" $? "installer accepted"
 grep -q "not ours" "$W/brain/adapter/memory-ob-mcp.cjs"; check "F: foreign file intact" $? "foreign file clobbered"
 
+# G: the Apps-page copy — only in the nested Goose layout, beside the owner's apps.
+grep -q 'no Goose data folder found' "$W/install.log"; check "G: flat layout skips the Apps copy with a note" $? "$(grep 'Screens app' "$W/install.log" 2>&1)"
+mkdir -p "$W/nested/config" "$W/nested/data"
+cat > "$W/nested/config/config.yaml" <<'YAML'
+extensions:
+  memory:
+    type: builtin
+    name: memory
+    enabled: true
+YAML
+printf 'ALLOW\n' | node "$ADDON" --goose-config "$W/nested/config/config.yaml" --brain "$W/nested/brain" --adapter "$ADAPTER" > "$W/nested.log" 2>&1
+check "G: nested install writes the Apps-page copy" $? "$(tail -3 "$W/nested.log")"
+grep -q 'Memory_OB' "$W/nested/data/apps/memory-ob.html" 2>/dev/null && grep -qi 'captured when the installer ran' "$W/nested/data/apps/memory-ob.html" 2>/dev/null; check "G: screens app carries the name and the stamp" $? "$(ls "$W/nested/data/apps" 2>&1)"
+grep -q 'Screens app written' "$W/nested.log"; check "G: install reports the screens app" $? "$(grep 'Screens app' "$W/nested.log" 2>&1)"
+
 echo; echo "$pass passed, $fail failed"
 exit $fail

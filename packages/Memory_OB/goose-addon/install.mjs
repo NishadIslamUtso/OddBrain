@@ -18,8 +18,9 @@
  *   node install.mjs --print-only --goose-config <path>     (show diff, write nothing)
  */
 import { createHash, randomUUID } from 'node:crypto'
-import { closeSync, constants, existsSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readSync, renameSync, unlinkSync, writeSync } from 'node:fs'
-import { dirname, join, resolve } from 'node:path'
+import { execFileSync } from 'node:child_process'
+import { closeSync, constants, existsSync, fstatSync, ftruncateSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, unlinkSync, writeSync } from 'node:fs'
+import { basename, dirname, join, resolve } from 'node:path'
 import { createInterface } from 'node:readline'
 import { fileURLToPath } from 'node:url'
 
@@ -107,6 +108,19 @@ const brainLayout = [
 const adapterTarget = join(brainRoot, 'adapter', 'memory-ob-mcp.cjs')
 const receiptPath = join(brainRoot, 'adapter', 'goose-adapter.json')
 const skillTarget = join(dirname(gooseConfig), 'skills', 'memory-ob-memory', 'SKILL.md')
+// Goose's Apps page lists apps from <root>/data/apps — where the owner's other
+// apps live ("beside the scheduler thing"). Nested layout: config is
+// <root>/config/config.yaml, so the data folder is its sibling. Only then (or
+// when a data folder sits directly under the config folder) — never invent a
+// location.
+const gooseDataDir = (() => {
+  const configDir = dirname(gooseConfig)
+  const sibling = join(configDir, '..', 'data')
+  if (basename(configDir) === 'config' && existsSync(sibling)) return sibling
+  if (existsSync(join(configDir, 'data'))) return join(configDir, 'data')
+  return ''
+})()
+const appsTarget = gooseDataDir ? join(gooseDataDir, 'apps', 'memory-ob.html') : ''
 
 // Ownership check: never overwrite a file we cannot prove we wrote.
 const ownedFile = (path, bytes, priorHash, label) => {
@@ -278,6 +292,7 @@ console.log('\nMemory_OB for Goose — proposed changes (nothing is written yet)
 console.log(`Brain folder:   ${brainRoot}`)
 console.log(`Goose config:   ${gooseConfig}`)
 console.log(`Skill installs: ${skillTarget}`)
+console.log(`Screens app:   ${appsTarget || '(no Goose data folder found beside the config — the Apps-page copy is skipped)'}`)
 console.log('')
 for (const note of notes) console.log(region('', note.label, note.before, note.after))
 if (priorReceipt) console.log(`Receipt update: ${receiptPath}\n  old adapter sha ${priorReceipt.adapterSha256}\n  new adapter sha ${sha(adapterBytes)}\n`)
@@ -349,6 +364,30 @@ for (const part of brainLayout) mkdirSync(join(brainRoot, part), { recursive: tr
 }
 writeFileAtomic(adapterTarget, adapterBytes)
 writeFileAtomic(skillTarget, skillBytes)
+// Screens app on Goose's Apps page — a stamped snapshot that sits beside the
+// owner's other apps. Live screens come from the chat tool. Soft-ownership:
+// never overwrite a file that is not ours.
+let appHtml = '', appNote = ''
+if (appsTarget) {
+  try {
+    if (existsSync(appsTarget)) {
+      const existing = readFileSync(appsTarget, 'utf8')
+      if (!existing.includes('Memory_OB')) {
+        appNote = `Screens app left alone: a different file already sits at ${appsTarget}.`
+      }
+    }
+    if (!appNote) {
+      appHtml = execFileSync('node', [adapterTarget, '--catalogue', join(brainRoot, 'store'), '--chats', join(brainRoot, 'chats'), '--vault', brainRoot, 'app-html'], { encoding: 'utf8', maxBuffer: 8_000_000 })
+      if (!appHtml.includes('Memory_OB')) throw Error('app-html returned unexpected content.')
+      mkdirSync(join(gooseDataDir, 'apps'), { recursive: true })
+      writeFileAtomic(appsTarget, Buffer.from(appHtml))
+      appNote = `Screens app written: ${appsTarget}`
+    }
+  } catch (error) {
+    appNote = `Screens app skipped: ${error instanceof Error ? error.message : String(error)}`
+    appHtml = ''
+  }
+}
 const receipt = {
   format: 'oddbrain-goose-memory-adapter-v1',
   configPath: gooseConfig,
@@ -357,6 +396,8 @@ const receipt = {
   adapterPath: adapterTarget,
   skillPath: skillTarget,
   skillSha256: sha(skillBytes),
+  appPath: appsTarget,
+  appSha256: appHtml ? sha(appHtml) : '',
   cataloguePath: join(brainRoot, 'store'),
   chatsPath: join(brainRoot, 'chats'),
   vaultPath: brainRoot,
@@ -365,6 +406,7 @@ const receipt = {
 writeFileAtomic(receiptPath, Buffer.from(`${JSON.stringify(receipt, null, 2)}\n`))
 
 console.log(`\nInstalled.`)
+if (appNote) console.log(appNote)
 if (backup) console.log(`Original Goose config preserved at: ${backup}`)
 console.log(`Receipt: ${receiptPath}`)
 console.log('\nNext: fully close and reopen Goose, then ask "what memory tools do you have?"')

@@ -75,9 +75,16 @@ const rowList = (title: string, rows: AppReviewRow[], empty: string): string => 
       </article>`).join('')}
     </section>`
 
-/** Render the three screens. Every value is HTML-escaped; nothing is executable. */
-export function buildAppHtml(state: AppScreenState): string {
+/** Render the three screens. Every value is HTML-escaped; nothing is executable.
+ *  `snapshot` mode is the copy the installer drops into Goose's Apps folder —
+ *  it says plainly when it was captured and how to get live screens. */
+export function buildAppHtml(state: AppScreenState, options?: { snapshot?: boolean }): string {
   const { counts, projects, vault, review } = state
+  const snapshotBanner = options && options.snapshot ? `
+  <div class="banner">
+    This copy was captured when the installer ran (state as of ${escapeHtml(state.generatedAt)}).
+    For live screens any time, open the chat and say: <b>show my memory screens</b>.
+  </div>` : ''
   return `<!DOCTYPE html>
 <html>
 <head>
@@ -102,6 +109,7 @@ ${GOOSE_APP_PRD}
     .chip { border: 1px solid rgba(128,128,128,.3); border-radius: 10px; padding: 6px 10px; font-size: 12px; }
     .chip b { font-size: 15px; margin-right: 4px; }
     body.light .chip { background: #fff; } body.dark .chip { background: #2d2d2f; }
+    .banner { margin-top: 12px; padding: 10px 14px; border-radius: 10px; font-size: 12.5px; border: 1px solid rgba(128,128,128,.35); opacity: .9; }
     .panel { margin-top: 16px; border: 1px solid rgba(128,128,128,.25); border-radius: 12px; padding: 12px 16px; }
     body.light .panel { background: #fff; } body.dark .panel { background: #2d2d2f; }
     .panel h2 { margin: 2px 0 10px; font-size: 15px; }
@@ -123,6 +131,7 @@ ${GOOSE_APP_PRD}
 </head>
 <body class="light">
   <div class="wrap">
+  ${snapshotBanner}
   <header class="app">
     <h1>Memory_OB</h1>
     <div class="sub">Live memory state as of ${escapeHtml(state.generatedAt)} · ask “show my memory screens” again to refresh</div>

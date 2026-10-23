@@ -839,7 +839,17 @@ const send = (value: unknown): void => { process.stdout.write(`${JSON.stringify(
 const success = (id: unknown, result: unknown): void => send({ jsonrpc: '2.0', id, result })
 const failure = (id: unknown, code: number, message: string): void => send({ jsonrpc: '2.0', id: id ?? null, error: { code, message } })
 
-if (process.argv.includes('owner')) ownerConsole(process.argv.slice(process.argv.indexOf('owner') + 1))
+if (process.argv.includes('app-html')) {
+  // The installer drops this snapshot into Goose's Apps folder so the screens
+  // sit beside the owner's other apps. Live screens come from the chat tool.
+  try {
+    process.stdout.write(buildAppHtml(collectAppState(), { snapshot: true }))
+    process.exit(0)
+  } catch (error) {
+    process.stderr.write(`[Memory_OB app] ${error instanceof Error ? error.message : String(error)}\n`)
+    process.exit(1)
+  }
+} else if (process.argv.includes('owner')) ownerConsole(process.argv.slice(process.argv.indexOf('owner') + 1))
 else {
 const reader = createInterface({ input: process.stdin, crlfDelay: Infinity })
 reader.on('line', line => {

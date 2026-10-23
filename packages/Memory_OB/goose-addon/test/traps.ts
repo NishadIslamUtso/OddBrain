@@ -373,6 +373,8 @@ const run = async (): Promise<void> => {
     check('trap19: the resource read declares csp and border metadata', Boolean(read.result?.contents?.[0]?._meta?.ui?.csp) && read.result?.contents?.[0]?._meta?.ui?.prefersBorder === true, JSON.stringify(read.result?.contents?.[0]?._meta ?? {}))
     check('trap19: an unknown app resource is refused', Boolean((await mcp.request('resources/read', { uri: 'ui://apps/evil' })).error), 'missing refusal')
     mcp.close()
+    const htmlRun = spawnSync('node', [bundle, '--catalogue', catalogueRoot, '--chats', chatsRoot, '--vault', vaultRoot, 'app-html'], { encoding: 'utf8' })
+    check('trap19: app-html renders the stamped Apps-page copy', htmlRun.status === 0 && /GooseApp/.test(htmlRun.stdout) && /captured when the installer ran/i.test(htmlRun.stdout), htmlRun.stderr || String(htmlRun.stdout).slice(0, 200))
   }
 }
 
