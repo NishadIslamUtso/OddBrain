@@ -43,10 +43,12 @@ const gooseCandidates = () => {
   const root = process.env.GOOSE_PATH_ROOT
   const home = process.env.HOME || process.env.USERPROFILE || homedir()
   const list = []
-  if (root && root.startsWith('/')) list.push(root)
+  if (root) list.push(root)
   if (process.platform === 'win32') {
     const appData = process.env.APPDATA || join(home, 'AppData', 'Roaming')
+    const localAppData = process.env.LOCALAPPDATA || join(home, 'AppData', 'Local')
     list.push(join(appData, 'Block', 'goose'), join(appData, 'goose'))
+    list.push(join(localAppData, 'Block', 'goose'), join(localAppData, 'goose'), join(home, '.config', 'goose'))
     list.push(join(home, 'AppData', 'Roaming', 'Block', 'goose'))
   } else if (process.platform === 'darwin') {
     list.push(join(home, 'Library', 'Application Support', 'Block', 'goose'))
@@ -58,7 +60,9 @@ const gooseCandidates = () => {
 }
 const looksLikeGoose = (dir) => {
   if (!existsSync(dir)) return false
+  // Flat layout (one folder) or the nested root layout (config/ + data/).
   return existsSync(join(dir, 'sessions')) || existsSync(join(dir, 'memory')) || existsSync(join(dir, 'config.yaml'))
+    || existsSync(join(dir, 'config', 'config.yaml')) || existsSync(join(dir, 'data', 'sessions'))
 }
 const explicitData = option('--goose-data')
 const explicitConfig = option('--goose-config')
@@ -67,8 +71,12 @@ let gooseConfig = explicitConfig ? resolve(explicitConfig) : ''
 if (!gooseData || !gooseConfig) {
   const found = gooseCandidates().filter(looksLikeGoose)
   const primary = found[0] || ''
-  if (!gooseData) gooseData = primary
-  if (!gooseConfig) gooseConfig = primary
+  let data = primary, config = primary
+  if (primary && (existsSync(join(primary, 'data', 'sessions')) || existsSync(join(primary, 'config', 'config.yaml')))) {
+    data = join(primary, 'data'); config = join(primary, 'config')
+  }
+  if (!gooseData) gooseData = data
+  if (!gooseConfig) gooseConfig = config
   if (!primary && (!explicitData || !explicitConfig)) {
     fail(`Could not find Goose's folder. Looked in:\n  ${gooseCandidates().join('\n  ')}\nPass it explicitly: node import-goose-history.mjs --goose-data <folder> --goose-config <folder>`)
   }
