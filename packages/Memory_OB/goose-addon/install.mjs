@@ -145,6 +145,7 @@ const blockFor = () => [
   '      - memory_ob_project',
   '      - memory_ob_evidence',
   '      - memory_ob_propose',
+  '      - memory_ob_screens',
   '',
 ].join('\n')
 
@@ -153,6 +154,17 @@ const disabledMemoryEntry = () => [
   '    type: builtin',
   '    name: memory',
   '    enabled: false',
+  '',
+].join('\n')
+
+// The built-in Apps extension powers Goose's sidebar Apps page — the door the
+// Memory_OB screens use for standalone launch inside the Goose app.
+const appsEntry = () => [
+  '  apps:',
+  '    type: builtin',
+  '    name: apps',
+  '    display_name: Apps',
+  '    enabled: true',
   '',
 ].join('\n')
 
@@ -225,13 +237,34 @@ function patchConfig(before) {
     const at = anchor ? anchor.end : extIndex + 1
     lines.splice(at, 0, ...disabledMemoryEntry().replace(/\n$/, '').split('\n'))
   }
+
+  // Pass 4: the built-in Apps extension, on. Without it Goose's sidebar has no
+  // Apps page at all, so the Memory_OB screens cannot be launched standalone.
+  entries = findEntries()
+  const appsRow = entries.find(entry => entry.name === 'apps')
+  if (!appsRow) {
+    const anchor = entries.find(entry => entry.name === 'memory_ob')
+    const at = anchor ? anchor.end : extIndex + 1
+    lines.splice(at, 0, ...appsEntry().replace(/\n$/, '').split('\n'))
+    notes.push({ label: `${gooseConfig}#extensions.apps`, before: '', after: appsEntry() })
+  } else {
+    let enabledLine = -1
+    for (let i = appsRow.start + 1; i < appsRow.end; i += 1) if (/^ {4}enabled:/.test(lines[i])) enabledLine = i
+    if (enabledLine >= 0 && lines[enabledLine].trim() === 'enabled: false') {
+      notes.push({ label: `${gooseConfig}#extensions.apps.enabled`, before: `${lines[enabledLine]}\n`, after: '    enabled: true\n' })
+      lines[enabledLine] = '    enabled: true'
+    } else if (enabledLine < 0) {
+      notes.push({ label: `${gooseConfig}#extensions.apps`, before: `${lines[appsRow.start]}\n`, after: `${lines[appsRow.start]}\n    enabled: true\n` })
+      lines.splice(appsRow.start + 1, 0, '    enabled: true')
+    }
+  }
   return { after: lines.join('\n'), notes }
 }
 
 const { after, notes } = patchConfig(before)
 
-// Sanity: the result must contain exactly our five tools and the memory switch.
-for (const needle of ['memory_ob_status', 'memory_ob_search', 'memory_ob_project', 'memory_ob_evidence', 'memory_ob_propose']) {
+// Sanity: the result must contain exactly our six tools and the memory switch.
+for (const needle of ['memory_ob_status', 'memory_ob_search', 'memory_ob_project', 'memory_ob_evidence', 'memory_ob_propose', 'memory_ob_screens']) {
   if (!after.includes(`- ${needle}`)) fail('Patch safety check failed: the prepared config is missing tool entries. Nothing was changed.')
 }
 if (after.replace(blockFor(), '').includes('memory_ob:\n    type: stdio\n    name: memory_ob') && before.includes('memory_ob:')) {

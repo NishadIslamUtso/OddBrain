@@ -25,9 +25,11 @@ It imports your Goose history into `Documents\OddBrain\Memory_OB` **first**
 installs. The `ALLOW` in the line is your approval — the exact change is
 printed before anything is written. Restart Goose afterwards.
 
-**Your screens live inside Goose itself** — after the restart, Memory_OB
-appears in Goose's Apps sidebar (next to the Clock app) with Projects, Vault
-and Review, always showing live memory state. The full window version is
+**Your screens live inside Goose itself.** Ask Goose *"show my memory
+screens"* and Projects, Vault and Review render **in the conversation** (the
+MCP Apps contract: the `memory_ob_screens` tool returns a `ui://` app). The
+installer also enables Goose's built-in **Apps** extension, so the screens are
+on the sidebar's Apps page too (next to the Clock). The full window version is
 still there when you want it: `Documents\OddBrain\Memory_OB\Open Screens.cmd`.
 
 **Every future module ships the same way** — this is the pattern:

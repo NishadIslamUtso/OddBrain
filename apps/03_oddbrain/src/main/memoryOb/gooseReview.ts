@@ -76,6 +76,7 @@ const extensionBlock = (adapter: string, catalogue: string, chats: string, vault
   '      - memory_ob_project',
   '      - memory_ob_evidence',
   '      - memory_ob_propose',
+  '      - memory_ob_screens',
 ].join('\n') + '\n'
 
 const readReceipt = (bytes: Buffer | null): Receipt | null => {
@@ -122,7 +123,7 @@ function verifyPatchedConfig(text: string): void {
   const extension = document.getIn(['extensions', 'memory_ob']) as any
   if (!extension || typeof extension.toJSON !== 'function') throw Error('The prepared Goose config did not retain the Memory_OB extension.')
   const value = extension.toJSON()
-  if (value?.type !== 'stdio' || value?.name !== 'memory_ob' || value?.enabled !== true || value?.cmd !== 'node' || !Array.isArray(value.args) || value.args.length !== 7 || !Array.isArray(value.available_tools) || value.available_tools.join('|') !== 'memory_ob_status|memory_ob_search|memory_ob_project|memory_ob_evidence|memory_ob_propose') throw Error('The prepared Goose extension changed shape during YAML parsing.')
+  if (value?.type !== 'stdio' || value?.name !== 'memory_ob' || value?.enabled !== true || value?.cmd !== 'node' || !Array.isArray(value.args) || value.args.length !== 7 || !Array.isArray(value.available_tools) || value.available_tools.join('|') !== 'memory_ob_status|memory_ob_search|memory_ob_project|memory_ob_evidence|memory_ob_propose|memory_ob_screens') throw Error('The prepared Goose extension changed shape during YAML parsing.')
 }
 
 export function createGooseMemoryReview(scope: () => Scope, now = Date.now) {

@@ -36,7 +36,7 @@ its old memory store afterwards.
 
 The installer:
 
-- adds one `memory_ob` extension entry to Goose's config (four read-only tools),
+- adds one `memory_ob` extension entry to Goose's config (read-only tools plus the in-chat screens),
 - switches **off** Goose's stock `memory` extension (`enabled: false`),
 - creates the brain folder ready to use, including an empty memory catalogue,
 - installs the `memory-ob-memory` rule sheet into Goose's skills folder,

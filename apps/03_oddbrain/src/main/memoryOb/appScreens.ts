@@ -90,42 +90,47 @@ ${JSON.stringify(GOOSE_APP_METADATA, null, 2)}
 ${GOOSE_APP_PRD}
   </script>
   <style>
-    html, body { margin: 0; padding: 0; background: #14121a; color: #ece9f1; font: 14px/1.5 system-ui, "Segoe UI", sans-serif; }
-    header.app { padding: 18px 22px 12px; border-bottom: 1px solid #2c2836; }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; padding: 0; font: 14px/1.5 system-ui, "Segoe UI", sans-serif; transition: background-color .3s, color .3s; }
+    body.light { background: #f5f5f7; color: #1d1d1f; }
+    body.dark { background: #1d1d1f; color: #f5f5f7; }
+    .wrap { padding: 16px 20px 20px; max-width: 860px; margin: 0 auto; }
+    header.app { padding-bottom: 10px; border-bottom: 1px solid rgba(128,128,128,.25); }
     header.app h1 { margin: 0 0 2px; font-size: 20px; letter-spacing: .3px; }
-    header.app .sub { color: #a89fbc; font-size: 12px; }
-    .strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 22px 0; }
-    .chip { background: #201c2b; border: 1px solid #322b42; border-radius: 10px; padding: 6px 10px; font-size: 12px; }
+    header.app .sub { opacity: .65; font-size: 12px; }
+    .strip { display: flex; flex-wrap: wrap; gap: 8px; padding: 12px 0 0; }
+    .chip { border: 1px solid rgba(128,128,128,.3); border-radius: 10px; padding: 6px 10px; font-size: 12px; }
     .chip b { font-size: 15px; margin-right: 4px; }
-    .chip.warn { border-color: #7a5230; } .chip.good { border-color: #2f5d3f; } .chip.bad { border-color: #6e3038; }
-    main { padding: 6px 22px 20px; }
-    .panel { margin-top: 18px; background: #1a1722; border: 1px solid #2c2836; border-radius: 12px; padding: 12px 16px; }
-    .panel h2 { margin: 2px 0 10px; font-size: 15px; color: #cfc4e6; }
-    .count { color: #8f83ab; font-weight: normal; font-size: 12px; }
+    body.light .chip { background: #fff; } body.dark .chip { background: #2d2d2f; }
+    .panel { margin-top: 16px; border: 1px solid rgba(128,128,128,.25); border-radius: 12px; padding: 12px 16px; }
+    body.light .panel { background: #fff; } body.dark .panel { background: #2d2d2f; }
+    .panel h2 { margin: 2px 0 10px; font-size: 15px; }
+    .count { opacity: .55; font-weight: normal; font-size: 12px; }
     table { width: 100%; border-collapse: collapse; font-size: 13px; }
-    td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid #262231; }
-    th { color: #9b90b5; font-weight: 600; }
-    .row { border-top: 1px solid #262231; padding: 10px 2px; }
+    td, th { text-align: left; padding: 6px 8px; border-bottom: 1px solid rgba(128,128,128,.18); }
+    th { opacity: .65; font-weight: 600; }
+    .row { border-top: 1px solid rgba(128,128,128,.18); padding: 10px 2px; }
     .row:first-of-type { border-top: 0; }
     .row header { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; }
-    .row .quote { margin: 6px 0 2px; color: #c9bfe0; font-style: italic; }
-    .row footer { color: #7e7396; font-size: 11px; word-break: break-all; }
-    .tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: #242033; color: #a99cc6; }
-    .empty { color: #7e7396; font-style: italic; margin: 4px 0; }
-    .files { margin: 0; padding-left: 18px; color: #c9bfe0; }
+    .row .quote { margin: 6px 0 2px; opacity: .85; font-style: italic; }
+    .row footer { opacity: .55; font-size: 11px; word-break: break-all; }
+    .tag { font-size: 11px; padding: 1px 8px; border-radius: 999px; border: 1px solid rgba(128,128,128,.3); opacity: .8; }
+    .empty { opacity: .55; font-style: italic; margin: 4px 0; }
+    .files { margin: 0; padding-left: 18px; }
     .files li { margin: 2px 0; word-break: break-all; }
-    footer.app { padding: 10px 22px 18px; color: #7e7396; font-size: 12px; border-top: 1px solid #2c2836; }
+    footer.app { padding: 14px 0 4px; opacity: .6; font-size: 12px; border-top: 1px solid rgba(128,128,128,.25); margin-top: 16px; }
   </style>
 </head>
-<body>
+<body class="light">
+  <div class="wrap">
   <header class="app">
     <h1>Memory_OB</h1>
-    <div class="sub">Live memory state as of ${escapeHtml(state.generatedAt)} · close and reopen this app to refresh</div>
+    <div class="sub">Live memory state as of ${escapeHtml(state.generatedAt)} · ask “show my memory screens” again to refresh</div>
   </header>
   <div class="strip">
-    <span class="chip good"><b>${counts.confirmed}</b>confirmed memory</span>
-    <span class="chip warn"><b>${counts.pending}</b>pending</span>
-    <span class="chip bad"><b>${counts.rejected}</b>rejected</span>
+    <span class="chip"><b>${counts.confirmed}</b>confirmed memory</span>
+    <span class="chip"><b>${counts.pending}</b>pending</span>
+    <span class="chip"><b>${counts.rejected}</b>rejected</span>
     <span class="chip"><b>${counts.stale}</b>stale</span>
     <span class="chip"><b>${counts.raw}</b>raw evidence</span>
     <span class="chip"><b>${counts.draft}</b>drafts</span>
@@ -156,6 +161,54 @@ ${GOOSE_APP_PRD}
     These screens are read-only. To approve or deny a proposed memory, use the confirmation card in the chat.
     Full Review history, undo and revoke live in the Review window (<code>Open Screens.cmd</code>).
   </footer>
+  </div>
+  <script>
+    class McpAppClient {
+      constructor() {
+        this.pendingRequests = new Map();
+        this.requestId = 0;
+        this.hostContext = null;
+        window.addEventListener('message', (e) => this.handleMessage(e));
+        this.initialize();
+      }
+      async initialize() {
+        try {
+          const result = await this.request('ui/initialize', {});
+          this.hostContext = result.hostContext;
+          if (this.hostContext && this.hostContext.theme) this.applyTheme(this.hostContext.theme);
+          this.notify('ui/notifications/initialized', {});
+          this.reportSize();
+        } catch (error) { /* older hosts: stay light */ }
+      }
+      handleMessage(event) {
+        const data = event.data;
+        if (!data || typeof data !== 'object') return;
+        if ('id' in data && this.pendingRequests.has(data.id)) {
+          const entry = this.pendingRequests.get(data.id);
+          this.pendingRequests.delete(data.id);
+          data.error ? entry.reject(new Error(data.error.message)) : entry.resolve(data.result);
+          return;
+        }
+        if (data.method === 'ui/notifications/host-context-changed') {
+          if (data.params && data.params.theme) this.applyTheme(data.params.theme);
+        }
+      }
+      request(method, params) {
+        return new Promise((resolve, reject) => {
+          const id = ++this.requestId;
+          this.pendingRequests.set(id, { resolve, reject });
+          window.parent.postMessage({ jsonrpc: '2.0', id: id, method: method, params: params }, '*');
+          setTimeout(() => {
+            if (this.pendingRequests.has(id)) { this.pendingRequests.delete(id); reject(new Error('Request timed out')); }
+          }, 30000);
+        });
+      }
+      notify(method, params) { window.parent.postMessage({ jsonrpc: '2.0', method: method, params: params }, '*'); }
+      applyTheme(theme) { document.body.className = (theme === 'dark') ? 'dark' : 'light'; }
+      reportSize() { this.notify('ui/notifications/size-changed', { height: document.body.scrollHeight }); }
+    }
+    window.mcpApp = new McpAppClient();
+  </script>
 </body>
 </html>
 `

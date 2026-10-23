@@ -160,7 +160,7 @@ const run = async (): Promise<void> => {
   await mcp.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'traps', version: '1' } })
   const listed = await mcp.request('tools/list', {})
   const names = (listed.result?.tools ?? []).map((tool: any) => tool.name).sort()
-  check('trap0: four read-only tools plus the one owner-gated propose tool', JSON.stringify(names) === JSON.stringify(['memory_ob_evidence', 'memory_ob_project', 'memory_ob_propose', 'memory_ob_search', 'memory_ob_status']), JSON.stringify(names))
+  check('trap0: four read-only tools plus the one owner-gated propose tool and the screens view', JSON.stringify(names) === JSON.stringify(['memory_ob_evidence', 'memory_ob_project', 'memory_ob_propose', 'memory_ob_screens', 'memory_ob_search', 'memory_ob_status']), JSON.stringify(names))
 
   const s1 = await mcp.call('memory_ob_search', { query: 'Lantern launch date' })
   const hit = (s1.json?.hits ?? []).find((row: any) => row.authority === 'confirmed-owner-memory')
@@ -355,18 +355,22 @@ const run = async (): Promise<void> => {
 
   {
     // The Memory_OB screens as a Goose App: a view-only ui:// resource the
-    // Goose desktop lists in its Apps sidebar and renders inside the app.
+    // Goose desktop renders inline in the chat (and on its Apps page).
     const mcp = new Mcp()
     const init = await mcp.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'traps-app', version: '1' } })
     check('trap19: the app screens resource capability is declared', init.result?.capabilities?.resources !== undefined, JSON.stringify(init.result?.capabilities ?? {}))
     const listed = await mcp.request('resources/list', {})
     const resources = listed.result?.resources ?? []
-    check('trap19: Memory_OB offers its screens as a Goose app resource', resources.length === 1 && resources[0].uri === 'ui://apps/memory-ob' && resources[0].mimeType === 'text/html;profile=mcp-app', JSON.stringify(resources))
-    const read = await mcp.request('resources/read', { uri: 'ui://apps/memory-ob' })
+    check('trap19: Memory_OB offers its screens as a Goose app resource', resources.length === 1 && resources[0].uri === 'ui://apps/memory-ob/main' && resources[0].mimeType === 'text/html;profile=mcp-app', JSON.stringify(resources))
+    const shown = await mcp.request('tools/call', { name: 'memory_ob_screens', arguments: {} })
+    check('trap19: the screens tool tells the host to render the app', shown.result?._meta?.ui?.resourceUri === 'ui://apps/memory-ob/main', JSON.stringify(shown.result?._meta ?? {}))
+    const read = await mcp.request('resources/read', { uri: 'ui://apps/memory-ob/main' })
     const html = String(read.result?.contents?.[0]?.text ?? '')
     check('trap19: the app html carries GooseApp metadata for the sidebar', /"@type":\s*"GooseApp"/.test(html) && /"name":\s*"Memory_OB"/.test(html), html.slice(0, 300))
     check('trap19: the screens show Projects, Vault, and Review', /Projects/.test(html) && /Vault/.test(html) && /Review/.test(html), html.slice(0, 300))
     check('trap19: the app is view-only and points approvals to the chat cards', /read-only/i.test(html) && /confirmation card/i.test(html), html.slice(0, 600))
+    check('trap19: the app carries the sandbox bridge contract', /ui\/initialize/.test(html) && /ui\/notifications\/size-changed/.test(html), html.slice(0, 200))
+    check('trap19: the resource read declares csp and border metadata', Boolean(read.result?.contents?.[0]?._meta?.ui?.csp) && read.result?.contents?.[0]?._meta?.ui?.prefersBorder === true, JSON.stringify(read.result?.contents?.[0]?._meta ?? {}))
     check('trap19: an unknown app resource is refused', Boolean((await mcp.request('resources/read', { uri: 'ui://apps/evil' })).error), 'missing refusal')
     mcp.close()
   }
