@@ -33,7 +33,7 @@ const brainRoot = resolve(option('--brain', join(process.env.HOME || process.env
 const firstExisting = (...paths) => paths.find(path => existsSync(path))
 const corePath = resolve(option('--core', firstExisting(
   join(here, 'goose-import-core.cjs'),
-  join(here, 'goose-import-core.cjs'),
+  join(here, 'dist', 'goose-import-core.cjs'),
   join(here, '..', '..', '..', 'apps', '03_oddbrain', 'out', 'memmory-ob', 'goose-import', 'goose-import-core.cjs'),
 ) || join(here, 'goose-import-core.cjs')))
 if (!existsSync(corePath)) fail(`Import core not found: ${corePath}. Build it with: npm run build:goose-import`)

@@ -41,6 +41,7 @@ const uiDir = resolve(option('--ui', firstExisting(
 ) || join(here, 'ui')))
 const serverPath = resolve(option('--server', firstExisting(
   join(here, 'brain-window-server.cjs'),
+  join(here, 'dist', 'brain-window-server.cjs'),
   join(here, '..', '..', '..', 'apps', '03_oddbrain', 'out', 'memmory-ob', 'brain-window', 'brain-window-server.cjs'),
 ) || join(here, 'brain-window-server.cjs')))
 

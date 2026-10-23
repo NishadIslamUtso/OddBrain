@@ -74,12 +74,21 @@ const option = (name, fallback = '') => {
 const printOnly = args.includes('--print-only')
 const gooseConfig = resolve(option('--goose-config', ''))
 const brainRoot = resolve(option('--brain', join(process.env.HOME || process.env.USERPROFILE || '.', 'Memmory_OB')))
-const adapterSource = resolve(option('--adapter', join(here, '..', '..', '..', 'apps', '03_oddbrain', 'out', 'memmory-ob', 'memmory-ob-mcp.cjs')))
-const skillSource = resolve(option('--skill', join(here, '..', 'goose-skill', 'SKILL.md')))
+// Packaged folder first (this folder ships pre-built), then the repository build.
+const firstExisting = (...paths) => paths.find(path => existsSync(path))
+const adapterSource = resolve(option('--adapter', firstExisting(
+  join(here, 'dist', 'memmory-ob-mcp.cjs'),
+  join(here, 'memmory-ob-mcp.cjs'),
+  join(here, '..', '..', '..', 'apps', '03_oddbrain', 'out', 'memmory-ob', 'memmory-ob-mcp.cjs'),
+) || join(here, 'dist', 'memmory-ob-mcp.cjs')))
+const skillSource = resolve(option('--skill', firstExisting(
+  join(here, 'goose-skill', 'SKILL.md'),
+  join(here, '..', 'goose-skill', 'SKILL.md'),
+) || join(here, 'goose-skill', 'SKILL.md')))
 
 if (!option('--goose-config')) fail('Missing --goose-config. Point it at Goose\'s config.yaml (usually %APPDATA%\\Block\\goose\\config.yaml on Windows or ~/.config/goose/config.yaml).')
 if (!existsSync(gooseConfig)) fail(`Goose config not found: ${gooseConfig}. Start Goose once first so it creates config.yaml.`)
-if (!existsSync(adapterSource)) fail(`Adapter bundle not found: ${adapterSource}. Build it first (npm run build:memmory-ob) or pass --adapter <file>.`)
+if (!existsSync(adapterSource)) fail(`Adapter bundle not found: ${adapterSource}. Build it first (npm run build:memmory-ob), use the packaged folder, or pass --adapter <file>.`)
 if (!existsSync(skillSource)) fail(`Skill file not found: ${skillSource}.`)
 
 const configBytes = readRegularFile(gooseConfig, 8_000_000, 'Goose config')

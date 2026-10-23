@@ -10,6 +10,7 @@ dist/
 /dist-web/
 /apps/*/dist-web/
 build/
+/packages/Memmory_OB/dist-addon/
 out/
 
 # The app's own mark is source and lives in resources/, which is tracked like any

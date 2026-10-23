@@ -21,6 +21,7 @@
     "build:web": "node scripts/build-ui-preview.mjs && vite build --config vite.web.config.ts",
     "build:memmory-ob": "node scripts/build-memmory-ob-mcp.mjs && node scripts/build-memmory-ob-core.mjs && node scripts/build-goose-import.mjs",
     "build:brain-window": "node scripts/build-brain-window.mjs",
+    "package:addon": "node scripts/package-addon.mjs",
     "start": "electron-vite preview",
     "preview:web": "vite preview --config vite.web.config.ts --port 4174",
     "typecheck": "tsc --noEmit -p tsconfig.json",

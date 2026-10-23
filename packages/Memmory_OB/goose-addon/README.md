@@ -129,8 +129,16 @@ skipped — only the conversation itself is kept.
 - **Engine-notes proposals**: the organizer drafts memory proposals from
   conversations and shows them for review — confirmation still only ever
   happens in the Review screen.
-- **One downloadable folder**: the whole addon packaged with the Brain Window
-  and the built core, ready to copy onto a machine.
+- **Real-machine acceptance** on your Windows machine with plain Goose.
+
+## The ready-to-download folder
+
+`npm run package:addon` (in `apps/03_oddbrain`) builds
+`packages/Memmory_OB/dist-addon/Memmory_OB-addon/` plus a `.zip`: the whole
+addon pre-built — installer, import CLI, Brain Window launcher with its server
+and interface, the four-tool adapter core, and the skill — with a `MANIFEST.md`
+recording sources, versions, commands, states and SHA-256 checksums for every
+file. Copy the folder anywhere and run its commands; nothing needs building.
 
 ## Rules this addon lives by
 
