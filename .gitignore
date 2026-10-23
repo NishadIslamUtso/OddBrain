@@ -81,6 +81,8 @@ ollama/
 archive_zips/
 *.zip
 !apps/*/archive_zips/
+# Owner's deliverables: the ready-to-install package lives on GitHub for download
+!release/*.zip
 
 # Keep living docs, .ai/, spec/, extension/, apps/ source
 # Don't ignore:
