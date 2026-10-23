@@ -12,7 +12,7 @@ There is no OddBrain app. Goose is the platform; features arrive as modules.
 
 **1 — Download the package** (it saves to your Downloads folder):
 
-https://raw.githubusercontent.com/NishadIslamUtso/OddBrain/arena/81a07155-oddbrain/release/Memory_OB-addon-0.9.7.zip
+https://raw.githubusercontent.com/NishadIslamUtso/OddBrain/arena/81a07155-oddbrain/release/Memory_OB-addon-1.0.0.zip
 
 **2 — Open PowerShell and paste this one line:**
 
@@ -30,17 +30,24 @@ config writer discards entries whose old shape no longer parses), one line
 brings them back rebuilt in the current schema — ask for the
 `fix-goose-extensions.mjs` line.
 
-**Your screens live inside Goose itself.** Ask Goose *"show my memory
-screens"* and one app renders **in the conversation** with **Projects, Vault
-and Review as tabs** — live memory state every time you ask (the MCP Apps
-contract: the `memory_ob_screens` tool is linked to a `ui://` screen). Its
-**Refresh** button asks the chat for the screens again. Records marked Never
-Send never appear in any screen. The installer also drops a stamped snapshot
-beside your other apps (`data\apps\memory-ob.html`, on the sidebar's Apps
-page) that says when it was captured and how to get live screens. Approving
-or denying memory always happens on the confirmation card in the chat. The
-full interactive window is still there when you want it:
-`Documents\OddBrain\Memory_OB\Open Screens.cmd`.
+**Your screens live inside Goose itself — no browser, no window.** Ask Goose
+*"show my memory screens"* and one app renders **in the conversation** with
+**Projects, Vault and Review as tabs** — live memory state every time you ask
+(the `memory_ob_screens` tool is linked to its `ui://` screen the way Goose's
+own chart extension does it). Its **Refresh** button asks the chat for the
+screens again. The installer also drops a stamped snapshot beside your other
+apps (`data\apps\memory-ob.html`, on the sidebar's Apps page) that says when
+it was captured and how to get live screens. Records marked Never Send never
+appear in any screen — not their text, titles, ids, or a count. Approving or
+denying memory always happens on the confirmation card in the chat.
+
+**The tools (eleven).** Reads: `status`, `search`, `evidence` (hash-verified
+exact wording), `project`. The one confirmer: `propose` — its card saves
+exactly what it shows. Captures that stay raw or draft forever: `intake`
+(Memory_OB takes anything) and `working_notes`. Undo and owner controls:
+`review` (retract keeps history; nothing is ever permanently deleted),
+`owner` (never-send / trash / restore), `link` (supports / contradicts /
+derived-from / branch-of).
 
 **Every future module ships the same way** — this is the pattern:
 

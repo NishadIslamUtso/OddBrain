@@ -159,6 +159,11 @@ const blockFor = () => [
   '      - memory_ob_project',
   '      - memory_ob_evidence',
   '      - memory_ob_propose',
+  '      - memory_ob_review',
+  '      - memory_ob_working_notes',
+  '      - memory_ob_owner',
+  '      - memory_ob_link',
+  '      - memory_ob_intake',
   '      - memory_ob_screens',
   '',
 ].join('\n')
@@ -212,7 +217,25 @@ function patchConfig(before) {
     return found
   }
   let entries = findEntries()
-  const memoryEntry = entries.find(entry => entry.name === 'memory')
+
+  // Pass 0: repair damage left by earlier broken installers. Duplicate
+  // memory/apps/memory_ob blocks make the YAML ambiguous — a second enabled
+  // memory block can silently re-enable stock Goose memory. Keep the fullest
+  // block of each name (ties keep the first) and drop the later duplicates;
+  // the passes below then fix the survivor in place.
+  for (const name of ['memory_ob', 'memory', 'apps']) {
+    const rows = findEntries().filter(entry => entry.name === name)
+    if (rows.length <= 1) continue
+    const keep = rows.reduce((best, row) => (row.end - row.start) > (best.end - best.start) ? row : best, rows[0])
+    for (let i = rows.length - 1; i >= 0; i -= 1) {
+      if (rows[i] === keep) continue
+      notes.push({ label: `${gooseConfig}#extensions.${name} (duplicate repair)`, before: `${lines.slice(rows[i].start, rows[i].end).join('\n')}\n`, after: '' })
+      lines.splice(rows[i].start, rows[i].end - rows[i].start)
+    }
+    notes.push({ label: `${gooseConfig}#extensions.${name} (duplicate repair)`, before: `${rows.length} blocks`, after: `1 block kept (the ${rows.length - 1} duplicate(s) left by earlier installers were removed)` })
+  }
+
+  const memoryEntry = findEntries().find(entry => entry.name === 'memory')
   let needMemoryInsert = false
 
   // Pass 1: stock memory off-switch, in place, without touching sibling lines.
@@ -277,8 +300,8 @@ function patchConfig(before) {
 
 const { after, notes } = patchConfig(before)
 
-// Sanity: the result must contain exactly our six tools and the memory switch.
-for (const needle of ['memory_ob_status', 'memory_ob_search', 'memory_ob_project', 'memory_ob_evidence', 'memory_ob_propose', 'memory_ob_screens']) {
+// Sanity: the result must contain exactly our eleven tools and the memory switch.
+for (const needle of ['memory_ob_status', 'memory_ob_search', 'memory_ob_project', 'memory_ob_evidence', 'memory_ob_propose', 'memory_ob_review', 'memory_ob_working_notes', 'memory_ob_owner', 'memory_ob_link', 'memory_ob_intake', 'memory_ob_screens']) {
   if (!after.includes(`- ${needle}`)) fail('Patch safety check failed: the prepared config is missing tool entries. Nothing was changed.')
 }
 if (after.replace(blockFor(), '').includes('memory_ob:\n    type: stdio\n    name: memory_ob') && before.includes('memory_ob:')) {
@@ -297,7 +320,7 @@ console.log('')
 for (const note of notes) console.log(region('', note.label, note.before, note.after))
 if (priorReceipt) console.log(`Receipt update: ${receiptPath}\n  old adapter sha ${priorReceipt.adapterSha256}\n  new adapter sha ${sha(adapterBytes)}\n`)
 console.log('Everything else in config.yaml is preserved byte for byte. No secrets are printed.')
-console.log('This gives Goose four READ-ONLY memory tools and switches OFF its stock memory.')
+console.log('This gives Goose the eleven Memory_OB tools (screens included) and switches OFF its stock memory.')
 console.log('IMPORTANT: import your existing Goose history FIRST (node import-goose-history.mjs) if you want')
 console.log('to keep it. After stock memory is switched off, Goose stops reading its old memory store.')
 console.log('Type ALLOW to write these changes, anything else to cancel.')
@@ -343,7 +366,10 @@ const writeConfigVerified = (newBytes) => {
     }
     ftruncateSync(descriptor, 0)
     let written = 0
-    while (written < newBytes.length) { const count = writeSync(descriptor, newBytes, written, newBytes.length - written, null); if (!count) break; written += count }
+    // Explicit position 0: the handle's read cursor sits at the old end of
+    // file, and a null-position write would leave a hole of NUL bytes in
+    // front of the new config (which Goose then cannot parse).
+    while (written < newBytes.length) { const count = writeSync(descriptor, newBytes, written, newBytes.length - written, written); if (!count) break; written += count }
     if (written !== newBytes.length) fail('The Goose config could not be completed. Inspect it manually before restarting Goose.')
     return backup
   } finally { closeSync(descriptor) }
@@ -354,12 +380,28 @@ let backup = ''
 if (after !== before) backup = writeConfigVerified(Buffer.from(after))
 for (const part of brainLayout) mkdirSync(join(brainRoot, part), { recursive: true })
 // A new brain is born usable: an empty valid catalogue manifest, created only
-// when absent. An existing catalogue is never touched.
+// when absent. An existing valid catalogue is never touched. A manifest left
+// damaged by an earlier broken installer is kept aside (never deleted) and
+// replaced with a valid one — the store rebuilds its counts from the object
+// files that are actually there, and import-goose-history rebuilds content.
 {
   const manifestPath = join(brainRoot, 'store', 'manifest.json')
+  const at = new Date().toISOString()
+  const fresh = `${JSON.stringify({ format: 'oddbrain-memory-ob', version: 1, revision: 0, createdAt: at, updatedAt: at, records: 0, relationships: 0, lastChatStoreRevision: 0 }, null, 2)}\n`
   if (!existsSync(manifestPath)) {
-    const at = new Date().toISOString()
-    writeExclusive(manifestPath, `${JSON.stringify({ format: 'oddbrain-memory-ob', version: 1, revision: 0, createdAt: at, updatedAt: at, records: 0, relationships: 0, lastChatStoreRevision: 0 }, null, 2)}\n`, 'catalogue manifest')
+    writeExclusive(manifestPath, fresh, 'catalogue manifest')
+  } else {
+    let healthy = false
+    try {
+      const row = JSON.parse(readFileSync(manifestPath, 'utf8'))
+      healthy = row?.format === 'oddbrain-memory-ob' && row?.version === 1 && Number.isSafeInteger(row?.lastChatStoreRevision)
+    } catch { healthy = false }
+    if (!healthy) {
+      const aside = `${manifestPath}.damaged-${Date.now()}`
+      renameSync(manifestPath, aside)
+      writeExclusive(manifestPath, fresh, 'catalogue manifest')
+      console.log(`A damaged catalogue manifest (left by an earlier broken installer) was kept at:\n  ${aside}\nA valid empty manifest is in place; the store rebuilds its counts from the object files that exist.`)
+    }
   }
 }
 writeFileAtomic(adapterTarget, adapterBytes)
@@ -410,9 +452,10 @@ if (appNote) console.log(appNote)
 if (backup) console.log(`Original Goose config preserved at: ${backup}`)
 console.log(`Receipt: ${receiptPath}`)
 console.log('\nNext: fully close and reopen Goose, then ask "what memory tools do you have?"')
-console.log('It should list the four memory_ob_* tools. Stock Goose Memory is switched off.')
+console.log('It should list the eleven memory_ob_* tools. Stock Goose Memory is switched off.')
 console.log('Your memory lives in the brain folder as plain files you can always open and read.')
-console.log('Open your screens (Projects, Vault, Review) on this brain with:')
-console.log(`  node ${join(here, 'brain-window.mjs')} --brain ${brainRoot}`)
+console.log('See your screens (Projects, Vault, Review) inside Goose:')
+console.log('  - say "show my memory screens" in any chat, or')
+console.log('  - open the Apps page in Goose — Memory_OB sits beside your other apps.')
 console.log('To hide any record from Goose permanently, run:')
 console.log(`  node ${adapterTarget} --catalogue ${join(brainRoot, 'store')} --chats ${join(brainRoot, 'chats')} --vault ${brainRoot} owner list`)

@@ -17,8 +17,10 @@ with `npm run package:addon` in `apps/03_oddbrain`). Inside the folder:
 node import-goose-history.mjs          # 1. look at your Goose history (changes nothing)
 node import-goose-history.mjs --apply  # 2. bring it into your memory (type ALLOW)
 node install.mjs --goose-config <config.yaml>   # 3. install into Goose (type ALLOW)
-node brain-window.mjs                  # the Review window: Projects · Vault · Review
 ```
+
+Then, in Goose: say **"show my memory screens"** — Projects · Vault · Review
+render inside the chat (and on Goose's Apps page). No browser window.
 
 Run the import **before** installing, on the computer that still has your
 Goose history. After install, Goose never touches its old memory again.
@@ -29,8 +31,9 @@ Goose history. After install, Goose never touches its old memory again.
   second copy.
 - Everything starts as **raw unconfirmed evidence** — imported history, chat
   notes, drafts. Nothing is trusted on arrival.
-- The **Review window is the only place memory is confirmed**. You approve,
-  reject or correct with the exact words in front of you.
+- The **confirmation card in the chat is the only place memory is confirmed**.
+  You approve or deny with the exact words in front of you; undo and revoke
+  keep full history (`memory_ob_review retract`).
 - Goose will be able to **suggest** memory ("remember this"); it lands as a
   proposal and waits for your approval — never confirmed by itself.
 - Deleted things go to recoverable Trash. Nothing is ever permanently deleted
@@ -39,15 +42,18 @@ Goose history. After install, Goose never touches its old memory again.
 
 ## What's done
 
-- The four read-only Goose tools (status, search, project counts, evidence)
-  with hash-verified quotes — evidence never quotes from a changed source.
+- The eleven Goose tools (status, search, project counts, evidence, propose,
+  review, working notes, owner controls, link, intake, screens) with
+  hash-verified quotes — evidence never quotes from a changed source.
 - One-command installer: exact change shown first, type `ALLOW`, config backed
   up, receipt written, Goose's stock memory switched off in the same change.
-- One-time Goose-history import (sessions.db + old sessions + memory notes;
-  Chat Recall is covered). Goose's folders are never touched.
-- Review window with the real screens: Projects (stable project memory),
-  Vault (files, search, memory graph, link check, folder choose-and-decide),
-  Review (doubts/confirmations/interpretations).
+  It also repairs the duplicate config blocks and unparseable configs that
+  earlier broken installers leave behind (and never writes one again).
+- One-time Goose-history import (sessions.db + old sessions + memory notes).
+  Goose's folders are never touched.
+- Screens inside Goose: Projects (stable project memory), Vault (files,
+  memory graph), Review (doubts/confirmations/interpretations) as tabs in the
+  chat app and on the Apps page — view-only, live on every ask.
 - The proposal drafter ("engine-notes"): reads your conversations and drafts
   memory suggestions with exact quotes for you to approve — nothing lands
   without you.

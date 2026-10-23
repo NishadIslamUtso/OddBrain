@@ -41,12 +41,12 @@ const writeObject = (identity: string, row: Record<string, unknown>): void => {
   mkdirSync(join(path, '..'), { recursive: true })
   writeFileSync(path, JSON.stringify(row, null, 2))
 }
-writeObject(`project:${projectId}`, { id: `project:${projectId}`, kind: 'project', lifecycle: 'active', authority: 'raw', source: { domain: 'generated', externalId: projectId, locator: 'projects.json' }, neverSend: false, sensitivity: 'ordinary' })
-writeObject('project:proj-other', { id: 'project:proj-other', kind: 'project', lifecycle: 'active', authority: 'raw', source: { domain: 'generated', externalId: 'proj-other', locator: 'projects.json' }, neverSend: false, sensitivity: 'ordinary' })
+writeObject(`project:${projectId}`, { id: `project:${projectId}`, kind: 'project', title: 'Trap project', lifecycle: 'active', authority: 'raw', scope: { kind: 'project', projectId }, source: { domain: 'generated', externalId: projectId, locator: 'projects.json' }, projectIds: [projectId], relationshipIds: [], attachmentIds: [], neverSend: false, sensitivity: 'ordinary', summary: {}, useCount: 0, createdAt: '2026-10-22T00:00:00.000Z', updatedAt: '2026-10-22T00:00:00.000Z', revision: 1, contentHash: sha(`project:${projectId}`) })
+writeObject('project:proj-other', { id: 'project:proj-other', kind: 'project', title: 'Other project', lifecycle: 'active', authority: 'raw', scope: { kind: 'project', projectId: 'proj-other' }, source: { domain: 'generated', externalId: 'proj-other', locator: 'projects.json' }, projectIds: ['proj-other'], relationshipIds: [], attachmentIds: [], neverSend: false, sensitivity: 'ordinary', summary: {}, useCount: 0, createdAt: '2026-10-22T00:00:00.000Z', updatedAt: '2026-10-22T00:00:00.000Z', revision: 1, contentHash: sha('project:proj-other') })
 writeObject('interpretation:hidden-1', {
   id: 'interpretation:hidden-1', kind: 'interpretation', title: 'Hidden title SECRET-TITLE',
   authority: 'pending', lifecycle: 'active', neverSend: true, sensitivity: 'ordinary',
-  text: 'HIDDEN-NEVER-SEND-SECRET content', projectIds: [projectId],
+  text: 'HIDDEN-NEVER-SEND-SECRET content', projectIds: [projectId], scope: { kind: 'project', projectId },
   source: { domain: 'brain-memory', externalId: 'hidden-1' },
   relationshipIds: [], attachmentIds: [], summary: {}, useCount: 0,
   createdAt: '2026-10-22T03:00:00.000Z', updatedAt: '2026-10-22T03:00:00.000Z', revision: 1, contentHash: sha('hidden-1'),
@@ -168,7 +168,7 @@ const run = async (): Promise<void> => {
   await mcp.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'traps', version: '1' } })
   const listed = await mcp.request('tools/list', {})
   const names = (listed.result?.tools ?? []).map((tool: any) => tool.name).sort()
-  check('trap0: four read-only tools plus the one owner-gated propose tool and the screens view', JSON.stringify(names) === JSON.stringify(['memory_ob_evidence', 'memory_ob_project', 'memory_ob_propose', 'memory_ob_screens', 'memory_ob_search', 'memory_ob_status']), JSON.stringify(names))
+  check('trap0: the eleven Memory_OB tools', JSON.stringify(names) === JSON.stringify(['memory_ob_evidence', 'memory_ob_intake', 'memory_ob_link', 'memory_ob_owner', 'memory_ob_project', 'memory_ob_propose', 'memory_ob_review', 'memory_ob_screens', 'memory_ob_search', 'memory_ob_status', 'memory_ob_working_notes']), JSON.stringify(names))
 
   const s1 = await mcp.call('memory_ob_search', { query: 'Lantern launch date' })
   const hit = (s1.json?.hits ?? []).find((row: any) => row.authority === 'confirmed-owner-memory')
@@ -205,12 +205,12 @@ const run = async (): Promise<void> => {
   check('trap8: unmatched quotation refused', ev8.isError && /quotation is not present/.test(ev8.text), ev8.text)
   writeState()
 
-  writeObject(`app-chat:${chat.id}`, { id: `app-chat:${chat.id}`, kind: 'app-chat', lifecycle: 'active', authority: 'raw', source: { domain: 'brain-memory', externalId: chat.id, locator: 'chats' }, neverSend: true, sensitivity: 'ordinary' })
+  writeObject(`app-chat:${chat.id}`, { id: `app-chat:${chat.id}`, kind: 'app-chat', title: 'Trap chat', lifecycle: 'active', authority: 'raw', scope: { kind: 'project', projectId }, source: { domain: 'brain-memory', externalId: chat.id, locator: 'chats' }, projectIds: [projectId], relationshipIds: [], attachmentIds: [], neverSend: true, sensitivity: 'ordinary', summary: {}, useCount: 0, createdAt: '2026-10-22T01:00:00.000Z', updatedAt: '2026-10-22T01:00:00.000Z', revision: 1, contentHash: sha(`app-chat:${chat.id}`) })
   const s9 = await mcp.call('memory_ob_search', { query: 'Lantern launch', projectId })
   check('trap9: Never-Send chat hidden from search', (s9.json?.hits ?? []).every((row: any) => row.kind !== 'app-chat'), s9.text)
   const ev9 = await mcp.call('memory_ob_evidence', { recordId: `app-chat:${chat.id}`, messageId: 'm1', expectedSha256: sha(m1.content), projectId })
   check('trap9: Never-Send chat evidence refused', ev9.isError && /Never Send/.test(ev9.text), ev9.text)
-  writeObject(`app-chat:${chat.id}`, { id: `app-chat:${chat.id}`, kind: 'app-chat', lifecycle: 'active', authority: 'raw', source: { domain: 'brain-memory', externalId: chat.id, locator: 'chats' }, neverSend: false, sensitivity: 'ordinary' })
+  writeObject(`app-chat:${chat.id}`, { id: `app-chat:${chat.id}`, kind: 'app-chat', title: 'Trap chat', lifecycle: 'active', authority: 'raw', scope: { kind: 'project', projectId }, source: { domain: 'brain-memory', externalId: chat.id, locator: 'chats' }, projectIds: [projectId], relationshipIds: [], attachmentIds: [], neverSend: false, sensitivity: 'ordinary', summary: {}, useCount: 0, createdAt: '2026-10-22T01:00:00.000Z', updatedAt: '2026-10-22T01:00:00.000Z', revision: 1, contentHash: sha(`app-chat:${chat.id}`) })
 
   const s10 = await mcp.call('memory_ob_search', { query: 'Lantern launch', projectId })
   check('trap10: project-scoped chat evidence available', (s10.json?.hits ?? []).some((row: any) => row.kind === 'app-chat' && row.authority === 'raw-unconfirmed-evidence'), s10.text)
@@ -358,6 +358,78 @@ const run = async (): Promise<void> => {
     check('trap18: a journal lands as a journal with its event date', !journal.isError && journal.json?.saved === true && journal.json?.savedAs?.kind === 'journal', journal.text)
     const bogus = await mcp.call('memory_ob_propose', { kind: 'memory', title: 'Made up', text: 'Invented memory.', basis: { quote: 'this was never said by anyone' } })
     check('trap18: a quotation that is not an exact message is refused', bogus.isError === true && /not an exact message/.test(bogus.text), bogus.text)
+    mcp.close()
+  }
+
+  // ---- trap20: the Goose-native toolset — intake, undo, notes, owner marks, links ----
+  {
+    const nativeRoot = mkdtempSync('/tmp/memory-native-')
+    const catalogue = join(nativeRoot, 'store'), chatsDir = join(nativeRoot, 'chats'), vault = join(nativeRoot, 'vault')
+    mkdirSync(catalogue, { recursive: true })
+    mkdirSync(join(vault, '00 System', 'Connectors'), { recursive: true })
+    mkdirSync(join(vault, '06 Review', 'Organizer'), { recursive: true })
+    const at = new Date().toISOString()
+    writeFileSync(join(catalogue, 'manifest.json'), JSON.stringify({ format: 'oddbrain-memory-ob', version: 1, revision: 0, createdAt: at, updatedAt: at, records: 0, relationships: 0, lastChatStoreRevision: 0 }, null, 2) + '\n')
+    writeFileSync(join(vault, '00 System', 'Privacy & Access.md'), '# Privacy & Access\n\nThe never-check list.\n\n```yaml\nexcluded_patterns:\n  - secret.example.com/*\n```\n')
+    writeFileSync(join(vault, '00 System', 'Connectors', 'Source Scope.md'), '# Source Scope\n\nNo scope patterns yet.\n')
+    const u1 = { id: 'u1', role: 'user', content: 'Remember: our shipping code name is Harborlight and cancel the old plan.', at: '2026-10-23T02:00:00.000Z' }
+    const chatA = { id: 'chat-native-1', title: 'Native chat', projectId: null, lifecycle: 'active', messages: [u1] }
+    createChatStore(chatsDir).migrate({ chats: [chatA], currentChat: chatA.id, rawChats: JSON.stringify([chatA]), rawCurrentChat: JSON.stringify(chatA.id) })
+    const store = createMemoryObStore(catalogue)
+    store.syncProjects([{ id: 'proj-native', name: 'Harborlight', instruction: '', folder: '', createdAt: at, goals: [], references: [] }] as never)
+    const mcp = new Mcp(catalogue, chatsDir, vault)
+    await mcp.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'traps-7', version: '1' } })
+
+    // memory_ob_intake — the "Memory_OB takes anything" door.
+    const intake = await mcp.call('memory_ob_intake', { module: 'goose', id: 'note-1', title: 'Harborlight spec line', text: 'The Harborlight spec pins the harbor window at sixty characters.', projectId: 'proj-native' })
+    check('trap20: intake stores a module capture as raw evidence', !intake.isError && intake.json?.authority === 'raw-unconfirmed-evidence' && /^raw-source:goose:note-1$/.test(intake.json?.recordId ?? ''), intake.text)
+    const intakeSearch = await mcp.call('memory_ob_search', { query: 'harbor window sixty', projectId: 'proj-native' })
+    check('trap20: intake evidence is findable in project scope', (intakeSearch.json?.hits ?? []).some((row: any) => row.recordId === 'raw-source:goose:note-1'), intakeSearch.text)
+    const hazardIntake = await mcp.call('memory_ob_intake', { module: 'goose', id: 'note-2', title: 'Sneaky', text: 'invi\u200Bsible' })
+    check('trap20: intake refuses invisible text', hazardIntake.isError === true && /invisible/.test(hazardIntake.text), hazardIntake.text)
+
+    // memory_ob_owner — Never Send hides rows from every agent surface, wholesale.
+    const hide = await mcp.call('memory_ob_owner', { action: 'never-send', recordId: 'raw-source:goose:note-1' })
+    check('trap20: never-send marks a record', !hide.isError && hide.json?.neverSend === true, hide.text)
+    const ownerList = await mcp.call('memory_ob_owner', { action: 'list' })
+    check('trap20: the owner list hides Never Send rows wholesale', !/Harborlight spec line|raw-source:goose:note-1/.test(ownerList.text) && /Never Send/.test(ownerList.text ?? ''), ownerList.text.slice(0, 400))
+    const hiddenSearch = await mcp.call('memory_ob_search', { query: 'harbor window sixty', projectId: 'proj-native' })
+    check('trap20: never-send rows vanish from search too', !(hiddenSearch.json?.hits ?? []).some((row: any) => row.recordId === 'raw-source:goose:note-1'), hiddenSearch.text)
+    const shown = await mcp.call('memory_ob_owner', { action: 'allow-send', recordId: 'raw-source:goose:note-1' })
+    check('trap20: allow-send restores it under the ordinary rules', !shown.isError && shown.json?.neverSend === false, shown.text)
+
+    // trash / restore — recoverable, never permanent.
+    const trashed = await mcp.call('memory_ob_owner', { action: 'trash', recordId: 'raw-source:goose:note-1', reason: 'owner asked' })
+    check('trap20: trash is recoverable and recorded', !trashed.isError && trashed.json?.lifecycle === 'trash', trashed.text)
+    const restored = await mcp.call('memory_ob_owner', { action: 'restore', recordId: 'raw-source:goose:note-1' })
+    check('trap20: restore brings the row back', !restored.isError && restored.json?.lifecycle === 'active', restored.text)
+
+    // memory_ob_working_notes — per-chat drafts, revisioned.
+    const notes1 = await mcp.call('memory_ob_working_notes', { chatId: 'chat-native-1', notes: { objective: 'Ship Harborlight', plan: ['draft the notice'], decisions: ['sixty characters'], constraints: [], openQuestions: ['who signs off?'], uncertainties: [], findings: [], nextActions: ['ask the owner'] } })
+    check('trap20: working notes save as a revision', !notes1.isError && notes1.json?.revisionId && notes1.json?.notes?.objective === 'Ship Harborlight', notes1.text)
+    const notesRead = await mcp.call('memory_ob_working_notes', { chatId: 'chat-native-1' })
+    check('trap20: working notes read back and stay labelled drafts', !notesRead.isError && /never confirmed memory/.test(notesRead.json?.notice ?? '') && notesRead.json?.notes?.plan?.[0] === 'draft the notice', notesRead.text)
+    const stale = await mcp.call('memory_ob_working_notes', { chatId: 'chat-native-1', expected: 'not-a-real-revision', notes: { objective: 'Overwritten elsewhere?', plan: [], decisions: [], constraints: [], openQuestions: [], uncertainties: [], findings: [], nextActions: [] } })
+    check('trap20: a stale expected revision never overwrites', stale.isError === true && /changed elsewhere/i.test(stale.text), stale.text)
+
+    // memory_ob_review — undo keeps history; nothing is deleted.
+    const saved = await mcp.call('memory_ob_propose', { kind: 'memory', title: 'Code name', text: 'Our shipping code name is Harborlight.', basis: { quote: 'shipping code name is Harborlight', messageId: 'u1' } })
+    check('trap20: propose saves the memory for the undo path', !saved.isError && saved.json?.saved === true, saved.text)
+    const retract = await mcp.call('memory_ob_review', { itemId: String(saved.json?.recordId ?? '').replace(/^interpretation:/, ''), decision: 'retract' })
+    check('trap20: retract withdraws it and keeps its history', !retract.isError && retract.json?.state === 'rejected' && (retract.json?.history ?? 0) >= 2 && /kept/.test(retract.json?.notice ?? ''), retract.text)
+    const gone = await mcp.call('memory_ob_search', { query: 'code name Harborlight' })
+    check('trap20: a retracted record is never returned as fact', !(gone.json?.hits ?? []).some((row: any) => row.authority === 'confirmed-owner-memory'), gone.text)
+
+    // memory_ob_link — declared relationships only.
+    const link1 = await mcp.call('memory_ob_link', { from: 'raw-source:goose:note-1', to: 'raw-source:goose:note-1', kind: 'supports' })
+    check('trap20: linking a record to itself is refused', link1.isError === true, link1.text)
+    await mcp.call('memory_ob_intake', { module: 'goose', id: 'note-3', title: 'Harborlight follow-up', text: 'The harbor window sign-off moved to Friday.', projectId: 'proj-native' })
+    const link2 = await mcp.call('memory_ob_link', { from: 'raw-source:goose:note-3', to: 'raw-source:goose:note-1', kind: 'supports' })
+    check('trap20: a declared link is recorded', !link2.isError && link2.json?.saved === true, link2.text)
+    const linkAgain = await mcp.call('memory_ob_link', { from: 'raw-source:goose:note-3', to: 'raw-source:goose:note-1', kind: 'supports' })
+    check('trap20: re-linking replaces itself silently', !linkAgain.isError && linkAgain.json?.saved === false, linkAgain.text)
+    const badKind = await mcp.call('memory_ob_link', { from: 'raw-source:goose:note-1', to: 'raw-source:goose:note-3', kind: 'owns' })
+    check('trap20: only the four evidence link kinds exist', badKind.isError === true, badKind.text)
     mcp.close()
   }
 

@@ -574,7 +574,52 @@ export function createMemoryObStore(root: string) {
     return { manifest: structuredClone(state), records: structuredClone(selected), relationships: structuredClone(selectedRelationships), notice: selected.length === limit && records.size > selected.length ? `Showing ${limit.toLocaleString()} records; originals were not clipped or evicted.` : 'Memory_OB catalogue loaded.', root }
   }
 
-  return { read, project, search, syncChats, syncProjects, syncWorkingNotes, syncTranscriptHeaders, syncAttachments, syncJobs, syncMemoryWorkspace, syncSources, indexables, revision: () => state.revision }
+  /**
+   * Declared relationships between records — supports, contradicts,
+   * derived-from, branch-of. Same revisioned recoverable write path as every
+   * other relationship; re-linking an identical pair replaces itself silently.
+   */
+  const link = (input: { from: string; to: string; kind: string; sourceIds?: string[] }): { relationshipId: string; changed: boolean } => {
+    const from = typeof input.from === 'string' ? input.from : '', to = typeof input.to === 'string' ? input.to : ''
+    if (!from || from.length > 2_048 || !to || to.length > 2_048 || from === to) throw Error('A relationship needs two different bounded record ids. Nothing was written.')
+    if (!['supports', 'contradicts', 'derived-from', 'branch-of'].includes(input.kind)) throw Error('Link kind must be supports, contradicts, derived-from or branch-of. Nothing was written.')
+    const kind = input.kind as MemoryRelationship['kind']
+    const sourceIds = Array.isArray(input.sourceIds) && input.sourceIds.length ? input.sourceIds.slice(0, 8).map(value => String(value).slice(0, 2_048)) : [from, to]
+    const id = `${kind}:${from}:${to}`
+    const relation = nextRelationship(relationships.get(id), { id, from, to, kind, state: 'active', sourceIds })
+    if (relation) commit([], [relation])
+    return { relationshipId: id, changed: Boolean(relation) }
+  }
+
+  /**
+   * Owner access marks on one catalogue row. Never Send survives every sync —
+   * nextObject never clears it — and is enforced by every agent-facing read.
+   * Trash is recoverable and never permanent: restoring returns the row to
+   * its previous lifecycle, and a later resync of the same material may also
+   * restore its row.
+   */
+  const ownerAccess = (input: { id: string; neverSend?: boolean; trash?: boolean; reason?: string; by?: 'owner' | 'ai' }): { id: string; neverSend: boolean; lifecycle: MemoryLifecycle; changed: boolean } => {
+    const id = typeof input.id === 'string' ? input.id : ''
+    if (!id || id.length > 2_048) throw Error('Provide one catalogue record id, for example app-chat:<chat id> or interpretation:<record id>.')
+    const row = records.get(id)
+    if (!row) throw Error('Not found: that record is not in the Memory_OB catalogue.')
+    const next: MemoryObject = { ...row }
+    if (input.neverSend !== undefined) next.neverSend = input.neverSend === true
+    if (input.trash === true) {
+      if (row.lifecycle === 'trash') return { id, neverSend: row.neverSend === true, lifecycle: row.lifecycle, changed: false }
+      next.lifecycle = 'trash'
+      next.trash = { at: nowIso(), by: input.by === 'ai' ? 'ai' : 'owner', reason: String(input.reason || '').slice(0, 300) || 'Moved to recoverable Trash', previous: row.lifecycle === 'archived' ? 'archived' : 'active' }
+    } else if (input.trash === false) {
+      if (row.lifecycle !== 'trash') return { id, neverSend: row.neverSend === true, lifecycle: row.lifecycle, changed: false }
+      next.lifecycle = row.trash?.previous === 'archived' ? 'archived' : 'active'
+      delete next.trash
+    }
+    writeRecoverableJson(fileFor(objectRoot, id), next)
+    load()
+    return { id, neverSend: next.neverSend === true, lifecycle: next.lifecycle, changed: true }
+  }
+
+  return { read, project, search, syncChats, syncProjects, syncWorkingNotes, syncTranscriptHeaders, syncAttachments, syncJobs, syncMemoryWorkspace, syncSources, link, ownerAccess, indexables, revision: () => state.revision }
 }
 
 export type MemoryObStore = ReturnType<typeof createMemoryObStore>

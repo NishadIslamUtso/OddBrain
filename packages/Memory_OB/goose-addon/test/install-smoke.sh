@@ -54,9 +54,10 @@ node -e "const m=require('$W/brain/store/manifest.json'); if(m.format!=='oddbrai
 check "D: empty valid catalogue manifest created" $? "manifest bad"
 grep -q "memory_ob_status" "$cfg" && grep -q "enabled: false" "$cfg"; check "D: tools added and stock memory off" $? "config wrong"
 grep -q "TOKEN=sk-not-a-real-16charsecret" "$cfg"; check "D: secrets preserved" $? "secret lost"
+[ "$(tr -dc '\0' < "$cfg" | wc -c | tr -d ' ')" = "0" ]; check "D: written config has no NUL bytes (Goose can parse it)" $? "NUL bytes found"
 [ -f "$cfg.oddbrain-original" ]; check "D: original config backed up" $? "no backup"
 [ -f "$W/brain/adapter/goose-adapter.json" ]; check "D: receipt written" $? "no receipt"
-grep -q "brain-window.mjs" "$W/install.log"; check "D: Brain Window command shown" $? "missing"
+grep -q "show my memory screens" "$W/install.log"; check "D: in-Goose screens instructions shown" $? "missing"
 
 cp "$cfg" "$W/config.before-rerun"
 printf 'ALLOW\n' | node "$ADDON" --goose-config "$cfg" --brain "$W/brain" --adapter "$ADAPTER" > "$W/reinstall.log" 2>&1
@@ -85,6 +86,54 @@ printf 'ALLOW\n' | node "$ADDON" --goose-config "$W/nested/config/config.yaml" -
 check "G: nested install writes the Apps-page copy" $? "$(tail -3 "$W/nested.log")"
 grep -q 'Memory_OB' "$W/nested/data/apps/memory-ob.html" 2>/dev/null && grep -qi 'captured when the installer ran' "$W/nested/data/apps/memory-ob.html" 2>/dev/null; check "G: screens app carries the name and the stamp" $? "$(ls "$W/nested/data/apps" 2>&1)"
 grep -q 'Screens app written' "$W/nested.log"; check "G: install reports the screens app" $? "$(grep 'Screens app' "$W/nested.log" 2>&1)"
+
+# H: repair of the duplicate-block damage a broken earlier installer leaves
+# behind (two memory blocks can silently re-enable stock memory).
+mkdir -p "$W/dup"
+cat > "$W/dup/config.yaml" <<'YAML'
+extensions:
+  memory_ob:
+    type: stdio
+    name: memory_ob
+    enabled: true
+    cmd: node
+    args:
+      - "C:\\broken\\memory-mcp.cjs"
+  apps:
+    type: builtin
+    name: apps
+    display_name: Apps
+    enabled: true
+  memory:
+    type: builtin
+    name: memory
+    enabled: false
+  memory:
+    enabled: true
+    type: builtin
+    name: memory
+    description: Teach goose your preferences as you go.
+    display_name: Memory
+    timeout: 300
+    bundled: true
+  apps:
+    enabled: true
+    type: platform
+    name: apps
+    description: Create and manage custom Goose apps through chat.
+    display_name: Apps
+    bundled: true
+YAML
+printf 'ALLOW\n' | node "$ADDON" --goose-config "$W/dup/config.yaml" --brain "$W/dup/brain" --adapter "$ADAPTER" > "$W/dup.log" 2>&1
+check "H: install on a duplicated config exits cleanly" $? "$(tail -3 "$W/dup.log")"
+[ "$(grep -c '^  memory:' "$W/dup/config.yaml")" = "1" ]; check "H: exactly one stock memory block remains" $? "count $(grep -c '^  memory:' "$W/dup/config.yaml")"
+[ "$(grep -c '^  apps:' "$W/dup/config.yaml")" = "1" ]; check "H: exactly one apps block remains" $? "count $(grep -c '^  apps:' "$W/dup/config.yaml")"
+[ "$(grep -c '^  memory_ob:' "$W/dup/config.yaml")" = "1" ]; check "H: exactly one memory_ob block remains" $? "count $(grep -c '^  memory_ob:' "$W/dup/config.yaml")"
+awk '/^  memory:/{f=1} f&&/^  [A-Za-z0-9_]+:/&&!/^  memory:/{exit} f' "$W/dup/config.yaml" | grep -q "enabled: false"; check "H: stock memory ends up off" $? "memory block: $(awk '/^  memory:/{f=1} f&&/^  [A-Za-z0-9_]+:/&&!/^  memory:/{exit} f' "$W/dup/config.yaml")"
+awk '/^  memory:/{f=1} f&&/^  [A-Za-z0-9_]+:/&&!/^  memory:/{exit} f' "$W/dup/config.yaml" | grep -q "Teach goose"; check "H: the fullest memory block was kept" $? "block lost"
+grep -q "duplicate repair" "$W/dup.log"; check "H: the repair is reported" $? "not reported"
+grep -q "dup/brain/adapter/memory-ob-mcp.cjs" "$W/dup/config.yaml" && ! grep -aq "broken" "$W/dup/config.yaml"; check "H: the broken memory_ob block was replaced" $? "broken block survived"
+[ "$(tr -dc '\0' < "$W/dup/config.yaml" | wc -c | tr -d ' ')" = "0" ]; check "H: repaired config has no NUL bytes" $? "NUL bytes found"
 
 echo; echo "$pass passed, $fail failed"
 exit $fail

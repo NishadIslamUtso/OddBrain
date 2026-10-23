@@ -1,6 +1,6 @@
 // Package the Goose addon as ONE ready-to-download folder: the pre-built
-// adapter (four-tool MCP core), the Brain Window server + interface, the import
-// core, the installer, and the skill. Generated output only — never committed
+// adapter (the eleven-tool MCP core + in-Goose screens), the import core, the
+// installer, and the skill. Generated output only — never committed
 // (see .gitignore: packages/Memory_OB/dist-addon/).
 //
 //   npm run package:addon
@@ -35,20 +35,17 @@ try {
 const inputs = [
   ['dist/memory-ob-mcp.cjs', join(appRoot, 'out', 'memory-ob', 'memory-ob-mcp.cjs'), 'adapter: the Memory_OB tools for Goose'],
   ['dist/goose-import-core.cjs', join(appRoot, 'out', 'memory-ob', 'goose-import', 'goose-import-core.cjs'), 'one-time Goose-history import engine'],
-  ['dist/brain-window-server.cjs', join(appRoot, 'out', 'memory-ob', 'brain-window', 'brain-window-server.cjs'), 'Brain Window host (Projects, Vault, Review)'],
   ['dist/memory-ob-semantic.cjs', join(appRoot, 'out', 'memory-ob', 'semantic', 'memory-ob-semantic.cjs'), 'optional meaning-search engine (separate module)'],
   ['semantic-search.mjs', join(addonSrc, 'semantic-search.mjs'), 'meaning-search CLI (optional module)'],
-  ['ui/', join(appRoot, 'dist-web'), 'the built Brain Window interface'],
   ['install.mjs', join(addonSrc, 'install.mjs'), 'installer (type ALLOW to write)'],
   ['import-goose-history.mjs', join(addonSrc, 'import-goose-history.mjs'), 'import CLI'],
   ['fix-goose-extensions.mjs', join(addonSrc, 'fix-goose-extensions.mjs'), 'restores extensions Goose dropped from its config (type ALLOW to write)'],
-  ['brain-window.mjs', join(addonSrc, 'brain-window.mjs'), 'Brain Window launcher'],
   ['README.md', join(addonSrc, 'README.md'), 'owner guide'],
   ['goose-skill/SKILL.md', join(repoRoot, 'packages', 'Memory_OB', 'goose-skill', 'SKILL.md'), 'the Memory_OB skill Goose reads'],
   ['LICENSE', join(repoRoot, 'packages', 'Memory_OB', 'LICENSE'), 'license'],
 ]
 for (const [target, source] of inputs) {
-  if (!existsSync(source)) fail(`Missing build input for ${target}:\n  ${source}\nBuild it first: cd apps/03_oddbrain && npm run build:memory-ob && npm run build:brain-window && npm run build:web`)
+  if (!existsSync(source)) fail(`Missing build input for ${target}:\n  ${source}\nBuild it first: cd apps/03_oddbrain && npm run build:memory-ob`)
 }
 
 // ---------- assemble ----------
@@ -95,30 +92,32 @@ Targets: Windows 11 + Node.js 24 (works on macOS/Linux too). No paid services. N
 ## What this folder is
 
 One folder you can copy anywhere. It makes plain Goose work with your one
-memory (\`Memory_OB\`) without installing or maintaining any app:
+memory (\`Memory_OB\`) inside Goose itself — no separate app, no browser:
 
-- \`install.mjs\` — installs the read-only tools + the in-chat screens + the skill into Goose and
-  switches Goose's stock memory off, in one reviewed change (type \`ALLOW\`).
+- \`install.mjs\` — installs the eleven Memory_OB tools + the in-chat and
+  Apps-page screens + the skill into Goose and switches Goose's stock memory
+  off, in one reviewed change (type \`ALLOW\`). It also repairs duplicate
+  \`memory\`/\`apps\`/\`memory_ob\` config blocks left by earlier broken installers,
+  and never writes a config Goose cannot parse.
 - \`import-goose-history.mjs\` — the one-time import of your existing Goose
   sessions and memory, run BEFORE installing. Everything imported is labelled
   raw unconfirmed evidence.
 - \`fix-goose-extensions.mjs\` — rebuilds extensions that Goose dropped from
   its config because their old shape stopped parsing (type \`ALLOW\`).
-- \`brain-window.mjs\` — the local Brain Window: Projects, Vault (files, search,
-  graph, link check, folder choose-and-decide) and Review (the only place
-  memory is confirmed).
 - \`dist/\` — pre-built engines. No build step needed on your machine.
+
+Your screens live INSIDE Goose: say "show my memory screens" in any chat, or
+open the Apps page — Memory_OB sits beside your other apps. There is no
+browser window to open.
 
 ## Sources and versions
 
 | Part | Source | Version |
 | --- | --- | --- |
-| Adapter + tools (dist/memory-ob-mcp.cjs) | OddBrain ${appRoot.includes('03_oddbrain') ? 'apps/03_oddbrain' : 'OddBrain'} main/memoryOb | ${appVersion} |
-| Import engine (dist/goose-import-core.cjs) | OddBrain main/memoryOb/gooseImport | ${appVersion} |
-| Brain Window host (dist/brain-window-server.cjs) | OddBrain main/brainWindow | ${appVersion} |
-| Interface (ui/) | OddBrain renderer (dist-web build) | ${appVersion} |
+| Adapter + tools (\`dist/memory-ob-mcp.cjs\`) | OddBrain ${appRoot.includes('03_oddbrain') ? 'apps/03_oddbrain' : 'OddBrain'} main/memoryOb | ${appVersion} |
+| Import engine (\`dist/goose-import-core.cjs\`) | OddBrain main/memoryOb/gooseImport | ${appVersion} |
 | Goose storage formats | Goose v1.55.0 (sessions.db, .jsonl sessions, memory/*.txt) | v1.55.0 |
-| Skill (goose-skill/SKILL.md) | packages/Memory_OB/goose-skill | ${appVersion} |
+| Skill (\`goose-skill/SKILL.md\`) | packages/Memory_OB/goose-skill | ${appVersion} |
 
 ## Commands
 
@@ -127,8 +126,7 @@ memory (\`Memory_OB\`) without installing or maintaining any app:
 | \`node import-goose-history.mjs\` | Preview your Goose history (changes nothing) |
 | \`node import-goose-history.mjs --apply\` | Import it (type ALLOW) |
 | \`node install.mjs --goose-config <config.yaml>\` | Review the exact change, type ALLOW to install |
-| \`node brain-window.mjs\` | Open Projects · Vault · Review in your browser |
-| \`node dist/memory-ob-mcp.cjs --catalogue <store> --chats <chats> owner list\` | Owner commands (never-send / allow-send) |
+| \`node dist/memory-ob-mcp.cjs --catalogue <store> --chats <chats> --vault <brain> owner list\` | Owner commands (never-send / allow-send / trash / restore) |
 
 ## File checksums (SHA-256)
 
@@ -138,23 +136,28 @@ ${files.map(file => `| \`${file.name}\` | ${file.bytes} | \`${file.sha}\` |`).jo
 
 ## States
 
-- Verified in the repository suite before packaging: install smoke 34/34,
-  import smoke 20/20, judge traps 33/33 (Never-Send, project scope, hazard
-  excerpts, restart identity, trashed chats, empty catalogue), Brain Window
-  smoke 10/10, \`security:release\` and \`security:policy\` passed on the build
-  this package was cut from.
+- Verified in the repository suite before packaging: the judge trap suite
+  (intake, review-undo, Working Notes, owner marks, links, the Never-Send
+  redaction law, and the Goose app screens contract), the install smoke
+  (including the no-NUL-bytes and duplicate-block repair regressions), the
+  import smoke, the extension-repair smoke, \`npm run typecheck\`, and
+  \`security:release\` — all green on the build this package was cut from.
 - The package itself is verified end-to-end by
   \`packages/Memory_OB/goose-addon/test/package-smoke.sh\` in the repository:
-  it copies THIS folder to a clean place and runs import + install + Brain
-  Window from it.
+  it copies THIS folder to a clean place and runs import + install from it.
 
 ## Decisions this package keeps
 
 - One memory authority: the brain folder. Nothing else is a second database.
-- Goose never confirms its own memory; the Review screen is the only place
-  confirmations happen.
+- The in-chat confirmation card is the only place memory is confirmed: Allow
+  saves exactly what the card shows, Deny saves nothing. The screens are
+  view-only.
+- \`memory_ob_review retract\` withdraws a confirmed record and keeps its full
+  history. Nothing is ever permanently deleted.
 - Imported history is raw unconfirmed evidence (\`origin: import\`), never
   silently trusted.
+- Never Send records are never handed to an agent — not their text, titles,
+  ids, or a count — on any surface.
 - Goose's own folders are read-only sources; the AI may move things to
   recoverable Trash but never permanently deletes.
 - No telemetry, no credentials, no external services, no phone-home.

@@ -1,7 +1,8 @@
 # Memory_OB for Goose
 
 This addon gives your **plain Goose** a real memory — the OddBrain brain — with
-**no OddBrain app** to install, build, or maintain.
+**no OddBrain app** to install, build, or maintain, and **no browser window**:
+the screens live inside Goose itself.
 
 Once it is installed:
 
@@ -10,8 +11,7 @@ Once it is installed:
 - Goose's **own stock memory is switched off** in the same reviewed step. After
   install, Goose never touches its original memory structure again — only yours.
 - Everything lives in **one brain folder** as plain files you can open and read.
-- Goose gets **read-only** tools. It can never write, confirm, delete, or send
-  memory. Only you confirm facts, in the Review screen.
+- You confirm facts on the **confirmation card in the chat** — nowhere else.
 
 ## Install (one command)
 
@@ -22,8 +22,8 @@ Once it is installed:
 node install.mjs --goose-config <path\to\goose\config.yaml>
 ```
 
-On Windows the config is usually `%APPDATA%\Block\goose\config.yaml`. The brain
-folder defaults to `Memory_OB` in your home directory; change it with
+On Windows the config is usually `%APPDATA%\Block\goose\config\config.yaml`. The
+brain folder defaults to `Memory_OB` in your home directory; change it with
 `--brain <folder>`.
 
 3. Read the exact proposed changes it prints. Type `ALLOW` to write them,
@@ -36,10 +36,18 @@ its old memory store afterwards.
 
 The installer:
 
-- adds one `memory_ob` extension entry to Goose's config (read-only tools plus the in-chat screens),
+- adds one `memory_ob` extension entry to Goose's config (the eleven tools plus
+  the in-chat screens),
 - switches **off** Goose's stock `memory` extension (`enabled: false`),
+- **repairs damage left by earlier broken installers** — duplicate
+  `memory`/`apps`/`memory_ob` blocks (a second enabled `memory` block can
+  silently switch stock memory back on) are collapsed to one clean block, and a
+  damaged catalogue manifest is kept aside, never deleted,
+- writes a config Goose can always parse (a regression-tested guarantee),
 - creates the brain folder ready to use, including an empty memory catalogue,
 - installs the `memory-ob-memory` rule sheet into Goose's skills folder,
+- drops the stamped screens snapshot onto Goose's Apps page
+  (`data\apps\memory-ob.html`) beside your other apps,
 - keeps your original `config.yaml` as a backup,
 - writes a receipt with SHA-256 hashes of everything it installed,
 - refuses to overwrite any file it did not write itself.
@@ -50,9 +58,29 @@ The installer:
 |---|---|
 | `memory_ob_status` | Is the brain alive? Which revision? |
 | `memory_ob_search` | Find exact word matches in confirmed memory and raw chat evidence. Every answer carries its authority label. |
-| `memory_ob_project` | Bounded counts for one Project. |
 | `memory_ob_evidence` | Return exact wording, only while the stored bytes still match the SHA-256 you were given. Changed source → refused. Raw chat evidence needs its Project ID — same boundary as search. |
-| `memory_ob_propose` | The ONE writer. Saves exactly one memory through your Allow click on the confirmation card — see below. |
+| `memory_ob_project` | Bounded counts for one Project. |
+| `memory_ob_propose` | The ONE confirmer. Saves exactly one memory through your Allow click on the confirmation card — see below. |
+| `memory_ob_review` | Undo and revoke: `retract` withdraws a confirmed record and **keeps its full history** (nothing is ever permanently deleted); `reject` dismisses a pending draft; `approve`/`correct` act on a draft you explicitly named. |
+| `memory_ob_working_notes` | Per-chat draft continuity (objective, plan, decisions, open questions, next actions). Drafts forever — never facts. |
+| `memory_ob_owner` | Your controls: hide a record (`never-send`), unhide it, move it to recoverable Trash, restore it. |
+| `memory_ob_link` | Declared relationships: supports, contradicts, derived-from, branch-of. |
+| `memory_ob_intake` | **Memory_OB takes anything**: notes, pages, documents, video — any module can hand over captured text. It lands as raw unconfirmed evidence with a byte-preserving copy. |
+| `memory_ob_screens` | Your screens — Projects, Vault, Review — inside the chat. |
+
+## Your screens, inside Goose
+
+No browser, no window. Either:
+
+- say **"show my memory screens"** in any chat — one app renders **in the
+  conversation** with **Projects, Vault and Review as tabs**, live memory state
+  every time you ask. Its **Refresh** button asks the chat for the screens
+  again; or
+- open Goose's **Apps page** — Memory_OB sits beside your other apps
+  (a stamped snapshot that says when it was captured and how to get live).
+
+The screens are **view-only**. Records marked Never Send never appear in them —
+not their text, titles, ids, or a count.
 
 ## Remember this — the card in chat
 
@@ -61,12 +89,11 @@ confirmation card appears **in the chat** showing exactly what is being saved
 and as what: the destination (`memory`, `journal`, `capsule` or `life-story`),
 the title, the exact text, and the quotation it is based on.
 
-- **Allow** → it becomes confirmed owner memory right there. No second visit to
-  Review needed.
+- **Allow** → it becomes confirmed owner memory right there.
 - **Deny** → nothing is saved at all.
-- Change your mind later? The Review screen still holds the full history —
-  correct or withdraw anything there (withdrawal keeps history; nothing is
-  ever deleted).
+- Change your mind later? Say so — `memory_ob_review retract` withdraws it and
+  keeps the full history (nothing is ever deleted), or ask in the Review tab
+  for the record's history.
 
 Two honest rules to keep this safe:
 
@@ -77,18 +104,22 @@ Two honest rules to keep this safe:
 
 ## Hiding a record from Goose (Never Send)
 
-You decide what Goose can ever see. On your own machine, in a terminal:
+You decide what Goose can ever see. Ask Goose — *"mark that Never Send"* — or
+on your own machine, in a terminal:
 
 ```
 node <brain>/adapter/memory-ob-mcp.cjs --catalogue <brain>/store --chats <brain>/chats --vault <brain> owner list
-node <brain>/adapter/memory-ob-mcp.cjs --catalogue <brain>/store --chats <brain>/chats --vault <brain> owner never-send <recordId>
-node <brain>/adapter/memory-ob-mcp.cjs --catalogue <brain>/store --chats <brain>/chats --vault <brain> owner allow-send <recordId>
+node <brain>/adapter/memory-ob-mcp.cjs ... owner never-send <recordId>
+node <brain>/adapter/memory-ob-mcp.cjs ... owner allow-send <recordId>
+node <brain>/adapter/memory-ob-mcp.cjs ... owner trash <recordId>
+node <brain>/adapter/memory-ob-mcp.cjs ... owner restore <recordId>
 ```
 
-`owner list` shows every record with its `recordId`, sensitivity and Never-Send
-mark. `never-send` hides it from all four tools immediately and permanently —
-OddBrain keeps your choice across every memory sync. `allow-send` clears the
-mark again. The install receipt prints the full command with your real paths.
+`owner list` shows every record with its `recordId`. `never-send` hides it from
+every agent tool immediately and permanently — the mark survives every memory
+sync. Hidden records are excluded wholesale from everything the AI can see:
+not their text, titles, ids, or a count. `trash` is recoverable and never
+permanent — restore brings the record back, and nothing is ever deleted.
 
 ## The brain folder
 
@@ -97,37 +128,13 @@ Memory_OB/
   00 System/        privacy rules (your Never-Check list)
   02 Sources/       raw sources (conversations, documents)
   03 Memory/        confirmed memory
+  04 Working Memory/  per-chat Working Notes (drafts)
   06 Review/        the review queue (doubts, confirmations, interpretations)
   99 Trash/         recoverable trash — nothing is ever permanently deleted
   store/            the catalogue (identities, links, hashes)
   chats/            durable chat records
   adapter/          the adapter bundle + ownership receipt
 ```
-
-## The Brain Window (your screens on your brain)
-
-```
-node brain-window.mjs
-```
-
-One command opens the **same OddBrain screens** in your browser, on your brain
-folder (default `~/Memory_OB`, change with `--brain <folder>`):
-
-- **Projects screen** — create and edit Projects, their goals and attached
-  reference files; shared Project memory is one catalogue for Goose and the app.
-- **Vault screen** — your brain's files, vault search, and the memory graph with
-  an honest link check (dead and ambiguous links are reported, never repaired
-  behind your back).
-- **Review screen** — doubts, confirmations, interpretations: the only place
-  memory is ever confirmed. Decisions are saved immediately.
-- **Brain screen** — memory checking at a glance: chats, trash, and what memory
-  holds.
-- **First run** — selecting a folder (your memory folder / data folder) and
-  deciding what to do with it: prepare it as a brain, or leave it untouched.
-
-It is local-only (127.0.0.1): nothing on your network can reach it. No desktop
-app is installed or required. Anything that needs the real desktop app keeps
-saying so out loud instead of pretending.
 
 ## Import your Goose history (one time, before installing)
 
@@ -139,20 +146,20 @@ node import-goose-history.mjs --apply    # type ALLOW to write it into the brain
 ```
 
 It reads Goose's sessions (the SQLite store and old `.jsonl` files) and the
-stock `memory/*.txt` categories — including `Chat Recall`, which is only a
-search over those same sessions. Every message lands in the brain labelled
-**raw unconfirmed evidence** (`origin: import`), to be reviewed in the Review
-screen like any other evidence. Goose's folders are never changed; re-running
-skips what is already imported. Tool calls and tool results are counted and
-skipped — only the conversation itself is kept.
+stock `memory/*.txt` categories. Every message lands in the brain labelled
+**raw unconfirmed evidence** (`origin: import`), never silently trusted. Goose's
+folders are never changed; re-running skips what is already imported. Tool
+calls and tool results are counted and skipped — only the conversation itself
+is kept.
 
 ## Anything, no matter the module
 
 Any module can hand memory its raw sources (video, documents, browser —
-whatever you add next). Memory keeps an untouched copy, labels it raw
-unconfirmed evidence (never a confirmed fact or instruction), finds it in
-search, and quotes it only hash-verified and inside a Project scope — exactly
-like chat evidence. The same Never Send and local-only rules apply.
+whatever you add next), through the `memory_ob_intake` tool or directly. Memory
+keeps an untouched copy, labels it raw unconfirmed evidence (never a confirmed
+fact or instruction), finds it in search, and quotes it only hash-verified and
+inside a Project scope — exactly like chat evidence. The same Never Send and
+local-only rules apply.
 
 ## Meaning search (optional)
 
@@ -174,27 +181,22 @@ Cloud allowance) via `ODDBRAIN_MODEL_BASE_URL` and `ODDBRAIN_EMBED_MODEL` —
 no local model is ever downloaded. The vector index is a rebuildable
 derivative; deleting it loses nothing.
 
-## Still coming next (built on this)
-
-- **Engine-notes proposals**: the organizer drafts memory proposals from
-  conversations and shows them for review. You confirm each draft either in
-  the Review screen or — for single memories Goose proposes in chat — with
-  one click on the confirmation card.
-- **Real-machine acceptance** on your Windows machine with plain Goose.
-
 ## The ready-to-download folder
 
 `npm run package:addon` (in `apps/03_oddbrain`) builds
 `packages/Memory_OB/dist-addon/Memory_OB-addon/` plus a `.zip`: the whole
-addon pre-built — installer, import CLI, Brain Window launcher with its server
-and interface, the four-tool adapter core, and the skill — with a `MANIFEST.md`
-recording sources, versions, commands, states and SHA-256 checksums for every
-file. Copy the folder anywhere and run its commands; nothing needs building.
+addon pre-built — installer, import CLI, the eleven-tool adapter core with the
+in-Goose screens, and the skill — with a `MANIFEST.md` recording sources,
+versions, commands, states and SHA-256 checksums for every file. Copy the
+folder anywhere and run its commands; nothing needs building.
 
 ## Rules this addon lives by
 
 - One memory authority: this brain. Not a second database anywhere.
-- Goose never confirms its own memory.
+- The in-chat confirmation card is the only place memory is confirmed.
 - Raw, pending, rejected and confirmed stay separate and labelled.
+- Never Send records are never handed to an agent — not text, titles, ids, or a
+  count — on any surface.
 - Excluded/Never-Check sources are never returned, even if they were reviewed before.
-- Trash is recoverable; permanent deletion is yours alone, after impact review.
+- Trash and retraction are recoverable; permanent deletion is yours alone,
+  after impact review.
