@@ -49,7 +49,12 @@ const chat = {
   id: 'chat-trap-1', title: 'Trap chat', projectId, lifecycle: 'active',
   messages: [m1, { id: 'm2', role: 'assistant', content: 'Nothing about dates is stored in this conversation.', at: '2026-10-22T01:00:01.000Z' }, m3],
 }
-createChatStore(chatsRoot).migrate({ chats: [chat], currentChat: chat.id, rawChats: JSON.stringify([chat]), rawCurrentChat: JSON.stringify(chat.id) })
+const trashChat = {
+  id: 'chat-trash-1', title: 'Trashed chat', projectId: null, lifecycle: 'trash',
+  trash: { at: '2026-10-22T02:00:00.000Z', by: 'ai', reason: 'owner asked for this one to go to Trash', previous: 'active' },
+  messages: [{ id: 't1', role: 'user', content: 'the deleted confession: the moon is made of green cheese, half-eaten by mice', at: '2026-10-21T23:00:00.000Z' }],
+}
+createChatStore(chatsRoot).migrate({ chats: [chat, trashChat], currentChat: chat.id, rawChats: JSON.stringify([chat, trashChat]), rawCurrentChat: JSON.stringify(chat.id) })
 
 writeFileSync(join(vaultRoot, '00 System', 'Privacy & Access.md'),
   '# Privacy & Access\n\nThe never-check list.\n\n```yaml\nexcluded_patterns:\n  - secret.example.com/*\n```\n')
@@ -248,6 +253,21 @@ const run = async (): Promise<void> => {
   const searchFresh = await freshMcp.call('memmory_ob_search', { query: 'anything at all' })
   check('trap15: empty brain search is safe and empty', !searchFresh.isError && (searchFresh.json?.hits ?? []).length === 0, searchFresh.text)
   freshMcp.close()
+
+  // ---- trap16: the trashed-chat trap ----
+  {
+    const mcp = new Mcp()
+    await mcp.request('initialize', { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'traps-4', version: '1' } })
+    const searchTrash = await mcp.call('memmory_ob_search', { query: 'moon green cheese confession' })
+    const trashText = searchTrash.text || ''
+    check('trap16: trashed chat never surfaces in scoped search', !trashText.includes('green cheese'), trashText)
+    const searchLive = await mcp.call('memmory_ob_search', { query: 'When is the Lantern launch' })
+    check('trap16: the live chat still answers', /Lantern launch/.test(searchLive.text || ''), searchLive.text)
+    const evidenceTrash = await mcp.call('memmory_ob_evidence', { statement: 'the moon is made of green cheese' })
+    const evText = evidenceTrash.text || ''
+    check('trap16: trashed chat produces no evidence record', !evText.includes('green cheese, half-eaten') && !evText.includes('chat-trash-1'), evText)
+    mcp.close()
+  }
 }
 
 run().then(() => {

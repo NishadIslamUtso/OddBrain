@@ -30,9 +30,9 @@ folder defaults to `Memmory_OB` in your home directory; change it with
    anything else cancels. Nothing is written before you allow.
 
 **Before you install on a computer that has history you want to keep:** run the
-history import first (see *Still coming next* below). The install switches
-Goose's stock memory off in the same change, and Goose stops reading its old
-memory store afterwards.
+history import first (see *Import your Goose history* below). The install
+switches Goose's stock memory off in the same change, and Goose stops reading
+its old memory store afterwards.
 
 The installer:
 
@@ -107,12 +107,30 @@ It is local-only (127.0.0.1): nothing on your network can reach it. No desktop
 app is installed or required. Anything that needs the real desktop app keeps
 saying so out loud instead of pretending.
 
+## Import your Goose history (one time, before installing)
+
+On the computer that still has your Goose history:
+
+```
+node import-goose-history.mjs            # preview — changes nothing
+node import-goose-history.mjs --apply    # type ALLOW to write it into the brain
+```
+
+It reads Goose's sessions (the SQLite store and old `.jsonl` files) and the
+stock `memory/*.txt` categories — including `Chat Recall`, which is only a
+search over those same sessions. Every message lands in the brain labelled
+**raw unconfirmed evidence** (`origin: import`), to be reviewed in the Review
+screen like any other evidence. Goose's folders are never changed; re-running
+skips what is already imported. Tool calls and tool results are counted and
+skipped — only the conversation itself is kept.
+
 ## Still coming next (built on this)
 
-- **History import**: one command to pull your existing Goose sessions into the
-  brain as raw evidence, so nothing is lost when stock memory goes off.
-- **The Review screen**: the separate screen for doubts, confirmations and
-  interpretations — the only place memory is ever confirmed.
+- **Engine-notes proposals**: the organizer drafts memory proposals from
+  conversations and shows them for review — confirmation still only ever
+  happens in the Review screen.
+- **One downloadable folder**: the whole addon packaged with the Brain Window
+  and the built core, ready to copy onto a machine.
 
 ## Rules this addon lives by
 
