@@ -57,6 +57,63 @@ const splitFlowList = (text) => {
   return inner.split(',').map(part => unquote(part)).filter(part => part !== '')
 }
 
+/** Split on a separator at depth 0, honoring quotes and nested {} []. */
+const splitTopLevel = (text, separator) => {
+  const parts = []
+  let depth = 0, quoted = null, escaped = false, current = ''
+  for (const character of String(text)) {
+    if (escaped) { current += character; escaped = false; continue }
+    if (quoted === '"') {
+      current += character
+      if (character === '\\') escaped = true
+      else if (character === '"') quoted = null
+      continue
+    }
+    if (quoted === "'") {
+      current += character
+      if (character === "'") quoted = null
+      continue
+    }
+    if (character === '"' || character === "'") { quoted = character; current += character; continue }
+    if (character === '{' || character === '[') depth += 1
+    if (character === '}' || character === ']') depth -= 1
+    if (character === separator && depth === 0) { parts.push(current); current = ''; continue }
+    current += character
+  }
+  if (current.trim()) parts.push(current)
+  return parts
+}
+
+const parseFlowMap = (text) => {
+  const inner = String(text).trim().replace(/^\{/, '').replace(/\}$/, '')
+  const map = {}
+  for (const part of splitTopLevel(inner, ',')) {
+    const index = part.indexOf(':')
+    if (index < 0) continue
+    const key = part.slice(0, index).trim().replace(/^["']|["']$/g, '')
+    if (key) map[key] = part.slice(index + 1).trim()
+  }
+  return map
+}
+
+/** Cut a trailing YAML comment that sits outside any quotes. */
+const stripComment = (text) => {
+  let quoted = null, escaped = false
+  for (let i = 0; i < text.length; i += 1) {
+    const character = text[i]
+    if (escaped) { escaped = false; continue }
+    if (quoted === '"') {
+      if (character === '\\') escaped = true
+      else if (character === '"') quoted = null
+      continue
+    }
+    if (quoted === "'") { if (character === "'") quoted = null; continue }
+    if (character === '"' || character === "'") { quoted = character; continue }
+    if (character === '#' && (i === 0 || text[i - 1] === ' ')) return text.slice(0, i).trim()
+  }
+  return text.trim()
+}
+
 const splitCommand = (text) => {
   const tokens = []
   let current = '', quoted = false
@@ -90,8 +147,17 @@ const parseBool = (raw) => {
   return null
 }
 
-/** Split one extension entry's lines into scalar props and block props. */
-const readEntry = (lines) => {
+/** Split one extension entry into scalar props and block props. Block form is
+ *  `name:` plus indented lines; flow form is `name: {type: stdio, ...}` on the
+ *  same line. Both appear in real Goose configs — and entries with a trailing
+ *  comment (`name:  # downloaded`) are still plain block entries. */
+const readEntry = (entry) => {
+  if (entry && entry.inline !== undefined && entry.inline !== null) {
+    const inline = stripComment(entry.inline)
+    if (!inline.startsWith('{')) return { scalars: {}, blocks: {}, unsupported: true }
+    return { scalars: parseFlowMap(inline), blocks: {} }
+  }
+  const lines = entry && entry.lines ? entry.lines : Array.isArray(entry) ? entry : []
   const scalars = {}
   const blocks = {}
   let currentBlock = null
@@ -104,7 +170,7 @@ const readEntry = (lines) => {
       blocks[currentBlock] = []
     } else if (scalar) {
       currentBlock = null
-      scalars[scalar[1]] = scalar[2]
+      scalars[scalar[1]] = stripComment(scalar[2])
     } else if (currentBlock && deeper && line.trim() !== '') {
       blocks[currentBlock].push(line)
     } else if (line.trim() === '') {
@@ -130,12 +196,19 @@ const readMap = (blockLines) => {
   const map = {}
   for (const line of blockLines ?? []) {
     const match = line.match(/^ {6,}([A-Za-z0-9_\-]+):\s*(.*)$/)
-    if (match) map[match[1]] = unquote(match[2])
+    if (match) map[match[1]] = unquote(stripComment(match[2]))
   }
   return map
 }
 
-// ---------- extension blocks in one config ----------
+const readFlowOrBlockMap = (scalars, blocks, key) => {
+  if (scalars[key] && String(scalars[key]).trim().startsWith('{')) return parseFlowMap(scalars[key])
+  return readMap(blocks[key])
+}
+
+/** ---------- extension blocks in one config ----------
+ *  Each entry is captured either as indented block lines or as a same-line
+ *  flow map (`name: {type: stdio, ...}`) — both forms appear in real configs. */
 const extensionBlocks = (text) => {
   const lines = text.split('\n')
   const found = new Map()
@@ -143,20 +216,18 @@ const extensionBlocks = (text) => {
   if (extIndex < 0) return { lines, found, start: -1, end: -1 }
   let start = extIndex + 1
   let end = lines.length
+  const starts = []
   for (let i = extIndex + 1; i < lines.length; i += 1) {
     if (/^\S/.test(lines[i]) && lines[i].trim() !== '') { end = i; break }
-    const entry = lines[i].match(/^ {2}([A-Za-z0-9_]+):\s*$/)
-    if (entry) found.set(entry[1], [])
+    const entry = lines[i].match(/^ {2}([A-Za-z0-9_]+):\s*(.*)$/)
+    if (entry) starts.push({ name: entry[1], index: i, tail: entry[2] })
   }
-  const names = [...found.keys()]
-  for (let n = 0; n < names.length; n += 1) {
-    const name = names[n]
-    const entryStart = lines.findIndex((line, i) => i >= start && i < end && line === `  ${name}:`)
-    let entryEnd = end
-    for (let i = entryStart + 1; i < end; i += 1) {
-      if (/^ {2}[A-Za-z0-9_]+:/.test(lines[i]) || (/^\S/.test(lines[i]) && lines[i].trim() !== '')) { entryEnd = i; break }
-    }
-    found.set(name, lines.slice(entryStart + 1, entryEnd))
+  for (let n = 0; n < starts.length; n += 1) {
+    const here = starts[n]
+    const nextIndex = n + 1 < starts.length ? starts[n + 1].index : end
+    const tail = stripComment(here.tail)
+    if (tail.startsWith('{')) found.set(here.name, { inline: tail, lines: [] })
+    else found.set(here.name, { inline: null, lines: lines.slice(here.index + 1, nextIndex) })
   }
   return { lines, found, start, end }
 }
@@ -166,8 +237,9 @@ const original = extensionBlocks(backup)
 if (original.found.size === 0) fail('No extensions were found in the backup file.')
 
 // ---------- normalize one entry into Goose v1.55's schema ----------
-const normalize = (name, entryLines) => {
-  const { scalars, blocks } = readEntry(entryLines)
+const normalize = (name, entry) => {
+  const { scalars, blocks, unsupported } = readEntry(entry)
+  if (unsupported) return { skip: `${name}: entry uses a shape this reader cannot rebuild (not a flow map)` }
   const notes = []
   const type = unquote(scalars.type || '').toLowerCase() || (scalars.cmd || scalars.command || blocks.command ? 'stdio' : (scalars.uri || scalars.url ? 'streamable_http' : ''))
   const displayName = unquote(scalars.display_name || name)
@@ -195,8 +267,8 @@ const normalize = (name, entryLines) => {
     if (!uri) return { skip: `${name}: no uri/url found; not restorable automatically` }
     out.push(`  ${name}:`, '    type: streamable_http', `    name: ${quote(entryName)}`, `    display_name: ${quote(displayName)}`, `    enabled: ${enabled === false ? 'false' : 'true'}`)
     out.push(`    uri: ${quote(uri)}`)
-    pushMap('headers', readMap(blocks.headers))
-    pushMap('envs', readMap(blocks.envs ?? blocks.env))
+    pushMap('headers', { ...readFlowOrBlockMap(scalars, blocks, 'headers') })
+    pushMap('envs', { ...readFlowOrBlockMap(scalars, blocks, 'env'), ...readFlowOrBlockMap(scalars, blocks, 'envs') })
     pushList('env_keys', readFlowOrBlockList(scalars, blocks, 'env_keys'))
     const timeout = parseSeconds(scalars.timeout ?? '30') ?? 30
     if (scalars.timeout && parseSeconds(scalars.timeout) === null) notes.push(`timeout '${scalars.timeout}' read as ${timeout}s`)
@@ -216,7 +288,7 @@ const normalize = (name, entryLines) => {
   if (!cmd) return { skip: `${name}: no cmd/command found; not restorable automatically` }
   out.push(`  ${name}:`, '    type: stdio', `    name: ${quote(entryName)}`, `    display_name: ${quote(displayName)}`, `    enabled: ${enabled === false ? 'false' : 'true'}`, `    cmd: ${quote(cmd)}`)
   pushList('args', args)
-  pushMap('envs', readMap(blocks.envs ?? blocks.env))
+  pushMap('envs', { ...readFlowOrBlockMap(scalars, blocks, 'env'), ...readFlowOrBlockMap(scalars, blocks, 'envs') })
   pushList('env_keys', readFlowOrBlockList(scalars, blocks, 'env_keys'))
   const timeout = parseSeconds(scalars.timeout ?? '30') ?? 30
   if (scalars.timeout && parseSeconds(scalars.timeout) === null) notes.push(`timeout '${scalars.timeout}' read as ${timeout}s`)

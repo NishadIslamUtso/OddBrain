@@ -46,6 +46,10 @@ extensions:
   youtubetranscript:
     type: stdio
     command: [node, yt.js, --fast]
+  flowtool: {type: stdio, command: "npx -y flow-mcp --beta", timeout: "90s", enabled: "true"}
+  commenttool:  # downloaded from the web
+    command: node tool.js
+    timeout: 45
   custom_ollama_cloud:
     type: streamable_http
     url: https://example.test/mcp
@@ -72,13 +76,15 @@ EOF
 
 # 1) preview shows the normalized restorations
 node "$FIX" --goose-config "$cfg" > "$W/preview.txt" 2>&1
-grep -q 'fetch, playwright, youtubetranscript, custom_ollama_cloud' "$W/preview.txt"; check "A: all four missing names reported" $? "$(head -20 "$W/preview.txt")"
+grep -q 'Missing since Goose dropped them: fetch' "$W/preview.txt" && grep -q 'playwright' "$W/preview.txt" && grep -q 'youtubetranscript' "$W/preview.txt" && grep -q 'custom_ollama_cloud' "$W/preview.txt"; check "A: all four missing names reported" $? "$(head -20 "$W/preview.txt")"
 grep -q 'cmd: "npx"' "$W/preview.txt"; check "B: string command split into cmd" $? "$(grep -A6 'extensions.fetch' "$W/preview.txt")"
 grep -q -- '- "-y"' "$W/preview.txt" && grep -q -- '- "fetch-mcp"' "$W/preview.txt"; check "C: command remainder became args" $? "$(grep -A8 'extensions.fetch' "$W/preview.txt")"
 grep -q 'timeout: 120' "$W/preview.txt"; check "D: 2m timeout read as 120 seconds" $? "$(grep -B2 -A2 'timeout: 120' "$W/preview.txt")"
 grep -q 'uri: "https://example.test/mcp"' "$W/preview.txt"; check "E: url promoted to uri for streamable_http" $? "$(grep -A8 'extensions.custom_ollama_cloud' "$W/preview.txt")"
 grep -q 'weirdthing: unknown extension type' "$W/preview.txt"; check "F: unknown type skipped with a reason" $? "$(tail -5 "$W/preview.txt")"
 grep -q "tom: Goose manages built-in" "$W/preview.txt"; check "G: builtin entries are left to Goose" $? "$(tail -5 "$W/preview.txt")"
+grep -q 'flowtool' "$W/preview.txt" && grep -q 'cmd: "npx"' "$W/preview.txt" && grep -q 'timeout: 90' "$W/preview.txt"; check "Q: same-line flow map entry is read and normalized" $? "$(grep -A10 'extensions.flowtool' "$W/preview.txt")"
+grep -q 'commenttool' "$W/preview.txt" && grep -q 'cmd: "node"' "$W/preview.txt"; check "R: entry with a trailing comment is still found" $? "$(grep -A8 'extensions.commenttool' "$W/preview.txt")"
 grep -q 'Preview only' "$W/preview.txt"; check "H: preview writes nothing" $? "$(tail -2 "$W/preview.txt")"
 grep -q 'memory_ob' "$cfg" && ! grep -q 'fetch:' "$cfg"; check "I: config untouched after preview" $? "$(cat "$cfg")"
 
@@ -88,8 +94,9 @@ grep -q 'Cancelled' "$W/cancel.txt" && ! grep -q 'fetch:' "$cfg"; check "J: canc
 
 # 3) ALLOW restores everything rebuilt
 echo "ALLOW" | node "$FIX" --goose-config "$cfg" --apply > "$W/apply.txt" 2>&1
-grep -q 'Restored: fetch, playwright, youtubetranscript, custom_ollama_cloud' "$W/apply.txt"; check "K: apply reports the restorations" $? "$(tail -4 "$W/apply.txt")"
+grep -q 'Restored: fetch' "$W/apply.txt" && grep -q 'flowtool' "$W/apply.txt" && grep -q 'commenttool' "$W/apply.txt" && grep -q 'custom_ollama_cloud' "$W/apply.txt"; check "K: apply reports the restorations" $? "$(tail -4 "$W/apply.txt")"
 grep -q 'fetch:' "$cfg" && grep -q 'playwright:' "$cfg" && grep -q 'youtubetranscript:' "$cfg" && grep -q 'custom_ollama_cloud:' "$cfg"; check "L: restored entries are in the config" $? "$(cat "$cfg")"
+grep -q 'flowtool:' "$cfg" && grep -q 'commenttool:' "$cfg"; check "S: flow and comment shapes landed in the config" $? "$(cat "$cfg")"
 grep -q 'memory_ob:' "$cfg" && grep -q 'developer:' "$cfg" && grep -q 'GANDALF: 1' "$cfg"; check "M: existing entries and other sections intact" $? "$(cat "$cfg")"
 grep -q 'cmd: "npx"' "$cfg"; check "N: restored block uses the typed schema" $? "$(grep -A8 'fetch:' "$cfg")"
 
