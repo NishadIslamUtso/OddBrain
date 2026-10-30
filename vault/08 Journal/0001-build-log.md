@@ -1,7 +1,7 @@
 ---
 title: "Brain plugin build log — Oct 29"
 kind: journal
-status: confirmed
+status: demo
 created: 2026-10-29T23:00:00+06:00
 modified: 2026-10-29T23:30:00+06:00
 tags: [build, plugin, debugging]

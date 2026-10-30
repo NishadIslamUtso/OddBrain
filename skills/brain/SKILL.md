@@ -204,6 +204,9 @@ curl -s "http://127.0.0.1:9119/api/plugins/brain/proposals?status=pending&limit=
 
 **When:** The user explicitly approves something in the Review screen.
 
+> **Important:** The agent must not approve its own proposals via curl or API calls.
+> Approval is a user-only action performed in the Review UI.
+
 ```bash
 curl -s -X POST http://127.0.0.1:9119/api/plugins/brain/proposals/0001/approve
 ```

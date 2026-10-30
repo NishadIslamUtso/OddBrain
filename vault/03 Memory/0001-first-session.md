@@ -1,7 +1,7 @@
 ---
 title: "First Brain session"
 kind: memory
-status: confirmed
+status: demo
 created: 2026-10-29T22:00:00+06:00
 modified: 2026-10-29T22:30:00+06:00
 tags: [session, bootstrap]

@@ -1,7 +1,7 @@
 ---
 title: "User preferences"
 kind: people
-status: confirmed
+status: demo
 created: 2026-10-29T22:00:00+06:00
 modified: 2026-10-29T22:00:00+06:00
 tags: [preferences, constraints]

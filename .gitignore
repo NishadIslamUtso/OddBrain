@@ -29,3 +29,4 @@ Thumbs.db
 # Vault (user data lives here, but don't commit empty dirs)
 vault/.obsidian/Cache/
 vault/.obsidian/Workspace/
+config.yaml

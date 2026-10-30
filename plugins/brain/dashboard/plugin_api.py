@@ -824,3 +824,66 @@ def vault_manifest() -> dict[str, Any]:
         "files": entries,
     }
 
+
+# ---------------------------------------------------------------------------
+# Settings — brain-specific config (model selector, etc.)
+# ---------------------------------------------------------------------------
+
+@router.get("/settings")
+def get_brain_settings() -> dict[str, Any]:
+    """Return Brain-specific settings."""
+    settings_path = BRAIN_PATH / ".brain" / "settings.json"
+    if settings_path.exists():
+        try:
+            return json.loads(settings_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {
+        "model": "auto",
+        "version": 1,
+    }
+
+
+@router.post("/settings")
+def update_brain_settings(payload: dict[str, Any], token: Optional[str] = Query(None)) -> dict[str, Any]:
+    """Update Brain-specific settings."""
+    _check_token(token)
+    settings_path = BRAIN_PATH / ".brain" / "settings.json"
+    settings_path.parent.mkdir(parents=True, exist_ok=True)
+    current = {}
+    if settings_path.exists():
+        try:
+            current = json.loads(settings_path.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    current.update(payload)
+    current.setdefault("version", 1)
+    settings_path.write_text(json.dumps(current, indent=2), encoding="utf-8")
+    return {"ok": True, "settings": current}
+
+
+@router.get("/models")
+def list_brain_models() -> dict[str, Any]:
+    """Return available model choices for Brain features.
+
+    - `auto` means: use Hermes's current main model.
+    - Other entries are explicit model identifiers the user can select.
+    """
+    return {
+        "default": "auto",
+        "models": [
+            "auto",
+            "openrouter/auto",
+            "nous/auto",
+            "nous-api/auto",
+            "anthropic/auto",
+            "openai-codex/auto",
+            "copilot/auto",
+            "gemini/auto",
+            "ollama/auto",
+            "ollama-cloud/auto",
+            "lmstudio/auto",
+            "custom",
+        ],
+    }
+

@@ -1,7 +1,7 @@
 ---
 title: "Brain plugin activated"
 kind: activity
-status: confirmed
+status: demo
 created: 2026-10-29T23:09:00+06:00
 tags: [plugin, activation]
 source: agent

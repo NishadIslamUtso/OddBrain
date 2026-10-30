@@ -1,7 +1,7 @@
 ---
 title: "Free Nous tier models — research note"
 kind: knowledge
-status: confirmed
+status: demo
 created: 2026-10-29T22:30:00+06:00
 modified: 2026-10-29T22:30:00+06:00
 tags: [models, free-tier, nous]

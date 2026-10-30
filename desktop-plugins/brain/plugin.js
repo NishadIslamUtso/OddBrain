@@ -41,9 +41,9 @@ function Row({ label, value }) {
 
 function RecordCard({ rec, onOpen }) {
   const kindColor = {
-    'memory': 'text-blue-400',
-    'journal': 'text-green-400',
-    'review': 'text-orange-400',
+    'memory': 'text-(--ui-text-secondary)',
+    'journal': 'text-(--ui-accent)',
+    'review': 'text-(--ui-text-tertiary)',
     'archive': 'text-(--ui-text-quaternary)',
   }[rec.kind] || 'text-(--ui-text-secondary)'
 
@@ -79,7 +79,7 @@ function ProposalCard({ prop, onApprove, onDeny, onOpen }) {
         jsxs('div', { className: 'flex gap-2', children: [
           jsx('button', {
             onClick: (e) => { e.stopPropagation(); onApprove(prop.proposal_id) },
-            className: 'rounded-md bg-green-500/20 px-2 py-0.5 text-xs text-green-400 hover:bg-green-500/30',
+            className: 'rounded-md bg-(--ui-accent)/20 px-2 py-0.5 text-xs text-(--ui-accent) hover:bg-(--ui-accent)/30',
             children: 'Approve'
           }),
           jsx('button', {
@@ -209,6 +209,7 @@ function ReviewPage({ ctx }) {
   const [filter, setFilter] = useState('pending')
   const [selected, setSelected] = useState(null)
   const [actionMsg, setActionMsg] = useState(null)
+  const [denyReason, setDenyReason] = useState('')
 
   const loadProposals = useCallback(async () => {
     setLoading(true)
@@ -243,21 +244,22 @@ function ReviewPage({ ctx }) {
   }, [loadProposals])
 
   const handleDeny = useCallback(async (pid) => {
-    const reason = prompt ? '' : ''  // cannot use prompt() in React; just deny
+    const reason = (denyReason || '').trim()
     setActionMsg(`Denying ${pid}…`)
     try {
       await ctx.rest(`/proposals/${pid}/deny`, {
         method: 'POST',
-        body: {},
+        body: { reason: reason || undefined },
       })
       setActionMsg(`${pid} denied`)
       setTimeout(() => setActionMsg(null), 3000)
       loadProposals()
       setSelected(null)
+      setDenyReason('')
     } catch (e) {
       setActionMsg(`Error: ${e.message}`)
     }
-  }, [loadProposals])
+  }, [loadProposals, denyReason])
 
   return jsxs('div', {
     className: 'flex h-full flex-col gap-4 p-4 text-sm',
@@ -281,7 +283,7 @@ function ReviewPage({ ctx }) {
         jsxs('div', { className: 'text-xs text-(--ui-text-quaternary)', children: [total, ' proposals'] }),
         actionMsg && jsxs('div', {
           className: 'text-xs',
-          children: [actionMsg.includes('Error') ? 'text-red-400' : 'text-green-400', actionMsg]
+          children: [actionMsg.includes('Error') ? 'text-red-400' : 'text-(--ui-accent)', actionMsg]
         }),
       ]}),
 
@@ -329,16 +331,25 @@ function ReviewPage({ ctx }) {
             selected.destination && ` → ${selected.destination}`,
             selected.created && ` · ${selected.created}`,
           ]}),
-          selected.status === 'pending' && jsxs('div', { className: 'flex gap-2 mt-2', children: [
-            jsx('button', {
-              onClick: () => handleApprove(selected.proposal_id),
-              className: 'rounded-md bg-green-500/20 px-3 py-1 text-xs text-green-400 hover:bg-green-500/30',
-              children: 'Approve'
-            }),
-            jsx('button', {
-              onClick: () => handleDeny(selected.proposal_id),
-              className: 'rounded-md bg-red-500/20 px-3 py-1 text-xs text-red-400 hover:bg-red-500/30',
-              children: 'Deny'
+          selected.status === 'pending' && jsxs('div', { className: 'flex flex-col gap-2 mt-2', children: [
+            jsxs('div', { className: 'flex gap-2', children: [
+              jsx('button', {
+                onClick: () => handleApprove(selected.proposal_id),
+                className: 'rounded-md bg-(--ui-accent)/20 px-3 py-1 text-xs text-(--ui-accent) hover:bg-(--ui-accent)/30',
+                children: 'Approve'
+              }),
+              jsx('button', {
+                onClick: () => handleDeny(selected.proposal_id),
+                className: 'rounded-md bg-red-500/20 px-3 py-1 text-xs text-red-400 hover:bg-red-500/30',
+                children: 'Deny'
+              }),
+            ]}),
+            jsx('input', {
+              type: 'text',
+              placeholder: 'Deny reason (optional)',
+              value: denyReason,
+              onChange: (e) => setDenyReason(e.target.value),
+              className: 'w-full rounded-md border border-(--ui-stroke-secondary) bg-(--ui-background-secondary) px-3 py-1.5 text-xs text-(--ui-text-primary) placeholder:text-(--ui-text-quaternary) focus:border-(--ui-accent) focus:outline-none',
             }),
           ]}),
         ]
@@ -502,11 +513,40 @@ function GraphPage({ ctx }) {
 }
 function BrainPage({ ctx }) {
   const [tab, setTab] = useState('vault')
+  const [brainModel, setBrainModel] = useState('auto')
+  const [availableModels, setAvailableModels] = useState([])
+  const [modelsLoaded, setModelsLoaded] = useState(false)
 
   const ROUTES = "routes"
   if (typeof ROUTES !== 'string') {
     return jsx('div', { className: 'p-4 text-sm text-(--ui-text-tertiary)', children: 'Brain SDK not available on this host.' })
   }
+
+  useEffect(() => {
+    let cancelled = false
+    ctx.rest('/settings').then(data => {
+      if (!cancelled && data && data.model) setBrainModel(data.model)
+    }).catch(() => {})
+    ctx.rest('/models').then(data => {
+      if (!cancelled && data && Array.isArray(data.models)) {
+        setAvailableModels(data.models)
+        setModelsLoaded(true)
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [ctx])
+
+  const handleModelChange = useCallback(async (value) => {
+    setBrainModel(value)
+    try {
+      await ctx.rest('/settings', {
+        method: 'POST',
+        body: { model: value },
+      })
+    } catch (e) {
+      console.error('Failed to save Brain model setting', e)
+    }
+  }, [ctx])
 
   return jsxs('div', {
     className: 'flex h-full flex-col text-sm',
@@ -534,6 +574,18 @@ function BrainPage({ ctx }) {
             className: `px-4 py-2 text-xs ${tab === 'review' ? 'border-b-2 border-(--ui-accent) text-(--ui-text-primary)' : 'text-(--ui-text-tertiary)'}`,
             children: 'Review'
           }),
+          jsxs('div', { className: 'ml-auto flex items-center gap-2 px-3', children: [
+            jsxs('span', { className: 'text-xs text-(--ui-text-quaternary)', children: ['Model:', ' '] }),
+            jsxs('select', {
+              value: brainModel,
+              onChange: (e) => handleModelChange(e.target.value),
+              className: 'rounded-md border border-(--ui-stroke-secondary) bg-(--ui-background-secondary) px-2 py-1 text-xs text-(--ui-text-primary) focus:border-(--ui-accent) focus:outline-none',
+              children: [
+                jsx('option', { value: 'auto', children: 'auto (main model)' }),
+                ...availableModels.filter(m => m !== 'auto').map(m => jsx('option', { key: m, value: m, children: m })),
+              ]
+            }),
+          ]}),
         ]
       }),
       jsx('div', { className: 'flex-1 overflow-hidden', children: tab === 'vault' ? jsx(VaultPage, { ctx }) : tab === 'search' ? jsx(SearchPage, { ctx }) : tab === 'graph' ? jsx(GraphPage, { ctx }) : jsx(ReviewPage, { ctx }) }),
