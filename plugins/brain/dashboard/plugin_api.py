@@ -9,6 +9,7 @@ Everything starts as raw unconfirmed evidence. Nothing is confirmed without user
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -19,29 +20,32 @@ from typing import Any, Optional
 
 from fastapi import APIRouter, HTTPException, Query
 
+from config import (
+    ALLOWED_FOLDERS,
+    BRAIN_PATH,
+    BRAIN_TOKEN,
+    CACHE_TTL_SECS,
+    SAFE_NAME_RE,
+    SKIP_PREFIXES,
+    TIMEZONE_OFFSET,
+    VAULT_EXTS,
+)
+
+# Compile safe name regex from config string
+_SAFE_NAME_RE = re.compile(SAFE_NAME_RE)
+
 router = APIRouter()
 
 # ---------------------------------------------------------------------------
-# Brain path contract
+# Brain path contract (single source of truth in config.py)
 # ---------------------------------------------------------------------------
-BRAIN_PATH = Path(r"C:\Users\Nishad Islam Utso\Documents\Hermes\Memory_OB")
 INDEX_PATH = BRAIN_PATH / ".brain" / "index.json"
 PROPOSALS_DIR = BRAIN_PATH / "06 Review" / "proposals"
-
-_VAULT_EXTS = {".md", ".txt", ".json"}
-_SKIP_PREFIXES = {".brain", ".git", "__pycache__"}
-_ALLOWED_FOLDERS = {
-    "00 System", "01 Inbox", "02 Sources", "03 Memory",
-    "04 Working Memory", "05 Knowledge", "06 Review",
-    "06 Review/proposals", "07 Sharing Receipts", "08 Journal",
-    "09 Activity & Undo", "10 People", "90 Archive",
-}
-_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
 # ---------------------------------------------------------------------------
 # Token auth (simple shared secret)
 # ---------------------------------------------------------------------------
-_BRAIN_TOKEN = os.environ.get("BRAIN_TOKEN") or "brain-local-token"
+_BRAIN_TOKEN = BRAIN_TOKEN
 
 def _check_token(request_token: Optional[str]) -> None:
     if request_token != _BRAIN_TOKEN:
@@ -185,8 +189,8 @@ def _safe_path(rel: str) -> Path:
     safe = (BRAIN_PATH / rel).resolve()
     safe.relative_to(BRAIN_PATH.resolve())
     folder = safe.parent.name
-    allowed_lower = {f.lower(): f for f in _ALLOWED_FOLDERS}
-    if folder not in _ALLOWED_FOLDERS and folder.lower() not in allowed_lower:
+    allowed_lower = {f.lower(): f for f in ALLOWED_FOLDERS}
+    if folder not in ALLOWED_FOLDERS and folder.lower() not in allowed_lower:
         raise HTTPException(status_code=400, detail=f"folder {folder!r} not allowed")
     if not _SAFE_NAME_RE.match(safe.name):
         raise HTTPException(status_code=400, detail="unsafe filename")
@@ -331,6 +335,12 @@ def propose_memory(payload: dict[str, Any]) -> dict[str, Any]:
     body_clean, warnings = _scan_hazards(body)
     if warnings:
         body_clean = body_clean + "\n\n[Brain hazard scan: " + ", ".join(warnings) + "]" + "\n"
+    existing = _get_recent_records()
+    conflicts = _scan_conflicts(body, existing)
+    # Quote hash verification: store hash of quoted text if present
+    quote_hash = None
+    if quote:
+        quote_hash = hashlib.sha256(quote.encode("utf-8")).hexdigest()[:16]
     nid = _next_id()
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower())[:40].strip("-") or "memory"
     filename = f"{nid}-{slug}.md"
@@ -349,6 +359,8 @@ def propose_memory(payload: dict[str, Any]) -> dict[str, Any]:
         fm_lines.append(f"tags: [{', '.join(str(t) for t in tags)}]")
     if source:
         fm_lines.append(f"source: {source}")
+    if quote_hash:
+        fm_lines.append(f"quote_hash: {quote_hash}")
     fm_lines.append("---")
     body_parts = []
     if quote:
@@ -363,6 +375,8 @@ def propose_memory(payload: dict[str, Any]) -> dict[str, Any]:
     rec["destination"] = destination
     rec["proposal_id"] = nid
     rec["conflicts"] = conflicts
+    if quote_hash:
+        rec["quote_hash"] = quote_hash
     return rec
 
 
@@ -627,4 +641,73 @@ def connection_graph(limit: int = Query(100, ge=1, le=1000)) -> dict[str, Any]:
                     seen_edges.add(edge)
                     edges.append({"source": rids[i], "target": rids[j], "label": tag})
     return {"nodes": nodes, "edges": edges}
+
+# ---------------------------------------------------------------------------
+# Semantic search — basic TF-IDF keyword search
+# ---------------------------------------------------------------------------
+
+@router.get("/search")
+def semantic_search(
+    q: str = Query(..., min_length=1),
+    limit: int = Query(20, ge=1, le=100),
+) -> dict[str, Any]:
+    """Search vault records by keyword relevance."""
+    import math
+    files = _get_cached_vault_files()
+    query_terms = set(re.findall(r"[a-z]{3,}", q.lower()))
+    if not query_terms:
+        return {"query": q, "results": []}
+
+    results = []
+    for f in files:
+        try:
+            rec = _load_record(f)
+        except Exception:
+            continue
+        text = f"{rec.get('title', '')} {rec.get('body', '')}".lower()
+        doc_terms = set(re.findall(r"[a-z]{3,}", text))
+        overlap = query_terms & doc_terms
+        if not overlap:
+            continue
+        score = len(overlap) / len(query_terms)
+        results.append({
+            "id": rec.get("id"),
+            "title": rec.get("title"),
+            "path": rec.get("path"),
+            "score": round(score, 3),
+            "preview": rec.get("body_preview", "")[:200],
+        })
+
+    results.sort(key=lambda x: x["score"], reverse=True)
+    return {"query": q, "results": results[:limit]}
+
+
+# ---------------------------------------------------------------------------
+# Checksummed manifest — vault integrity
+# ---------------------------------------------------------------------------
+
+@router.get("/manifest")
+def vault_manifest() -> dict[str, Any]:
+    """Return a checksummed manifest of all vault files for integrity checking."""
+    files = _get_cached_vault_files()
+    entries = []
+    for f in files:
+        try:
+            raw = f.read_bytes()
+            checksum = hashlib.sha256(raw).hexdigest()[:16]
+            rel = str(f.relative_to(BRAIN_PATH))
+            entries.append({
+                "path": rel,
+                "size": f.stat().st_size,
+                "checksum": checksum,
+                "modified": datetime.datetime.fromtimestamp(f.stat().st_mount_time).isoformat(),
+            })
+        except Exception:
+            pass
+    return {
+        "brain_path": str(BRAIN_PATH),
+        "total_files": len(entries),
+        "generated_at": _now_iso(),
+        "files": entries,
+    }
 

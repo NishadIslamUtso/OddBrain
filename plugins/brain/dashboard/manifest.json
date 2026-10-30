@@ -3,6 +3,10 @@
   "label": "Brain",
   "description": "Memory_OB vault — read-only viewer for Hermes",
   "icon": "Brain",
-  "version": "0.1.0",
-  "api": "plugin_api.py"
+  "version": "0.2.0",
+  "api": "plugin_api.py",
+  "config": {
+    "brain_path": "C:\\Users\\Nishad Islam Utso\\Documents\\Hermes\\Memory_OB",
+    "token": "brain-local-token"
+  }
 }

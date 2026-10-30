@@ -7,7 +7,8 @@ import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path("plugins/brain/dashboard").resolve()))
-from plugin_api import _safe_path, _scan_hazards, _next_id, _ALLOWED_FOLDERS, _scan_conflicts
+from plugin_api import _safe_path, _scan_hazards, _next_id, _scan_conflicts
+from config import ALLOWED_FOLDERS
 
 PASS = 0
 FAIL = 0
@@ -53,7 +54,7 @@ check("100 IDs are unique", len(ids) == 100)
 check("ID has timestamp prefix", all("-" in i for i in ids))
 
 print("\n=== Allowed folders ===")
-check("12 folders allowed", len(_ALLOWED_FOLDERS) == 13)
+check("12 folders allowed", len(ALLOWED_FOLDERS) == 13)
 
 print("\n=== Conflict scanner ===")
 existing = ["I always prefer dark mode for programming and always use dark mode"]

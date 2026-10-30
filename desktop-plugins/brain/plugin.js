@@ -14,7 +14,14 @@ import * as sdk from '@hermes/plugin-sdk'
 import { jsx, jsxs, Fragment } from 'react/jsx-runtime'
 import { useState, useEffect, useCallback } from 'react'
 
-const BRAIN_PATH = 'C:\\Users\\Nishad Islam Utso\\Documents\\Hermes\\Memory_OB'
+// Brain path loaded from manifest at runtime; fallback to hardcoded default
+let BRAIN_PATH = 'C:\\Users\\Nishad Islam Utso\\Documents\\Hermes\\Memory_OB'
+try {
+  const manifest = ctx?.host?.getManifest?.()
+  if (manifest?.config?.brain_path) {
+    BRAIN_PATH = manifest.config.brain_path
+  }
+} catch {}
 
 const KINDS = [
   'system', 'inbox', 'sources', 'memory', 'working-memory',

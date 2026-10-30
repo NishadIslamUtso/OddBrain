@@ -11,6 +11,7 @@ import sys
 REQUIRED_FILES = [
     "desktop-plugins/brain/plugin.js",
     "plugins/brain/dashboard/plugin_api.py",
+    "plugins/brain/dashboard/config.py",
     "plugins/brain/dashboard/manifest.json",
     "skills/brain/SKILL.md",
     "skills/brain/memory-full-recall/SKILL.md",
@@ -77,8 +78,21 @@ if plugin_api.exists():
 else:
     print("  [SKIP] plugin_api.py not found")
 
+# Check config.py
+print("\n4. Config module:")
+config_py = BASE / "plugins/brain/dashboard/config.py"
+if config_py.exists():
+    try:
+        compile(config_py.read_text(encoding="utf-8"), str(config_py), "exec")
+        print("  [OK] config.py syntax valid")
+    except SyntaxError as e:
+        print(f"  [FAIL] config.py syntax error: {e}")
+        errors.append(f"Syntax error in config.py: {e}")
+else:
+    print("  [MISSING] config.py")
+
 # Check JS syntax (basic)
-print("\n4. JavaScript syntax (basic check):")
+print("\n5. JavaScript syntax (basic check):")
 plugin_js = BASE / "desktop-plugins/brain/plugin.js"
 if plugin_js.exists():
     text = plugin_js.read_text(encoding="utf-8")
@@ -90,8 +104,26 @@ if plugin_js.exists():
 else:
     print("  [SKIP] plugin.js not found")
 
+# Check manifest
+print("\n6. Plugin manifest:")
+manifest = BASE / "plugins/brain/dashboard/manifest.json"
+if manifest.exists():
+    try:
+        import json
+        data = json.loads(manifest.read_text(encoding="utf-8"))
+        if "config" in data and "brain_path" in data.get("config", {}):
+            print(f"  [OK] manifest.json has brain_path config")
+        else:
+            print("  [WARN] manifest.json missing brain_path config")
+            warnings.append("manifest.json missing brain_path config")
+    except Exception as e:
+        print(f"  [FAIL] manifest.json invalid: {e}")
+        errors.append(f"Invalid manifest.json: {e}")
+else:
+    print("  [MISSING] manifest.json")
+
 # Check vault structure
-print("\n5. Vault structure:")
+print("\n7. Vault structure:")
 vault_path = pathlib.Path(r"C:\Users\Nishad Islam Utso\Documents\Hermes\Memory_OB")
 if vault_path.exists():
     print(f"  [OK] Vault exists at: {vault_path}")
