@@ -347,6 +347,159 @@ function ReviewPage({ ctx }) {
   })
 }
 
+
+function SearchPage({ ctx }) {
+  const [query, setQuery] = useState('')
+  const [results, setResults] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [selected, setSelected] = useState(null)
+
+  const doSearch = useCallback(async (q) => {
+    if (!q.trim()) {
+      setResults([])
+      return
+    }
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await ctx.rest(`/search?q=${encodeURIComponent(q)}&limit=20`)
+      setResults(data.results || [])
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    const timer = setTimeout(() => doSearch(query), 250)
+    return () => clearTimeout(timer)
+  }, [query, doSearch])
+
+  return jsxs('div', {
+    className: 'flex h-full flex-col gap-4 p-4 text-sm',
+    children: [
+      jsxs('div', { className: 'flex flex-col gap-1', children: [
+        jsx('div', { className: 'text-base font-medium', children: 'Semantic search' }),
+        jsx('div', { className: 'text-(--ui-text-tertiary)', children: 'Keyword relevance across the vault' }),
+      ]}),
+      jsx('input', {
+        type: 'text', placeholder: 'Search the vault...', value: query,
+        onChange: (e) => setQuery(e.target.value),
+        className: 'w-full rounded-md border border-(--ui-stroke-secondary) bg-(--ui-background-secondary) px-3 py-1.5 text-sm text-(--ui-text-primary) placeholder:text-(--ui-text-quaternary) focus:border-(--ui-accent) focus:outline-none',
+      }),
+      error && jsxs('div', {
+        className: 'rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400',
+        children: [
+          jsx('div', { className: 'font-medium', children: 'Search error' }),
+          jsx('div', { children: error }),
+        ]
+      }),
+      loading && jsx('div', { className: 'text-(--ui-text-tertiary)', children: 'Searching...' }),
+      !loading && !error && jsxs('div', {
+        className: 'text-xs text-(--ui-text-quaternary)',
+        children: [results.length, ' results']
+      }),
+      !loading && !error && jsxs('div', {
+        className: 'flex flex-col gap-2 overflow-y-auto',
+        children: results.length === 0 && query.trim()
+          ? jsx('div', { className: 'text-(--ui-text-quaternary)', children: 'No matches.' })
+          : results.map(r => jsx('div', {
+              key: r.id,
+              className: 'rounded-md border border-(--ui-stroke-secondary) p-3 cursor-pointer hover:border-(--ui-accent) transition-colors',
+              onClick: () => setSelected(r),
+              children: jsxs('div', { children: [
+                jsxs('div', { className: 'flex items-center justify-between', children: [
+                  jsx('div', { className: 'text-sm font-medium text-(--ui-text-primary)', children: r.title || r.id }),
+                  jsxs('span', { className: 'text-xs text-(--ui-text-quaternary)', children: ['score ', r.score] }),
+                ]}),
+                jsx('div', { className: 'text-xs text-(--ui-text-tertiary) line-clamp-2', children: r.preview }),
+              ]})
+            }))
+      }),
+      selected && jsxs('div', {
+        className: 'mt-auto flex max-h-[50vh] flex-col gap-2 rounded-md border border-(--ui-stroke-secondary) p-3',
+        children: [
+          jsxs('div', { className: 'flex items-center justify-between', children: [
+            jsx('div', { className: 'text-sm font-medium', children: selected.title || selected.id }),
+            jsx('button', { onClick: () => setSelected(null), className: 'text-xs text-(--ui-text-quaternary)', children: 'Close' }),
+          ]}),
+          jsxs('div', {
+            className: 'overflow-y-auto whitespace-pre-wrap select-text text-xs text-(--ui-text-secondary)',
+            style: { maxHeight: '30vh' },
+            children: [selected.preview]
+          }),
+          jsxs('div', { className: 'text-xs text-(--ui-text-quaternary)', children: [selected.path, ' score ' + selected.score] }),
+        ]
+      }),
+    ]
+  })
+}
+
+function GraphPage({ ctx }) {
+  const [graph, setGraph] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    ctx.rest('/graph?limit=200')
+      .then(data => {
+        if (!cancelled) setGraph(data)
+      })
+      .catch(e => {
+        if (!cancelled) setError(e.message)
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false)
+      })
+    return () => { cancelled = true }
+  }, [])
+
+  const nodes = graph?.nodes || []
+  const edges = graph?.edges || []
+
+  return jsxs('div', {
+    className: 'flex h-full flex-col gap-4 p-4 text-sm',
+    children: [
+      jsxs('div', { className: 'flex flex-col gap-1', children: [
+        jsx('div', { className: 'text-base font-medium', children: 'Connection graph' }),
+        jsx('div', { className: 'text-(--ui-text-tertiary)', children: 'Records linked by shared tags' }),
+      ]}),
+      error && jsxs('div', {
+        className: 'rounded-md border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-400',
+        children: [
+          jsx('div', { className: 'font-medium', children: 'Graph error' }),
+          jsx('div', { children: error }),
+        ]
+      }),
+      loading && jsx('div', { className: 'text-(--ui-text-tertiary)', children: 'Loading graph...' }),
+      !loading && !error && jsxs('div', {
+        className: 'text-xs text-(--ui-text-quaternary)',
+        children: [nodes.length, ' nodes', edges.length, ' edges']
+      }),
+      !loading && !error && jsxs('div', {
+        className: 'flex flex-col gap-2 overflow-y-auto',
+        children: nodes.length === 0
+          ? jsx('div', { className: 'text-(--ui-text-quaternary)', children: 'No graph data yet.' })
+          : nodes.map(n => jsxs('div', {
+              key: n.id,
+              className: 'rounded-md border border-(--ui-stroke-secondary) p-3',
+              children: [
+                jsxs('div', { className: 'flex items-center gap-2', children: [
+                  jsx('span', { className: 'text-xs font-medium text-(--ui-text-primary)', children: n.title || n.id }),
+                  jsxs('span', { className: 'text-xs text-(--ui-text-quaternary)', children: [n.kind, ' · ', n.status] }),
+                ]}),
+                jsx('div', { className: 'text-xs text-(--ui-text-tertiary)', children: n.path }),
+              ]
+            }))
+      }),
+    ]
+  })
+}
 function BrainPage({ ctx }) {
   const [tab, setTab] = useState('vault')
 
@@ -367,13 +520,23 @@ function BrainPage({ ctx }) {
             children: 'Vault'
           }),
           jsx('button', {
+            onClick: () => setTab('search'),
+            className: `px-4 py-2 text-xs ${tab === 'search' ? 'border-b-2 border-(--ui-accent) text-(--ui-text-primary)' : 'text-(--ui-text-tertiary)'}`,
+            children: 'Search'
+          }),
+          jsx('button', {
+            onClick: () => setTab('graph'),
+            className: `px-4 py-2 text-xs ${tab === 'graph' ? 'border-b-2 border-(--ui-accent) text-(--ui-text-primary)' : 'text-(--ui-text-tertiary)'}`,
+            children: 'Graph'
+          }),
+          jsx('button', {
             onClick: () => setTab('review'),
             className: `px-4 py-2 text-xs ${tab === 'review' ? 'border-b-2 border-(--ui-accent) text-(--ui-text-primary)' : 'text-(--ui-text-tertiary)'}`,
             children: 'Review'
           }),
         ]
       }),
-      jsx('div', { className: 'flex-1 overflow-hidden', children: tab === 'vault' ? jsx(VaultPage, { ctx }) : jsx(ReviewPage, { ctx }) }),
+      jsx('div', { className: 'flex-1 overflow-hidden', children: tab === 'vault' ? jsx(VaultPage, { ctx }) : tab === 'search' ? jsx(SearchPage, { ctx }) : tab === 'graph' ? jsx(GraphPage, { ctx }) : jsx(ReviewPage, { ctx }) }),
     ]
   })
 }

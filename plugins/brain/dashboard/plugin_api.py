@@ -87,8 +87,6 @@ def _get_cached_vault_files() -> list[Path]:
     return _vault_cache
 
 
-_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.S)
-
 # ---------------------------------------------------------------------------
 # Hazard scanner
 # ---------------------------------------------------------------------------
@@ -258,6 +256,121 @@ def _invalidate_vault_cache() -> None:
     global _vault_cache_dirty
     _vault_cache_dirty = True
 
+
+
+
+# ---------------------------------------------------------------------------
+# Frontmatter parser
+# ---------------------------------------------------------------------------
+_FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.S)
+
+def _parse_frontmatter(text: str) -> dict[str, Any]:
+    m = _FRONTMATTER_RE.match(text)
+    if not m:
+        return {}
+    block = m.group(1)
+    result: dict[str, Any] = {}
+    for raw_line in block.splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if ":" not in line:
+            continue
+        key, _, val = line.partition(":")
+        key = key.strip()
+        val = val.strip()
+        if not key:
+            continue
+        if val.startswith("[") and val.endswith("]"):
+            inner = val[1:-1]
+            items = [v.strip().strip('"').strip("'") for v in inner.split(",") if v.strip()]
+            result[key] = items
+        elif val.lower() in {"true", "yes"}:
+            result[key] = True
+        elif val.lower() in {"false", "no"}:
+            result[key] = False
+        else:
+            try:
+                result[key] = int(val)
+            except ValueError:
+                try:
+                    result[key] = float(val)
+                except ValueError:
+                    result[key] = val.strip('"').strip("'")
+    return result
+
+
+# ---------------------------------------------------------------------------
+# Record helpers
+# ---------------------------------------------------------------------------
+def _record_kind(path: Path) -> str:
+    parts = [p for p in path.relative_to(BRAIN_PATH).parts if p]
+    if not parts:
+        return "root"
+    folder = parts[0]
+    label = re.sub(r"^\d+\s*", "", folder).strip()
+    return label.lower().replace(" ", "-") if label else folder
+
+
+def _record_id(rel_path: Path) -> str:
+    return str(rel_path).replace("\\", "/")
+
+
+def _load_index() -> dict[str, Any]:
+    if INDEX_PATH.exists():
+        try:
+            return json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    return {"version": 1, "brain_path": str(BRAIN_PATH), "next_id": 1, "last_scan": None, "total_records": 0}
+
+
+def _save_index(idx: dict[str, Any]) -> None:
+    INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
+    INDEX_PATH.write_text(json.dumps(idx, indent=2), encoding="utf-8")
+
+
+def _load_record(path: Path) -> dict[str, Any]:
+    rel = path.relative_to(BRAIN_PATH)
+    raw = path.read_text(encoding="utf-8-sig", errors="replace")
+    fm = _parse_frontmatter(raw)
+    body_start = raw.find("\n---\n")
+    body = raw[body_start + 4 :] if body_start != -1 else raw
+    body = body.strip()
+    title_line = ""
+    for line in body.splitlines():
+        stripped = line.strip()
+        if stripped:
+            title_line = stripped.lstrip("#").strip()
+            break
+    never_send = str(fm.get("never_send", "false")).lower() == "true"
+    local_only = str(fm.get("local_only", "false")).lower() == "true"
+    quote = fm.get("quote", "")
+    quote_hash = fm.get("quote_hash", "")
+    quote_verified = False
+    if quote_hash and quote:
+        computed = hashlib.sha256(quote.encode("utf-8")).hexdigest()[:16]
+        quote_verified = computed == quote_hash
+    rec = {
+        "id": _record_id(rel),
+        "path": str(rel),
+        "kind": fm.get("type", _record_kind(path)),
+        "status": fm.get("status", "unconfirmed"),
+        "title": fm.get("title", title_line),
+        "body": body,
+        "body_preview": body[:300] + ("…" if len(body) > 300 else ""),
+        "tags": fm.get("tags", []),
+        "created": fm.get("created", ""),
+        "modified": fm.get("modified", ""),
+        "size_bytes": path.stat().st_size,
+        "never_send": never_send,
+        "local_only": local_only,
+        "quote_hash": quote_hash,
+        "quote_verified": quote_verified,
+    }
+    if never_send or local_only:
+        rec["body"] = "[REDACTED — never_send/local_only]"
+    return rec
 
 # ---------------------------------------------------------------------------
 # READ routes
@@ -700,7 +813,7 @@ def vault_manifest() -> dict[str, Any]:
                 "path": rel,
                 "size": f.stat().st_size,
                 "checksum": checksum,
-                "modified": datetime.datetime.fromtimestamp(f.stat().st_mount_time).isoformat(),
+                "modified": datetime.datetime.fromtimestamp(f.stat().st_mtime).isoformat(),
             })
         except Exception:
             pass
