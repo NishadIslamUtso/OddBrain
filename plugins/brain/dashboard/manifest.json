@@ -1,0 +1,8 @@
+{
+  "name": "brain",
+  "label": "Brain",
+  "description": "Memory_OB vault — read-only viewer for Hermes",
+  "icon": "Brain",
+  "version": "0.1.0",
+  "api": "plugin_api.py"
+}

@@ -1,0 +1,31 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.env
+
+# Node
+node_modules/
+dist/
+build/
+
+# Hermes
+*.log
+cache/
+scratch/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Vault (user data lives here, but don't commit empty dirs)
+vault/.obsidian/Cache/
+vault/.obsidian/Workspace/
