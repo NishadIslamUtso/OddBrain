@@ -887,3 +887,92 @@ def list_brain_models() -> dict[str, Any]:
         ],
     }
 
+
+# ---------------------------------------------------------------------------
+# Context injection — top-N relevant records for the current session
+# ---------------------------------------------------------------------------
+
+@router.get("/context")
+def get_brain_context(
+    q: Optional[str] = Query(None),
+    limit: int = Query(8, ge=1, le=50),
+) -> dict[str, Any]:
+    """Return top relevant vault records for context injection."""
+    files = _get_cached_vault_files()
+    query_terms = set(re.findall(r"[a-z]{3,}", (q or "").lower()))
+    scored: list[tuple[float, dict[str, Any]]] = []
+    for f in files:
+        try:
+            rec = _load_record(f)
+        except Exception:
+            continue
+        text = f"{rec.get('title', '')} {rec.get('body', '')}".lower()
+        doc_terms = set(re.findall(r"[a-z]{3,}", text))
+        overlap = query_terms & doc_terms if query_terms else set()
+        score = len(overlap) / len(query_terms) if query_terms else 0.1
+        if score <= 0 and not query_terms:
+            score = 0.05
+        if score <= 0:
+            continue
+        scored.append((score, {
+            "id": rec.get("id"),
+            "title": rec.get("title"),
+            "path": rec.get("path"),
+            "kind": rec.get("kind"),
+            "status": rec.get("status"),
+            "preview": rec.get("body_preview", "")[:300],
+        }))
+    scored.sort(key=lambda x: x[0], reverse=True)
+    results = [item for _, item in scored[:limit]]
+    return {"query": q or "", "limit": limit, "results": results}
+
+
+# ---------------------------------------------------------------------------
+# Notes — direct scratch writes (no proposal)
+# ---------------------------------------------------------------------------
+
+@router.post("/notes")
+def create_note(payload: dict[str, Any], token: Optional[str] = Query(None)) -> dict[str, Any]:
+    """Create a working note directly in 04 Working Memory."""
+    _check_token(token)
+    kind = payload.get("kind", "working-note")
+    title = (payload.get("title") or "").strip()
+    body = (payload.get("body") or "").strip()
+    if not title and not body:
+        raise HTTPException(status_code=400, detail="title or body required")
+    folder_map = {
+        "working-note": "04 Working Memory",
+        "journal": "08 Journal",
+        "inbox": "01 Inbox",
+        "sources": "02 Sources",
+    }
+    dest_folder = payload.get("folder") or folder_map.get(kind, "04 Working Memory")
+    dest_dir = _safe_path(dest_folder)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    nid = _next_id()
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower())[:40].strip("-") or "note"
+    filename = f"{nid}-{slug}.md"
+    full_path = dest_dir / filename
+    now = _now_iso()
+    fm_lines = [
+        "---",
+        f"type: {kind}",
+        f"status: unconfirmed",
+        f"title: {title or 'untitled'}",
+        f"created: {now}",
+        f"modified: {now}",
+    ]
+    if payload.get("tags"):
+        fm_lines.append(f"tags: [{', '.join(str(t) for t in payload.get('tags', []))}]")
+    fm_lines.append("---")
+    content = "\n".join(fm_lines) + "\n\n" + body.strip() + "\n"
+    full_path.write_text(content, encoding="utf-8")
+    _invalidate_vault_cache()
+    _append_activity("note", f"Note created -> {full_path.relative_to(BRAIN_PATH)}")
+    try:
+        rec = _load_record(full_path)
+        rec["destination"] = dest_folder
+        return rec
+    except Exception:
+        return {"id": str(full_path.relative_to(BRAIN_PATH)), "path": str(full_path.relative_to(BRAIN_PATH)), "kind": kind, "status": "unconfirmed", "title": title or "untitled"}
+

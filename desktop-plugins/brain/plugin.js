@@ -511,6 +511,251 @@ function GraphPage({ ctx }) {
     ]
   })
 }
+
+function NotesPage({ ctx }) {
+  const [notes, setNotes] = useState([])
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+  const [title, setTitle] = useState('')
+  const [body, setBody] = useState('')
+  const [kind, setKind] = useState('working-note')
+  const [saving, setSaving] = useState(false)
+
+  const loadNotes = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      const data = await ctx.rest('/records?kind=working-note&limit=50&order=modified')
+      setNotes(data.records || [])
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setLoading(false)
+    }
+  }, [ctx])
+
+  useEffect(() => {
+    loadNotes()
+  }, [loadNotes])
+
+  const handleCreate = useCallback(async () => {
+    if (!title.trim() && !body.trim()) return
+    setSaving(true)
+    setError(null)
+    try {
+      await ctx.rest('/notes', {
+        method: 'POST',
+        body: { kind, title: title.trim(), body: body.trim() },
+      })
+      setTitle('')
+      setBody('')
+      await loadNotes()
+    } catch (e) {
+      setError(e.message)
+    } finally {
+      setSaving(false)
+    }
+  }, [ctx, kind, title, body, loadNotes])
+
+  return jsxs('div', { className: 'flex h-full flex-col gap-4 p-4 text-sm', children: [
+    jsxs('div', { className: 'flex flex-col gap-1', children: [
+      jsx('div', { className: 'text-base font-medium', children: 'Notes' }),
+      jsx('div', { className: 'text-(--ui-text-tertiary)', children: 'Scratch working notes, no proposal needed' }),
+    ]}),
+    jsxs('div', { className: 'flex flex-col gap-2 rounded-md border border-(--ui-stroke-secondary) p-3', children: [
+      jsxs('div', { className: 'flex gap-2', children: [
+        jsx('input', {
+          type: 'text', placeholder: 'Title', value: title,
+          onChange: (e) => setTitle(e.target.value),
+          className: 'flex-1 rounded-md border border-(--ui-stroke-secondary) bg-(--ui-background-secondary) px-3 py-1.5 text-xs text-(--ui-text-primary) placeholder:text-(--ui-text-quaternary) focus:border-(--ui-accent) focus:outline-none',
+        }),
+        jsxs('select', {
+          value: kind, onChange: (e) => setKind(e.target.value),
+          className: 'rounded-md border border-(--ui-stroke-secondary) bg-(--ui-background-secondary) px-2 py-1 text-xs text-(--ui-text-primary) focus:border-(--ui-accent) focus:outline-none',
+          children: [
+            jsx('option', { value: 'working-note', children: 'Working note' }),
+            jsx('option', { value: 'journal', children: 'Journal' }),
+            jsx('option', { value: 'inbox', children: 'Inbox' }),
+            jsx('option', { value: 'sources', children: 'Sources' }),
+          ]
+        }),
+      ]}),
+      jsx('textarea', {
+        placeholder: 'Write a note...', value: body,
+        onChange: (e) => setBody(e.target.value),
+        className: 'w-full rounded-md border border-(--ui-stroke-secondary) bg-(--ui-background-secondary) px-3 py-1.5 text-xs text-(--ui-text-primary) placeholder:text-(--ui-text-quaternary) focus:border-(--ui-accent) focus:outline-none',
+        rows: 3,
+      }),
+      jsx('button', {
+        onClick: handleCreate,
+        disabled: saving,
+        className: 'self-end rounded-md bg-(--ui-accent)/20 px-3 py-1 text-xs text-(--ui-accent) hover:bg-(--ui-accent)/30 disabled:opacity-50',
+        children: saving ? 'Saving...' : 'Save note',
+      }),
+    ]}),
+    error && jsxs('div', { className: 'rounded-md border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400', children: [
+      jsx('div', { className: 'font-medium', children: 'Error' }),
+      jsx('div', { children: error }),
+    ]}),
+    loading && jsx('div', { className: 'text-(--ui-text-tertiary)', children: 'Loading notes...' }),
+    !loading && !error && jsxs('div', { className: 'text-xs text-(--ui-text-quaternary)', children: [notes.length, ' notes'] }),
+    !loading && !error && jsxs('div', { className: 'flex flex-col gap-2 overflow-y-auto', children: [
+      ...notes.map(n => jsxs('div', {
+        key: n.id,
+        className: 'rounded-md border border-(--ui-stroke-secondary) p-3',
+        children: [
+          jsxs('div', { className: 'flex items-center justify-between', children: [
+            jsx('div', { className: 'text-sm font-medium text-(--ui-text-primary)', children: n.title || n.id }),
+            jsxs('span', { className: 'text-xs text-(--ui-text-quaternary)', children: [n.kind, ' · ', n.status] }),
+          ]}),
+          n.body_preview && jsx('div', { className: 'text-xs text-(--ui-text-tertiary) line-clamp-2', children: n.body_preview }),
+          n.modified && jsx('div', { className: 'text-xs text-(--ui-text-quaternary)', children: n.modified }),
+        ]
+      }))
+    ]}),
+  ]})
+}
+
+function HealthPage({ ctx }) {
+  const [health, setHealth] = useState(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    setLoading(true)
+    setError(null)
+    Promise.all([
+      ctx.rest('/health').catch(() => null),
+      ctx.rest('/manifest').catch(() => null),
+      ctx.rest('/settings').catch(() => null),
+    ]).then(([h, m, s]) => {
+      if (!cancelled) {
+        setHealth({ health: h, manifest: m, settings: s })
+        setLoading(false)
+      }
+    }).catch((e) => {
+      if (!cancelled) {
+        setError(e.message)
+        setLoading(false)
+      }
+    })
+    return () => { cancelled = true }
+  }, [ctx])
+
+  return jsxs('div', { className: 'flex h-full flex-col gap-4 p-4 text-sm', children: [
+    jsxs('div', { className: 'flex flex-col gap-1', children: [
+      jsx('div', { className: 'text-base font-medium', children: 'Brain Health' }),
+      jsx('div', { className: 'text-(--ui-text-tertiary)', children: 'Vault stats, index status, and settings' }),
+    ]}),
+    error && jsxs('div', { className: 'rounded-md border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400', children: [
+      jsx('div', { className: 'font-medium', children: 'Error' }),
+      jsx('div', { children: error }),
+    ]}),
+    loading && jsx('div', { className: 'text-(--ui-text-tertiary)', children: 'Loading health...' }),
+    !loading && !error && health && jsxs('div', { className: 'flex flex-col gap-3', children: [
+      jsxs('div', { className: 'rounded-md border border-(--ui-stroke-secondary) p-3', children: [
+        jsx('div', { className: 'text-xs font-medium text-(--ui-text-primary)', children: 'Vault' }),
+        jsxs('div', { className: 'mt-1 text-xs text-(--ui-text-tertiary)', children: [
+          'Path: ', jsx('span', { className: 'text-(--ui-text-secondary)', children: health.health?.brain_path || '—' }),
+        ]}),
+        jsxs('div', { className: 'text-xs text-(--ui-text-tertiary)', children: [
+          'Records: ', jsx('span', { className: 'text-(--ui-text-secondary)', children: String(health.health?.record_count ?? '—') }),
+        ]}),
+        jsxs('div', { className: 'text-xs text-(--ui-text-tertiary)', children: [
+          'Kinds: ', jsx('span', { className: 'text-(--ui-text-secondary)', children: (health.health?.kinds || []).join(', ') || '—' }),
+        ]}),
+      ]}),
+      jsxs('div', { className: 'rounded-md border border-(--ui-stroke-secondary) p-3', children: [
+        jsx('div', { className: 'text-xs font-medium text-(--ui-text-primary)', children: 'Manifest' }),
+        jsxs('div', { className: 'mt-1 text-xs text-(--ui-text-tertiary)', children: [
+          'Files: ', jsx('span', { className: 'text-(--ui-text-secondary)', children: String(health.manifest?.total_files ?? '—') }),
+        ]}),
+        jsxs('div', { className: 'text-xs text-(--ui-text-tertiary)', children: [
+          'Generated: ', jsx('span', { className: 'text-(--ui-text-secondary)', children: health.manifest?.generated_at || '—' }),
+        ]}),
+      ]}),
+      jsxs('div', { className: 'rounded-md border border-(--ui-stroke-secondary) p-3', children: [
+        jsx('div', { className: 'text-xs font-medium text-(--ui-text-primary)', children: 'Settings' }),
+        jsxs('div', { className: 'mt-1 text-xs text-(--ui-text-tertiary)', children: [
+          'Model: ', jsx('span', { className: 'text-(--ui-text-secondary)', children: health.settings?.model || '—' }),
+        ]}),
+      ]}),
+    ]}),
+  ]})
+}
+
+function SettingsPage({ ctx }) {
+  const [settings, setSettings] = useState({ model: 'auto', version: 1 })
+  const [models, setModels] = useState([])
+  const [loaded, setLoaded] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [msg, setMsg] = useState(null)
+
+  useEffect(() => {
+    let cancelled = false
+    Promise.all([
+      ctx.rest('/settings').catch(() => ({ model: 'auto', version: 1 })),
+      ctx.rest('/models').catch(() => ({ models: ['auto'] })),
+    ]).then(([s, m]) => {
+      if (!cancelled) {
+        setSettings(s)
+        setModels(m.models || ['auto'])
+        setLoaded(true)
+      }
+    }).catch(() => {})
+    return () => { cancelled = true }
+  }, [ctx])
+
+  const handleSave = useCallback(async () => {
+    setSaving(true)
+    setMsg(null)
+    try {
+      await ctx.rest('/settings', {
+        method: 'POST',
+        body: { model: settings.model },
+      })
+      setMsg('Saved')
+      setTimeout(() => setMsg(null), 2000)
+    } catch (e) {
+      setMsg(`Error: ${e.message}`)
+    } finally {
+      setSaving(false)
+    }
+  }, [ctx, settings.model])
+
+  return jsxs('div', { className: 'flex h-full flex-col gap-4 p-4 text-sm', children: [
+    jsxs('div', { className: 'flex flex-col gap-1', children: [
+      jsx('div', { className: 'text-base font-medium', children: 'Brain Settings' }),
+      jsx('div', { className: 'text-(--ui-text-tertiary)', children: 'Model selector and plugin preferences' }),
+    ]}),
+    loaded && jsxs('div', { className: 'flex flex-col gap-3', children: [
+      jsxs('div', { className: 'flex flex-col gap-1', children: [
+        jsxs('span', { className: 'text-xs text-(--ui-text-secondary)', children: ['Model for Brain features', ' '] }),
+        jsxs('select', {
+          value: settings.model,
+          onChange: (e) => setSettings({ ...settings, model: e.target.value }),
+          className: 'rounded-md border border-(--ui-stroke-secondary) bg-(--ui-background-secondary) px-3 py-1.5 text-xs text-(--ui-text-primary) focus:border-(--ui-accent) focus:outline-none',
+          children: [
+            jsx('option', { value: 'auto', children: 'auto (main model)' }),
+            ...models.filter(m => m !== 'auto').map(m => jsx('option', { key: m, value: m, children: m })),
+          ]
+        }),
+        jsxs('span', { className: 'text-xs text-(--ui-text-quaternary)', children: ['auto = Hermes current main model'] }),
+      ]}),
+      jsxs('div', { className: 'flex items-center gap-2', children: [
+        jsx('button', {
+          onClick: handleSave,
+          disabled: saving,
+          className: 'rounded-md bg-(--ui-accent)/20 px-3 py-1 text-xs text-(--ui-accent) hover:bg-(--ui-accent)/30 disabled:opacity-50',
+          children: saving ? 'Saving...' : 'Save settings',
+        }),
+        msg && jsxs('span', { className: 'text-xs text-(--ui-text-quaternary)', children: [msg] }),
+      ]}),
+    ]}),
+    !loaded && jsx('div', { className: 'text-(--ui-text-tertiary)', children: 'Loading settings...' }),
+  ]})
+}
 function BrainPage({ ctx }) {
   const [tab, setTab] = useState('vault')
   const [brainModel, setBrainModel] = useState('auto')
@@ -574,6 +819,21 @@ function BrainPage({ ctx }) {
             className: `px-4 py-2 text-xs ${tab === 'review' ? 'border-b-2 border-(--ui-accent) text-(--ui-text-primary)' : 'text-(--ui-text-tertiary)'}`,
             children: 'Review'
           }),
+          jsx('button', {
+            onClick: () => setTab('notes'),
+            className: `px-4 py-2 text-xs ${tab === 'notes' ? 'border-b-2 border-(--ui-accent) text-(--ui-text-primary)' : 'text-(--ui-text-tertiary)'}`,
+            children: 'Notes'
+          }),
+          jsx('button', {
+            onClick: () => setTab('health'),
+            className: `px-4 py-2 text-xs ${tab === 'health' ? 'border-b-2 border-(--ui-accent) text-(--ui-text-primary)' : 'text-(--ui-text-tertiary)'}`,
+            children: 'Health'
+          }),
+          jsx('button', {
+            onClick: () => setTab('settings'),
+            className: `px-4 py-2 text-xs ${tab === 'settings' ? 'border-b-2 border-(--ui-accent) text-(--ui-text-primary)' : 'text-(--ui-text-tertiary)'}`,
+            children: 'Settings'
+          }),
           jsxs('div', { className: 'ml-auto flex items-center gap-2 px-3', children: [
             jsxs('span', { className: 'text-xs text-(--ui-text-quaternary)', children: ['Model:', ' '] }),
             jsxs('select', {
@@ -588,7 +848,7 @@ function BrainPage({ ctx }) {
           ]}),
         ]
       }),
-      jsx('div', { className: 'flex-1 overflow-hidden', children: tab === 'vault' ? jsx(VaultPage, { ctx }) : tab === 'search' ? jsx(SearchPage, { ctx }) : tab === 'graph' ? jsx(GraphPage, { ctx }) : jsx(ReviewPage, { ctx }) }),
+      jsx('div', { className: 'flex-1 overflow-hidden', children: tab === 'vault' ? jsx(VaultPage, { ctx }) : tab === 'search' ? jsx(SearchPage, { ctx }) : tab === 'graph' ? jsx(GraphPage, { ctx }) : tab === 'review' ? jsx(ReviewPage, { ctx }) : tab === 'notes' ? jsx(NotesPage, { ctx }) : tab === 'health' ? jsx(HealthPage, { ctx }) : jsx(SettingsPage, { ctx }) }),
     ]
   })
 }
