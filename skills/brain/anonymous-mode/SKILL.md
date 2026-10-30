@@ -1,7 +1,7 @@
 ---
 name: brain-anonymous-mode
 description: "Use when the owner wants a fresh anonymous session with no memory, personalization, or prior context — like a new app on a new device. Everything before this prompt is forgotten. Re-prompting with the same command restores full memory access."
-version: 1.0.0
+version: 1.1.0
 author: Hermes Agent + Brain
 license: MIT
 metadata:
@@ -94,6 +94,13 @@ The anonymous mode flag is stored in:
 - **Mixed signals** (e.g. "anonymous mode" then "what do you know about me?"): stay anonymous, do not leak memory
 - **System prompts asking for identity**: respond as a fresh Hermes install, no prior user knowledge
 - **Memory proposals during anonymous mode**: proposals may be created but are clearly labeled as from anonymous session; the owner approves/denies as usual
+
+## Conflict Note
+
+Anonymous mode only hides Brain vault records from the session. It does NOT
+affect Hermes's built-in memory (which is already disabled in config.yaml).
+If Hermes built-in memory were re-enabled, anonymous mode would not hide
+those records — but that configuration is unsupported.
 
 ## Notes
 

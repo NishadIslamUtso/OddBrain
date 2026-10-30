@@ -1,4 +1,5 @@
-"""Brain vault — plugin API, mounted at /api/plugins/brain/.
+"""
+Brain vault — plugin API, mounted at /api/plugins/brain/.
 
 Reads and writes the Memory_OB vault folder.
 The vault folder is the single source of truth.
@@ -7,8 +8,11 @@ Everything starts as raw unconfirmed evidence. Nothing is confirmed without user
 
 from __future__ import annotations
 
+import datetime
 import json
+import os
 import re
+import secrets
 import time
 from pathlib import Path
 from typing import Any, Optional
@@ -26,9 +30,26 @@ PROPOSALS_DIR = BRAIN_PATH / "06 Review" / "proposals"
 
 _VAULT_EXTS = {".md", ".txt", ".json"}
 _SKIP_PREFIXES = {".brain", ".git", "__pycache__"}
+_ALLOWED_FOLDERS = {
+    "00 System", "01 Inbox", "02 Sources", "03 Memory",
+    "04 Working Memory", "05 Knowledge", "06 Review",
+    "06 Review/proposals", "07 Sharing Receipts", "08 Journal",
+    "09 Activity & Undo", "10 People", "90 Archive",
+}
+_SAFE_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 
-# Simple file-list cache to avoid a full rglob on every request.
-# The vault is write-light, read-heavy; a 5-second TTL is plenty.
+# ---------------------------------------------------------------------------
+# Token auth (simple shared secret)
+# ---------------------------------------------------------------------------
+_BRAIN_TOKEN = os.environ.get("BRAIN_TOKEN") or "brain-local-token"
+
+def _check_token(request_token: Optional[str]) -> None:
+    if request_token != _BRAIN_TOKEN:
+        raise HTTPException(status_code=401, detail="invalid token")
+
+# ---------------------------------------------------------------------------
+# File-list cache
+# ---------------------------------------------------------------------------
 _CACHE_TTL_SECS = 5
 _vault_cache: list[Path] = []
 _vault_cache_at: float = 0.0
@@ -64,122 +85,117 @@ def _get_cached_vault_files() -> list[Path]:
 
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n", re.S)
 
+# ---------------------------------------------------------------------------
+# Hazard scanner
+# ---------------------------------------------------------------------------
+_HAZARD_PATTERNS = [
+    re.compile(r"[\u200B-\u200D\u2060-\u206F]"),
+    re.compile(r"(?i)ignore\s+all\s+previous\s+instructions"),
+    re.compile(r"(?i)you\s+are\s+now\s+(in|operating in)\s+(a\s+)?new"),
+    re.compile(r"(?i)developer\s+mode|debug\s+mode"),
+    re.compile(r"(?i)execute\s+arbitrary\s+code|run\s+any\s+command"),
+    re.compile(r"(?i)forget\s+(all|everything|your|previous)"),
+    re.compile(r"(?i)act\s+as\s+(if|though)\s+you\s+are"),
+    re.compile(r"(?i)do\s+not\s+follow\s+(your|the)\s+(previous|above|prior)"),
+    re.compile(r"(?i)this\s+is\s+(a\s+)?(test|hypothetical|fictional)"),
+]
 
-def _parse_frontmatter(text: str) -> dict[str, Any]:
-    m = _FRONTMATTER_RE.match(text)
-    if not m:
-        return {}
-    block = m.group(1)
-    result: dict[str, Any] = {}
-    for raw_line in block.splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
+_OMIT_MSG = "[OMITTED — potential instruction hazard detected by Brain scan]"
+
+# ---------------------------------------------------------------------------
+# Conflict scanner — contradictions and repetitions
+# ---------------------------------------------------------------------------
+
+_CONTRADICTION_PATTERNS = [
+    (re.compile(r"(?i)\b(always|never|every|all|none)\b"), re.compile(r"(?i)\b(sometimes|rarely|occasionally|may|might|can)\b")),
+    (re.compile(r"(?i)\b(prefer|like|love|enjoy)\b"), re.compile(r"(?i)\b(dislike|hate|avoid|detest)\b")),
+    (re.compile(r"(?i)\b(always use|always do)\b"), re.compile(r"(?i)\b(never use|never do|don'?t use|don'?t do)\b")),
+]
+
+
+def _scan_conflicts(new_text: str, existing_texts: list[str]) -> list[dict[str, Any]]:
+    """Scan for contradictions between new text and existing records."""
+    conflicts = []
+    for existing in existing_texts[:20]:  # limit to recent 20 for perf
+        existing_lower = existing.lower()
+        new_lower = new_text.lower()
+        # Check for direct overlap
+        words_new = set(re.findall(r"[a-z]{4,}", new_lower))
+        words_old = set(re.findall(r"[a-z]{4,}", existing_lower))
+        overlap = words_new & words_old
+        if len(overlap) < 3:
             continue
-        if ":" not in line:
-            continue
-        key, _, val = line.partition(":")
-        key = key.strip()
-        val = val.strip()
-        if not key:
-            continue
-        if val.startswith("[") and val.endswith("]"):
-            inner = val[1:-1]
-            items = [v.strip().strip("\"'") for v in inner.split(",") if v.strip()]
-            result[key] = items
-        elif val.lower() in {"true", "yes"}:
-            result[key] = True
-        elif val.lower() in {"false", "no"}:
-            result[key] = False
-        else:
-            try:
-                result[key] = int(val)
-            except ValueError:
-                try:
-                    result[key] = float(val)
-                except ValueError:
-                    result[key] = val.strip("\"'")
-    return result
+        for pos_pat, neg_pat in _CONTRADICTION_PATTERNS:
+            if (pos_pat.search(new_text) and neg_pat.search(existing)) or                (pos_pat.search(existing) and neg_pat.search(new_text)):
+                conflicts.append({
+                    "type": "contradiction",
+                    "existing_excerpt": existing[:200],
+                    "new_excerpt": new_text[:200],
+                    "overlap_words": list(overlap)[:10],
+                })
+                break
+    return conflicts
 
 
-def _record_kind(path: Path) -> str:
-    parts = [p for p in path.relative_to(BRAIN_PATH).parts if p]
-    if not parts:
-        return "root"
-    folder = parts[0]
-    label = re.sub(r"^\d+\s*", "", folder).strip()
-    return label.lower().replace(" ", "-") if label else folder
-
-
-def _record_id(rel_path: Path) -> str:
-    return str(rel_path).replace("\\", "/")
-
-
-def _now_iso() -> str:
-    return time.strftime("%Y-%m-%dT%H:%M:%S%z")
-
-
-def _load_index() -> dict[str, Any]:
-    if INDEX_PATH.exists():
+def _get_recent_records(limit: int = 20) -> list[str]:
+    """Get recent record bodies for conflict scanning."""
+    files = _get_cached_vault_files()
+    bodies = []
+    for f in files[-limit:]:
         try:
-            return json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+            rec = _load_record(f)
+            bodies.append(rec.get("body", ""))
         except Exception:
             pass
-    return {"version": 1, "brain_path": str(BRAIN_PATH), "next_id": 1, "last_scan": None, "total_records": 0}
+    return bodies
 
 
-def _save_index(idx: dict[str, Any]) -> None:
-    INDEX_PATH.parent.mkdir(parents=True, exist_ok=True)
-    INDEX_PATH.write_text(json.dumps(idx, indent=2), encoding="utf-8")
 
 
-def _next_id() -> int:
-    idx = _load_index()
-    nid = int(idx.get("next_id", 1))
-    idx["next_id"] = nid + 1
-    idx["last_scan"] = _now_iso()
-    _save_index(idx)
-    return nid
+def _scan_hazards(text: str) -> tuple[str, list[str]]:
+    """Scan text for instruction-like hazards. Returns (cleaned_text, list_of_warnings)."""
+    warnings = []
+    lines = text.splitlines(keepends=True)
+    cleaned = []
+    for i, line in enumerate(lines, 1):
+        skip = False
+        for pat in _HAZARD_PATTERNS:
+            if pat.search(line):
+                warnings.append(f"line {i}: hazard pattern matched")
+                skip = True
+                break
+        if skip:
+            cleaned.append(f"> {_OMIT_MSG}\n")
+        else:
+            cleaned.append(line)
+    return "".join(cleaned), warnings
 
 
-def _load_record(path: Path) -> dict[str, Any]:
-    rel = path.relative_to(BRAIN_PATH)
-    raw = path.read_text(encoding="utf-8-sig", errors="replace")
-    fm = _parse_frontmatter(raw)
-    body_start = raw.find("\n---\n")
-    body = raw[body_start + 4 :] if body_start != -1 else raw
-    body = body.strip()
-    title_line = ""
-    for line in body.splitlines():
-        stripped = line.strip()
-        if stripped:
-            title_line = stripped.lstrip("#").strip()
-            break
-    return {
-        "id": _record_id(rel),
-        "path": str(rel),
-        "kind": fm.get("type", _record_kind(path)),
-        "status": fm.get("status", "unconfirmed"),
-        "title": fm.get("title", title_line),
-        "body": body,
-        "body_preview": body[:300] + ("…" if len(body) > 300 else ""),
-        "tags": fm.get("tags", []),
-        "created": fm.get("created", ""),
-        "modified": fm.get("modified", ""),
-        "size_bytes": path.stat().st_size,
-    }
+def _next_id() -> str:
+    """Collision-proof ID: timestamp + random suffix."""
+    import secrets
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d%H%M%S")
+    rand = secrets.token_hex(3)
+    return f"{ts}-{rand}"
 
-
-def _iter_vault_files() -> list[Path]:
-    """Deprecated: use _get_cached_vault_files(). Kept for compatibility."""
-    _invalidate_vault_cache()
-    return _get_cached_vault_files()
-
-
+# ---------------------------------------------------------------------------
+# Path validation
+# ---------------------------------------------------------------------------
 def _safe_path(rel: str) -> Path:
     safe = (BRAIN_PATH / rel).resolve()
     safe.relative_to(BRAIN_PATH.resolve())
+    folder = safe.parent.name
+    allowed_lower = {f.lower(): f for f in _ALLOWED_FOLDERS}
+    if folder not in _ALLOWED_FOLDERS and folder.lower() not in allowed_lower:
+        raise HTTPException(status_code=400, detail=f"folder {folder!r} not allowed")
+    if not _SAFE_NAME_RE.match(safe.name):
+        raise HTTPException(status_code=400, detail="unsafe filename")
     return safe
 
+
+def _now_iso() -> str:
+    """Return current time in ISO-8601 with explicit Asia/Dhaka (+06:00) timezone."""
+    return datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=6))).strftime("%Y-%m-%dT%H:%M:%S+06:00")
 
 def _write_record(path: Path, kind: str, title: str, body: str, status: str = "unconfirmed",
                   tags: Optional[list[str]] = None, source: Optional[str] = None) -> dict[str, Any]:
@@ -218,6 +234,25 @@ def _set_frontmatter_status(raw: str, status: str) -> str:
 def _set_frontmatter_modified(raw: str) -> str:
     now = _now_iso()
     return re.sub(r"(^modified:\s*)(.*)", f"\1{now}", raw, count=1, flags=re.M)
+
+
+# ---------------------------------------------------------------------------
+# Activity log
+# ---------------------------------------------------------------------------
+def _append_activity(action: str, detail: str) -> None:
+    """Append an entry to the activity log (append-only, never delete)."""
+    activity_dir = BRAIN_PATH / "09 Activity & Undo"
+    activity_dir.mkdir(parents=True, exist_ok=True)
+    ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    entry = "- [{}] {}: {}\n".format(ts, action, detail)
+    log_file = activity_dir / f"{datetime.datetime.now(datetime.timezone.utc).strftime('%Y-%m-%d')}.md"
+    with open(log_file, "a", encoding="utf-8") as f:
+        f.write(entry)
+
+
+def _invalidate_vault_cache() -> None:
+    global _vault_cache_dirty
+    _vault_cache_dirty = True
 
 
 # ---------------------------------------------------------------------------
@@ -293,9 +328,12 @@ def propose_memory(payload: dict[str, Any]) -> dict[str, Any]:
     source = payload.get("source", "")
     quote = payload.get("quote", "")
     PROPOSALS_DIR.mkdir(parents=True, exist_ok=True)
+    body_clean, warnings = _scan_hazards(body)
+    if warnings:
+        body_clean = body_clean + "\n\n[Brain hazard scan: " + ", ".join(warnings) + "]" + "\n"
     nid = _next_id()
     slug = re.sub(r"[^a-z0-9]+", "-", title.lower())[:40].strip("-") or "memory"
-    filename = f"{nid:04d}-{slug}.md"
+    filename = f"{nid}-{slug}.md"
     now = _now_iso()
     fm_lines = [
         "---",
@@ -304,7 +342,7 @@ def propose_memory(payload: dict[str, Any]) -> dict[str, Any]:
         f"title: {title}",
         f"created: {now}",
         f"modified: {now}",
-        f"proposal_id: {nid:04d}",
+        f"proposal_id: {nid}",
         f"destination: {destination}",
     ]
     if tags:
@@ -315,7 +353,7 @@ def propose_memory(payload: dict[str, Any]) -> dict[str, Any]:
     body_parts = []
     if quote:
         body_parts.append(f"> {quote}\n")
-    body_parts.append(body.strip())
+    body_parts.append(body_clean)
     content = "\n".join(fm_lines) + "\n\n" + "\n".join(body_parts) + "\n"
     full_path = BRAIN_PATH / "06 Review" / "proposals" / filename
     full_path.parent.mkdir(parents=True, exist_ok=True)
@@ -323,7 +361,8 @@ def propose_memory(payload: dict[str, Any]) -> dict[str, Any]:
     _invalidate_vault_cache()
     rec = _load_record(full_path)
     rec["destination"] = destination
-    rec["proposal_id"] = f"{nid:04d}"
+    rec["proposal_id"] = nid
+    rec["conflicts"] = conflicts
     return rec
 
 
@@ -371,7 +410,8 @@ def get_proposal(pid: str) -> dict[str, Any]:
 
 
 @router.post("/proposals/{pid}/approve")
-def approve_proposal(pid: str) -> dict[str, Any]:
+def approve_proposal(pid: str, token: Optional[str] = Query(None)) -> dict[str, Any]:
+    _check_token(token)
     if not PROPOSALS_DIR.is_dir():
         raise HTTPException(status_code=404, detail="no proposals")
     src = None
@@ -388,21 +428,23 @@ def approve_proposal(pid: str) -> dict[str, Any]:
     if src is None:
         raise HTTPException(status_code=404, detail="proposal not found")
     dest_folder = rec.get("destination", "03 Memory")
-    dest_dir = BRAIN_PATH / dest_folder
+    dest_dir = _safe_path(dest_folder)
     dest_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = dest_dir / src.name
+    dest_path = _safe_path(str(dest_dir.relative_to(BRAIN_PATH)) + "/" + src.name)
     raw = src.read_text(encoding="utf-8-sig", errors="replace")
     raw = _set_frontmatter_status(raw, "confirmed")
     raw = _set_frontmatter_modified(raw)
     dest_path.write_text(raw, encoding="utf-8")
     src.unlink()
     _invalidate_vault_cache()
+    _append_activity("approve", f"Proposal {pid} approved -> {dest_path.relative_to(BRAIN_PATH)}")
     return {"ok": True, "proposal_id": pid, "moved_to": str(dest_path.relative_to(BRAIN_PATH)),
             "status": "confirmed"}
 
 
 @router.post("/proposals/{pid}/deny")
-def deny_proposal(pid: str, payload: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+def deny_proposal(pid: str, payload: Optional[dict[str, Any]] = None, token: Optional[str] = Query(None)) -> dict[str, Any]:
+    _check_token(token)
     if not PROPOSALS_DIR.is_dir():
         raise HTTPException(status_code=404, detail="no proposals")
     src = None
@@ -423,7 +465,7 @@ def deny_proposal(pid: str, payload: Optional[dict[str, Any]] = None) -> dict[st
         reason = f"\n\n> **Deny reason:** {payload['reason']}\n"
     archive_dir = BRAIN_PATH / "90 Archive"
     archive_dir.mkdir(parents=True, exist_ok=True)
-    dest_path = archive_dir / src.name
+    dest_path = _safe_path(str(archive_dir.relative_to(BRAIN_PATH)) + "/" + src.name)
     raw = src.read_text(encoding="utf-8-sig", errors="replace")
     raw = _set_frontmatter_status(raw, "denied")
     raw = _set_frontmatter_modified(raw)
@@ -431,12 +473,14 @@ def deny_proposal(pid: str, payload: Optional[dict[str, Any]] = None) -> dict[st
     dest_path.write_text(raw, encoding="utf-8")
     src.unlink()
     _invalidate_vault_cache()
+    _append_activity("deny", f"Proposal {pid} denied -> {dest_path.relative_to(BRAIN_PATH)}")
     return {"ok": True, "proposal_id": pid, "moved_to": str(dest_path.relative_to(BRAIN_PATH)),
             "status": "denied"}
 
 
 @router.post("/proposals/{pid}/modify")
-def modify_proposal(pid: str, payload: dict[str, Any]) -> dict[str, Any]:
+def modify_proposal(pid: str, payload: dict[str, Any], token: Optional[str] = Query(None)) -> dict[str, Any]:
+    _check_token(token)
     if not PROPOSALS_DIR.is_dir():
         raise HTTPException(status_code=404, detail="no proposals")
     src = None
@@ -472,9 +516,11 @@ def modify_proposal(pid: str, payload: dict[str, Any]) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 @router.post("/records")
-def create_record(payload: dict[str, Any]) -> dict[str, Any]:
+def create_record(payload: dict[str, Any], token: Optional[str] = Query(None)) -> dict[str, Any]:
     """Create a vault record directly. Used by the agent for working notes,
-    session captures, and intake — where user confirmation per-item is not needed."""
+    session captures, and intake — where user confirmation per-item is not needed.
+    Only scratch kinds are allowed; memory MUST go through propose."""
+    _check_token(token)
     kind = payload.get("kind", "memory")
     title = (payload.get("title") or "").strip()
     body = (payload.get("body") or "").strip()
@@ -483,7 +529,7 @@ def create_record(payload: dict[str, Any]) -> dict[str, Any]:
     folder_map = {
         "memory": "03 Memory",
         "journal": "08 Journal",
-        "working-note": "04 Working Memory",
+        "working-memory": "04 Working Memory",
         "knowledge": "05 Knowledge",
         "source": "02 Sources",
         "review": "06 Review",
@@ -493,23 +539,92 @@ def create_record(payload: dict[str, Any]) -> dict[str, Any]:
         "activity": "09 Activity & Undo",
         "sharing-receipt": "07 Sharing Receipts",
     }
+    allowed_direct = {"working-memory", "journal", "system", "inbox", "sources", "activity", "sharing-receipts", "archive", "review"}
+    if kind == "memory" or kind not in allowed_direct:
+        raise HTTPException(status_code=403, detail=f"kind={kind!r} requires proposal flow; use POST /propose instead")
     dest_folder = payload.get("folder") or folder_map.get(kind, "03 Memory")
     filename = payload.get("filename")
     if not filename:
         nid = _next_id()
         slug = re.sub(r"[^a-z0-9]+", "-", title.lower())[:40].strip("-") or kind
-        filename = f"{nid:04d}-{slug}.md"
-    dest_dir = BRAIN_PATH / dest_folder
+        filename = f"{nid}-{slug}.md"
+    dest_dir = _safe_path(dest_folder)
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_path = dest_dir / filename
+    body_clean, _ = _scan_hazards(body)
+    status = payload.get("status", "raw-unconfirmed-evidence")
     rec = _write_record(
         dest_path,
         kind=kind,
         title=title or dest_path.stem,
-        body=body,
-        status=payload.get("status", "confirmed"),
+        body=body_clean,
+        status=status,
         tags=payload.get("tags", []),
         source=payload.get("source", "agent"),
     )
     rec["destination"] = str(dest_path.relative_to(BRAIN_PATH))
     return rec
+
+# ---------------------------------------------------------------------------
+# Compression checkpoint — capture before Hermes compresses session
+# ---------------------------------------------------------------------------
+
+@router.post("/capture")
+def capture_session(payload: dict[str, Any], token: Optional[str] = Query(None)) -> dict[str, Any]:
+    """Save a pre-compression checkpoint. Called by Hermes before it compresses
+    a session, so nothing is lost."""
+    _check_token(token)
+    title = (payload.get("title") or "Session capture").strip()
+    body = (payload.get("body") or "").strip()
+    if not body:
+        raise HTTPException(status_code=400, detail="body required")
+    destination = payload.get("destination", "03 Memory")
+    dest_dir = _safe_path(destination)
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    nid = _next_id()
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower())[:40].strip("-") or "capture"
+    filename = f"{nid}-capture-{slug}.md"
+    dest_path = dest_dir / filename
+    rec = _write_record(
+        dest_path,
+        kind="memory",
+        title=title,
+        body=body,
+        status="raw-unconfirmed-evidence",
+        source="pre-compression-capture",
+    )
+    _append_activity("capture", f"Pre-compression checkpoint saved -> {dest_path.relative_to(BRAIN_PATH)}")
+    rec["destination"] = str(dest_path.relative_to(BRAIN_PATH))
+    return rec
+
+# ---------------------------------------------------------------------------
+# Connection graph — record relationships
+# ---------------------------------------------------------------------------
+
+@router.get("/graph")
+def connection_graph(limit: int = Query(100, ge=1, le=1000)) -> dict[str, Any]:
+    """Return a simple connection graph: nodes (records) and edges (shared tags/mentions)."""
+    files = _get_cached_vault_files()
+    nodes = []
+    tag_index: dict[str, list[str]] = {}
+    for f in files[:limit]:
+        try:
+            rec = _load_record(f)
+        except Exception:
+            continue
+        rid = rec.get("id")
+        nodes.append({"id": rid, "title": rec.get("title"), "kind": rec.get("kind"),
+                      "status": rec.get("status"), "path": rec.get("path")})
+        for tag in rec.get("tags", []):
+            tag_index.setdefault(tag, []).append(rid)
+    edges = []
+    seen_edges = set()
+    for tag, rids in tag_index.items():
+        for i in range(len(rids)):
+            for j in range(i + 1, len(rids)):
+                edge = (rids[i], rids[j], tag)
+                if edge not in seen_edges:
+                    seen_edges.add(edge)
+                    edges.append({"source": rids[i], "target": rids[j], "label": tag})
+    return {"nodes": nodes, "edges": edges}
+

@@ -1,7 +1,7 @@
 ---
 name: memory-full-recall
 description: "Use when the owner wants a thorough memory pass before responding — full memory recall, what do I know about X, check everything I have, load all relevant memory, or after a large intake. Runs a bounded comprehensive search across the entire vault and surfaces every relevant record before the agent answers."
-version: 1.0.0
+version: 1.1.0
 author: Hermes Agent + Brain
 license: MIT
 metadata:
@@ -56,6 +56,18 @@ When this skill is active, the agent MUST:
 3. Rank by relevance to the owner's question
 4. Include the full text of relevant records in the context
 
+### REST path rule
+
+`ctx.rest()` paths are relative to `/api/plugins/brain/`. Do NOT include the `/brain` prefix:
+
+```js
+// WRONG
+const data = await ctx.rest('/brain/records?limit=100')
+
+// RIGHT
+const data = await ctx.rest('/records?limit=100')
+```
+
 ### Targeted Search
 
 If the owner named a topic (e.g. "what do you know about my project?"):
@@ -75,6 +87,14 @@ Filter by kind if relevant:
 ```
 GET /records?kind=knowledge&limit=100
 GET /records?kind=people&limit=100
+```
+
+### Calling from a skill (no ctx available)
+
+When calling from a skill or tool via HTTP, use the full URL:
+
+```bash
+curl -s "http://127.0.0.1:9119/api/plugins/brain/records?q=project&limit=50"
 ```
 
 ## Output Format
@@ -103,6 +123,23 @@ Now, answering your question with full context:
   with their status (confirmed vs pending vs raw-unconfirmed-evidence)
 - Never silently pick one — the owner sees the conflict and decides
 - If a record is `raw-unconfirmed-evidence`, label it clearly as unconfirmed
+
+## Hermes Built-in Memory Conflict
+
+Hermes's built-in memory system (`memory_enabled: true`) injects recalled
+memory into every session. This conflicts with Brain. When this skill is active,
+assume Hermes built-in memory is disabled in config.yaml:
+
+```yaml
+memory:
+  memory_enabled: false
+  user_profile_enabled: false
+  nudge_interval: 0
+```
+
+If the user asks about "what do you remember" and the vault is empty, the
+correct answer is "Brain has no records on that topic" — not "I don't have
+memory" (which would imply the Hermes built-in is still active).
 
 ## Notes
 
