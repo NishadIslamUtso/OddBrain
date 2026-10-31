@@ -40,7 +40,7 @@ and where it lives.
 TRUTH ledger (confirmed records) uses the app's proven vocabulary:
 
 ```
-kind:     profile | journal | story | capsule | note
+kind:     profile | journal | story | capsule | learning | note
 subject:  self | <person id>          (journal/story/note = self only)
 speaker:  user | assistant | other:<name> | source:<file>
 status:   active | superseded | retracted | trash
@@ -57,11 +57,14 @@ never_send: flag
 - **story** — Life Story records and chapters (see below).
 - **capsule** — deliberately saved AI replies. The ONLY kind an AI's words may
   become. AI words never become personal facts.
+- **learning** — distilled knowledge for 05 Knowledge: how the owner thinks,
+  problems and what solved them, understandings the memory reaches. Each
+  learning cites its supporting records.
 - **note** — engine-notes: one short dated line — a decision, preference, or
   open item the OWNER stated.
 
 LIVING layer (auto) stores atomic `fact` candidates (trust-scored). A promoted
-fact lands as one of the five kinds above.
+fact lands as one of the six kinds above.
 
 ## The trust ladder
 
@@ -102,6 +105,9 @@ verification.
 - **DIFF CARDS** — old vs new side by side (strikethrough vs underline). One
   click: keep both / take new / take old / edit / later. Logged; old versions
   never lost. Batch review supported.
+- **PROPOSAL CARDS (the old Interpretations queue)** — new records drafted
+  from evidence (journal entry, story, profile, capsule, learning) await
+  their creation card, with source quote + re-run (retry) option.
 - **ASK CARDS** — doubts and conflicts with SPEAKERS NAMED ("You said A on
   Tuesday — the PDF says B"). Confirm / dismiss / later.
 - **MERGE CARDS** — proposed duplicate merges (people included) with
@@ -150,6 +156,10 @@ facts. Conflict asks argue with names.
   full-recall skill — owner-triggered, bounded, returns everything relevant.
 - Quoting truth = hash-verified only. neverSend + hazard scan run at the EXIT
   (retrieval boundary) — the store takes anything; the door out obeys the law.
+- **Sharing receipts** (folder 07) — every time memory goes out (recall sent
+  to an AI, records shared with a person or gateway), a receipt lands in 07:
+  who, what (record ids + hashes), when, the allow/neverSend basis. Audit
+  records, never blockers.
 - **Anonymous sessions** — a toggle: no recall injected, nothing saved as
   personal; a clean slate that restores on command.
 
@@ -257,6 +267,9 @@ mattering; steps 1–2 cannot corrupt anything (nothing is truth yet).
 | memory-full-recall skill | Deliberate deep search tier |
 | anonymous-mode skill | Anonymous sessions toggle |
 | Task Scheduler / cron | Nightly dream + sweep schedule |
+| Sharing receipts (07 folder, receipt logs) | Sharing receipts per outbound use (recall section) |
+| Interpretations queue (Review) + retry action | Proposal cards + re-run extraction |
+| 05 Knowledge content (understandings, problems) | `learning` kind (cites supporting records) |
 | File cache / safe paths / collision-proof IDs / token auth | Engine internals (trap suite) |
 | Projects (screens + project tool) | DROPPED with owner's OK (Hermes worktrees/projects.db cover it) — recorded here, not silently |
 | Goose/Ollama history import | DROPPED by owner's instruction (nothing to keep) — recorded here, not silently |

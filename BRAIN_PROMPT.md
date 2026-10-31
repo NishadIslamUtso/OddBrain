@@ -91,7 +91,7 @@ Attic = sacred (backed up, never auto-pruned). Index = disposable
 Truth ledger (confirmed) kinds — the app's proven vocabulary:
 
 ```
-kind:     profile | journal | story | capsule | note
+kind:     profile | journal | story | capsule | learning | note
 subject:  self | <person id>       (journal/story/note = self only)
 speaker:  user | assistant | other:<name> | source:<file>
 status:   active | superseded | retracted | trash
@@ -108,11 +108,14 @@ never_send: flag
 - **story** — Life Story records and chapters (§5).
 - **capsule** — deliberately saved AI replies. The ONLY kind AI words may
   become. AI words never become personal facts.
+- **learning** — distilled knowledge for 05 Knowledge: how the owner thinks,
+  problems and what solved them, understandings the memory reaches. Each
+  learning cites its supporting records.
 - **note** — one short dated line the OWNER stated: decision, preference,
   open item.
 
 Living layer stores atomic `fact` candidates (trust 0.1–0.6). A promoted
-fact lands as one of the five kinds above.
+fact lands as one of the six kinds above.
 
 ### Trust ladder
 | Tier | Who moves it | Quote as fact? |
@@ -148,6 +151,10 @@ verification.
 - **DIFF CARDS** — old vs new side by side (strikethrough vs underline).
   One click: keep both / take new / take old / edit / later. Logged; old
   versions never lost. Batch review supported.
+- **PROPOSAL CARDS (the old Interpretations queue)** — new records drafted
+  from evidence (a journal entry, a story, a profile, a capsule, a learning)
+  await their creation card. Every proposal carries its source quote and can
+  be re-run (the old retry action) with different instructions.
 - **ASK CARDS** — doubts and conflicts with SPEAKERS NAMED ("You said A on
   Tuesday — the PDF says B"). Confirm / dismiss / later.
 - **MERGE CARDS** — proposed duplicate merges (people included) with
@@ -200,6 +207,10 @@ with names. Gateway messages arrive as `other:<platform>`.
 - Quoting truth = hash-verified only. neverSend + hazard scan run at the
   EXIT (retrieval boundary). The store takes anything; the door out obeys
   the law.
+- **Sharing receipts** (folder 07) — every time memory goes out (recall sent
+  to an AI, records shared with a person or gateway), a receipt file lands in
+  07: who, what (record ids + hashes), when, and the allow/neverSend basis.
+  Receipts are audit records, never blockers.
 - **Anonymous-mode skill**: session toggle — no recall injected, nothing
   saved as personal; clean slate, restores on command.
 
