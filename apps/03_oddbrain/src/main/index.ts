@@ -1,15 +1,80 @@
-import { app, BrowserWindow, dialog, Menu, safeStorage, shell, globalShortcut } from 'electron'
-import { randomBytes } from 'node:crypto'
+import { createApprovalSigner } from './workflows/approvalSigner'
+import { createWorkflowScheduler } from './workflows/scheduler'
+import type { ScheduleInput } from '../shared/lib/schedules'
+import { createWorkflowService } from './workflows/service'
+import type { WorkflowMode, WorkflowStep } from '../shared/lib/workflows'
+import { createCommandRunner, COMMAND_DISCLOSURE } from './commands/runner'
+import type { ShellRequest } from '../shared/lib/commands'
+import { createWorkQueue } from './engine/workQueue'
+import { snapshotNativeArtifacts, collectNativeArtifacts } from './engine/nativeArtifacts'
+import { createMcpReview, inspectNativeMcp } from './engine/mcpReview'
+import { inspectNativeLaunch, nativeLaunchSummary } from './engine/nativeLaunchInventory'
+import { strippedEnvironmentNames } from './engine/claudeCode'
+import { createSkillAuthoring, readInstalledSkills, inspectInstalledSkill, type SkillRoot } from './engine/installedSkills'
+import type { SkillDraft } from '../shared/lib/installedSkills'
+import { createPermissionTickets } from './engine/permissionTickets'
+import { createReadTrustStore, type ReadTrustCandidate } from './engine/readTrust'
+import { READ_TRUST_MODES, type ReadTrustMode } from '../shared/lib/readTrust'
+import { createNativeContext } from './nativeContext'
+import { checkNativeConversation } from '../shared/lib/nativeConversation'
+import { sessionKey } from './engine/socket'
+import { createSessionBoardStore } from './engine/sessionBoardStore'
+import { createCheckpointReviewGate } from './engine/checkpointReviewGate'
+import { engineCommandRefusal } from '../shared/lib/engineCommandPolicy'
+import { createSessionMemory } from './engine/sessionMemory'
+import { AGY_PICTURES_ANSWER } from './engine/agy'
+import { restartIdleConnection } from './engine/restart'
+import { createTurnArchive } from './turnArchive'
+import { dispatchRecordedTurn } from './recordedDispatch'
+import { effortTarget, selectedEffort, type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
+import { checkEffortSelection, createCapabilityInspector } from './engine/nativeCapabilities'
+import type { ThinkingMode } from '../shared/lib/engine'
+import { createVaultFiles } from './vault/files'
+import { exportExtension } from './extension/export'
+import { discoverClaudeModels } from './engine/modelDiscovery'
+import { selectEngine } from '../shared/lib/engine'
+import { configBytes, noLinkedPath, commitConfigs, preserveConfig } from './engine/configTransaction'
+import { createMemoryWorkspace } from './memory/workspace'
+import { createMemoryOrganizer } from './memory/organizer'
+import { createMemoryObStore } from './memoryOb/store'
+import { createGooseMemoryReview } from './memoryOb/gooseReview'
+import { createProcessingLedger } from './processing/ledger'
+import { createAttachmentCenter } from './attachments/center'
+import { createFolderAccess } from './folders/access'
+import type { MemoryAction } from '../shared/lib/memoryWorkspace'
+import { normalizeExtensionAppearance, type ExtensionAppearance } from '../shared/lib/extensionAppearance'
+import { createMediaService } from './media/service'
+import { createVideoStudioService } from './video/service'
+import { createMarketplaceService } from './engine/marketplace'
+import { createAgyMarketplaceService } from './engine/agyMarketplace'
+import type { MediaFileInput, MediaInput, MediaPreferences } from '../shared/lib/mediaBridge'
+import type { CreativeKind, CreativeUse, DesignKitFormat, KdenliveAudioIntent, KdenliveEditPlan, VideoStudioPreferences } from '../shared/lib/videoStudio'
+import type { MarketplaceAction } from '../shared/lib/marketplace'
+import { fitWindow } from './windowBounds'
+import { inferenceAllowed } from './automation/inferencePolicy'
+import { CLOUD_PROVIDERS } from '../shared/lib/providers'
+import { createAutomationService, type AutomationService } from './automation/service'
+import { createTextReviewer } from './automation/reviewer'
+import type { AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
+import { readUiPreview } from './uiPreview'
+import { createLaunchGate } from './uiLaunch'
+import { app, BrowserWindow, dialog, Menu, safeStorage, shell, globalShortcut, screen, session } from 'electron'
+import { randomBytes, randomUUID, createHash } from 'node:crypto'
 import { pathToFileURL } from 'node:url'
-import { loadAppFlags, saveAppFlags } from './appFlags'
+import { loadAppFlags, readAppFlagsStrict, saveAppFlags } from './appFlags'
 import { userInfo } from 'node:os'
-import { registerStagingRoot, setBinaryOverride, binaryOverride } from './engine/enginePath'
-import { handle, lockNavigation, pinOwnOrigins } from './ipcGuard'
-import { dirname, join, resolve } from 'node:path'
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
+import { registerStagingRoot, setBinaryOverride, binaryOverride, nativeEngineSelection, resolveEngineCommand } from './engine/enginePath'
+import { handle, lockNavigation, pinOwnOrigins, urlIsOurs } from './ipcGuard'
+import { basename, dirname, join, resolve, relative, isAbsolute } from 'node:path'
+import { closeSync, constants, existsSync, fstatSync, fsyncSync, openSync, statSync, lstatSync, realpathSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { startLocalApi, type LocalApi } from './api/server'
 import { DEFAULT_EXTENSION_PORT, startExtensionApi, type ExtensionApi } from './extension/server'
 import { createVaultService, resolveVaultRoot } from './vault/service'
+import { searchVault } from './vault/recall'
+import { estimateModelTokens, parseContextOverflow } from '../shared/lib/modelContext'
+import { WORKING_NOTES_PROPOSAL_GUIDANCE } from '../shared/lib/workingNotesProposal'
+import { VAULT_SEARCH_PROPOSAL_GUIDANCE } from '../shared/lib/retrievalProposal'
+import { canonicalStructureRoot, conflictWasSettled, normalizeSettledConflicts, settleStructureConflict, validStructureRelative, type SettledStructureConflict } from './vault/settled'
 import { createKeyStore, type KeyStore } from './cloud/keys'
 import { createCloudClient, type CloudClient } from './cloud/client'
 import { providerById } from '../shared/lib/providers'
@@ -21,13 +86,13 @@ import {
   writeSettings,
   type AppSettings,
 } from './settings'
-import { cloudEnabled, normalizePermissions } from '../shared/lib/permissions'
+import { cloudEnabled, applyPermissionPatch } from '../shared/lib/permissions'
 import { registerArtifactIpc } from './artifacts/ipc'
 import { createEngineSocket, type EngineSocket } from './engine/socket'
-import { normalizeEngine } from '../shared/lib/engine'
+import { isValidModelName, normalizeEngine } from '../shared/lib/engine'
 import { APPROVAL_MODES, type ApprovalMode, type EngineAvailability, type EngineEvent, type EngineId, type EngineModelEntry } from '../shared/lib/engine'
-import { ENGINE_IMAGE_MIMES, MAX_ENGINE_IMAGE_CHARS as ENGINE_IMAGE_CHARS, MAX_ENGINE_ATTACHMENTS as ENGINE_IMAGE_LIMIT } from '../shared/lib/media'
-import { listCheckpoints, restoreCheckpoint } from './engine/checkpoints'
+import { engineImages, engineSourceFiles } from '../shared/lib/media'
+import { listCheckpoints, restoreCheckpoint, inspectCheckpoint } from './engine/checkpoints'
 import { createRecipeManager } from './recipes'
 import { createCompactManager } from './compact'
 import { buildRepoMap } from './repoMap'
@@ -40,19 +105,33 @@ import { agyModelSource, detectEngine } from './engine/availability'
 import { enginePath } from './engine/enginePath'
 import { pdfSafeName } from '../shared/lib/artifacts'
 import { parsePullLine, validateModelName } from './engine/pull'
-import { deployMcp, deploySkill, scanClaudeSkills, type McpServer, type VaultSkill } from './engine/deploy'
-import { installCatalogSkill } from './engine/skillCatalogInstall'
+import { openLogin, readAuthStatus } from './engine/authStatus'
+import { readOllamaVersion } from './engine/ollamaVersion'
+import { ollamaEndpoint } from './engine/ollamaEndpoint'
+import { scanClaudeSkills, type McpServer } from './engine/deploy'
+import { createCatalogInstallReview } from './engine/skillCatalogInstall'
+import { readMcpList } from '../shared/lib/mcp'
 import { installPackFromFolder, listPacks, removePack } from './engine/packs'
 import { exportPack } from './engine/exportPack'
 import { installFromIndex, readIndex } from './engine/storeIndex'
 import { starterPackFiles } from './engine/vaultSkills'
 import { deployBuiltInSkills } from './engine/vaultSkills'
 import { applyConflictAction, brainFileContents, classifyBrainRoot, defaultVaultPath, planBrainApply, planBrainRefresh } from '../shared/lib/brainStructure'
-import { normalizeBoard } from '../shared/lib/sessionsBoard'
+import { backupVault, restoreVault } from './vault/backup'
 import { exportVaultCopy } from './vault/exportCopy'
-import { deployHouseRules } from './engine/houseRulesDeploy'
-import { DEFAULT_HOUSE_RULES, type HouseRules } from '../shared/lib/houseRules'
-import { newProject, normalizeProjects, type Project } from '../shared/lib/projects'
+import { createProjectRuleReview, houseRulesFile as nativeHouseRulesFile } from './engine/houseRulesDeploy'
+import { DEFAULT_HOUSE_RULES, instructionBlock, type HouseRules } from '../shared/lib/houseRules'
+import { newProject, type Project } from '../shared/lib/projects'
+import { scanTextHazards } from '../shared/lib/textHazards'
+import { createChatStore } from './chats/store'
+import { CHAT_RECOVERY_FILE_LIMIT, chatRecoveryDocument, parseChatRecoveryDocument } from './chats/recovery'
+import { readRegularFileSync } from './safeFile'
+import type { ChatStoreMigration, ChatStoreSnapshot, ChatStoreWrite } from '../shared/lib/chatStore'
+import { WorkingNotesStore } from './chats/workingNotes'
+import type { WorkingNotes } from '../shared/lib/chatContext'
+import { readRecoverableJson, writeRecoverableJson } from './recoverableJson'
+import { appDataBackupExclusions, createAppDataBackup, restoreAppDataBackup } from './appDataBackup'
+import { createCompleteMemoryBackup, restoreCompleteMemoryBackup } from './completeMemoryBackup'
 
 /**
  * The main process. Everything that touches the machine lives on this side:
@@ -97,8 +176,16 @@ const API_PORT = Number(process.env.AI_ASSISTANT_API_PORT || 41979)
  */
 function runMonthlyAudit(): void {
   try {
-    const audit = createVaultService({ vaultPath: vaultRoot() }).monthlyAudit()
+    const service = currentVaultService()
+    const audit = service.monthlyAudit()
     if (audit.written) console.log(`[vault] monthly audit written: ${audit.relative}`)
+    const review = service.interpretationReviewState(), latestDate = review.runs[0]?.createdAt
+    const latestParts = latestDate ? Object.fromEntries(new Intl.DateTimeFormat('en', { timeZone: 'Asia/Dhaka', year: 'numeric', month: '2-digit' }).formatToParts(new Date(latestDate)).map(part => [part.type, part.value])) : {}
+    const latest = latestParts.year && latestParts.month ? `${latestParts.year}-${latestParts.month}` : ''
+    if (latest !== audit.month) {
+      const scanned = service.interpretationReview(60)
+      console.log(`[vault] interpretation review checked ${scanned.runs[0]?.checked || 0} in-range item(s)`)
+    }
   } catch {
     // No vault (yet or anymore): the audit waits for a boot that has one.
   }
@@ -114,6 +201,9 @@ function vaultRoot(): string {
       userData: join(app.getPath('userData'), 'vault'),
     })
   ).root
+}
+function currentVaultService(): ReturnType<typeof createVaultService> {
+  return createVaultService({ vaultPath: vaultRoot(), onAttachment: input => { attachmentCenterService?.record(input) } })
 }
 
 /**
@@ -152,7 +242,10 @@ function stampFor(now: Date): string {
 // first engine start never hunts folders with a slim inherited PATH.
 void enginePath()
 
+let engineEventSequence = 0
+const engineCloseWaiters = new Set<(event: EngineEvent) => void>()
 function pushEngineEvent(event: EngineEvent): void {
+  event = { ...event, sequence: ++engineEventSequence }
   // Stream pieces are for the live window only: a hundred of them would
   // crowd out the real story from the small remembered history, and the
   // finished text arrives in its own event for whoever reads it later.
@@ -161,6 +254,25 @@ function pushEngineEvent(event: EngineEvent): void {
   for (const window of BrowserWindow.getAllWindows()) {
     window.webContents.send('engine:event', event)
   }
+  // A close reaches here only after recordedDispatch durably appended it. Stop
+  // acknowledgements therefore cannot outrun the canonical transcript.
+  if (event.kind === 'closed') for (const settle of [...engineCloseWaiters]) settle(event)
+}
+
+function waitForEngineClose(transcriptId = '', timeoutMs = 5_000): Promise<boolean> {
+  return new Promise(resolve => {
+    let settled = false
+    const finish = (confirmed: boolean) => {
+      if (settled) return
+      settled = true; clearTimeout(timer); engineCloseWaiters.delete(onClose); resolve(confirmed)
+    }
+    const onClose = (event: EngineEvent) => {
+      if (!transcriptId || !event.transcriptId || event.transcriptId === transcriptId) finish(true)
+    }
+    const timer = setTimeout(() => finish(false), timeoutMs)
+    timer.unref?.()
+    engineCloseWaiters.add(onClose)
+  })
 }
 
 /** Everything the renderer is allowed to ask about settings and the folder. */
@@ -170,20 +282,21 @@ function pushEngineEvent(event: EngineEvent): void {
   // The plan is made here, from the real folder, never from the renderer's
   // word; an existing file is never rewritten.
   const settledFile = (): string => join(app.getPath('userData'), 'structure-settled.json')
-  const readSettled = (): string[] => {
+  const readSettled = (): SettledStructureConflict[] => {
     try {
       const parsed: unknown = JSON.parse(readFileSync(settledFile(), 'utf8'))
-      return Array.isArray(parsed) ? parsed.filter((entry): entry is string => typeof entry === 'string') : []
+      const normalized = normalizeSettledConflicts(parsed, canonicalStructureRoot(vaultRoot()))
+      if (Array.isArray(parsed) && parsed.some(entry => typeof entry === 'string')) {
+        try { writeFileSync(settledFile(), JSON.stringify(normalized, null, 2), 'utf8') } catch { return normalizeSettledConflicts(parsed.filter(entry => typeof entry !== 'string'), canonicalStructureRoot(vaultRoot())) } // Never silently scope the same legacy entries to another vault on a failed migration.
+      }
+      return normalized
     } catch {
       return []
     }
   }
-  const rememberSettled = (relative: string): void => {
-    const list = readSettled()
-    if (!list.includes(relative)) {
-      list.push(relative)
-      writeFileSync(settledFile(), JSON.stringify(list, null, 2), 'utf8')
-    }
+  const rememberSettled = (root: string, relative: string): void => {
+    const before = readSettled(), after = settleStructureConflict(before, root, relative)
+    if (after !== before) writeFileSync(settledFile(), JSON.stringify(after, null, 2), 'utf8')
   }
 
   const structurePlan = (root: string) => {
@@ -206,7 +319,7 @@ function pushEngineEvent(event: EngineEvent): void {
       }
     }
     const settled = readSettled()
-    const plan = planBrainApply(kind, relative => existsSync(join(root, relative)), readExisting, relative => settled.includes(relative))
+    const plan = planBrainApply(kind, relative => existsSync(join(root, relative)), readExisting, relative => conflictWasSettled(settled, root, relative))
     const differing = planBrainRefresh(kind, readExisting)
     return { kind: plan.kind, present: plan.present, missing: plan.missing, differing, conflicts: plan.conflicts, writes: plan.writes }
   }
@@ -224,7 +337,7 @@ function pushEngineEvent(event: EngineEvent): void {
       }
       if (written.length && resolve(root) === resolve(vaultRoot())) {
         try {
-          const service = createVaultService({ vaultPath: vaultRoot() })
+          const service = currentVaultService()
           service.capture({ type: 'journal', content: `Second-brain structure: added ${written.join(', ')}.` })
         } catch {
           // The files are on disk either way; a log failure is not hidden, but not fatal.
@@ -237,8 +350,496 @@ function pushEngineEvent(event: EngineEvent): void {
   }
 
 
+function inferencePermissions() {
+  if (automation?.preferences().allowCloudInference !== false) return settings.permissions
+  return { ...settings.permissions, cloud: Object.fromEntries(CLOUD_PROVIDERS.map(p => [p.id, false])) }
+}
+
+const capabilityInspector = createCapabilityInspector()
+let mediaService: ReturnType<typeof createMediaService> | undefined
+let videoStudioService: ReturnType<typeof createVideoStudioService> | undefined
+let attachmentCenterService: ReturnType<typeof createAttachmentCenter> | undefined
+let marketplaceService: ReturnType<typeof createMarketplaceService> | undefined
+let agyMarketplaceService: ReturnType<typeof createAgyMarketplaceService> | undefined
+let memoryObService: ReturnType<typeof createMemoryObStore> | undefined
 function registerBridges(): void {
+  const chatRoot = join(app.getPath('userData'), 'chats-v1')
+  const chatStore = createChatStore(chatRoot)
+  const memoryObRoot = join(app.getPath('userData'), 'memory-ob-v1')
+  const memoryOb = createMemoryObStore(memoryObRoot)
+  memoryObService = memoryOb
+  const memoryObAnswer = (run: () => object) => { try { return { ok: true as const, ...run() } } catch (error) { return { ok: false as const, error: (error as Error).message || 'Memory_OB could not complete this request. Originals were not changed.' } } }
+  handle('memory-ob:read', (_event, input?: { lifecycle?: 'active' | 'archived' | 'trash'; projectId?: string; limit?: number }) => memoryObAnswer(() => ({ view: memoryOb.read(input) })))
+  handle('memory-ob:project', (_event, projectId: string) => memoryObAnswer(() => ({ view: memoryOb.project(String(projectId || '')) })))
+  handle('memory-ob:search', (_event, input: { query: string; projectId?: string; currentChatId?: string; limit?: number }) => memoryObAnswer(() => ({ hits: memoryOb.search(input), revision: memoryOb.revision() })))
+  try { const snapshot = chatStore.read(); memoryOb.syncChats(snapshot.chats, snapshot.revision) } catch (error) { console.error(`[memory-ob] app-chat intake paused: ${(error as Error).message}`) }
+  const processingLedger = createProcessingLedger(app.getPath('userData'), undefined, ledger => {
+    try { memoryOb.syncJobs(ledger) } catch (error) { console.error(`[memory-ob] processing-job intake paused: ${(error as Error).message}`) }
+  })
+  const attachmentCenterRoot = join(app.getPath('userData'), 'attachment-center', 'originals')
+  const attachmentCenter = createAttachmentCenter(join(app.getPath('userData'), 'attachment-center', 'index.json'), attachmentCenterRoot, undefined, state => {
+    try { memoryOb.syncAttachments(state) } catch (error) { console.error(`[memory-ob] attachment intake paused: ${(error as Error).message}`) }
+  })
+  attachmentCenterService = attachmentCenter
+  try { memoryOb.syncAttachments(attachmentCenter.read()) } catch (error) { console.error(`[memory-ob] attachment startup intake paused: ${(error as Error).message}`) }
+  const folderAccess = createFolderAccess(join(app.getPath('userData'), 'folder-access.json'))
+  try { processingLedger.recover() } catch (error) { console.error(`[processing] ${(error as Error).message}`) }
+  const processingAnswer = (run: () => unknown) => { try { return { ok: true as const, ledger: run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
+  handle('processing:read', () => processingAnswer(() => processingLedger.read()))
+  handle('processing:resume', (_event, id: string) => processingAnswer(() => { processingLedger.resume(id); return processingLedger.read() }))
+  handle('processing:set-limits', (_event, limits: import('../shared/lib/processingLedger').ProcessingLedger['budget']['limits']) => processingAnswer(() => processingLedger.setLimits(limits)))
+  const attachmentAnswer = (run: () => object) => { try { return { ok: true as const, ...run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
+  handle('attachments:read', () => attachmentAnswer(() => ({ state: attachmentCenter.read() })))
+  handle('attachments:preview-delete', (_event, id: string) => attachmentAnswer(() => ({ preview: attachmentCenter.previewDelete(id) })))
+  handle('attachments:confirm-delete', (_event, token: string) => attachmentAnswer(() => ({ state: attachmentCenter.confirmDelete(token), answer: 'The reviewed private Attachment Center copy was deleted. Separate turn copies, vault sources, and derived records were not changed.' })))
+  const folderAnswer = (run: () => object) => { try { return { ok: true as const, ...run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
+  handle('folders:read', () => folderAnswer(() => ({ state: folderAccess.read() })))
+  handle('folders:choose', async (_event, input: import('../shared/lib/folderAccess').FolderAccessBridge extends never ? never : { purpose: string; duration: 'session' | 'day' | 'until-revoked'; projectId?: string | null; write?: boolean; watch?: boolean; review?: boolean; cloud?: boolean; commands?: boolean }) => {
+    const selected = await dialog.showOpenDialog({ title: 'Choose one folder for this purpose', properties: ['openDirectory'] })
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, answer: 'Folder access cancelled. Nothing was granted.' }
+    return folderAnswer(() => ({ state: folderAccess.grant(selected.filePaths[0], input), answer: 'Purpose-limited folder access saved. It grants only the switches shown; it does not capture, send, run, change, or delete files.' }))
+  })
+  handle('folders:revoke', (_event, id: string) => folderAnswer(() => ({ state: folderAccess.revoke(id), answer: 'Folder access revoked. Files were not changed or deleted.' })))
+  handle('folders:list', (_event, id: string) => folderAnswer(() => folderAccess.list(id)))
+  const chatAnswer = <T,>(run: () => T) => {
+    try { return { ok: true as const, ...run() } }
+    catch (error) {
+      const failure = error as Error & { snapshot?: ChatStoreSnapshot }
+      return { ok: false as const, error: failure.message || 'Conversation storage failed. Original files were not replaced.', ...(failure.snapshot ? { snapshot: failure.snapshot } : {}) }
+    }
+  }
+  handle('chats:read', event => chatAnswer(() => {
+    const snapshot = chatStore.read((done, total) => { if (!event.sender.isDestroyed()) event.sender.send('chats:load-progress', { done, total }) })
+    memoryOb.syncChats(snapshot.chats, snapshot.revision)
+    return { snapshot }
+  }))
+  handle('chats:migrate', (_event, input: ChatStoreMigration) => chatAnswer(() => {
+    const result = chatStore.migrate(input); memoryOb.syncChats(result.snapshot.chats, result.snapshot.revision); return result
+  }))
+  handle('chats:write', (_event, input: ChatStoreWrite) => chatAnswer(() => {
+    const snapshot = chatStore.write(input)
+    memoryOb.syncChats(snapshot.chats, snapshot.revision)
+    return { receipt: { initialized: true as const, revision: snapshot.revision, currentChat: snapshot.currentChat, ...(snapshot.notice ? { notice: snapshot.notice } : {}) } }
+  }))
+  handle('chats:export-recovery', async (_event, input: ChatStoreMigration) => {
+    try {
+      const document = chatRecoveryDocument(input)
+      const chosen = await dialog.showSaveDialog({ title: 'Export OddBrain chat recovery data', defaultPath: `OddBrain-chat-recovery-${Date.now()}.json`, filters: [{ name: 'JSON recovery file', extensions: ['json'] }] })
+      if (chosen.canceled || !chosen.filePath) return { ok: false, answer: 'Export cancelled. Nothing was written.' }
+      noLinkedPath(chosen.filePath)
+      const fd = openSync(chosen.filePath, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW || 0), 0o600)
+      try {
+        writeFileSync(fd, document, 'utf8'); fsyncSync(fd)
+        if (fstatSync(fd).size !== Buffer.byteLength(document)) throw Error('The exported file could not be verified.')
+      } finally { closeSync(fd) }
+      return { ok: true, answer: `Chat recovery data exported to ${chosen.filePath}`, path: chosen.filePath }
+    } catch (error) { return { ok: false, answer: `${(error as Error).message || 'Chat recovery data could not be exported.'} The live chat store was not changed.` } }
+  })
+  handle('chats:import-recovery', async () => {
+    try {
+      const chosen = await dialog.showOpenDialog({ title: 'Import OddBrain chat recovery data', properties: ['openFile'], filters: [{ name: 'OddBrain chat recovery JSON', extensions: ['json'] }] })
+      if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, answer: 'Import cancelled. Nothing was changed.' }
+      const selected = chosen.filePaths[0]
+      noLinkedPath(selected)
+      const document = parseChatRecoveryDocument(readRegularFileSync(selected, CHAT_RECOVERY_FILE_LIMIT).bytes)
+      const plan = chatStore.previewRecovery(document)
+      if (!plan.repair && plan.merge.imported === 0) return { ok: true, answer: `All ${plan.merge.identical.toLocaleString()} chat(s) from this recovery export are already present. Nothing was changed.`, snapshot: { initialized: plan.expectedInitialized, revision: plan.expectedRevision, chats: plan.merge.chats, currentChat: plan.merge.currentChat } }
+      const lines = [
+        `Recovery export: ${document.exportedAt}`,
+        `Chats in file: ${document.chats.length.toLocaleString()}`,
+        `New recovered chats: ${plan.merge.imported.toLocaleString()}`,
+        `Already present: ${plan.merge.identical.toLocaleString()}`,
+        `ID conflicts kept as separate recovered copies: ${plan.merge.conflicts.toLocaleString()}`,
+        `Final library: ${plan.merge.chats.length.toLocaleString()} chat(s)`,
+      ]
+      if (plan.repair) lines.push('', document.chats.length === 0 ? 'This is an explicitly empty recovery export. The unreadable indexes will be preserved, then the active library will be repaired to zero chats. Existing item files will be retained for forensic recovery.' : 'The current chat indexes cannot be read. Their exact files will be moved into the private recovery folder before this import becomes active. Existing item files will be retained.', plan.storageProblem || '')
+      else lines.push('', 'Existing chats are never replaced. Exact repeats are skipped; conflicting versions are kept as separate recovered copies.')
+      const confirmation = await dialog.showMessageBox({
+        type: plan.repair ? 'warning' : 'question',
+        buttons: ['Cancel', plan.repair ? (document.chats.length === 0 ? 'Preserve damaged indexes and use empty library' : 'Preserve damaged indexes and import') : 'Import recovered chats'],
+        defaultId: 0,
+        cancelId: 0,
+        message: plan.repair ? 'Repair app-chat storage from this recovery export?' : 'Merge this recovery export into app chats?',
+        detail: lines.join('\n'),
+      })
+      if (confirmation.response !== 1) return { ok: false, answer: 'Import cancelled. Nothing was changed.' }
+      const snapshot = chatStore.importRecovery(plan)
+      memoryOb.syncChats(snapshot.chats, snapshot.revision)
+      return { ok: true, answer: `${plan.merge.imported.toLocaleString()} recovered chat(s) imported${plan.merge.conflicts ? `; ${plan.merge.conflicts.toLocaleString()} ID conflict(s) were kept as separate copies` : ''}. The library now contains ${snapshot.chats.length.toLocaleString()} chat(s).`, snapshot }
+    } catch (error) { return { ok: false, answer: `${(error as Error).message || 'Chat recovery data could not be imported.'} The selected recovery file was not changed.` } }
+  })
+  handle('chats:open-location', async () => {
+    try {
+      mkdirSync(chatRoot, { recursive: true, mode: 0o700 })
+      const error = await shell.openPath(chatRoot)
+      return error ? { ok: false, answer: `The chat storage folder could not be opened: ${error}` } : { ok: true, answer: 'Opened the private app-chat storage folder.', path: chatRoot }
+    } catch (error) { return { ok: false, answer: (error as Error).message || 'The chat storage folder could not be opened.' } }
+  })
+
+  const workingNotes = new WorkingNotesStore(join(app.getPath('userData'), 'working-notes-v1'))
+  const notesAnswer = (run: () => ReturnType<WorkingNotesStore['read']>) => {
+    try { const result = run(); memoryOb.syncWorkingNotes(result); return result } catch (error) { return { ok: false as const, current: null, revisions: [], answer: (error as Error).message || 'Working Notes could not be read. Originals were kept.' } }
+  }
+  handle('working-notes:read', (_event, chatId: string) => notesAnswer(() => workingNotes.read(chatId)))
+  handle('working-notes:save', (_event, input: { chatId: string; expected: string | null; notes: WorkingNotes; proposal?: WorkingNotes }) => notesAnswer(() => workingNotes.save(input)))
+  handle('working-notes:reject-proposal', (_event, input: { chatId: string; expected: string | null; notes: WorkingNotes; proposal: WorkingNotes }) => notesAnswer(() => workingNotes.reject(input)))
+  handle('working-notes:migrate', (_event, input: { chatId: string; notes: WorkingNotes[] }) => notesAnswer(() => workingNotes.migrate(input.chatId, input.notes)))
+  handle('working-notes:fork', (_event, input: { sourceChatId: string; targetChatId: string; expectedSource: string | null }) => notesAnswer(() => workingNotes.fork(input)))
+  handle('working-notes:export', async (_event, chatId: string) => {
+    try {
+      const document = JSON.stringify(workingNotes.exportValue(chatId), null, 2)
+      const chosen = await dialog.showSaveDialog({ title: 'Export Working Notes recovery history', defaultPath: `OddBrain-working-notes-${Date.now()}.json`, filters: [{ name: 'Working Notes recovery', extensions: ['json'] }] })
+      if (chosen.canceled || !chosen.filePath) return { ok: false, answer: 'Export cancelled. Nothing was written.' }
+      noLinkedPath(chosen.filePath)
+      const descriptor = openSync(chosen.filePath, constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | (constants.O_NOFOLLOW || 0), 0o600)
+      try { writeFileSync(descriptor, document, 'utf8'); fsyncSync(descriptor) } finally { closeSync(descriptor) }
+      return { ok: true, answer: `Working Notes recovery exported to ${chosen.filePath}` }
+    } catch (error) { return { ok: false, answer: `${(error as Error).message} Nothing was changed.` } }
+  })
+  handle('working-notes:import', async (_event, chatId: string) => {
+    try {
+      const chosen = await dialog.showOpenDialog({ title: 'Import Working Notes recovery history', properties: ['openFile'], filters: [{ name: 'Working Notes recovery', extensions: ['json'] }] })
+      if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, current: null, revisions: [], answer: 'Import cancelled. Nothing was changed.' }
+      const bytes = readRegularFileSync(chosen.filePaths[0], 50_000_000).bytes
+      return notesAnswer(() => workingNotes.importValue(chatId, JSON.parse(bytes.toString('utf8'))))
+    } catch (error) { return { ok: false, current: null, revisions: [], answer: `${(error as Error).message} Nothing was imported.` } }
+  })
+  try {
+    for (const chat of chatStore.read().chats) {
+      try { memoryOb.syncWorkingNotes(workingNotes.read(chat.id)) }
+      catch (error) { console.error(`[memory-ob] Working Notes intake paused for ${chat.id}: ${(error as Error).message}`) }
+    }
+  } catch (error) { console.error(`[memory-ob] Working Notes startup intake paused: ${(error as Error).message}`) }
+
+  const workQueue = createWorkQueue(join(app.getPath('userData'), 'work-queue'), () => JSON.stringify(settings.engine), () => createHash('sha256').update(JSON.stringify([settings.engine, settings.permissions, automation?.preferences().allowCloudInference !== false, resolveEngineCommand(settings.engine.id), settings.engine.cloudProvider === 'anthropic' ? keyStore?.get('anthropic') || '' : ''])).digest('hex'))
+  const permissionTickets = createPermissionTickets(() => engine?.current() || null)
+  const readTrust = createReadTrustStore(join(app.getPath('userData'), 'read-trust-v2'))
+  const pendingReads = new Map<string, { candidate: ReadTrustCandidate; owner: number; file: string; folder: string }>()
+  const announceReadTrust = (): void => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed() && !window.webContents.isDestroyed()) window.webContents.send('engine:read-trust-changed') }
+  const readTrustAnswer = <T,>(run: () => T) => { try { return { ok: true as const, ...run() } } catch (error) { return { ok: false as const, error: (error as Error).message || 'Read approvals could not be changed.' } } }
+  handle('engine:read-trust:list', () => readTrustAnswer(() => ({ view: readTrust.view() })))
+  handle('engine:read-trust:migrate', (_event, raw: string | null) => {
+    const result = readTrustAnswer(() => readTrust.migrateLegacy(raw, vaultRoot()))
+    if (!result.ok) return { ok: false as const, answer: result.error }
+    return { ok: true as const, view: result.view, answer: result.skipped ? `Migrated ${result.migrated} legacy exact-file approval(s); ${result.skipped} invalid or unavailable rule(s) were not activated. Exact recovery data was retained.` : `Migrated ${result.migrated} legacy exact-file approval(s) into main-process storage.` }
+  })
+  handle('engine:read-trust:revoke', (_event, id: string) => {
+    const result = readTrustAnswer(() => ({ view: readTrust.revoke(id) }))
+    if (result.ok) announceReadTrust()
+    return result.ok ? { ...result, answer: 'Read approval revoked.' } : { ok: false as const, answer: result.error }
+  })
+  handle('engine:read-trust:approve', (event, requestId: string, mode: ReadTrustMode) => {
+    if (!(READ_TRUST_MODES as readonly unknown[]).includes(mode)) return { ok: false as const, answer: 'Unknown read-approval scope. Nothing was approved.' }
+    const pending = pendingReads.get(requestId), checked = pending ? readTrust.eligible(pending.candidate) : null
+    if (!pending || pending.owner !== event.sender.id || !checked || checked.file !== pending.file || checked.folder !== pending.folder) return { ok: false as const, answer: 'That read request expired, belongs to another window, changed path, or is not eligible for broader approval. Nothing was approved.' }
+    let added: ReturnType<typeof readTrust.add>
+    try { readTrust.view(); added = readTrust.add(pending.candidate, mode) }
+    catch (error) { return { ok: false as const, answer: `No read was approved because the requested scope could not be saved visibly: ${(error as Error).message}` } }
+    if (!permissionTickets.answer(requestId, true)) {
+      if (added.created) try { readTrust.revoke(added.rule.id) } catch { /* remains visible and revocable if rollback could not be confirmed */ }
+      announceReadTrust()
+      return { ok: false as const, answer: 'The engine did not accept that read response. The new rule was rolled back when possible; inspect the visible approval list before retrying.' }
+    }
+    pendingReads.delete(requestId); announceReadTrust()
+    return { ok: true as const, answer: mode === 'turn' ? 'Allowed this read and enabled a revocable read-only folder approval for the rest of this turn.' : `Allowed this read and saved a revocable ${mode === 'file' ? 'exact-file' : mode === 'project' ? 'project-folder' : 'folder'} Read approval.`, view: readTrust.view(), rule: added.rule }
+  })
+  let nativeWork = 0
+  let activeTranscript: { transcriptId: string; chatId?: string; prompt: string } | undefined
+  let preparing: { owner: number; controller: AbortController } | undefined
+  let overflowRetryPending = false, retryPreparing: AbortController | undefined
+  const catalogReviews = new Map<number, ReturnType<typeof createCatalogInstallReview>>()
+  const mcpReviews = new Map<number, ReturnType<typeof createMcpReview>>()
+  const gooseMemoryReviews = new Map<number, ReturnType<typeof createGooseMemoryReview>>()
+  const ruleReviews = new Map<number, Map<string, { service: ReturnType<typeof createProjectRuleReview>; expiresAt: number }>>()
+  const skillReviews = new Map<number, ReturnType<typeof createSkillAuthoring>>()
+  const checkpointReviews = new Map<number, ReturnType<typeof createCheckpointReviewGate>>()
+  const nativeContext = createNativeContext(
+    join(app.getPath('userData'), 'projects.json'),
+    join(app.getPath('userData'), 'project-context-grants.json'),
+    undefined,
+    (query, options) => searchVault(currentVaultService().files(), query, options),
+    (projectId, query, currentChatId) => memoryOb.search({ projectId, query, currentChatId, limit: 4, kinds: ['app-chat'] }),
+  )
+  try { memoryOb.syncProjects(nativeContext.projects()) } catch (error) { console.error(`[memory-ob] Project intake paused: ${(error as Error).message}`) }
+  // Deliberately memory-only: each app start requires fresh folder trust. A
+  // changed declaration fingerprint invalidates trust within the same process.
+  const nativeLaunchTrust = new Map<string, { digest: string; fullSpeed: boolean }>()
+  const sessionMemory = createSessionMemory(join(app.getPath('userData'), 'engine-sessions.json'))
+  const turnArchive = createTurnArchive(join(app.getPath('userData'), 'turn-transcripts'))
+  const transcriptIntakeCursors = new Set<string>()
+  const syncTranscriptPage = (before = ''): void => {
+    if (transcriptIntakeCursors.has(before)) return
+    transcriptIntakeCursors.add(before)
+    setImmediate(() => {
+      try {
+        const page = turnArchive.list(before)
+        memoryOb.syncTranscriptHeaders(page.entries)
+        if (page.notice) console.error(`[memory-ob] transcript intake notice: ${page.notice}`)
+        if (page.next && page.next !== before) syncTranscriptPage(page.next)
+      } catch (error) { console.error(`[memory-ob] transcript intake paused: ${(error as Error).message}`) }
+    })
+  }
+  syncTranscriptPage()
+  // Service-owned URL/retry reads already have a durable Video Studio intake.
+  // This prevents the generic attachment callback from creating a second file-kind intake.
+  const internalVideoReads = new Set<string>(), internalVideoOwners = new Set<number>(), directVideoOwners = new Set<number>()
+  const transcriptAnswer = <T,>(read: () => T) => { try { return { ok: true as const, value: read() } } catch { return { ok: false as const, error: 'The transcript could not be read. Its original file has not been changed.' } } }
+  handle('transcripts:list', (_event, before: string = '') => transcriptAnswer(() => turnArchive.list(before)))
+  handle('transcripts:read', (_event, id: string) => transcriptAnswer(() => turnArchive.read(id)))
+  handle('transcripts:raw', (_event, id: string) => transcriptAnswer(() => turnArchive.raw(id)))
+  handle('transcripts:image', (_event, id: string, imageId: string) => transcriptAnswer(() => turnArchive.image(id, imageId)))
+  handle('transcripts:attachment', (_event, id: string, attachmentId: string) => transcriptAnswer(() => turnArchive.attachment(id, attachmentId)))
+  handle('transcripts:save-attachment', async (_event, id: string, attachmentId: string) => {
+    try {
+      const descriptor = turnArchive.read(id).header.attachments?.find(file => file.id === attachmentId)
+      if (!descriptor) throw Error('That retained original is not indexed by this transcript.')
+      const chosen = await dialog.showSaveDialog({ title: 'Save verified original source', defaultPath: descriptor.name })
+      if (chosen.canceled || !chosen.filePath) return { ok: false, answer: 'Save cancelled. The retained original is unchanged.' }
+      noLinkedPath(chosen.filePath); turnArchive.saveAttachment(id, attachmentId, chosen.filePath)
+      return { ok: true, answer: `Verified original saved to ${chosen.filePath}` }
+    } catch (error) { return { ok: false, answer: `${(error as Error).message} The retained original is unchanged.` } }
+  })
+  handle('transcripts:recover', (_event, chatIds: string[], knownTranscriptIds: string[], before: string = '') => transcriptAnswer(() => turnArchive.recover(chatIds, knownTranscriptIds, before)))
+  mediaService = createMediaService({ file: join(app.getPath('userData'), 'media.json'), sourceRoot: attachmentCenterRoot, processing: processingLedger, onSource: (owner, input) => {
+    if (internalVideoOwners.has(owner) || internalVideoReads.has(input.locator)) {
+      if (directVideoOwners.has(owner) && (/^video\//.test(input.mime) || /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(input.name))) videoStudioService?.registerLocalIntake(owner, input.locator, { name: input.name, sha256: input.sha256, videoOcr: input.videoOcr })
+      return
+    }
+    attachmentCenter.record({ ...input, origin: 'native-chat' })
+    if (/^video\//.test(input.mime) || /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(input.name)) try { videoStudioService?.registerLocalIntake(owner, input.locator, { name: input.name, sha256: input.sha256, videoOcr: input.videoOcr }) } catch (error) { console.error(`[video-intake] ${(error as Error).message}`) }
+  }, onProcessed: (owner, sha256, processor, coverage, ok) => {
+    if (!internalVideoOwners.has(owner)) attachmentCenter.processed(sha256, processor, coverage, ok)
+    if (!ok) videoStudioService?.markLocalEvidenceFailure(sha256, coverage)
+  }, onCancelled: owner => { const win = BrowserWindow.getAllWindows().find(w => w.webContents.id === owner); if (win && !win.isDestroyed() && !win.webContents.isDestroyed()) win.webContents.send('media:cancelled') }, access: () => ({ permissions: settings.permissions, external: automation?.preferences().allowCloudInference !== false, key: id => keyStore?.get(id) || '', customBaseUrl: settings.cloud.baseUrl }) })
+  const videoMime = (path: string): string => /\.webm$/i.test(path) ? 'video/webm' : /\.avi$/i.test(path) ? 'video/x-msvideo' : 'video/mp4'
+  const videoStudio = createVideoStudioService({
+    file: join(app.getPath('userData'), 'video-studio.json'), keys: () => keyStore,
+    analyzeVideo: async (owner, path, videoOcr = false) => {
+      const file = statSync(path); internalVideoReads.add(path); internalVideoOwners.add(owner)
+      try { return await mediaService!.decodeFile(owner, path, { name: basename(path), mime: videoMime(path), size: file.size, route: 'local', storage: 'in-place', videoOcr, videoFrameBudget: 12 }) }
+      finally { internalVideoReads.delete(path); internalVideoOwners.delete(owner) }
+    },
+    videoOcrAvailable: () => Boolean(mediaService!.read().ocrAdapter),
+    ffmpegPath: () => mediaService!.read().ffmpeg,
+    expandVideoEvidence: (path, moments, videoOcr, signal) => mediaService!.extractEvidence(path, moments, videoOcr, signal),
+    stopVideoAnalysis: owner => mediaService!.cancel(owner),
+  })
+  videoStudioService = videoStudio
+  marketplaceService = createMarketplaceService({ file: join(app.getPath('userData'), 'marketplaces.json') })
+  agyMarketplaceService = createAgyMarketplaceService({ cacheFile: join(app.getPath('home'), '.gemini', 'antigravity', 'cache', 'marketplaces', 'antigravity-plugins-official', 'marketplace.json') })
+  const market = (engine: unknown) => {
+    if (engine === 'agy') return agyMarketplaceService!
+    if (engine === undefined || engine === 'claude-code') return marketplaceService!
+    throw Error('Unknown marketplace engine.')
+  }
+  const commandSessions = new WeakMap<object, number>(); let commandSessionSerial = 0
+  const commandScope = (reserved = false) => {
+    const child = engine?.current()
+    if (child && !commandSessions.has(child)) commandSessions.set(child, ++commandSessionSerial)
+    const cwd = resolve(settings.engine.workspace || vaultRoot())
+    const authority = JSON.stringify([cwd, settings.engine, settings.permissions, child ? commandSessions.get(child) : null, engine?.currentTarget(), nativeWork, workDispatchGeneration])
+    const explanation = !settings.permissions.manualCommands ? 'Enable Reviewed OS commands in Settings → Agent access first. This is separate from native engine tool approval.'
+      : settings.engine.approval === 'plan' ? 'Arbitrary OS commands are disabled while the engine is in Plan mode. Choose a non-plan mode explicitly before reviewing a command.'
+      : engine?.turnBusy() || (dispatchingWork && !reserved) || foregroundApiRequests > 0 ? 'Wait for active work before running an app command.' : COMMAND_DISCLOSURE
+    return { cwd, authority, stableAuthority: JSON.stringify([cwd, settings.engine.approval, settings.permissions]), busy: !!engine?.turnBusy() || (dispatchingWork && !reserved) || foregroundApiRequests > 0, allowed: settings.permissions.manualCommands === true && settings.engine.approval !== 'plan' && !engine?.turnBusy() && (!dispatchingWork || reserved) && foregroundApiRequests === 0, explanation }
+  }
+  const commandRunner = createCommandRunner({ root: join(app.getPath('userData'), 'command-runs'), isolationRoot: join(app.getPath('userData'), 'isolated-worktrees'), scope: () => commandScope(),
+    acquire: async (request, authority, signal) => {
+      const initial = commandScope()
+      if (!initial.allowed || initial.authority !== authority || resolve(request.cwd) !== initial.cwd) throw Error('Command authority changed before reservation. Nothing was run.')
+      dispatchingWork = true
+      try {
+        memoryOrganizer?.cancel(); await automation?.cancel(); signal.throwIfAborted()
+        const recheck = () => { const current = commandScope(true); if (!current.allowed || current.authority !== authority) throw Error('Command access, engine, session or working folder changed. Nothing was run.'); signal.throwIfAborted() }
+        recheck()
+        return { recheck, release: () => { dispatchingWork = false; workDispatchGeneration++ } }
+      } catch (error) { dispatchingWork = false; workDispatchGeneration++; throw error }
+    },
+  })
+  const workflows = createWorkflowService(join(app.getPath('userData'), 'workflows'), commandRunner)
+  const scheduleSigner = createApprovalSigner(join(app.getPath('userData'), 'workflow-approval-key.json'), {
+    available: () => safeStorage.isEncryptionAvailable() && (process.platform !== 'linux' || safeStorage.getSelectedStorageBackend() !== 'basic_text'),
+    encrypt: value => safeStorage.encryptString(value), decrypt: value => safeStorage.decryptString(value),
+  })
+  const scheduler = createWorkflowScheduler({ root: join(app.getPath('userData'), 'workflow-schedules'), workflows, signer: scheduleSigner,
+    busy: () => workQueue.view(-1).some(item => item.status === 'queued') || automation?.view().current?.automatic === false,
+  })
+  scheduler.start()
+
+  app.on('before-quit', () => { scheduler.dispose(); workflows.cancel(); commandRunner.cancel() })
+  const owners = new Set<number>()
+  const localVideoReviews = new Map<string, { owner: number; path: string; name: string; size: number; dev: number; ino: number; mtimeMs: number; ocrAvailable: boolean; expires: number }>()
+  const track = (sender: Electron.WebContents): number => {
+    if (!owners.has(sender.id)) { owners.add(sender.id); sender.once('destroyed', () => { scheduler.forget(sender.id); workflows.forget(sender.id); commandRunner.forget(sender.id); try { workQueue.ownerClosed(sender.id) } catch { /* queue recovery stays fail-closed on next read */ } if (preparing?.owner === sender.id) preparing.controller.abort(); catalogReviews.get(sender.id)?.cancel(); catalogReviews.delete(sender.id); mcpReviews.delete(sender.id); gooseMemoryReviews.get(sender.id)?.cancel(); gooseMemoryReviews.delete(sender.id); ruleReviews.delete(sender.id); skillReviews.delete(sender.id); checkpointReviews.delete(sender.id); capabilityInspector.cancel(sender.id); mediaService?.cancel(sender.id); videoStudio.forget(sender.id); for (const [token, review] of localVideoReviews) if (review.owner === sender.id) localVideoReviews.delete(token); marketplaceService?.cancel(sender.id); agyMarketplaceService?.cancel(sender.id); owners.delete(sender.id) }) }
+    return sender.id
+  }
+  handle('schedules:list', () => scheduler.list())
+  handle('schedules:preview', (event, input: ScheduleInput) => scheduler.preview(track(event.sender), input))
+  handle('schedules:decide', (event, token: string, decision: 'allow' | 'deny') => scheduler.decide(track(event.sender), token, decision))
+  handle('schedules:pause', (_event, id: string) => scheduler.pause(id))
+  handle('schedules:inbox', (_event, before?: string) => scheduler.inbox(before))
+  handle('schedules:acknowledge', (_event, id: string) => scheduler.acknowledge(id))
+  handle('workflows:list', (_event, before?: string) => workflows.list(before))
+  handle('workflows:save', (_event, input: { name: string; cwd: string; steps: WorkflowStep[]; mode?: WorkflowMode }) => workflows.save(input))
+  handle('workflows:archive', (_event, id: string, archived: boolean) => workflows.archive(id, archived))
+  handle('workflows:preview', (event, id: string) => workflows.preview(track(event.sender), id))
+  handle('workflows:decide', (event, token: string, decision: 'allow' | 'deny') => workflows.decide(track(event.sender), token, decision))
+  handle('workflows:cancel', () => workflows.cancel())
+  handle('workflows:runs', (_event, before?: string) => workflows.runs(before))
+  handle('workflows:read-run', (_event, id: string) => workflows.readRun(id))
+  handle('commands:saved', (_event, before?: string) => commandRunner.saved(before))
+  handle('commands:save', (_event, input: { name: string; command: string; cwd: string }) => commandRunner.save(input))
+  handle('commands:archive-saved', (_event, id: string, archived: boolean) => commandRunner.archiveSaved(id, archived))
+  handle('commands:preview-saved', (event, id: string) => commandRunner.previewSaved(track(event.sender), id))
+  handle('commands:context', () => commandRunner.context())
+  handle('commands:preview', (event, request: ShellRequest) => commandRunner.preview(track(event.sender), request))
+  handle('commands:decide', (event, token: string, decision: 'allow' | 'deny') => commandRunner.decide(track(event.sender), token, decision))
+  handle('commands:cancel', () => commandRunner.cancel())
+  handle('commands:history', (_event, before?: string) => commandRunner.history(before))
+  handle('commands:read', (_event, id: string) => commandRunner.read(id))
+  handle('commands:output', (_event, id: string, stream: 'stdout' | 'stderr') => commandRunner.output(id, stream))
+  const marketAnswer = async <T,>(run: () => Promise<T>) => { try { return { ok: true as const, value: await run() } } catch (error) { return { ok: false as const, error: (error as Error).message } } }
+  handle('media:authorize-recording', (event, expected: { provider: string; model: string }) => mediaService!.authorizeRecording(track(event.sender), expected))
+  handle('media:read', () => mediaService!.read())
+  handle('media:update', (_event, patch: Partial<MediaPreferences>) => mediaService!.update(patch))
+  handle('media:decoder', async () => {
+    const picked = await dialog.showOpenDialog({ title: 'Choose the installed FFmpeg executable', properties: ['openFile'] })
+    if (picked.canceled || !picked.filePaths[0]) return mediaService!.read()
+    return mediaService!.update({ ffmpeg: picked.filePaths[0] }, true)
+  })
+  handle('media:ocr-adapter', async () => {
+    const picked = await dialog.showOpenDialog({ title: 'Choose your installed DeepSeek-OCR-2 adapter', properties: ['openFile'] })
+    if (picked.canceled || !picked.filePaths[0]) return mediaService!.read()
+    return mediaService!.configureOcrAdapter(picked.filePaths[0])
+  })
+  handle('media:decode', (event, input: MediaInput) => mediaService!.decode(track(event.sender), input))
+  handle('media:decode-file', async (event, path: string, input: MediaFileInput) => {
+    const owner = track(event.sender), result = await mediaService!.decodeFile(owner, path, input)
+    if (result.ok && input.route === 'local' && (/^video\//.test(input.mime) || /\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(input.name))) {
+      try { await videoStudio.recordLocalEvidence(owner, path, result) }
+      catch (error) { if (result.source?.sha256) videoStudio.markLocalEvidenceFailure(result.source.sha256, (error as Error).message); return { ...result, disclosure: `${result.disclosure || ''} The source remained attached, and its durable Video Studio intake is waiting for a complete retry: ${(error as Error).message}`.trim() } }
+    }
+    return result
+  })
+  handle('media:release-source', (event, sourceHandle: string) => { mediaService!.releaseSource(track(event.sender), sourceHandle) })
+  handle('media:dictate', event => mediaService!.dictate(track(event.sender)))
+  handle('media:cancel', event => { mediaService!.cancel(event.sender.id) })
+  handle('video-studio:choose-local', async event => {
+    for (const [token, review] of localVideoReviews) if (review.expires <= Date.now()) localVideoReviews.delete(token)
+    const owner = track(event.sender), picked = await dialog.showOpenDialog({ title: 'Choose one local video for Video Studio', properties: ['openFile'], filters: [{ name: 'Video', extensions: ['mp4', 'webm', 'mov', 'mkv', 'avi', 'm4v'] }] })
+    if (picked.canceled || !picked.filePaths[0]) return { ok: false, name: '', bytes: 0, ocrAvailable: false, consequence: '', error: 'Local video selection cancelled. Nothing was read.' }
+    try {
+      const path = picked.filePaths[0], info = lstatSync(path)
+      if (!info.isFile() || info.isSymbolicLink() || info.size < 1) throw Error('The selected video is not a normal non-empty file.')
+      const name = basename(path)
+      if (!/\.(mp4|webm|mov|mkv|avi|m4v)$/i.test(name)) throw Error('Choose a supported video container.')
+      const token = randomUUID(), expires = Date.now() + 5 * 60_000, ocrAvailable = !!mediaService!.read().ocrAdapter
+      localVideoReviews.set(token, { owner, path, name, size: info.size, dev: info.dev, ino: info.ino, mtimeMs: info.mtimeMs, ocrAvailable, expires })
+      return { ok: true, token, name, bytes: info.size, ocrAvailable, consequence: `Use in place makes no extra source copy and later retries depend on this file staying here. A verified private copy uses another ${info.size.toLocaleString()} bytes in app data and joins app-data backups. After approval, OddBrain saves the durable intake before building the complete audio/transcript/scene map and up to twelve adaptive retained frames; it does not attach the video to chat or send it to a provider.`, expiresAt: new Date(expires).toISOString() }
+    } catch (error) { return { ok: false, name: '', bytes: 0, ocrAvailable: false, consequence: '', error: (error as Error).message } }
+  })
+  handle('video-studio:decide-local', async (event, token: string, decision: 'allow' | 'deny', storage: 'in-place' | 'private-copy', videoOcr: boolean) => {
+    const owner = track(event.sender), review = localVideoReviews.get(token); localVideoReviews.delete(token)
+    if (!review || review.owner !== owner || review.expires <= Date.now()) return { ok: false, answer: 'That local-video review expired or belongs to another window. Nothing was read.' }
+    if (decision !== 'allow') return { ok: true, answer: 'Cancelled. The selected local video was not read or copied.' }
+    if (!['in-place', 'private-copy'].includes(storage) || typeof videoOcr !== 'boolean' || (videoOcr && (!review.ocrAvailable || !mediaService!.read().ocrAdapter))) return { ok: false, answer: 'The reviewed storage or OCR choice changed. Choose the video again.' }
+    let sourceHandle = '', sourceSha = ''
+    try {
+      const current = lstatSync(review.path)
+      if (!current.isFile() || current.isSymbolicLink() || current.size !== review.size || current.dev !== review.dev || current.ino !== review.ino || current.mtimeMs !== review.mtimeMs) throw Error('The selected video changed after review. Choose it again; nothing was read.')
+      internalVideoOwners.add(owner); directVideoOwners.add(owner)
+      const result = await mediaService!.decodeFile(owner, review.path, { name: review.name, mime: videoMime(review.path), size: review.size, route: 'local', storage, videoOcr, videoFrameBudget: 12 })
+      sourceHandle = result.source?.handle || ''; sourceSha = result.source?.sha256 || ''
+      if (!result.ok) return { ok: false, answer: `Reading did not complete: ${result.error || 'Local video reading failed.'} If source staging finished, its durable intake remains blocked for retry; otherwise no source was registered.` }
+      const evidence = await videoStudio.recordLocalEvidence(owner, review.path, result)
+      return { ok: true, answer: 'The approved local video is now a durable ready intake. It was read completely without attaching it to chat or uploading it.', evidence }
+    } catch (error) {
+      if (sourceSha) videoStudio.markLocalEvidenceFailure(sourceSha, (error as Error).message)
+      return { ok: false, answer: `The local video remains unchanged, and any created intake is blocked: ${(error as Error).message}` }
+    } finally { directVideoOwners.delete(owner); internalVideoOwners.delete(owner); if (sourceHandle) mediaService!.releaseSource(owner, sourceHandle) }
+  })
+  handle('video-studio:read', () => videoStudio.read())
+  handle('video-studio:update', (_event, patch: Partial<VideoStudioPreferences>) => videoStudio.update(patch))
+  handle('video-studio:choose-kdenlive', async () => {
+    const picked = await dialog.showOpenDialog({ title: 'Choose Kdenlive', properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'Kdenlive', extensions: ['exe'] }] : [] })
+    if (!picked.canceled && picked.filePaths[0]) videoStudio.setKdenlive(picked.filePaths[0])
+    return videoStudio.read()
+  })
+  handle('video-studio:choose-project', async () => {
+    const picked = await dialog.showOpenDialog({ title: 'Choose the Kdenlive project folder', properties: ['openDirectory'] })
+    if (!picked.canceled && picked.filePaths[0]) videoStudio.setProjectFolder(picked.filePaths[0])
+    return videoStudio.read()
+  })
+  handle('video-studio:choose-ytdlp', async () => {
+    const picked = await dialog.showOpenDialog({ title: 'Choose owner-installed yt-dlp', properties: ['openFile'], filters: process.platform === 'win32' ? [{ name: 'yt-dlp', extensions: ['exe'] }] : [] })
+    if (!picked.canceled && picked.filePaths[0]) videoStudio.setYtDlp(picked.filePaths[0])
+    return videoStudio.read()
+  })
+  handle('video-studio:save-secret', (_event, kind: 'mcp' | 'pixabay', value: string) => videoStudio.saveSecret(kind, value))
+  handle('video-studio:clear-secret', (_event, kind: 'mcp' | 'pixabay') => videoStudio.clearSecret(kind))
+  handle('video-studio:test', () => videoStudio.testKdenlive())
+  handle('video-studio:open', () => videoStudio.openKdenlive())
+  handle('video-studio:search', (event, query: string, kind: CreativeKind, page?: number, intendedUse?: CreativeUse) => videoStudio.search(track(event.sender), query, kind, page, intendedUse))
+  handle('video-studio:preview', (event, token: string) => videoStudio.preview(track(event.sender), token))
+  handle('video-studio:prepare-asset', (event, token: string) => videoStudio.prepareAsset(track(event.sender), token))
+  handle('video-studio:decide-asset', (event, token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean) => videoStudio.decideAsset(track(event.sender), token, decision, importIntoKdenlive))
+  handle('video-studio:preflight-url', (event, url: string) => videoStudio.preflightUrl(track(event.sender), url))
+  handle('video-studio:acquire-url', (event, token: string, decision: 'allow' | 'deny', importIntoKdenlive: boolean) => videoStudio.acquireUrl(track(event.sender), token, decision, !!importIntoKdenlive))
+  handle('video-studio:workspace', () => videoStudio.workspace())
+  handle('video-studio:capture-frame', (_event, position: number) => videoStudio.captureKdenliveFrame(position))
+  handle('video-studio:prepare-kdenlive-render', (event, mode: 'preview' | 'export', start?: number, end?: number, intent?: 'vertical-short' | 'current-sequence', audioIntent?: KdenliveAudioIntent) => videoStudio.prepareKdenliveRender(track(event.sender), mode, start, end, intent, audioIntent))
+  handle('video-studio:decide-kdenlive-render', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideKdenliveRender(track(event.sender), token, decision))
+  handle('video-studio:kdenlive-render-status', event => { track(event.sender); return videoStudio.kdenliveRenderStatus() })
+  handle('video-studio:prepare-preview-inspection', (event, path: string, videoOcr: boolean) => videoStudio.prepareKdenlivePreviewInspection(track(event.sender), path, videoOcr === true))
+  handle('video-studio:decide-preview-inspection', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideKdenlivePreviewInspection(track(event.sender), token, decision))
+  handle('video-studio:expand-evidence', (event, id: string, moments: number[], question: string) => videoStudio.expandEvidence(track(event.sender), id, moments, question))
+  handle('video-studio:read-evidence-frame', (event, id: string, at: number) => { track(event.sender); return videoStudio.readEvidenceFrame(id, at) })
+  handle('video-studio:retry-evidence', (event, id: string) => videoStudio.retryEvidence(track(event.sender), id))
+  handle('video-studio:confirm-evidence', (event, id: string, at: number, description: string) => videoStudio.confirmEvidenceDescription(track(event.sender), id, at, description))
+  handle('video-studio:prepare-edit-plan', (event, plan?: KdenliveEditPlan) => videoStudio.prepareEditPlan(track(event.sender), plan))
+  handle('video-studio:decide-edit-plan', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideEditPlan(track(event.sender), token, decision))
+  handle('video-studio:prepare-kdenlive-action', (event, action: 'undo' | 'redo' | 'save-version' | 'make-vertical') => videoStudio.prepareKdenliveAction(track(event.sender), action))
+  handle('video-studio:decide-kdenlive-action', (event, token: string, decision: 'allow' | 'deny') => videoStudio.decideKdenliveAction(track(event.sender), token, decision))
+  handle('video-studio:stop', event => videoStudio.stop(track(event.sender)))
+  handle('video-studio:prepare-design-kit', (event, format: DesignKitFormat) => videoStudio.prepareDesignKit(track(event.sender), format))
+  handle('video-studio:decide-design-kit', (event, token: string, decision: 'allow' | 'deny', importTitleIntoKdenlive: boolean) => videoStudio.decideDesignKit(track(event.sender), token, decision, !!importTitleIntoKdenlive))
+  handle('market:sources', (_event, engine?: unknown) => market(engine).sources())
+  handle('market:browse', (event, repo: string, engine?: unknown) => marketAnswer(() => market(engine).browse(repo, track(event.sender))))
+  handle('market:inspect', (event, repo: string, plugin: string, engine?: unknown) => marketAnswer(() => market(engine).inspect(track(event.sender), repo, plugin)))
+  handle('market:probe', (event, engine?: unknown) => marketAnswer(() => market(engine).probe(track(event.sender))))
+  handle('market:installed', (event, engine?: unknown) => marketAnswer(() => market(engine).installed(track(event.sender))))
+  handle('market:plan', (event, repo: string, action: MarketplaceAction, plugin?: string, engine?: unknown) => marketAnswer(() => market(engine).plan(track(event.sender), repo, action, plugin)))
+  handle('market:confirm', (event, token: string, engine?: unknown) => marketAnswer(() => market(engine).confirm(track(event.sender), token)))
+  handle('market:cancel', (event, engine?: unknown) => { market(engine).cancel(event.sender.id) })
+  const memoryAnswer = async (run: () => unknown) => { try { if (!memoryOrganizer) throw Error('Memory organizer is still starting.'); return { ok: true, view: await run() } } catch (e) { return { ok: false, error: (e as Error).message } } }
+  handle('memory-workspace:read', () => memoryAnswer(() => memoryOrganizer!.read()))
+  handle('memory-workspace:act', (_event, action: MemoryAction) => memoryAnswer(() => memoryOrganizer!.act(action)))
+  handle('memory-workspace:run', () => memoryAnswer(() => memoryOrganizer!.run()))
   handle('settings:read', () => settings)
+  handle('automation:history', (_event, before?: string) => { if (!automation) throw Error('Automation is still starting.'); return automation.history(before) })
+  handle('automation:saved', (_event, id: string) => { if (!automation) throw Error('Automation is still starting.'); return automation.saved(id) })
+  handle('automation:read', () => { if (!automation) throw Error('Automation is still starting.'); return automation.view() })
+  handle('automation:update', (_event, input: Partial<AutomationPreferences>) => {
+    if (!automation) throw Error('Automation is still starting.')
+    const patch: Partial<AutomationPreferences> = {}
+    for (const key of ['autoKeep', 'autoReview', 'allowExternalReview', 'allowCloudInference'] as const) if (typeof input?.[key] === 'boolean') patch[key] = input[key]
+    if (typeof input?.reviewModel === 'string') patch.reviewModel = input.reviewModel
+    const wasCloud = automation.preferences().allowCloudInference
+    const result = automation.update(patch)
+    if (result.ok && wasCloud !== result.view.preferences.allowCloudInference) { workDispatchGeneration++; automation.stopWork(); mediaService?.cancelAll(); engine?.stop() }
+    return result
+  })
+  handle('automation:models', async () => {
+    try { if (!automation || !reviewer) throw Error('The reviewer is still starting.'); return { ok: true, models: await reviewer.models(automation.preferences()) } }
+    catch (error) { return { ok: false, models: [], error: (error as Error).message } }
+  })
+  handle('automation:review', async (_event, input: ReviewInput) => {
+    if (!automation) return { ok: false, error: 'The reviewer is still starting.' }
+    if (engine?.turnBusy()) return { ok: false, error: 'Wait for normal work to finish before reviewing it.' }
+    return automation.review(input)
+  })
+  handle('automation:cancel', async () => { await automation?.cancel(); return { ok: true } })
+
 
   handle(
     'settings:update',
@@ -254,6 +855,7 @@ function registerBridges(): void {
       // folder problem must never lose what somebody just typed into the other
       // pane of the same window.
       if (patch?.cloud && typeof patch.cloud === 'object') {
+        mediaService?.cancelAll()
         const cloud = settings.cloud
         settings = writeSettings(settingsFile, {
           ...settings,
@@ -265,11 +867,16 @@ function registerBridges(): void {
       }
       // What an agent may do. Sanitised on the way in — the window asks, the main
       // process decides — and the app's own settings file is the record.
-      if (patch?.permissions && typeof patch.permissions === 'object') {
-        settings = writeSettings(settingsFile, {
-          ...settings,
-          permissions: normalizePermissions(patch.permissions),
-        })
+      if (patch?.permissions !== undefined) {
+        const previousAccess = settings.permissions
+        let nextAccess: typeof previousAccess
+        try { nextAccess = applyPermissionPatch(previousAccess, patch.permissions) }
+        catch (error) { return { ok: false, error: (error as Error).message, settings } }
+        if (JSON.stringify(nextAccess) !== JSON.stringify(previousAccess)) {
+          settings = writeSettings(settingsFile, { ...settings, permissions: nextAccess })
+          workflows.cancel(); commandRunner.cancel(); void automation?.cancel(); mediaService?.cancelAll()
+          if (previousAccess.local !== settings.permissions.local || JSON.stringify(previousAccess.cloud) !== JSON.stringify(settings.permissions.cloud)) { workDispatchGeneration++; automation?.stopWork(); engine?.stop() }
+        }
       }
       // No vault path in the patch means the caller is not moving the vault, so
       // there is nothing to check and nothing to reconsider.
@@ -280,7 +887,7 @@ function registerBridges(): void {
       settings = writeSettings(settingsFile, { ...settings, vaultPath: wanted.trim() })
     // Point the running service at the new folder. No restart, and the interface
     // is told the result instead of assuming it worked.
-      const next = createVaultService({ vaultPath: vaultRoot() })
+      const next = currentVaultService()
       api?.setVault(next)
       // A newly chosen folder gets the structure immediately (his rule:
       // generate the default structure anyways; conflicts land beside).
@@ -309,6 +916,7 @@ function registerBridges(): void {
   })
 
   handle('cloud:save-key', (_event, id: string, key: string) => {
+    void automation?.cancel(); mediaService?.cancelAll()
     const provider = providerById(String(id || ''))
     if (!provider || !keyStore) return { ok: false, error: 'That is not a provider this app knows.' }
     if (!String(key || '').trim()) return { ok: false, error: 'Paste a key first.' }
@@ -317,6 +925,7 @@ function registerBridges(): void {
   })
 
   handle('cloud:clear-key', (_event, id: string) => {
+    void automation?.cancel(); mediaService?.cancelAll()
     keyStore?.clear(String(id || ''))
     // A cleared key must not keep speaking — but only ITS engine: the app has
     // one engine process, and stopping it because some OTHER provider's key
@@ -342,6 +951,26 @@ function registerBridges(): void {
    * Settings > System: a port that is open is a fact the person should be able to
    * see, not something to find out from an extension that quietly stopped working.
    */
+  handle('extension:appearance', (_event, value: unknown) => {
+    const clean = normalizeExtensionAppearance(value)
+    if (!clean) return { ok: false }
+    extensionAppearance = clean
+    return { ok: true }
+  })
+  handle('extension:export', async (_event, destination: unknown) => {
+    if (destination !== 'downloads' && destination !== 'choose') return { ok: false, answer: 'Choose Downloads or a folder.' }
+    let parent = app.getPath('downloads')
+    if (destination === 'choose') {
+      const chosen = await dialog.showOpenDialog({ title: 'Where should the extension folder go?', properties: ['openDirectory', 'createDirectory'] })
+      if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, answer: 'Cancelled. No extension folder was created.' }
+      parent = chosen.filePaths[0]
+    }
+    const source = app.isPackaged ? join(process.resourcesPath, 'extension') : resolve(app.getAppPath(), '../../extension')
+    const target = join(parent, `OddBrain-extension-${Date.now()}-${randomUUID().slice(0,8)}`)
+    const result = exportExtension(source, target)
+    if (result.ok && result.path) shell.showItemInFolder(join(result.path, 'manifest.json'))
+    return result
+  })
   handle('extension:status', () => ({
     ok: true,
     listening: Boolean(extensionApi?.listening),
@@ -398,7 +1027,7 @@ function registerBridges(): void {
         try {
           // One journal line for the whole apply — the journal is write-once
           // per day, so the apply is logged as the one event it was.
-          const service = createVaultService({ vaultPath: vaultRoot() })
+          const service = currentVaultService()
           service.capture({ type: 'journal', content: `Second-brain structure: added ${written.join(', ')}.` })
         } catch {
           // The files are on disk either way; a log failure is reported, not hidden.
@@ -418,20 +1047,16 @@ function registerBridges(): void {
     (_event, root: string, original: string, added: string, action: 'mine' | 'new' | 'both' | 'combine') => {
       try {
         if (typeof root !== 'string' || !root.trim()) return { ok: false, error: 'Give a real folder path.' }
+        if (canonicalStructureRoot(root) !== canonicalStructureRoot(vaultRoot())) return { ok: false, error: 'Only the selected vault can settle a structure conflict.' }
         if (action !== 'mine' && action !== 'new' && action !== 'both' && action !== 'combine') {
           return { ok: false, error: 'Unknown choice.' }
         }
-        const clean = (relative: string): string => {
-          if (typeof relative !== 'string' || /['\n\r]/.test(relative) || relative.includes('..')) {
-            throw new Error('Not a vault-relative path.')
-          }
-          return relative
-        }
-        const mine = clean(original)
-        const theirs = clean(added)
-        if (!theirs.includes(' (new)')) return { ok: false, error: 'That beside-copy was not added by the structure.' }
-        const mineFull = join(root, mine)
-        const theirsFull = join(root, theirs)
+        if (!validStructureRelative(original) || !validStructureRelative(added)) throw new Error('Not a vault-relative path.')
+        const mine = original, theirs = added
+        const scoped = createVaultFiles(root, () => new Date())
+        const mineFull = scoped.filePath(mine), theirsFull = scoped.filePath(theirs)
+        const plan = structurePlan(root)
+        if ('error' in plan || !plan.conflicts.some(conflict => conflict.original === mine && conflict.added === theirs)) return { ok: false, error: 'That pair is not a current structure conflict.' }
         if (!existsSync(mineFull) || !existsSync(theirsFull)) return { ok: false, error: 'One of the two files is gone.' }
         // The never-check list is functional, not prose: the default seed must
         // never overwrite the patterns the owner actually keeps.
@@ -439,13 +1064,13 @@ function registerBridges(): void {
           return { ok: false, error: 'The privacy list is never replaced by the default seed. Keep yours, or combine.' }
         }
         const verdict = applyConflictAction(action, readFileSync(mineFull, 'utf8'), readFileSync(theirsFull, 'utf8'))
-        if (verdict.original !== null) writeFileSync(mineFull, verdict.original, { encoding: 'utf8' })
+        if (verdict.original !== null) scoped.writeAtomic(mine, verdict.original)
         if (verdict.deleteAdded) rmSync(theirsFull)
         // Settled is settled: the plan stops offering this file.
-        rememberSettled(mine)
+        rememberSettled(root, mine)
         if (resolve(root) === resolve(vaultRoot())) {
           try {
-            const service = createVaultService({ vaultPath: vaultRoot() })
+            const service = currentVaultService()
             service.capture({ type: 'journal', content: `Structure conflict settled (${action}): ${mine}.` })
           } catch {
             // The files are settled either way; a log failure is not hidden, but it is not fatal.
@@ -474,7 +1099,7 @@ function registerBridges(): void {
       return { ok: false, error: `${target} could not be created.` }
     }
     settings = writeSettings(settingsFile, { ...settings, vaultPath: target })
-    const next = createVaultService({ vaultPath: vaultRoot() })
+    const next = currentVaultService()
     api?.setVault(next)
     const done = integrateVaultStructure(target)
     return { ok: true, path: target, kind: done.kind, written: done.written, conflicts: done.conflicts, differing: done.differing }
@@ -485,7 +1110,7 @@ function registerBridges(): void {
   // repaired behind the owner's back. Read-only.
   handle('vault:link-check', () => {
     try {
-      return createVaultService({ vaultPath: vaultRoot() }).links()
+      return currentVaultService().links()
     } catch (error) {
       return { files: 0, checked: 0, dead: [], ambiguous: [], error: (error as Error).message }
     }
@@ -502,68 +1127,300 @@ function registerBridges(): void {
   handle('engine:read', () => ({
     engine: settings.engine,
     running: engine?.running() === true,
-    history: [...engineHistory],
+    history: activeTranscript ? engineHistory.filter(event => event.transcriptId === activeTranscript?.transcriptId) : [...engineHistory],
+    active: activeTranscript, lastSequence: engineEventSequence, busy: engine?.turnBusy() === true,
   }))
 
   handle('engine:pick', (_event, id: string): { ok: boolean; answer: string } => {
-    const wanted = normalizeEngine({ id }).id
-    settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, id: wanted } })
+    if (id !== 'claude-code' && id !== 'agy') return { ok: false, answer: 'Unknown engine.' }
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Stop the active task or wait for it to finish before switching engines.' }
+    const wanted = id
+    settings = writeSettings(settingsFile, { ...settings, engine: selectEngine(settings.engine, wanted) })
     return { ok: true, answer: `engine set to ${wanted}` }
   })
 
-  handle(
-    'engine:send',
-    (_event, prompt: string, cwd: string, pictures: unknown = []): { ok: boolean; answer: string } => {
-      const text = typeof prompt === 'string' ? prompt.trim().slice(0, 20000) : ''
-      if (!text) return { ok: false, answer: 'Write what the engine should do first.' }
+  const sendNative = async (event: Electron.IpcMainInvokeEvent, prompt: string, cwd: string, pictures: unknown = [], conversation?: unknown, originalFiles: unknown = []): Promise<{ ok: boolean; answer: string }> => {
+      const requestOwner = event.sender.id
+      let context: ReturnType<typeof checkNativeConversation>
+      try { context = checkNativeConversation(conversation) } catch (error) { return { ok: false, answer: (error as Error).message } }
+      const text = typeof prompt === 'string' ? prompt : ''
+      if (!text.trim()) return { ok: false, answer: 'Write what the engine should do first.' }
+      const commandRefusal = engineCommandRefusal(text)
+      if (commandRefusal) return { ok: false, answer: commandRefusal }
       // Pictures: only what the wire can carry, only a few, only small. A bad
       // list is refused with the reason, never silently dropped.
-      const images: Array<{ mime: string; data: string }> = []
-      if (Array.isArray(pictures)) {
-        for (const entry of pictures.slice(0, ENGINE_IMAGE_LIMIT)) {
-          const mime = (entry as Record<string, unknown>)?.mime
-          const data = (entry as Record<string, unknown>)?.data
-          if (typeof mime !== 'string' || typeof data !== 'string' || !ENGINE_IMAGE_MIMES.includes(mime as never)) {
-            return { ok: false, answer: 'One of the pictures is not a PNG, JPEG or WebP. Nothing was sent.' }
-          }
-          if (data.length > ENGINE_IMAGE_CHARS || !data) {
-            return { ok: false, answer: 'One of the pictures is larger than 2 MB. Nothing was sent.' }
-          }
-          images.push({ mime, data })
-        }
-      }
+      const checkedImages = engineImages(pictures ?? [])
+      if (!checkedImages.ok) return checkedImages
+      const images = checkedImages.images
+      const checkedSources = engineSourceFiles(originalFiles ?? [])
+      if (!checkedSources.ok) return checkedSources
+      const retainedFiles = checkedSources.files.map(file => {
+        if (!('handle' in file)) return file
+        const source = mediaService!.resolveSource(requestOwner, file)
+        return { id: file.id, name: file.name, mime: file.mime, path: source.path, bytes: source.bytes, sha256: source.sha256 }
+      })
+      if (settings.engine.id === 'agy' && images.length) return { ok: false, answer: AGY_PICTURES_ANSWER }
       if (!engine) return { ok: false, answer: 'The engine is still waking up, try again in a moment.' }
       // The working folder is the app's decision, never the window's: the
       // folder the owner picked in the engine bay, or the vault when none.
       // The renderer's value is deliberately not consulted (review finding).
       void cwd
-      deployRulesNow()
+      if (dispatchingWork || engine.turnBusy()) return { ok: false, answer: 'An engine is already working. Stop it first, or wait for it to finish.' }
+      dispatchingWork = true
+      const ownWork = ++nativeWork
+      permissionTickets.clear(); pendingReads.clear(); if (readTrust.clearTurns()) announceReadTrust()
+      preparing = { owner: track(event.sender), controller: new AbortController() }
+      try {
+      const ownDispatch = workDispatchGeneration
+      const savedEngine = { ...settings.engine }, usedEngine = { ...savedEngine }
+      if (context?.expectedRoute && context.expectedRoute !== JSON.stringify(savedEngine)) throw Error('The selected engine or model changed while preparing this task. Nothing was sent; review the selection and retry.')
+      if (context) usedEngine.workspace = nativeContext.workspace(context, savedEngine.workspace || vaultRoot())
+      const policy = () => JSON.stringify([settings.permissions, automation?.preferences().allowCloudInference !== false])
+      const usedPolicy = policy()
+      const folderSubject = context?.projectId && !Object.hasOwn(context.overrides || {}, 'workspace') ? `project:${context.projectId}` : context?.chatId
+      if (context && folderSubject && resolve(usedEngine.workspace) !== resolve(savedEngine.workspace || vaultRoot()) && !nativeContext.workspaceGranted(folderSubject, usedEngine.workspace)) {
+        const approval = await dialog.showMessageBox({ type: 'question', title: 'Authorize the working folder', message: `Use ${usedEngine.workspace} for ${folderSubject.startsWith('project:') ? 'chats using this project’s default folder' : 'this chat'}?`, detail: 'This sets the working folder, not an OS sandbox. Existing native tool approval rules still apply; additional folder references grant no permissions. Cancel keeps the draft unsent.', buttons: ['Cancel', 'Use this folder'], defaultId: 0, cancelId: 0 })
+        if (approval.response !== 1 || ownDispatch !== workDispatchGeneration) return { ok: false, answer: 'Working folder not authorized. Nothing was sent.' }
+        nativeContext.grantWorkspace(folderSubject, usedEngine.workspace)
+      }
+      if (selectedEffort(savedEngine) !== 'default' && usedEngine.workspace !== savedEngine.workspace) return { ok: false, answer: 'This chat uses a different folder. Choose Engine default effort or inspect effort in that folder before sending.' }
+      memoryOrganizer?.cancel()
+      await automation?.beginWork(text, usedEngine)
+      if (ownDispatch !== workDispatchGeneration) { automation?.rejectWork(); return { ok: false, answer: 'The task was canceled before it started.' } }
+      const usedCommand = resolveEngineCommand(usedEngine.id)
+      // Saved effort is a request, not permanent proof about a changing CLI/account.
+      // Recheck before any task text is handed to the engine; no agent turn is used.
+      const effort = selectedEffort(usedEngine)
+      if (effort !== 'default') {
+        const checked = await checkEffortSelection(usedEngine, effort, effortTarget(usedEngine), current => capabilityInspector.inspect(track(event.sender), current, current.workspace || vaultRoot()))
+        if (!checked.ok) { automation?.rejectWork(); return { ok: false, answer: 'The requested effort could not be verified for this model. Refresh Reasoning effort or choose Engine default. No message was sent.' } }
+      }
+      const access = await inferenceAllowed(usedEngine, settings.permissions.local, automation?.preferences().allowCloudInference !== false)
+      if (!access.ok || usedPolicy !== policy() || usedCommand !== resolveEngineCommand(usedEngine.id) || ownDispatch !== workDispatchGeneration || JSON.stringify(savedEngine) !== JSON.stringify(settings.engine)) {
+        automation?.rejectWork(); return { ok: false, answer: access.answer || 'The task was canceled or its model changed before dispatch. Send again when ready.' }
+      }
+      let launchInventory = inspectNativeLaunch(usedEngine.id, usedEngine.workspace || vaultRoot(), app.getPath('home'))
+      const strippedNames = strippedEnvironmentNames(process.env)
+      const environmentDisclosure = strippedNames.length ? `\n\nAmbient environment values are hidden. Variable names removed before launch: ${strippedNames.join(', ')}.` : '\n\nNo credential-shaped or process-injection environment variable names were present to remove.'
+      const trustKey = JSON.stringify([usedEngine.id, resolve(usedEngine.workspace || vaultRoot())]), trusted = nativeLaunchTrust.get(trustKey)
+      const needsLaunchReview = trusted?.digest !== launchInventory.digest || (usedEngine.approval === 'full' && !trusted?.fullSpeed)
+      if (needsLaunchReview) {
+        if (usedEngine.approval === 'full' && !launchInventory.complete) {
+          automation?.rejectWork()
+          return { ok: false, answer: `Full speed was not started because native connector, rule, hook or task configuration could not be completely inventoried without following links or exceeding bounds. Fix the listed configuration paths or choose Ask, Plan or Allow edits.\n\n${nativeLaunchSummary(launchInventory)}${environmentDisclosure}` }
+        }
+        const full = usedEngine.approval === 'full'
+        const options: Electron.MessageBoxOptions = {
+          type: 'warning', title: full ? 'Trust this folder for Full speed' : 'Review native folder activation',
+          message: full ? `Start ${usedEngine.id} in Full speed for this folder?` : `Start ${usedEngine.id} with this folder’s native configuration?`,
+          detail: `${full ? 'Full speed skips native tool prompts. Connector declarations may start programs or network connections before a tool call. This trust lasts only for this app run and this exact configuration fingerprint.\n\n' : 'Native engines can load connector, rule, hook and task declarations outside OddBrain’s approval cards. Review this bounded inventory before activation.\n\n'}${nativeLaunchSummary(launchInventory)}${environmentDisclosure}`,
+          buttons: ['Cancel', full ? 'Trust folder & start Full speed' : 'Review & start'], defaultId: 0, cancelId: 0, noLink: true,
+        }
+        const owner = BrowserWindow.fromWebContents(event.sender)
+        const approval = owner ? await dialog.showMessageBox(owner, options) : await dialog.showMessageBox(options)
+        if (approval.response !== 1 || ownDispatch !== workDispatchGeneration) { automation?.rejectWork(); return { ok: false, answer: 'Native folder activation was canceled. Nothing was sent.' } }
+        const confirmedInventory = inspectNativeLaunch(usedEngine.id, usedEngine.workspace || vaultRoot(), app.getPath('home'))
+        if (confirmedInventory.digest !== launchInventory.digest || (full && !confirmedInventory.complete)) { automation?.rejectWork(); return { ok: false, answer: 'Native connector, rule, hook or task configuration changed during review. Nothing was sent; review the current inventory again.' } }
+        launchInventory = confirmedInventory
+        nativeLaunchTrust.set(trustKey, { digest: launchInventory.digest, fullSpeed: full })
+      }
+      automation?.retargetWork(usedEngine)
       // A provider brain rides the ENGINE: the key from Models goes into the
       // engine's own environment for this launch. The app itself never calls
       // the provider — and a missing key refuses honestly instead of falling
       // back to a different brain than the one that was chosen.
       let auth: { provider: 'anthropic'; apiKey: string } | undefined
-      if (settings.engine.cloudProvider === 'anthropic') {
+      if (usedEngine.cloudProvider === 'anthropic') {
+        if (!cloudEnabled(inferencePermissions(), 'anthropic', keyStore?.has('anthropic') === true)) { automation?.rejectWork(); return { ok: false, answer: 'Anthropic inference is not enabled in Agent access or has no key. Nothing was sent.' } }
         const key = keyStore?.get('anthropic') || ''
         if (!key) {
+          automation?.rejectWork()
           return { ok: false, answer: 'The Anthropic brain needs its key: add it in Settings > Models (it is held for this run). Nothing was sent.' }
         }
         auth = { provider: 'anthropic', apiKey: key }
       }
-      return engine.send(text, {
-        cwd: settings.engine.workspace || vaultRoot(),
-        settings: settings.engine,
-        auth, images,
-        checkpointDir: join(app.getPath('userData'), 'checkpoints'),
-        onEvent: (event: EngineEvent) => {
-          pushEngineEvent(event)
-          if (event.kind === 'done') void hookRunner.run('turn-done').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
-          if (event.kind === 'error') void hookRunner.run('turn-error').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
-          if (event.kind === 'permission') void hookRunner.run('permission').then((lines) => lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line })))
-        },
+      const appInstructions = `${instructionBlock(usedEngine.id, usedEngine.model, effectiveRules(), settings.memoryFolder || '')}\n## Chat Working Notes proposals\n\n${WORKING_NOTES_PROPOSAL_GUIDANCE}\n\n## Bounded vault follow-up proposals\n\n${VAULT_SEARCH_PROPOSAL_GUIDANCE}\n`
+      const envelopeReserve = estimateModelTokens(`OddBrain app instructions (not additional tool permissions):\n${appInstructions}\n\n`)
+      const preparationContext = context?.contextProfile?.capacityTokens !== null && context?.contextProfile?.capacityTokens !== undefined
+        ? { ...context, contextProfile: { ...context.contextProfile, outputReserveTokens: Math.min(10_000_000, context.contextProfile.outputReserveTokens + envelopeReserve) } }
+        : context
+      const sessionTarget = { settings: usedEngine, cwd: usedEngine.workspace || vaultRoot(), chatId: context?.chatId, auth }
+      let nativeSession = engine.nextSession(sessionTarget)
+      let prepared = preparationContext ? await nativeContext.prepare(preparationContext, usedEngine.workspace || vaultRoot(), text,
+        nativeSession.state !== 'fresh', preparing.controller.signal) : undefined
+      prepared?.validate()
+      const evidenceTag = /<(?:saved_evidence|oddbrain_evidence|oddbrain_attachment_evidence)>/i.test(text)
+      const sourceBearing = evidenceTag || prepared?.receipt.sources.some(source => source.role === 'untrusted-reference') === true
+      if (sourceBearing && usedEngine.approval !== 'plan') throw Error('Quoted or retrieved source evidence is present. Use Plan mode for this analysis turn so source text can influence only the written answer, not tools or file actions. After reviewing the answer, start a separate owner-authored action turn if needed. Nothing was sent.')
+      if (sourceBearing) {
+        // Never resume or reuse hidden native context for quoted evidence. When
+        // the ordinary route was continuing, prepare again as an isolated turn
+        // so selected stored chat history is explicit in the receipt.
+        if (preparationContext && nativeSession.state !== 'fresh') prepared = await nativeContext.prepare({ ...preparationContext, continuationExpected: false }, usedEngine.workspace || vaultRoot(), text, false, preparing.controller.signal)
+        prepared?.validate()
+        nativeSession = engine.nextSession({ ...sessionTarget, toolFree: true })
+      } else {
+        // Context preparation can decode retained files asynchronously. Do not
+        // claim live/resumed/fresh based on stale process state.
+        const confirmedNativeSession = engine.nextSession(sessionTarget)
+        if ((nativeSession.state === 'fresh') !== (confirmedNativeSession.state === 'fresh')) throw Error('Native session availability changed while context was prepared. Nothing was sent; send again so the exact fresh or continuing context can be reviewed and recorded.')
+        nativeSession = confirmedNativeSession
+      }
+      if (ownDispatch !== workDispatchGeneration || policy() !== usedPolicy || JSON.stringify(settings.engine) !== JSON.stringify(savedEngine) || usedCommand !== resolveEngineCommand(usedEngine.id)) throw Error('Task settings changed while reading context. Nothing was sent.')
+      if (preparing.controller.signal.aborted) throw Error('Task preparation canceled. Nothing was sent.')
+      if (auth && (keyStore?.get('anthropic') !== auth.apiKey || !cloudEnabled(inferencePermissions(), 'anthropic', keyStore?.has('anthropic') === true))) throw Error('Provider access changed while reading context. Nothing was sent.')
+      const finalLaunchInventory = inspectNativeLaunch(usedEngine.id, usedEngine.workspace || vaultRoot(), app.getPath('home'))
+      if (finalLaunchInventory.digest !== launchInventory.digest || (usedEngine.approval === 'full' && !finalLaunchInventory.complete)) throw Error('Native connector, rule, hook or task configuration changed before launch. Nothing was sent; review the folder again.')
+      launchInventory = finalLaunchInventory
+      const appHazards = scanTextHazards(appInstructions), requestHazards = scanTextHazards(text)
+      const finishContext = (value: typeof prepared, shownProfile = context?.contextProfile) => {
+        const prompt = `OddBrain app instructions (not additional tool permissions):\n${appInstructions}\n\n${value?.prompt || text}`
+        if (prompt.length > 250_000) throw Error('App instructions plus selected context exceed the app’s 250,000-character transport safety limit. Nothing was shortened or sent.')
+        const result = value?.receipt || { projectId: null, revision: '', workspace: usedEngine.workspace || vaultRoot(), sources: [], historyMessages: 0, characters: 0 }
+        result.sources.unshift({ id: 'app-instructions', title: 'OddBrain app instruction envelope', chars: appInstructions.length, digest: createHash('sha256').update(appInstructions).digest('hex'), coverage: 'Complete app-authored instruction block; descriptive guidance, not an additional permission grant', role: 'app-instruction', ...(appHazards.total ? { hazards: appHazards } : {}) })
+        result.sources.push({ id: 'owner-request', title: 'Current owner request', chars: text.length, digest: createHash('sha256').update(text).digest('hex'), coverage: 'Complete owner-entered request before the app envelope was added', role: 'owner-request', ...(requestHazards.total ? { hazards: requestHazards } : {}) })
+        result.characters = prompt.length
+        if (shownProfile) {
+          result.modelContext = { ...shownProfile, estimatedInputTokens: estimateModelTokens(prompt), exact: false }
+          const allowance = shownProfile.capacityTokens === null ? null : Math.max(0, shownProfile.capacityTokens - shownProfile.outputReserveTokens)
+          if (allowance !== null && result.modelContext.estimatedInputTokens > allowance) throw Error(`Essential app instructions and owner request exceed this model profile’s ${allowance.toLocaleString()}-token input allowance. Nothing essential was clipped.`)
+        }
+        result.session = nativeSession
+        result.launch = { digest: launchInventory.digest, complete: launchInventory.complete, files: launchInventory.files.length, connectorFiles: launchInventory.connectorFiles, ruleFiles: launchInventory.ruleFiles, hookFiles: launchInventory.hookFiles, warnings: launchInventory.warnings }
+        result.revision = createHash('sha256').update(JSON.stringify([result.revision, appInstructions, text, result.session, result.launch])).digest('hex')
+        return { prompt, receipt: result }
+      }
+      const finishedContext = finishContext(prepared)
+      const dispatchedText = finishedContext.prompt, receipt = finishedContext.receipt
+      const artifactBefore = snapshotNativeArtifacts(usedEngine.workspace || vaultRoot())
+      let overflowRetried = false, generationBegan = false
+      const sent = dispatchRecordedTurn(turnArchive, { prompt: dispatchedText, userPrompt: text, chatId: context?.chatId, context: receipt, engine: usedEngine.id, model: usedEngine.model, workspace: usedEngine.workspace || vaultRoot(), pictures: images.length, images, ...(retainedFiles.length ? { attachments: retainedFiles } : {}) }, receive => {
+        const dispatchAttempt = (attemptPrompt: string) => engine!.send(attemptPrompt, {
+          chatId: context?.chatId,
+          cwd: usedEngine.workspace || vaultRoot(),
+          settings: usedEngine,
+          auth, images, toolFree: sourceBearing,
+          checkpointDir: join(app.getPath('userData'), 'checkpoints'),
+          shouldCheckpoint: () => automation?.preferences().autoKeep !== false,
+          onEvent: output => {
+            const errorText = output.kind === 'error' ? output.text : ''
+            const overflow = errorText ? parseContextOverflow(errorText) : null
+            if (overflow?.overflow && !overflowRetried && !generationBegan && context?.contextProfile?.mode === 'auto' && context.contextProfile.source === 'unknown' && context.contextProfile.capacityTokens === null) {
+              overflowRetried = true
+              overflowRetryPending = true
+              const retryContext = context, observedCapacity = overflow.limitTokens, providerMessage = errorText.slice(0, 2_000)
+              receive({ kind: 'status', text: observedCapacity ? `The provider rejected this unknown Auto context before generation and reported a ${observedCapacity.toLocaleString()}-token limit. OddBrain is making its one allowed bounded retry.` : 'The provider rejected this unknown Auto context before generation. OddBrain is making its one allowed retry after removing one oldest complete lower-priority context group; it is not guessing a model limit.' })
+              void (async () => {
+                const retryController = new AbortController()
+                retryPreparing = retryController
+                try {
+                  if (ownDispatch !== workDispatchGeneration || policy() !== usedPolicy || JSON.stringify(settings.engine) !== JSON.stringify(savedEngine) || usedCommand !== resolveEngineCommand(usedEngine.id)) throw Error('Task settings changed after the provider overflow. The automatic retry was canceled.')
+                  const retryProfile = observedCapacity ? { ...retryContext.contextProfile!, source: 'observed' as const, capacityTokens: observedCapacity, outputReserveTokens: Math.min(10_000_000, retryContext.contextProfile!.outputReserveTokens + envelopeReserve) } : retryContext.contextProfile!
+                  const retryPrepared = await nativeContext.prepare({ ...retryContext, ...(sourceBearing ? { continuationExpected: false } : {}), contextProfile: retryProfile }, usedEngine.workspace || vaultRoot(), text, sourceBearing ? false : nativeSession.state !== 'fresh', retryController.signal, !observedCapacity)
+                  retryPrepared.validate()
+                  const retry = finishContext(retryPrepared, retryContext.contextProfile)
+                  retry.receipt.omitted = retry.receipt.omitted?.map(item => ({ ...item, reason: 'provider-overflow' as const }))
+                  retry.receipt.overflowRecovery = { attempt: 2, retryLimitTokens: observedCapacity, retryInputTokens: estimateModelTokens(retry.prompt), observedCapacityTokens: observedCapacity, providerMessage }
+                  retry.receipt.revision = createHash('sha256').update(JSON.stringify([retry.receipt.revision, retry.receipt.overflowRecovery, retry.receipt.omitted || []])).digest('hex')
+                  receive({ kind: 'status', text: `Retry context prepared: ${retry.receipt.omitted?.length || 0} lower-priority item(s) omitted; stored originals were not changed.`, context: retry.receipt })
+                  const answer = dispatchAttempt(retry.prompt)
+                  if (!answer.ok) receive({ kind: 'error', text: `${answer.answer} The one overflow retry was not started; nothing will be resubmitted automatically.` })
+                } catch (error) { receive({ kind: 'error', text: `${(error as Error).message} Nothing was resubmitted automatically.` }) }
+                finally { if (retryPreparing === retryController) retryPreparing = undefined; overflowRetryPending = false; dispatchingWork = false }
+              })()
+              return
+            }
+            if (['delta', 'text', 'thinking', 'tool', 'permission'].includes(output.kind)) generationBegan = true
+            if (output.kind === 'done') {
+              try {
+                const observed = collectNativeArtifacts(join(app.getPath('userData'), 'artifacts'), usedEngine.workspace || vaultRoot(), artifactBefore, context?.chatId)
+                for (const notice of observed.notices) receive({ kind: 'status', text: notice })
+                output = { ...output, ...(observed.links.length ? { artifacts: observed.links } : {}) }
+              } catch { receive({ kind: 'status', text: 'Artifact inspection could not finish. Original outputs remain in the working folder.' }) }
+            }
+            receive(output)
+          },
+        })
+        return dispatchAttempt(dispatchedText)
+      }, () => engine?.stop(), (event: EngineEvent) => {
+        if (event.kind === 'permission') {
+          try {
+            const requestId = permissionTickets.issue(event.requestId)
+            if (sourceBearing) {
+              // Evidence may shape only the written analysis. It cannot ask the
+              // owner to approve a tool from inside the same source-bearing turn.
+              const refused = permissionTickets.answer(requestId, false)
+              if (!refused) engine?.stop()
+              event = { kind: refused ? 'status' : 'error', text: refused ? 'OddBrain refused a tool request from this source-bearing analysis turn. No tool ran. Start a separate owner-authored action request if needed.' : 'The source-bearing tool request could not be safely refused. Stop requested; no approval is assumed.', chatId: context?.chatId, transcriptId: event.transcriptId }
+            } else {
+              const candidate: ReadTrustCandidate = { engine: usedEngine.id, workspace: usedEngine.workspace || vaultRoot(), tool: event.tool, file: event.file, risk: event.risk, projectId: context?.projectId || undefined, turnId: event.transcriptId || '' }
+              const eligible = readTrust.eligible(candidate)
+              let remembered: ReturnType<typeof readTrust.match>
+              try { remembered = eligible ? readTrust.match(candidate) : undefined } catch { remembered = undefined }
+              if (remembered) {
+                if (!permissionTickets.answer(requestId, true)) { engine?.stop(); event = { kind: 'error', text: 'A saved read-only approval matched, but the response could not be delivered. Stop requested; no approval is assumed.', chatId: context?.chatId, transcriptId: event.transcriptId } }
+                else {
+                  const applied: EngineEvent = { kind: 'status', text: `Applied saved ${remembered.mode === 'turn' ? 'turn-folder' : remembered.mode === 'project' ? 'project-folder' : remembered.mode} Read approval: ${remembered.scope}`, chatId: context?.chatId, transcriptId: event.transcriptId }
+                  automation?.ingest(applied); pushEngineEvent(applied)
+                  void hookRunner.run('permission').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
+                  return
+                }
+              } else {
+                if (eligible) pendingReads.set(requestId, { candidate, owner: requestOwner, file: eligible.file, folder: eligible.folder })
+                event = { ...event, requestId, ...(eligible ? { readScopes: { file: eligible.file, folder: eligible.folder, workspace: eligible.workspace, project: !!context?.projectId } } : {}) }
+              }
+            }
+          } catch { engine?.stop(); event = { kind: 'error', text: 'The permission could not be bound to the active engine. Stop requested; no approval was sent.', chatId: context?.chatId, transcriptId: event.transcriptId } }
+        }
+        if (event.kind === 'done' || event.kind === 'error' || event.kind === 'closed') {
+          permissionTickets.clear()
+          if (event.transcriptId) { if (readTrust.clearTurn(event.transcriptId)) announceReadTrust(); for (const [id, pending] of pendingReads) if (pending.candidate.turnId === event.transcriptId) pendingReads.delete(id) }
+        }
+        automation?.ingest(event)
+        pushEngineEvent(event)
+        if (event.kind === 'done') void hookRunner.run('turn-done').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
+        if (event.kind === 'error') void hookRunner.run('turn-error').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
+        if (event.kind === 'permission') void hookRunner.run('permission').then((lines) => { if (ownWork === nativeWork) lines.forEach((line) => pushEngineEvent({ kind: 'status', text: line, chatId: context?.chatId, transcriptId: event.transcriptId })) })
       })
-    },
-  )
+      if (sent.transcriptId) {
+        activeTranscript = { transcriptId: sent.transcriptId, chatId: context?.chatId, prompt: text }
+        for (const source of retainedFiles) if ('path' in source) try { attachmentCenter.markTurn(source.sha256, sent.transcriptId) } catch { /* turn archive remains authoritative */ }
+        for (const source of checkedSources.files) if ('handle' in source) mediaService!.releaseSource(requestOwner, source.handle)
+      }
+      if (!sent.ok) automation?.rejectWork()
+      return sent
+      } catch (error) { automation?.rejectWork(); return { ok: false, answer: (error as Error).message } } finally { preparing = undefined; dispatchingWork = overflowRetryPending }
+    }
+  handle('queue:read', event => workQueue.view(track(event.sender)))
+  handle('queue:enqueue', (event, prompt: string, conversation?: unknown) => workQueue.enqueue(track(event.sender), prompt, checkNativeConversation(conversation)))
+  handle('queue:resume', (event, id: string, acknowledge?: boolean) => {
+    if (dispatchingWork || engine?.turnBusy()) throw Error('Wait for active work before resuming a saved task.')
+    return workQueue.resume(track(event.sender), id, acknowledge === true)
+  })
+  handle('queue:cancel', (event, id: string) => workQueue.cancel(track(event.sender), id))
+  handle('queue:hold', (event, id: string) => workQueue.block(id, 'The handoff response was not confirmed. Inspect transcripts before resuming.', event.sender.id))
+  handle('queue:history', (_event, before?: string) => workQueue.history(before))
+  handle('engine:send', async (event, prompt: string, cwd: string, pictures?: unknown, conversation?: unknown, queuedId?: string, originalFiles?: unknown) => {
+    if (!queuedId) return sendNative(event, prompt, cwd, pictures, conversation, originalFiles)
+    let started = false
+    try {
+      if (dispatchingWork || engine?.turnBusy()) throw Error('Another task is active. Resume this saved task after it finishes.')
+      if (Array.isArray(pictures) && pictures.length) throw Error('The saved queue contains text, not image bytes. Send images directly.')
+      const queuedSources = engineSourceFiles(originalFiles ?? [])
+      if (!queuedSources.ok) throw Error(queuedSources.answer)
+      if (queuedSources.files.length) throw Error('The saved queue contains text, not original attachment bytes. Send files directly.')
+      workQueue.start(track(event.sender), queuedId, prompt, checkNativeConversation(conversation)); started = true
+      const answer = await sendNative(event, prompt, cwd, pictures, conversation)
+      try { workQueue.finish(queuedId, answer) }
+      catch { return { ...answer, answer: answer.answer + ' Queue receipt could not be confirmed. Inspect transcripts before any retry.' } }
+      return answer
+    } catch (error) {
+      const answer = { ok: false, answer: (error as Error).message }
+      try { if (started) workQueue.finish(queuedId, answer); else workQueue.block(queuedId, answer.answer, event.sender.id) } catch { /* existing queue/turn records are retained */ }
+      return answer
+    }
+  })
+
 
   // Bringing a brain home: official-endpoint downloads into the app's own
   // engines folder, a run permission for staged installers, honest removal.
@@ -594,7 +1451,10 @@ function registerBridges(): void {
 
   // The two "keep it running" switches, in their own file (see appFlags.ts).
   const appFlagsFile = (): string => join(app.getPath('userData'), 'app-flags.json')
-  handle('app:flags:get', () => loadAppFlags(appFlagsFile()))
+  handle('app:preview-html', () => readUiPreview(app.getAppPath(), process.resourcesPath, app.isPackaged))
+  handle('app:claim-launch', () => claimUiLaunch())
+  const confirmedFlags = () => ({ ...readAppFlagsStrict(appFlagsFile()), ...(['win32', 'darwin'].includes(process.platform) ? { loginItem: app.getLoginItemSettings().openAtLogin } : {}) })
+  handle('app:flags:get', confirmedFlags)
   // The machine's own name for this person, offered as a suggestion on first
   // run. The real machine lesson: the app asked for a name and detected
   // nothing, so the owner typed empty quotes and moved on. Spaces in the
@@ -610,22 +1470,24 @@ function registerBridges(): void {
       filters: [{ name: 'Executable', extensions: ['exe', 'cmd', 'bat'] }],
     })
     if (picked.canceled || !picked.filePaths[0]) return { ok: false, answer: 'Nothing was picked.' }
-    const file = picked.filePaths[0]
-    if (!existsSync(file)) return { ok: false, answer: 'That file does not exist.' }
+    const pickedFile = picked.filePaths[0]
+    if (!existsSync(pickedFile)) return { ok: false, answer: 'That file does not exist.' }
+    const file = nativeEngineSelection(id, pickedFile)
+    if (!file) return { ok: false, answer: id === 'claude-code' ? 'That command shim has no current @anthropic-ai/claude-code bin/claude.exe beside it. Choose the native executable or reinstall the current package; no shell script was trusted.' : 'Choose the native agy executable. Command-script shims are not accepted for engine launches.' }
+    const next = { 'claude-code': binaryOverride('claude-code'), 'agy': binaryOverride('agy'), [id]: file }
+    try { writeRecoverableJson(join(app.getPath('userData'), 'engine-binaries.json'), next) }
+    catch (error) { return { ok: false, answer: `The engine path was not changed because it could not be saved recoverably: ${(error as Error).message}` } }
     setBinaryOverride(id, file)
-    try {
-      writeFileSync(join(app.getPath('userData'), 'engine-binaries.json'), JSON.stringify({ 'claude-code': binaryOverride('claude-code'), 'agy': binaryOverride('agy') }, null, 2))
-    } catch {}
     detectEngine(id, true).catch(() => {})
-    return { ok: true, answer: `${id} is pointed at ${file}. Launches and detection prefer it from now on.`, path: file }
+    return { ok: true, answer: `${id} is pointed at ${file}.${file !== pickedFile ? ' The npm shim was safely resolved to its package’s native executable.' : ''} Launches and detection prefer it from now on.`, path: file }
   })
 
   handle('engine:clear-binary', (_event, id: EngineId): { ok: boolean; answer: string } => {
     if (id !== 'claude-code' && id !== 'agy') return { ok: false, answer: 'Unknown engine.' }
+    const next = { 'claude-code': binaryOverride('claude-code'), 'agy': binaryOverride('agy'), [id]: '' }
+    try { writeRecoverableJson(join(app.getPath('userData'), 'engine-binaries.json'), next) }
+    catch (error) { return { ok: false, answer: `The engine path was not cleared because the change could not be saved recoverably: ${(error as Error).message}` } }
     setBinaryOverride(id, '')
-    try {
-      writeFileSync(join(app.getPath('userData'), 'engine-binaries.json'), JSON.stringify({ 'claude-code': binaryOverride('claude-code'), 'agy': binaryOverride('agy') }, null, 2))
-    } catch {}
     detectEngine(id, true).catch(() => {})
     return { ok: true, answer: `${id} is back to automatic detection.` }
   })
@@ -662,37 +1524,33 @@ function registerBridges(): void {
     // staged copy must exist. (The always-loaded env applies when the runtime
     // next starts; a running one is never restarted under the person's feet.)
     if (clean.warmRuntime === true || clean.keepLoadedAlways === true) void warmStartRuntime()
-    return next
+    return confirmedFlags()
   })
 
   // The battle tally: a PRIVATE local ledger of what won for this person.
-  // Real counts only, capped, never sent anywhere. No public scoreboard.
+  // Real counts only, never sent anywhere or silently evicted. No public scoreboard.
   const battleLedgerPath = (): string => join(app.getPath('userData'), 'battle-ledger.json')
   type BattleEntry = { prompt: string; winner: string; loser: string; tie: boolean; blind: boolean; at: string }
-  const readLedger = (): BattleEntry[] => {
-    try {
-      const parsed = JSON.parse(readFileSync(battleLedgerPath(), 'utf8')) as BattleEntry[]
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  }
+  const readLedger = (): BattleEntry[] => readRecoverableJson(battleLedgerPath(), value => {
+    if (!Array.isArray(value) || value.some(row => !row || typeof row !== 'object' || typeof row.prompt !== 'string' || row.prompt.length > 250_000 || typeof row.winner !== 'string' || typeof row.loser !== 'string' || typeof row.tie !== 'boolean' || typeof row.blind !== 'boolean' || typeof row.at !== 'string')) throw Error('The battle ledger is damaged.')
+    return value as BattleEntry[]
+  }, []).value
   handle('battle:record', (_event, entry: Partial<BattleEntry>): { ok: boolean; answer: string } => {
-    const prompt = typeof entry?.prompt === 'string' ? entry.prompt.slice(0, 500) : ''
-    const winner = typeof entry?.winner === 'string' ? entry.winner.slice(0, 120) : ''
-    const loser = typeof entry?.loser === 'string' ? entry.loser.slice(0, 120) : ''
+    const prompt = typeof entry?.prompt === 'string' && entry.prompt.length <= 250_000 ? entry.prompt : ''
+    const winner = typeof entry?.winner === 'string' && entry.winner.length <= 300 ? entry.winner : ''
+    const loser = typeof entry?.loser === 'string' && entry.loser.length <= 300 ? entry.loser : ''
     const tie = entry?.tie === true
     if (!prompt || (!tie && (!winner || !loser))) return { ok: false, answer: 'A tally line needs the prompt and the outcome.' }
-    const ledger = readLedger()
-    ledger.push({ prompt, winner, loser, tie, blind: entry?.blind === true, at: new Date().toISOString() })
     try {
-      writeFileSync(battleLedgerPath(), JSON.stringify(ledger.slice(-500), null, 2))
+      const ledger = readLedger()
+      ledger.push({ prompt, winner, loser, tie, blind: entry?.blind === true, at: new Date().toISOString() })
+      writeRecoverableJson(battleLedgerPath(), ledger)
       return { ok: true, answer: `Recorded. ${winner || 'A tie'} leads this prompt now.` }
     } catch (failure) {
       return { ok: false, answer: `Could not write the tally: ${(failure as Error).message}` }
     }
   })
-  handle('battle:ledger', (): { ok: boolean; entries: BattleEntry[] } => ({ ok: true, entries: readLedger().slice(-50).reverse() }))
+  handle('battle:ledger', (): { ok: boolean; entries: BattleEntry[] } => ({ ok: true, entries: readLedger().reverse() }))
 
   // Recipes: saved work orders as plain markdown the owner can read and
   // share. Shown in full before a run; the engine's own cards still gate
@@ -708,9 +1566,12 @@ function registerBridges(): void {
   const briefs = createCompactManager(join(app.getPath('userData'), 'handoffs'))
   handle('compact:save', (_event, input: { brief?: string; workspace?: string; at?: string }) => briefs.save(input ?? {}))
   handle('engine:fresh', (): { ok: boolean; answer: string } => {
+    if (commandRunner.running()) return { ok: false, answer: 'An app command is active. Stop it or wait for its result before resetting the engine session.' }
+    preparing?.controller.abort(); permissionTickets.clear(); pendingReads.clear(); if (readTrust.clearTurns()) announceReadTrust()
+    workDispatchGeneration++; automation?.stopWork()
     if (!engine) return { ok: false, answer: 'The engine door is not open on this machine yet.' }
-    engine.fresh()
-    return { ok: true, answer: 'Session ended and its resume id forgotten. The next task starts fresh.' }
+    try { engine.fresh(); return { ok: true, answer: 'Stop requested and the saved resume ID forgotten. The next task starts fresh; inspect any in-flight tool activity before retrying.' } }
+    catch { return { ok: false, answer: 'The fresh-session request could not be confirmed. Retry Fresh session before sending; no automatic retry was made.' } }
   })
 
   // The repo map: the working folder's structure on one page — the folder the
@@ -722,27 +1583,22 @@ function registerBridges(): void {
   // what it does not know). A hook's failure is reported, never fatal.
   const hooksFile = (): string => join(app.getPath('userData'), 'hooks.json')
   const hookRunner = createHookRunner({
-    load: () => {
-      try {
-        const parsed = JSON.parse(readFileSync(hooksFile(), 'utf8')) as unknown
-        return Array.isArray(parsed) ? (parsed as never[]) : []
-      } catch {
-        return []
-      }
-    },
+    load: () => readRecoverableJson(hooksFile(), value => {
+      if (!Array.isArray(value)) throw Error('The hook list is damaged.')
+      return value as never[]
+    }, []).value,
     save: (hooks) => {
-      writeFileSync(hooksFile(), JSON.stringify(hooks, null, 2), 'utf8')
+      writeRecoverableJson(hooksFile(), hooks)
     },
   })
-  const readHooks = (): Array<{ id: string; name: string; event: string; command: string }> => {
-    try {
-      const parsed = JSON.parse(readFileSync(hooksFile(), 'utf8')) as Array<{ id: string; name: string; event: string; command: string }>
-      return Array.isArray(parsed) ? parsed : []
-    } catch {
-      return []
-    }
-  }
-  handle('hooks:list', () => ({ ok: true, hooks: readHooks() }))
+  const readHooks = (): Array<{ id: string; name: string; event: string; command: string }> => readRecoverableJson(hooksFile(), value => {
+    if (!Array.isArray(value)) throw Error('The hook list is damaged.')
+    return value as Array<{ id: string; name: string; event: string; command: string }>
+  }, []).value
+  handle('hooks:list', () => {
+    try { return { ok: true as const, hooks: readHooks() } }
+    catch (error) { return { ok: false as const, hooks: [], answer: `Hooks could not be loaded safely: ${(error as Error).message}` } }
+  })
   handle('hooks:save', (_event, hook: unknown) => hookRunner.upsert(hook as never))
   handle('hooks:remove', (_event, id: string) => hookRunner.remove(typeof id === 'string' ? id : ''))
   handle('hooks:test', (_event, command: string) => hookRunner.test(typeof command === 'string' ? command : ''))
@@ -760,19 +1616,37 @@ function registerBridges(): void {
   // the way back. Read from the folder the engine was handed at send time.
   handle('engine:checkpoints:list', async () => {
     try {
-      return { ok: true, checkpoints: await listCheckpoints(join(app.getPath('userData'), 'checkpoints')) }
+      return { ok: true, checkpoints: await listCheckpoints(join(app.getPath('userData'), 'checkpoints'), Number.MAX_SAFE_INTEGER) }
     } catch {
-      return { ok: true, checkpoints: [] }
+      return { ok: false, checkpoints: [], answer: 'The checkpoint index could not be read. Its original was not changed.' }
     }
   })
+  const checkpointGate = (sender: Electron.WebContents) => {
+    const owner = track(sender)
+    let gate = checkpointReviews.get(owner)
+    if (!gate) {
+      gate = createCheckpointReviewGate(join(app.getPath('userData'), 'checkpoints'), path => {
+        if (dispatchingWork || engine?.turnBusy()) throw Error('Stop active work before reviewing or restoring files.')
+        const root = resolve(engine?.currentTarget()?.workspace || settings.engine.workspace || vaultRoot()), target = resolve(path), within = relative(root, target)
+        if (!within || within === '..' || within.startsWith('../') || within.startsWith('..\\') || isAbsolute(within)) throw Error('Choose this file’s working folder before reviewing its restore.')
+        noLinkedPath(root); noLinkedPath(target)
+        return JSON.stringify([root, engine?.currentTarget(), settings.engine, settings.permissions, workDispatchGeneration])
+      })
+      checkpointReviews.set(owner, gate)
+    }
+    return gate
+  }
+  handle('engine:checkpoint:preview', (event, copy: string, original: string) => checkpointGate(event.sender).preview(copy, original))
+  handle('engine:checkpoint:decide', (event, token: string, decision: 'allow' | 'deny') => checkpointGate(event.sender).decide(token, decision))
+  handle('engine:checkpoint:inspect', (_event, copy: string) => inspectCheckpoint(join(app.getPath('userData'), 'checkpoints'), typeof copy === 'string' ? copy : ''))
   handle('engine:checkpoint:restore', (_event, copy: string, original: string): Promise<{ ok: boolean; answer: string }> =>
     restoreCheckpoint(join(app.getPath('userData'), 'checkpoints'), typeof copy === 'string' ? copy : '', typeof original === 'string' ? original : ''))
 
   handle('engine:answer', (_event, requestId: string, allow: boolean): { ok: boolean } => {
-    const session = engine?.current()
-    if (!session || typeof requestId !== 'string' || !requestId) return { ok: false }
-    session.answer(requestId, allow === true)
-    return { ok: true }
+    if (typeof requestId !== 'string' || typeof allow !== 'boolean') return { ok: false }
+    const ok = permissionTickets.answer(requestId, allow)
+    if (ok) pendingReads.delete(requestId)
+    return { ok }
   })
 
   // The two folders skills deploy into: Claude Code reads its skills from
@@ -791,20 +1665,43 @@ function registerBridges(): void {
   // defaults inside the compiler — never an empty rule).
   const houseRulesFile = join(app.getPath('userData'), 'house-rules.json')
   const readHouseRules = (): Partial<HouseRules> => {
-    try {
-      return JSON.parse(readFileSync(houseRulesFile, 'utf8')) as Partial<HouseRules>
-    } catch {
-      return {}
-    }
+    const bytes = configBytes(houseRulesFile)
+    if (bytes === null) return {}
+    const value = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes))
+    if (!value || typeof value !== 'object' || Array.isArray(value) || Object.entries(value).some(([key, text]) => !Object.hasOwn(DEFAULT_HOUSE_RULES, key) || typeof text !== 'string')) throw Error('Saved app instructions could not be read. Originals are unchanged.')
+    return value
   }
-  const deployRulesNow = (): void => {
-    try {
-      const home = process.env['USERPROFILE'] || process.env['HOME'] || ''
-      deployHouseRules(settings.engine.id, settings.engine.model, home, readHouseRules())
-    } catch {
-      // A failed rules deploy must never block the work itself.
-    }
+  const effectiveRules = (): HouseRules => {
+    const saved = readHouseRules()
+    return Object.fromEntries(Object.entries(DEFAULT_HOUSE_RULES).map(([key, fallback]) => [key, saved[key as keyof HouseRules]?.trim() ? saved[key as keyof HouseRules] : fallback])) as HouseRules
   }
+  const rulePreview = (sender: Electron.WebContents, id: EngineId, projectId?: string) => {
+    if (id !== 'claude-code' && id !== 'agy') throw Error('Choose a known engine.')
+    const owner = track(sender), project = projectId ? nativeContext.projects().find(p => p.id === projectId) : undefined
+    if (projectId && (!project || !project.folder)) throw Error('Choose a working folder for this project before writing a native rule file. Shared chat instructions do not require one.')
+    const target = project ? join(project.folder, id === 'agy' ? 'GEMINI.md' : 'CLAUDE.md') : nativeHouseRulesFile(id, app.getPath('home'))
+    const snapshot = JSON.stringify([settings.engine, settings.permissions, project || null, readHouseRules()])
+    const authorize = () => {
+      if (dispatchingWork || engine?.turnBusy()) throw Error('Wait for active work before changing native rules.')
+      const currentProject = projectId ? nativeContext.projects().find(p => p.id === projectId) : undefined
+      if (snapshot !== JSON.stringify([settings.engine, settings.permissions, currentProject || null, readHouseRules()])) throw Error('Rule text or engine settings changed. Review again.')
+      if (project && resolve(project.folder) !== resolve(engine?.currentTarget()?.workspace || settings.engine.workspace || vaultRoot())) throw Error('Use Work here for this project before reviewing its native rule file.')
+      noLinkedPath(target)
+    }
+    const text = project ? [project.instruction, project.goals.length ? '## Project goals\n' + project.goals.map(goal => '- ' + goal).join('\n') : ''].filter(Boolean).join('\n\n') : instructionBlock(id, settings.engine.id === id ? settings.engine.model : '', effectiveRules(), settings.memoryFolder || '')
+    const service = createProjectRuleReview(authorize), review = service.preview(target, text)
+    let owned = ruleReviews.get(owner)
+    if (!owned) { owned = new Map(); ruleReviews.set(owner, owned) }
+    for (const [key, entry] of owned) if (entry.expiresAt <= Date.now()) owned.delete(key)
+    if (owned.size >= 20) { service.decide(review.token, 'deny'); throw Error('Too many pending rule reviews. Deny old reviews or wait for expiry.') }
+    owned.set(review.token, { service, expiresAt: review.expiresAt }); return review
+  }
+  handle('rules:preview-project', (event, projectId: string, id: EngineId) => rulePreview(event.sender, id, projectId))
+  handle('rules:preview-global', (event, id: EngineId) => rulePreview(event.sender, id))
+  handle('rules:decide', (event, token: string, decision: 'allow' | 'deny') => {
+    const owned = ruleReviews.get(event.sender.id), review = owned?.get(token); owned?.delete(token)
+    return review ? review.service.decide(token, decision) : { ok: false, answer: 'Unknown rule review in this window.' }
+  })
 
   // The vault folder, opened in the file manager. The vault root only —
   // this door is a convenience for the owner, not a general launcher.
@@ -835,8 +1732,7 @@ function registerBridges(): void {
   // CSP travels with the html.
   handle('artifact:popout', (_event, payload: { html: string; title: string }) => {
     const win = new BrowserWindow({
-      width: 760,
-      height: 860,
+      ...fitWindow(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea, { width: 760, height: 860, minWidth: 480, minHeight: 320 }),
       title: payload.title || 'OddBrain — artifact',
       autoHideMenuBar: true,
       backgroundColor: '#141417',
@@ -845,7 +1741,7 @@ function registerBridges(): void {
       // navigation locked (the PDF window below does the same).
       webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false },
     })
-    lockNavigation(win.webContents)
+    lockNavigation(win.webContents, false)
     void win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(payload.html))
     return { ok: true }
   })
@@ -858,7 +1754,10 @@ function registerBridges(): void {
       const dir = join(vaultRoot(), 'Artifacts PDF')
       mkdirSync(dir, { recursive: true })
       const target = join(dir, safe)
-      const win = new BrowserWindow({ show: false, width: 820, height: 1160, webPreferences: { sandbox: true } })
+      const win = new BrowserWindow({ show: false, width: 820, height: 1160, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } })
+      // PDF source is model-authored too. It may render and print, but it may not
+      // navigate this hidden window or launch a browser as a side effect.
+      lockNavigation(win.webContents, false)
       try {
         await win.loadURL('data:text/html;charset=utf-8,' + encodeURIComponent(payload.html))
         const bytes = await win.webContents.printToPDF({ printBackground: true })
@@ -872,9 +1771,21 @@ function registerBridges(): void {
     }
   })
 
-  handle('engine:stop', () => {
+  handle('engine:restart', () => restartIdleConnection(engine, dispatchingWork))
+
+  handle('engine:stop', async () => {
+    workflows.cancel(); commandRunner.cancel()
+    preparing?.controller.abort(); retryPreparing?.abort(); retryPreparing = undefined; overflowRetryPending = false; dispatchingWork = false; permissionTickets.clear(); pendingReads.clear(); if (readTrust.clearTurns()) announceReadTrust()
+    workDispatchGeneration++
+    automation?.stopWork()
+    const wasRunning = engine?.running() === true || engine?.turnBusy() === true
+    if (!wasRunning) return { ok: true, answer: 'No native process was active.' }
+    const closing = waitForEngineClose(activeTranscript?.transcriptId || '')
     engine?.stop()
-    return { ok: true }
+    const confirmed = await closing
+    return confirmed
+      ? { ok: true, answer: 'Stopped after the native process closed and the final transcript state was saved.' }
+      : { ok: false, answer: 'Stop was requested, but native process exit was not confirmed. The turn remains uncertain; inspect the process and Full transcripts before retrying.' }
   })
 
   // Bringing a brain home. The door streams progress sentences; each becomes
@@ -888,10 +1799,17 @@ function registerBridges(): void {
       for (const window of BrowserWindow.getAllWindows()) window.webContents.send('engine:pull-event', tick)
     }
     try {
-      const answer = await fetch(`${door}/api/pull`, {
+      // The brain door is reached the same way everywhere: model discovery
+      // already refuses redirects on this exact URL, so pull and delete do
+      // too — following one would send a model request somewhere the
+      // settings never named.
+      // This sends only the validated selected model name to the explicit
+      // owner-configured Ollama endpoint; no vault content is attached.
+      const answer = await fetch(ollamaEndpoint(door, 'api/pull'), { // lgtm[js/file-access-to-http]
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: name }),
+        redirect: 'error',
       })
       if (!answer.ok || !answer.body) {
         const why = `the brain door answered ${answer.status}`
@@ -930,10 +1848,14 @@ function registerBridges(): void {
     if (!name) return { ok: false, answer: 'That is not a model name this app will ask for.' }
     const door = settings.engine.baseUrl || 'http://localhost:11434'
     try {
-      const answer = await fetch(`${door}/api/delete`, {
+      // This sends only the validated selected model name to the explicit
+      // owner-configured Ollama endpoint; no vault content is attached.
+      const answer = await fetch(ollamaEndpoint(door, 'api/delete'), { // lgtm[js/file-access-to-http]
         method: 'DELETE',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ model: name }),
+        redirect: 'error',
+        signal: AbortSignal.timeout(15_000),
       })
       if (!answer.ok) return { ok: false, answer: `the brain door answered ${answer.status}` }
       return { ok: true, answer: `${name} is gone from this machine` }
@@ -948,14 +1870,14 @@ function registerBridges(): void {
   handle('vault:capture-chat', (_event, payload: { title: string; markdown: string }): { ok: boolean; answer: string } => {
     const title = typeof payload?.title === 'string' ? payload.title.trim().slice(0, 80) : ''
     const markdown = typeof payload?.markdown === 'string' ? payload.markdown : ''
-    if (!title || !markdown || markdown.length > 100_000) {
-      return { ok: false, answer: 'That is not a conversation this app will capture.' }
+    if (!title || !markdown || Buffer.byteLength(markdown, 'utf8') > 8_000_000) {
+      return { ok: false, answer: 'The capture is empty or exceeds 8 MB. Export the full chat as Markdown instead; nothing was shortened.' }
     }
-    const service = createVaultService({ vaultPath: vaultRoot() })
+    const service = currentVaultService()
     if (!service.available()) return { ok: false, answer: 'No vault to capture into.' }
     try {
       const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 40)
-      const name = `${stampFor(new Date())}${slug ? `-${slug}` : ''}.md`
+      const name = `${stampFor(new Date())}-${randomUUID()}${slug ? `-${slug}` : ''}.md`
       service.files().write(`Captures/${name}`, markdown)
       return { ok: true, answer: `Captures/${name}` }
     } catch (error) {
@@ -972,7 +1894,7 @@ function registerBridges(): void {
     if (!name || name.length > 120 || /[\\/:*?"<>|\n\r]/.test(name) || !markdown || markdown.length > 200_000) {
       return { ok: false, answer: 'That is not a name and document this app will write.' }
     }
-    const service = createVaultService({ vaultPath: vaultRoot() })
+    const service = currentVaultService()
     if (!service.available()) return { ok: false, answer: 'No vault to write the handoff into.' }
     try {
       service.files().write(`handoffs/${name}`, markdown)
@@ -987,7 +1909,7 @@ function registerBridges(): void {
   // or another machine) takes folders of markdown as they are — nothing is
   // converted, because nothing needs converting.
   handle('vault:export-copy', (): { ok: boolean; answer: string } => {
-    const service = createVaultService({ vaultPath: vaultRoot() })
+    const service = currentVaultService()
     if (!service.available()) return { ok: false, answer: 'No vault to copy.' }
     const stamp = stampFor(new Date())
     const destination = join(app.getPath('userData'), 'exports', `vault-${stamp}`)
@@ -996,7 +1918,99 @@ function registerBridges(): void {
     return { ok: true, answer: `${result.count} files copied to ${result.destination}` }
   })
 
+  handle('vault:backup', async (_event, operation: unknown) => {
+    if (operation !== 'create' && operation !== 'restore') return { ok: false, answer: 'Choose backup or restore.' }
+    let source = vaultRoot()
+    if (operation === 'restore') {
+      const selected = await dialog.showOpenDialog({ title: 'Choose an OddBrain backup folder', properties: ['openDirectory'] })
+      if (selected.canceled || !selected.filePaths[0]) return { ok: false, answer: 'Restore cancelled. Nothing changed.' }
+      source = selected.filePaths[0]
+    }
+    const parent = await dialog.showOpenDialog({ title: operation === 'create' ? 'Choose where to keep the backup' : 'Choose where to create the restored vault', properties: ['openDirectory', 'createDirectory'] })
+    if (parent.canceled || !parent.filePaths[0]) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+    const destination = join(parent.filePaths[0], `OddBrain-${operation === 'create' ? 'backup' : 'restored'}-${Date.now()}-${randomUUID().slice(0,8)}`)
+    const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', operation === 'create' ? 'Create backup' : 'Restore to new folder'], defaultId: 0, cancelId: 0, message: operation === 'create' ? 'Copy the entire vault, including sensitive conversations and attachments?' : 'Restore into a new folder? Your current vault will not be replaced.', detail: `Source: ${source}\nDestination: ${destination}\nVault files only. App chat history, installed models, application credentials and browser queues are not included. Export app chats separately from Settings → System. Keep the backup somewhere private.` })
+    if (confirmation.response !== 1) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+    // Native dialog paths, never arbitrary renderer-provided source/destination paths.
+    const result = operation === 'create' ? backupVault(source, destination) : restoreVault(source, destination)
+    if (!result.ok) return result
+    return { ok: true, answer: `${result.count} files copied and verified at ${result.destination}. ${operation === 'restore' ? 'Your current vault is unchanged. Choose this restored folder in Settings → Memory & files → Vault when ready.' : 'Keep another copy on a different drive. This is not an automatic backup schedule.'}` }
+  })
+
+  handle('app-data:backup', async (_event, operation: unknown, rendererPreferences: unknown) => {
+    if (operation !== 'create' && operation !== 'restore') return { ok: false, answer: 'Choose app-data backup or restore.' }
+    try {
+      let source = app.getPath('userData')
+      if (operation === 'restore') {
+        const selected = await dialog.showOpenDialog({ title: 'Choose an OddBrain app-data backup folder', properties: ['openDirectory'] })
+        if (selected.canceled || !selected.filePaths[0]) return { ok: false, answer: 'Restore cancelled. Nothing changed.' }
+        source = selected.filePaths[0]
+      }
+      const parent = await dialog.showOpenDialog({ title: operation === 'create' ? 'Choose where to keep the app-data backup' : 'Choose where to create the verified restored app-data copy', properties: ['openDirectory', 'createDirectory'] })
+      if (parent.canceled || !parent.filePaths[0]) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+      const destination = join(parent.filePaths[0], `OddBrain-app-data-${operation === 'create' ? 'backup' : 'restored'}-${Date.now()}-${randomUUID().slice(0, 8)}`)
+      const exclusions = appDataBackupExclusions().join('; ')
+      const confirmation = await dialog.showMessageBox({ type: 'question', buttons: ['Cancel', operation === 'create' ? 'Create app-data backup' : 'Restore to new folder'], defaultId: 0, cancelId: 0, message: operation === 'create' ? 'Back up selected app-private owner data?' : 'Verify and restore app data into a separate new folder?', detail: `Source: ${source}\nDestination: ${destination}\n\nIncluded: app chats, exact native transcripts, Working Notes and review differences, artifacts, projects, recipes, handoffs, reviewed command outcomes, checkpoints, review reports, durable Video Studio evidence/frames/render receipts, and supplied non-secret interface preferences.\n\nExcluded: ${exclusions}.\n\nThe vault is a separate backup domain. Restore never replaces live app data automatically.` })
+      if (confirmation.response !== 1) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+      const preferences = operation === 'create' && rendererPreferences && typeof rendererPreferences === 'object' && !Array.isArray(rendererPreferences) ? rendererPreferences as Record<string, string> : {}
+      const result = operation === 'create' ? createAppDataBackup(source, destination, preferences) : restoreAppDataBackup(source, destination)
+      return { ok: true, answer: `${result.files.toLocaleString()} app-data file(s), ${(result.bytes / 1_000_000).toFixed(1)} MB, copied and verified at ${destination}. ${operation === 'restore' ? 'Live app data and the vault are unchanged. Review the restored folder before any manual migration.' : 'Keep it private and retain a separate verified vault backup.'}` }
+    } catch (error) { return { ok: false, answer: `${(error as Error).message} No complete backup or restore is reported.` } }
+  })
+
+  handle('complete-memory:backup', async (_event, operation: unknown, rendererPreferences: unknown) => {
+    if (operation !== 'create' && operation !== 'restore') return { ok: false, answer: 'Choose Complete Memory Backup or verified restore.' }
+    try {
+      let source = ''
+      if (operation === 'restore') {
+        const selected = await dialog.showOpenDialog({ title: 'Choose a Complete Memory Backup folder', properties: ['openDirectory'] })
+        if (selected.canceled || !selected.filePaths[0]) return { ok: false, answer: 'Restore cancelled. Nothing changed.' }
+        source = selected.filePaths[0]
+      }
+      const parent = await dialog.showOpenDialog({ title: operation === 'create' ? 'Choose where to keep the Complete Memory Backup' : 'Choose where to create the inactive restored profile', properties: ['openDirectory', 'createDirectory'] })
+      if (parent.canceled || !parent.filePaths[0]) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+      const destination = join(parent.filePaths[0], `OddBrain-complete-memory-${operation === 'create' ? 'backup' : 'restored'}-${Date.now()}-${randomUUID().slice(0, 8)}`)
+      const confirmation = await dialog.showMessageBox({
+        type: 'question', buttons: ['Cancel', operation === 'create' ? 'Create complete backup' : 'Verify and restore'], defaultId: 0, cancelId: 0,
+        message: operation === 'create' ? 'Create one revision-consistent Complete Memory Backup?' : 'Verify the complete backup before creating an inactive restored profile?',
+        detail: operation === 'create'
+          ? `Vault: ${vaultRoot()}\nApp-private data: ${app.getPath('userData')}\nDestination: ${destination}\n\nIncludes the Memory_OB catalogue, app chats/transcripts, Projects, Working Notes, private attachment copies and the full vault through separate hashed domain manifests. Use-in-place external files, credentials, access grants, engine sessions and installed engines/models are explicitly excluded. Keep this sensitive backup private.`
+          : `Backup: ${source}\nNew inactive profile: ${destination}\n\nBoth domains and their hashes are checked before the new folder is created. Live app data and the live vault remain unchanged. Activation requires a later, separate owner review.`,
+      })
+      if (confirmation.response !== 1) return { ok: false, answer: 'Cancelled. Nothing changed.' }
+      const preferences = operation === 'create' && rendererPreferences && typeof rendererPreferences === 'object' && !Array.isArray(rendererPreferences) ? rendererPreferences as Record<string, string> : {}
+      const result = operation === 'create'
+        ? (() => {
+            const revision = memoryOb.revision()
+            return createCompleteMemoryBackup({ vaultRoot: vaultRoot(), appDataRoot: app.getPath('userData'), destination, rendererPreferences: preferences, revisionBefore: revision, revisionAfter: () => memoryOb.revision() })
+          })()
+        : restoreCompleteMemoryBackup(source, destination)
+      return { ok: true, answer: `${(result.vaultFiles + result.appDataFiles).toLocaleString()} listed file(s), ${(result.bytes / 1_000_000).toFixed(1)} MB, verified at ${result.destination}. Memory_OB revision ${result.revision}. ${operation === 'restore' ? 'This is an inactive new profile; live data was not replaced. Review ACTIVATION-REVIEW.json before any separate activation.' : 'External use-in-place files and sensitive exclusions are recorded in the top-level manifest.'}` }
+    } catch (error) { return { ok: false, answer: `${(error as Error).message} No Complete Memory Backup or restore is reported.` } }
+  })
+
   // The skills the owner's engine already has — the import list.
+  const skillRoots = (id: EngineId): SkillRoot[] => {
+    if (id !== 'claude-code' && id !== 'agy') throw Error('Choose a known engine.')
+    const home = app.getPath('home')
+    return id === 'claude-code' ? [{ engine: id, path: join(home, '.claude', 'skills') }]
+      : [{ engine: id, path: skillTargets().agySkillsDir }, { engine: id, path: join(home, '.gemini', 'config', 'skills') }, { engine: id, path: join(home, '.gemini', 'antigravity-cli', 'skills') }]
+  }
+  const skillReview = (sender: Electron.WebContents) => {
+    const owner = track(sender); let service = skillReviews.get(owner)
+    if (!service) {
+      service = createSkillAuthoring(id => skillRoots(id)[0].path, () => {
+        if (dispatchingWork || engine?.turnBusy()) throw Error('Wait for active work to finish before changing installed skills.')
+        return JSON.stringify([settings.engine, settings.permissions, workDispatchGeneration])
+      }); skillReviews.set(owner, service)
+    }
+    return service
+  }
+  handle('skills:inventory', (_event, id: EngineId) => readInstalledSkills(skillRoots(id)))
+  handle('skills:inspect-installed', (_event, id: EngineId, skill: string) => inspectInstalledSkill(skill, skillRoots(id)))
+  handle('skills:preview-create', (event, draft: SkillDraft) => skillReview(event.sender).preview(draft))
+  handle('skills:decide-create', (event, token: string, decision: 'allow' | 'deny') => skillReview(event.sender).decide(token, decision))
+
   handle('skills:scan', () => {
     const home = process.env['USERPROFILE'] || process.env['HOME'] || ''
     return scanClaudeSkills(join(home, '.claude', 'skills'))
@@ -1006,42 +2020,108 @@ function registerBridges(): void {
   // the catalog (this door fetches nothing else), the file comes from
   // anthropics/skills, and it lands in every engine's own folder through the
   // same deploy everything else uses.
-  handle('skills:install-catalog', async (_event, name: string): Promise<{ ok: boolean; answer: string; written?: string[] }> => {
-    const result = await installCatalogSkill(String(name ?? ''), skillTargets())
-    if (!result.ok) return { ok: false, answer: result.answer }
-    return { ok: true, answer: `${result.skill.name} installed to ${result.written.length} engine folders`, written: result.written }
-  })
-
-  // Deploy the app's vault into every engine's own folder. The renderer sends
-  // its vault; the main process validates every name before anything lands.
-  handle('skills:deploy', (_event, skills: VaultSkill[]): { ok: boolean; written: string[] } => {
-    const written: string[] = []
-    for (const skill of Array.isArray(skills) ? skills.slice(0, 200) : []) {
-      if (!skill || typeof skill.name !== 'string' || !skill.name.trim()) continue
-      const clean: VaultSkill = {
-        name: String(skill.name),
-        description: typeof skill.description === 'string' ? skill.description : '',
-        body: typeof skill.body === 'string' ? skill.body.slice(0, 20_000) : '',
-      }
-      if (!clean.body) continue
-      written.push(...deploySkill(clean, skillTargets()))
+  handle('skills:install-catalog', () => ({ ok: false, answer: 'Inspect the pinned package and allow its installation first. Nothing was installed.' }))
+  const catalogReview = (sender: Electron.WebContents) => {
+    const owner = track(sender); let service = catalogReviews.get(owner)
+    if (!service) {
+      service = createCatalogInstallReview(() => {
+        if (dispatchingWork || engine?.turnBusy()) throw Error('Wait for active work before installing skills.')
+        const targets = skillTargets()
+        return { targets, authority: JSON.stringify([targets, settings.engine, settings.permissions, workDispatchGeneration]) }
+      }); catalogReviews.set(owner, service)
     }
-    return { ok: true, written }
-  })
+    return service
+  }
+  handle('skills:plan-catalog', (event, name: string) => catalogReview(event.sender).plan(name))
+  handle('skills:decide-catalog', (event, token: string, decision: 'allow' | 'deny') => catalogReview(event.sender).decide(token, decision))
+  handle('skills:cancel-catalog', event => catalogReviews.get(event.sender.id)?.cancel())
+  // Retire the unexposed legacy writer rather than leave a review bypass.
+  handle('skills:deploy', () => ({ ok: false, written: [], answer: 'Use a reviewed skill-file change or package installation. Nothing was written.' }))
 
   // The one MCP list, stored once, deployed to every engine's config.
-  handle('mcp:read', () => {
+  //
+  // A list that cannot be parsed is reported, not shown as empty: an empty
+  // screen next to a Save button is how a hand-edited list would disappear.
+  handle('mcp:read', (): { servers: McpServer[]; problem: string } => {
     try {
-      return JSON.parse(readFileSync(mcpFile, 'utf8')) as { servers: McpServer[] }
-    } catch {
-      return { servers: [] as McpServer[] }
+      const bytes = configBytes(mcpFile)
+      return bytes === null ? { servers: [], problem: '' } : readMcpList(bytes.toString('utf8'))
+    } catch (e) {
+      return { servers: [], problem: `The saved tool-server list could not be read: ${(e as Error).message}` }
     }
   })
 
-  handle('mcp:write', (_event, payload: { servers: McpServer[] }): { ok: boolean; written: string[] } => {
-    const servers = Array.isArray(payload?.servers) ? payload.servers.slice(0, 100) : []
-    writeFileSync(mcpFile, JSON.stringify({ servers }), 'utf8')
-    return { ok: true, written: deployMcp(servers, settings.engine.workspace || vaultRoot()) }
+  handle('mcp:write', () => ({ ok: false, written: [], answer: 'Review the exact connector file changes before allowing them. No files changed.' }))
+  const mcpReview = (sender: Electron.WebContents) => {
+    const owner = track(sender); let service = mcpReviews.get(owner)
+    if (!service) {
+      service = createMcpReview(() => {
+        if (dispatchingWork || engine?.turnBusy()) throw Error('Wait for active work before changing connector files.')
+        const workspace = settings.engine.workspace || vaultRoot()
+        return { workspace, centralFile: mcpFile, authority: JSON.stringify([workspace, settings.engine, settings.permissions, workDispatchGeneration]) }
+      }); mcpReviews.set(owner, service)
+    }
+    return service
+  }
+  handle('mcp:preview', async (event, servers: unknown) => {
+    const oddbrain = Array.isArray(servers) ? servers.find(item => item && typeof item === 'object' && (item as any).name === 'oddbrain-video') as { url?: unknown } | undefined : undefined
+    if (oddbrain) {
+      const endpoint = typeof oddbrain.url === 'string' ? oddbrain.url : '', expected = (await videoStudio.read()).aiToolsUrl
+      if (!endpoint || endpoint !== expected) throw Error('The safe video connector must use the exact current capability URL, including its complete path. Nothing was written.')
+      const post = async (body: unknown, sessionId = ''): Promise<{ response: Response; value: any }> => {
+        const response = await fetch(endpoint, { method: 'POST', headers: { 'Content-Type': 'application/json', Accept: 'application/json', ...(sessionId ? { 'Mcp-Session-Id': sessionId } : {}) }, body: JSON.stringify(body), redirect: 'error', signal: AbortSignal.timeout(10_000) })
+        const raw = await response.text()
+        if (!response.ok || raw.length > 1_000_000) throw Error(`The exact safe video connector path failed its local handshake (HTTP ${response.status}). Nothing was written.`)
+        return { response, value: raw ? JSON.parse(raw) : null }
+      }
+      const initialized = await post({ jsonrpc: '2.0', id: 'oddbrain-path-check', method: 'initialize', params: { protocolVersion: '2025-06-18', capabilities: {}, clientInfo: { name: 'OddBrain connector review', version: '0.9.0' } } })
+      const sessionId = initialized.response.headers.get('mcp-session-id') || ''
+      if (!sessionId) throw Error('The exact safe video connector path did not return an MCP session. Nothing was written.')
+      await post({ jsonrpc: '2.0', method: 'notifications/initialized', params: {} }, sessionId)
+      const listed = await post({ jsonrpc: '2.0', id: 'oddbrain-tools-check', method: 'tools/list', params: {} }, sessionId)
+      if (!Array.isArray(listed.value?.result?.tools) || !listed.value.result.tools.some((tool: any) => tool?.name === 'oddbrain_video_sources')) throw Error('The exact safe video connector path did not return the reviewed tool inventory. Nothing was written.')
+    }
+    return mcpReview(event.sender).preview(servers)
+  })
+  handle('mcp:decide', (event, token: string, decision: 'allow' | 'deny') => mcpReview(event.sender).decide(token, decision))
+  handle('mcp:inventory', (_event, id: EngineId) => {
+    const home = app.getPath('home'), workspace = settings.engine.workspace || vaultRoot()
+    if (id === 'claude-code') return inspectNativeMcp([{ scope: 'Claude user configuration', path: join(home, '.claude.json') }, { scope: 'Claude workspace configuration', path: join(workspace, '.mcp.json') }])
+    if (id === 'agy') return inspectNativeMcp([{ scope: 'agy global configuration', path: join(home, '.gemini', 'config', 'mcp_config.json') }, { scope: 'agy workspace configuration', path: join(workspace, '.agents', 'mcp_config.json') }])
+    throw Error('Choose a known engine.')
+  })
+
+  const gooseMemoryReview = (sender: Electron.WebContents) => {
+    const owner = track(sender); let service = gooseMemoryReviews.get(owner)
+    if (!service) {
+      service = createGooseMemoryReview(() => {
+        const adapterRoot = join(memoryObRoot, 'adapters', 'goose', 'v1')
+        const scope = {
+          bundleSource: join(app.getAppPath(), 'out', 'memory-ob', 'memory-ob-mcp.cjs'),
+          bundleTarget: join(adapterRoot, 'memory-ob-mcp.cjs'),
+          skillSource: join(app.getAppPath(), 'out', 'memory-ob', 'memory-ob-memory.skill.md'),
+          receiptPath: join(adapterRoot, 'goose-adapter.json'),
+          catalogueRoot: memoryObRoot,
+          chatsRoot: chatRoot,
+          vaultRoot: vaultRoot(),
+        }
+        return { ...scope, authority: JSON.stringify([app.getVersion(), ...Object.values(scope)]) }
+      })
+      gooseMemoryReviews.set(owner, service)
+    }
+    return service
+  }
+  handle('memory-ob:goose-preview', async event => {
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Wait for active work before changing Goose configuration.' }
+    const selected = await dialog.showOpenDialog({ title: 'Choose Goose config.yaml', properties: ['openFile'], filters: [{ name: 'Goose YAML configuration', extensions: ['yaml', 'yml'] }] })
+    if (selected.canceled || !selected.filePaths[0]) return { ok: false, canceled: true, answer: 'Goose adapter setup cancelled. Nothing changed.' }
+    try { return { ok: true, review: gooseMemoryReview(event.sender).preview(selected.filePaths[0]) } }
+    catch (error) { return { ok: false, answer: `${(error as Error).message} Nothing changed.` } }
+  })
+  handle('memory-ob:goose-decide', (event, token: string, decision: 'allow' | 'deny') => {
+    if (decision !== 'allow' && decision !== 'deny') return { ok: false, answer: 'Choose Allow or Deny.' }
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Wait for active work before changing Goose configuration.' }
+    return gooseMemoryReview(event.sender).decide(String(token || ''), decision)
   })
 
   // Mods (Phase 1): a pack is a folder with a manifest. Install = the person
@@ -1078,21 +2158,18 @@ function registerBridges(): void {
   // are remembered; browse reads the index; install re-checks the pinned
   // checksum against the real files and refuses a mismatch outright.
   const indexesFile = (): string => join(app.getPath('userData'), 'extensions', 'indexes.json')
-  const readIndexes = (): Array<{ kind: 'folder' | 'url'; locator: string; addedAt: string }> => {
-    try {
-      const parsed = JSON.parse(readFileSync(indexesFile(), 'utf8'))
-      return Array.isArray(parsed?.indexes) ? parsed.indexes.slice(0, 20) : []
-    } catch {
-      return []
-    }
-  }
+  const readIndexes = (): Array<{ kind: 'folder' | 'url'; locator: string; addedAt: string }> => readRecoverableJson(indexesFile(), value => {
+    const rows = (value as { indexes?: unknown })?.indexes
+    if (!Array.isArray(rows) || rows.length > 20 || rows.some(row => !row || typeof row !== 'object' || !['folder', 'url'].includes(row.kind) || typeof row.locator !== 'string' || typeof row.addedAt !== 'string')) throw Error('The extension index list is damaged or exceeds 20 entries. Nothing was omitted.')
+    return rows as Array<{ kind: 'folder' | 'url'; locator: string; addedAt: string }>
+  }, []).value
   const toSource = (kind: string, locator: string): { kind: 'folder'; path: string } | { kind: 'url'; url: string } | null => {
     const clean = String(locator ?? '').trim()
     if (!clean) return null
     if (kind === 'url' || /^https?:\/\//.test(clean)) {
       try {
         const parsed = new URL(clean)
-        if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return null
+        if (parsed.protocol !== 'https:' || parsed.username || parsed.password || parsed.search || parsed.hash) return null
         return { kind: 'url', url: parsed.toString() }
       } catch {
         return null
@@ -1111,10 +2188,10 @@ function registerBridges(): void {
     if (list.some(item => (item.kind === 'url' ? item.locator : resolve(item.locator)) === key)) {
       return { ok: true, answer: 'That index is already added.' }
     }
+    if (list.length >= 20) return { ok: false, answer: 'Twenty extension indexes are already retained. Remove one before adding another; nothing was evicted.' }
     list.push({ kind: source.kind, locator: source.kind === 'url' ? source.url : source.path, addedAt: new Date().toISOString() })
     try {
-      mkdirSync(dirname(indexesFile()), { recursive: true })
-      writeFileSync(indexesFile(), JSON.stringify({ indexes: list }, null, 2), 'utf8')
+      writeRecoverableJson(indexesFile(), { indexes: list })
       return { ok: true, answer: 'Index added.' }
     } catch {
       return { ok: false, answer: 'The index list could not be written.' }
@@ -1124,7 +2201,7 @@ function registerBridges(): void {
   handle('mods:index-remove', (_event, locator: string): { ok: boolean } => {
     const list = readIndexes().filter(item => item.locator !== String(locator ?? ''))
     try {
-      writeFileSync(indexesFile(), JSON.stringify({ indexes: list }, null, 2), 'utf8')
+      writeRecoverableJson(indexesFile(), { indexes: list })
       return { ok: true }
     } catch {
       return { ok: false }
@@ -1206,20 +2283,11 @@ function registerBridges(): void {
   // The resume ids themselves stay in engine-sessions.json; this file only
   // carries the owner's links and history.
   const boardFile = (): string => join(app.getPath('userData'), 'sessions-board.json')
-  handle('sessions:board-read', (): unknown => {
-    try {
-      return JSON.parse(readFileSync(boardFile(), 'utf8'))
-    } catch {
-      return { continuing: {}, done: [] }
-    }
-  })
-  handle('sessions:board-write', (_event, value: unknown): { ok: boolean } => {
-    try {
-      writeFileSync(boardFile(), JSON.stringify(normalizeBoard(value), null, 2), 'utf8')
-      return { ok: true }
-    } catch {
-      return { ok: false }
-    }
+  const sessionBoard = createSessionBoardStore(boardFile())
+  handle('sessions:board-read', () => sessionBoard.read())
+  handle('sessions:board-write', (_event, value: unknown, expected: unknown): { ok: boolean } => {
+    try { sessionBoard.save(value, expected); return { ok: true } }
+    catch { return { ok: false } }
   })
   handle('sessions:pick-files', async (): Promise<string[]> => {
     const picked = await dialog.showOpenDialog({
@@ -1232,19 +2300,25 @@ function registerBridges(): void {
   // Projects: the owner's named homes for related work. Stored once,
   // validated on the way in and the way out; a damaged file means "no
   // projects yet", never a failed launch.
-  const projectsFile = join(app.getPath('userData'), 'projects.json')
-  handle('projects:read', (): Project[] => {
-    try {
-      return normalizeProjects(JSON.parse(readFileSync(projectsFile, 'utf8')))
-    } catch {
-      return []
-    }
+  handle('projects:read', () => { const projects = nativeContext.projects(); memoryOb.syncProjects(projects); return projects })
+  handle('projects:write', (_event, projects: unknown, expected?: unknown) => {
+    if (!Array.isArray(expected)) throw Error('Read projects before saving; no current data was replaced.')
+    const saved = nativeContext.write(projects, expected); memoryOb.syncProjects(saved); return { ok: true, projects: saved }
   })
-
-  handle('projects:write', (_event, projects: unknown): { ok: boolean; projects: Project[] } => {
-    const clean = normalizeProjects(projects)
-    writeFileSync(projectsFile, JSON.stringify(clean, null, 2), 'utf8')
-    return { ok: true, projects: clean }
+  handle('projects:attach', async (_event, projectId: string) => {
+    if (!nativeContext.projects().some(p => p.id === projectId)) throw Error('Choose an existing project first.')
+    const picked = await dialog.showOpenDialog({ title: 'Choose project references. Selected text may be sent with this project’s chats only after you enable it.', properties: ['openFile', 'multiSelections'] })
+    return picked.canceled ? [] : nativeContext.attach(projectId, picked.filePaths)
+  })
+  handle('engine:context-target', (_event, value: unknown) => {
+    const input = checkNativeConversation(value)
+    if (!input) throw Error('Choose a chat first.')
+    const workspace = nativeContext.workspace(input, settings.engine.workspace || vaultRoot())
+    return { workspace, route: JSON.stringify(settings.engine), resume: !!sessionMemory.load(sessionKey(settings.engine.id, workspace, input.chatId)) }
+  })
+  handle('engine:chat-sessions', (_event, chatId: string) => {
+    checkNativeConversation({ chatId })
+    return sessionMemory.list().filter(row => row.chatId === chatId).map(({ key: _key, ...row }) => row)
   })
 
   handle('projects:new', (_event, name: string): Project => newProject(String(name ?? '')))
@@ -1253,45 +2327,35 @@ function registerBridges(): void {
   // window never chooses a working folder behind the app's back; this door
   // IS the owner's explicit choice, same as the picker.
   handle('engine:workspace-set', (_event, folder: string): { ok: boolean; answer: string } => {
-    const clean = typeof folder === 'string' ? folder.trim().slice(0, 4096) : ''
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Stop active work before changing its working folder.' }
+    if (typeof folder !== 'string' || folder.length > 4096) return { ok: false, answer: 'Choose a valid working folder. Nothing was changed.' }
+    const clean = folder.trim()
     // Empty is allowed and means "back to the vault" — a real choice, not a mistake.
     if (clean === '') {
       settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, workspace: '' } })
       return { ok: true, answer: '' }
     }
-    if (/[\n\r]/.test(clean) || /^https?:\/\//.test(clean)) {
+    if (!isAbsolute(clean) || /[\n\r]/.test(clean) || /^https?:\/\//.test(clean)) {
       return { ok: false, answer: 'That is not a folder this app will work in.' }
     }
-    if (!existsSync(clean)) return { ok: false, answer: 'That folder does not exist on this machine.' }
+    try { if (!statSync(clean).isDirectory()) return { ok: false, answer: 'Choose a directory, not a file.' } }
+    catch { return { ok: false, answer: 'That folder could not be read on this machine.' } }
     settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, workspace: clean } })
     return { ok: true, answer: clean }
   })
 
   // The engine sessions, per workspace: the threads a fresh launch will
   // continue. Read-only for the screen, with an explicit forget.
-  const sessionsFile = (): string => join(app.getPath('userData'), 'engine-sessions.json')
-  handle('engine:sessions', (): Array<{ workspace: string; sessionId: string }> => {
+  handle('engine:sessions', () => sessionMemory.list(settings.engine.id).filter(row => !row.chatId))
+  handle('engine:sessions-forget', (_event, workspace: string): { ok: boolean; answer?: string } => {
+    if (typeof workspace !== 'string' || !workspace || /[\x00-\x1f]/.test(workspace)) return { ok: false, answer: 'Invalid saved workspace.' }
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Stop the active task before forgetting a session.' }
     try {
-      const data = JSON.parse(readFileSync(sessionsFile(), 'utf8')) as Record<string, string>
-      return Object.entries(data)
-        .filter(([, id]) => typeof id === 'string' && id.length > 3)
-        .map(([workspace, sessionId]) => ({ workspace, sessionId: String(sessionId).slice(0, 64) }))
-        .slice(0, 20)
-    } catch {
-      return []
-    }
-  })
-
-  handle('engine:sessions-forget', (_event, workspace: string): { ok: boolean } => {
-    try {
-      const file = sessionsFile()
-      const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>
-      delete data[String(workspace ?? '')]
-      writeFileSync(file, JSON.stringify(data), 'utf8')
+      const target = engine?.currentTarget()
+      if (target?.engine === settings.engine.id && target.workspace === workspace && !target.chatId) engine!.fresh()
+      else sessionMemory.save(`${settings.engine.id}::${workspace}`, '')
       return { ok: true }
-    } catch {
-      return { ok: true }
-    }
+    } catch { return { ok: false, answer: 'Removal of the saved resume ID could not be confirmed. Refresh and inspect the saved record before retrying.' } }
   })
 
   // Open a folder in the file manager. Guarded to folders that exist and are
@@ -1340,60 +2404,35 @@ function registerBridges(): void {
       const value = rules?.[key]
       if (typeof value === 'string' && value.trim()) clean[key] = value
     }
-    writeFileSync(houseRulesFile, JSON.stringify(clean), 'utf8')
-    const home = process.env['USERPROFILE'] || process.env['HOME'] || ''
-    const written = deployHouseRules(settings.engine.id, settings.engine.model, home, clean)
-    return { ok: true, written }
+    readHouseRules() // damaged originals are not replaced with defaults
+    const previous = configBytes(houseRulesFile); if (previous) preserveConfig(houseRulesFile, previous)
+    commitConfigs([{ path: houseRulesFile, text: JSON.stringify(clean) }])
+    return { ok: true, written: [] }
   })
 
   // The brains the engine can actually use, straight from the brain door —
   // the same list Claude Code itself would choose from. Real data only: what
   // Ollama reports, with cloud brains flagged because their work leaves the
   // machine and the label must say so.
-  handle('engine:models', async (): Promise<{ ok: boolean; models: EngineModelEntry[]; error?: string }> => {
+  handle('engine:capabilities', async (event): Promise<EngineCapabilityReport> => capabilityInspector.inspect(track(event.sender), { ...settings.engine }, settings.engine.workspace || vaultRoot()))
+  handle('engine:models', async (event): Promise<{ ok: boolean; models: EngineModelEntry[]; error?: string }> => {
     // Each engine is served by its OWN source: Claude Code reads its brains
     // from the owner's door; agy answers only to Google. Never a pickable lie.
     if (settings.engine.id !== 'claude-code') {
       const known = await detectEngine(settings.engine.id as EngineId)
-      const answer = await agyModelSource(known.found).models()
+      const answer = await agyModelSource(known.found, () => capabilityInspector.inspect(track(event.sender), { ...settings.engine }, settings.engine.workspace || vaultRoot())).models()
       return answer
     }
-    const door = settings.engine.baseUrl || 'http://localhost:11434'
-    try {
-      const answer = await fetch(`${door}/api/tags`, { signal: AbortSignal.timeout(4000) })
-      if (!answer.ok) return { ok: false, models: [], error: `the brain door answered ${answer.status}` }
-      const data = (await answer.json()) as { models?: Array<{ name?: string; size?: number; remote_model?: string }> }
-      const models: EngineModelEntry[] = (data.models ?? [])
-        .filter((m): m is { name: string; size?: number; remote_model?: string } => typeof m.name === 'string')
-        .map((m) => {
-          const cloud = Boolean(m.remote_model) || m.name.endsWith(':cloud')
-          return {
-            name: m.name,
-            cloud,
-            sizeGB: cloud || typeof m.size !== 'number' ? null : Math.round((m.size / 1e9) * 10) / 10,
-          }
-        })
-      // A key saved in Models adds that provider's real brains to this list —
-      // read from the provider's own door, never invented. The app itself
-      // still calls no provider: picking one of these routes the ENGINE there
-      // with the key on the next send.
-      if (cloud && keyStore?.has('anthropic') && cloudEnabled(settings.permissions, 'anthropic', true)) {
-        try {
-          const providerBrains = await cloud.listModels('anthropic')
-          for (const brain of providerBrains.slice(0, 50)) {
-            if (brain && typeof brain.name === 'string' && !models.some((m) => m.name === brain.name)) {
-              models.push({ name: brain.name, cloud: true, sizeGB: null, provider: 'anthropic' })
-            }
-          }
-        } catch {
-          // The provider door not answering costs nothing: the local list
-          // stands, and the Test button in Models says what went wrong.
-        }
-      }
-      return { ok: true, models }
-    } catch {
-      return { ok: false, models: [], error: 'the brain door (Ollama) is not answering, start Ollama, then refresh' }
-    }
+    return discoverClaudeModels({
+      baseUrl: settings.engine.baseUrl || 'http://localhost:11434',
+      nativeModels: async () => {
+        const report = await capabilityInspector.inspect(track(event.sender), { ...settings.engine }, settings.engine.workspace || vaultRoot())
+        if (!report.ok) throw Error('Native model inspection unavailable.')
+        return report.models
+      },
+      providerModels: cloud && keyStore?.has('anthropic') && cloudEnabled(inferencePermissions(), 'anthropic', true)
+        ? () => cloud!.listModels('anthropic') : undefined,
+    })
   })
 
   // The throttle: how much the engine may do before asking. The app offers
@@ -1402,6 +2441,7 @@ function registerBridges(): void {
     const mode: ApprovalMode = APPROVAL_MODES.includes(approval as ApprovalMode)
       ? (approval as ApprovalMode)
       : 'ask'
+    if (approval === 'plan') { workflows.cancel(); commandRunner.cancel() }
     settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, approval: mode } })
     return { ok: true, answer: mode }
   })
@@ -1419,31 +2459,78 @@ function registerBridges(): void {
   // The memory home is the ENGINE's own working folder — the same root it
   // spawns in — so what the pane lists is always what the engine wrote,
   // even when the workspace is not the vault.
-  const memoryFiles = createMemoryManager(() => settings.engine.workspace || vaultRoot())
+  const memoryFiles = createMemoryManager(() => settings.engine.workspace || vaultRoot(), () => settings.memoryFolder || '')
   handle('memory:list', () => memoryFiles.list())
-  handle('memory:remove', (_event, name: string) => memoryFiles.remove(typeof name === 'string' ? name : ''))
+  handle('memory:trash-list', () => memoryFiles.listTrash())
+  handle('memory:remove', (_event, name: string, expectedFolder?: string) => memoryFiles.remove(typeof name === 'string' ? name : '', typeof expectedFolder === 'string' ? expectedFolder : undefined))
+  handle('memory:restore', (_event, id: string, expectedFolder?: string) => memoryFiles.restore(typeof id === 'string' ? id : '', typeof expectedFolder === 'string' ? expectedFolder : undefined))
 
-  handle('engine:thinking', (_event, thinking: string): { ok: boolean; answer: string } => {
-    const mode = thinking === 'extended' ? 'extended' : 'default'
-    settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, thinking: mode } })
-    return { ok: true, answer: mode === 'extended' ? 'Extended thinking: the engine gets its own big budget.' : 'Default thinking.' }
+  handle('memory:choose-folder', async () => {
+    const chosen = await dialog.showOpenDialog({ title: 'Choose a dedicated memory folder (existing notes are not moved)', properties: ['openDirectory'] })
+    if (chosen.canceled || !chosen.filePaths[0]) return { ok: false, canceled: true, answer: '' }
+    const problem = folderProblem(chosen.filePaths[0]); if (problem) return { ok: false, answer: problem }
+    try {
+      const folder = realpathSync(chosen.filePaths[0])
+      if (/[\r\n]/.test(folder) || folder.length > 4096) return { ok: false, answer: 'That folder name cannot be used in an engine instruction.' }
+      settings = writeSettings(settingsFile, { ...settings, memoryFolder: folder })
+      return { ok: true, answer: 'Memory folder selected. Existing notes were not moved.', folder }
+    } catch { return { ok: false, answer: 'The memory folder could not be saved.' } }
+  })
+  handle('memory:default-folder', () => {
+    const next = { ...settings }; delete next.memoryFolder
+    try { settings = writeSettings(settingsFile, next); return { ok: true, answer: 'Memory uses the working-folder default again.' } }
+    catch { return { ok: false, answer: 'The memory preference could not be saved.' } }
   })
 
-  handle('engine:model', (_event, model: string, provider?: string): { ok: boolean; answer: string } => {
-    const clean = normalizeEngine({ ...settings.engine, model, cloudProvider: provider === 'anthropic' ? 'anthropic' : '' })
+
+  handle('engine:thinking', async (event, thinking: string, expectedTarget: string): Promise<{ ok: boolean; answer: string }> => {
+    const original = settings.engine
+    const snapshot = { ...original }
+    const target = effortTarget(snapshot)
+    const command = resolveEngineCommand(snapshot.id)
+    const checked = await checkEffortSelection(snapshot, thinking, expectedTarget, current => capabilityInspector.inspect(track(event.sender), current, current.workspace || vaultRoot()))
+    if (!checked.ok) return checked
+    if (command !== resolveEngineCommand(snapshot.id) || original !== settings.engine || target !== effortTarget(settings.engine)) return { ok: false, answer: 'Engine settings changed during the check. Nothing was changed.' }
+    settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, thinking: thinking as ThinkingMode, effortTarget: target } })
+    return checked
+  })
+
+  handle('engine:model', (_event, model: string, provider?: string, expectedEngine?: string): { ok: boolean; answer: string } => {
+    if ((expectedEngine && expectedEngine !== settings.engine.id) || (provider === 'anthropic' && settings.engine.id !== 'claude-code')) return { ok: false, answer: 'The engine changed. Choose a model from the current engine’s list.' }
+    const typed = typeof model === 'string' ? model.trim() : ''
+    if (typed && !isValidModelName(typed)) {
+      return { ok: false, answer: 'Model names use letters, digits, dots, colons, @, / and dashes only; nothing was changed.' }
+    }
+    const clean = normalizeEngine({ ...settings.engine, model: typed, cloudProvider: provider === 'anthropic' || provider === 'native' ? provider : '', thinking: 'default', effortTarget: undefined })
     settings = writeSettings(settingsFile, { ...settings, engine: clean })
     return { ok: true, answer: clean.cloudProvider ? `brain set to ${clean.model} via ${clean.cloudProvider}` : `brain set to ${clean.model}` }
   })
 
+  // Is the engine actually signed in? The CLI answers for itself; agy does not.
+  handle('engine:auth-status', (_event, id?: string): Promise<unknown> =>
+    readAuthStatus(id === 'agy' ? 'agy' : 'claude-code'),
+  )
+
+  // Open the CLI's own login in a terminal. The app starts the CLI; it never
+  // receives the credentials and never runs an OAuth flow in its own window.
+  handle('engine:open-login', () => openLogin())
+
+  // Which Ollama is answering, and whether it can serve Claude Code's door.
+  handle('engine:ollama-version', (): Promise<unknown> =>
+    readOllamaVersion({ baseUrl: settings.engine.baseUrl || 'http://127.0.0.1:11434' }),
+  )
+
   // "Open a folder" — the engine's workplace, chosen once and remembered.
   handle('engine:pick-workspace', async (): Promise<{ ok: boolean; answer: string }> => {
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Stop active work before changing its working folder.' }
     const answer = await dialog.showOpenDialog({
       title: 'Where should the engine work?',
       properties: ['openDirectory', 'createDirectory'],
     })
     if (answer.canceled || !answer.filePaths[0]) {
-      return { ok: false, answer: 'No folder chosen, the vault stays the workplace.' }
+      return { ok: false, answer: 'No folder chosen. The working folder was not changed.' }
     }
+    if (dispatchingWork || engine?.turnBusy()) return { ok: false, answer: 'Work started while the picker was open. The folder was not changed.' }
     const workspace = answer.filePaths[0]
     settings = writeSettings(settingsFile, { ...settings, engine: { ...settings.engine, workspace } })
     // The agy skills copy follows the workspace; refresh so a brand-new
@@ -1473,23 +2560,23 @@ try {
 try {
   const overrideFile = join(app.getPath('userData'), 'engine-binaries.json')
   if (existsSync(overrideFile)) {
-    const parsed = JSON.parse(readFileSync(overrideFile, 'utf8')) as Record<string, string>
+    const parsed = readRecoverableJson(overrideFile, value => {
+      if (!value || typeof value !== 'object' || Array.isArray(value)) throw Error('Engine path choices are damaged.')
+      const row = value as Record<string, unknown>
+      if (['claude-code', 'agy'].some(id => row[id] !== undefined && typeof row[id] !== 'string')) throw Error('Engine path choices are damaged.')
+      return row as Record<string, string>
+    }, {}).value
     for (const id of ['claude-code', 'agy'] as const) {
       const p = typeof parsed[id] === 'string' ? parsed[id] : ''
       if (p && existsSync(p)) setBinaryOverride(id, p)
     }
   }
-} catch {
-  /* a broken override file must never block the boot */
+} catch (error) {
+  console.warn(`[engine] saved binary paths could not be recovered: ${(error as Error).message}`)
 }
 
-const isSmoke = process.argv.includes('--smoke')
-const smokeOutArg = process.argv.find(arg => arg.startsWith('--smoke-out='))
-const smokeOut = smokeOutArg ? smokeOutArg.split('=')[1] : ''
-
-/** Renderer console output, kept so the smoke run can fail on it. */
-const consoleErrors: string[] = []
-const consoleWarnings: string[] = []
+const processStartedAt = performance.now()
+let startupReported = false
 
 let api: LocalApi | null = null
 
@@ -1519,7 +2606,7 @@ let downloadManager: ReturnType<typeof createDownloadManager> | null = null
 async function warmStartRuntime(): Promise<void> {
   try {
     if (!downloadManager) return
-    const status = downloadManager.ollamaStatus()
+    const status = await downloadManager.ollamaStatus()
     if (status && typeof status === 'object' && 'running' in status && (status as { running?: boolean }).running) return
     // The always-loaded switch is a RUNTIME property: Ollama's own env sets
     // the default hold forever, so every brain the engine drives stays warm.
@@ -1539,10 +2626,7 @@ function createQuickWindow(): void {
   }
   const icon = windowIcon()
   quickWindow = new BrowserWindow({
-    width: 440,
-    height: 620,
-    minWidth: 360,
-    minHeight: 420,
+    ...fitWindow(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea, { width: 440, height: 620, minWidth: 360, minHeight: 420 }),
     title: 'OddBrain — quick ask',
     autoHideMenuBar: true,
     ...(icon ? { icon } : {}),
@@ -1579,6 +2663,7 @@ function applyQuickShortcut(): void {
 }
 
 
+let extensionAppearance: ExtensionAppearance | null = null
 let extensionApi: ExtensionApi | null = null
 let settings: AppSettings = { ...EMPTY_SETTINGS }
 let settingsFile = ''
@@ -1586,6 +2671,12 @@ let keyStore: KeyStore | null = null
 let cloud: CloudClient | null = null
 /** The engine plug and the last events it produced, for windows opened mid-turn. */
 let engine: EngineSocket | null = null
+let automation: AutomationService | null = null
+let reviewer: ReturnType<typeof createTextReviewer> | null = null
+let memoryOrganizer: ReturnType<typeof createMemoryOrganizer> | null = null
+let foregroundApiRequests = 0
+let dispatchingWork = false
+let workDispatchGeneration = 0
 const engineHistory: EngineEvent[] = []
 
 /**
@@ -1610,10 +2701,7 @@ function windowIcon(): string | undefined {
 function createWindow(): BrowserWindow {
   const icon = windowIcon()
   const window = new BrowserWindow({
-    width: 1280,
-    height: 820,
-    minWidth: 940,
-    minHeight: 620,
+    ...fitWindow(screen.getDisplayNearestPoint(screen.getCursorScreenPoint()).workArea),
     show: false,
     ...(icon ? { icon } : {}),
     // The window paints this before the renderer draws, so there is never a white flash.
@@ -1628,31 +2716,14 @@ function createWindow(): BrowserWindow {
     },
   })
 
-  // Electron changed this event's payload shape across versions; read both.
-  window.webContents.on('console-message', (...args: unknown[]) => {
-    const maybeDetails = args[1]
-    const details =
-      maybeDetails && typeof maybeDetails === 'object'
-        ? (maybeDetails as { level?: string | number; message?: string })
-        : null
-    const level = details ? details.level : (args[1] as string | number)
-    const message = details ? details.message : (args[2] as string)
-    const text = String(message ?? '')
-    if (level === 'error' || level === 3) consoleErrors.push(text)
-    else if (level === 'warning' || level === 2) consoleWarnings.push(text)
+  // Show on first paint so there is never a white flash.
+  window.once('ready-to-show', () => {
+    window.show()
+    if (!startupReported) {
+      startupReported = true
+      console.log(`[startup] first window ready in ${Math.round(performance.now() - processStartedAt)} ms`)
+    }
   })
-
-  window.webContents.on('preload-error', (_event, path, error) => {
-    consoleErrors.push(`preload failed at ${path}: ${error.message}`)
-  })
-
-  window.webContents.on('did-fail-load', (_event, code, description) => {
-    consoleErrors.push(`renderer failed to load (${code}): ${description}`)
-  })
-
-  // Show on first paint so there is never a white flash, and so a screenshot
-  // taken by the smoke run captures something real rather than an unpainted frame.
-  window.once('ready-to-show', () => window.show())
 
   // The interface is always loaded over http, never from file://, so that its
   // fetch calls are same-origin and the local API boundary sees a real Origin.
@@ -1676,69 +2747,9 @@ function createWindow(): BrowserWindow {
   pinOwnOrigins([devServer, api?.url, appRendererFileUrl()])
   lockNavigation(window.webContents)
 
-  if (isSmoke) runSmoke(window)
-
   return window
 }
 
-/**
- * Headless proof that the shell works: wait for the renderer, photograph the
- * window, and exit non-zero if the renderer logged anything it shouldn't have.
- * This is the test that makes "the window opens" a fact instead of a claim.
- */
-function runSmoke(window: BrowserWindow): void {
-  const started = Date.now()
-  window.webContents.once('did-finish-load', () => {
-    setTimeout(async () => {
-      try {
-        // The real machine reported a chat that would not scroll. Photograph
-        // alone cannot see that, so the smoke run now proves the scroll
-        // chain on the built app: force overflow in the message scroller and
-        // demand that it actually moves.
-        let scrollLine = 'SCROLL skipped'
-        try {
-          const probe = (await window.webContents.executeJavaScript(
-            `(() => {
-              const scroller = document.querySelector('[data-find-scroll]')
-              if (!scroller) return { ok: false, why: 'no scroller in the tree' }
-              const filler = document.createElement('div')
-              filler.style.height = '4000px'
-              ;(scroller.firstElementChild ?? scroller).appendChild(filler)
-              const scrollable = scroller.scrollHeight > scroller.clientHeight
-              scroller.scrollTop = 99999
-              const moved = scroller.scrollTop > 100
-              filler.remove()
-              return { ok: scrollable && moved, scrollable, moved }
-            })()`,
-            true,
-          )) as { ok: boolean; why?: string; scrollable?: boolean; moved?: boolean }
-          scrollLine = probe && probe.ok ? 'SCROLL OK' : `SCROLL BROKEN ${JSON.stringify(probe)}`
-        } catch (probeError) {
-          scrollLine = `SCROLL FAILED ${(probeError as Error).message}`
-        }
-        const image = await window.webContents.capturePage()
-        if (smokeOut) writeFileSync(smokeOut, image.toPNG())
-        const bounds = window.getBounds()
-        const title = window.getTitle()
-        const blank = image.isEmpty()
-        console.log(
-          `SMOKE ${blank ? 'BLANK' : 'OK'} ${scrollLine} title="${title}" size=${bounds.width}x${bounds.height} ` +
-            `in ${Date.now() - started}ms errors=${consoleErrors.length} warnings=${consoleWarnings.length}`
-        )
-        for (const line of consoleErrors.slice(0, 10)) console.log(`  ERROR: ${line}`)
-        for (const line of consoleWarnings.slice(0, 10)) console.log(`  WARN:  ${line}`)
-        // The rule the owner set: a WARNING is already a failure. The smoke
-        // run is the console-clean gate, so it enforces the whole sentence.
-        const failed =
-          consoleErrors.length > 0 || consoleWarnings.length > 0 || blank || scrollLine.startsWith('SCROLL BROKEN')
-        app.exit(failed ? 1 : 0)
-      } catch (error) {
-        console.log(`SMOKE FAILED: ${(error as Error).message}`)
-        app.exit(1)
-      }
-    }, 1500)
-  })
-}
 
 // One copy at a time. A second launch focuses the window you already have.
 const gotLock = app.requestSingleInstanceLock()
@@ -1792,7 +2803,7 @@ if (!gotLock) {
         { label: 'Today', accelerator: 'CmdOrCtrl+3', click: () => sendToWindow('menu:view:today') },
         { label: 'Projects', accelerator: 'CmdOrCtrl+4', click: () => sendToWindow('menu:view:projects') },
         { label: 'Vault', accelerator: 'CmdOrCtrl+5', click: () => sendToWindow('menu:view:vault') },
-        { label: 'Code', accelerator: 'CmdOrCtrl+6', click: () => sendToWindow('menu:view:code') },
+        { label: 'Video Studio', accelerator: 'CmdOrCtrl+6', click: () => sendToWindow('menu:view:video') },
         { label: 'Brain', accelerator: 'CmdOrCtrl+7', click: () => sendToWindow('menu:view:brain') },
       ],
     },
@@ -1800,8 +2811,12 @@ if (!gotLock) {
       label: 'Help',
       submenu: [
         {
-          label: 'Learn more',
+          label: 'OddBrain source & help',
           click: () => void shell.openExternal('https://github.com/NishadIslamUtso/OddBrain'),
+        },
+        {
+          label: 'Source owner · NishadIslamUtso',
+          click: () => void shell.openExternal('https://github.com/NishadIslamUtso'),
         },
         {
           label: 'About OddBrain',
@@ -1810,7 +2825,7 @@ if (!gotLock) {
               type: 'info',
               title: 'About OddBrain',
               message: `OddBrain ${app.getVersion()}`,
-              detail: 'The face of your engines. Local vault, local memory, $0.',
+              detail: 'The face of your engines. Local vault, local memory, $0.\n\nSource owner: NishadIslamUtso (GitHub). This source identity is not a Windows code-signing certificate.',
             })
           },
         },
@@ -1824,6 +2839,17 @@ if (!gotLock) {
 })
 
 app.whenReady().then(async () => {
+    // Only a main-frame, explicitly initiated dictation session may use the mic.
+    session.defaultSession.setPermissionCheckHandler((contents, permission, _origin, details) => {
+      if (!contents || !urlIsOurs(contents.getURL()) || !details.isMainFrame) return false
+      if (permission === 'media') return details.mediaType === 'audio' && mediaService?.canRecord(contents.id) === true
+      return permission === 'clipboard-sanitized-write'
+    })
+    session.defaultSession.setPermissionRequestHandler((contents, permission, callback, details) => {
+      const own = urlIsOurs(contents.getURL()) && details.isMainFrame && urlIsOurs(details.requestingUrl)
+      if (permission === 'media') callback(!!own && 'mediaTypes' in details && details.mediaTypes?.length === 1 && details.mediaTypes[0] === 'audio' && mediaService?.canRecord(contents.id) === true)
+      else callback(!!own && permission === 'clipboard-sanitized-write')
+    })
     Menu.setApplicationMenu(menu)
     console.log(`[menu] application menu set: ${Menu.getApplicationMenu()?.items.length ?? 0} top items`)
     const rendererDir = process.env['ELECTRON_RENDERER_URL']
@@ -1837,37 +2863,7 @@ app.whenReady().then(async () => {
     // immediately (drives and tests use this door).
     applyQuickShortcut()
     if (process.argv.includes('--quick')) createQuickWindow()
-    engine = createEngineSocket({
-      // Engine sessions, remembered per workspace so a conversation survives
-      // an app restart (the engine's own --resume). A damaged file means
-      // "nothing to resume", never a failed launch.
-      load: (cwd) => {
-        try {
-          const file = join(app.getPath('userData'), 'engine-sessions.json')
-          const data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>
-          return typeof data[cwd] === 'string' ? data[cwd] : ''
-        } catch {
-          return ''
-        }
-      },
-      save: (cwd, sessionId) => {
-        try {
-          const file = join(app.getPath('userData'), 'engine-sessions.json')
-          let data: Record<string, string> = {}
-          try {
-            data = JSON.parse(readFileSync(file, 'utf8')) as Record<string, string>
-          } catch {
-            data = {}
-          }
-          data[cwd] = sessionId
-          // Keep the map small: the twenty most recent workplaces are enough.
-          const entries = Object.entries(data).slice(-20)
-          writeFileSync(file, JSON.stringify(Object.fromEntries(entries)), 'utf8')
-        } catch {
-          // A failed save costs only the resume; the work itself is unaffected.
-        }
-      },
-    })
+    engine = createEngineSocket(createSessionMemory(join(app.getPath('userData'), 'engine-sessions.json')))
     registerBridges()
     // The keep-it-running flags, honored every boot — HERE, after the bridges
     // registered, because the warm runtime starts through the download
@@ -1912,9 +2908,31 @@ app.whenReady().then(async () => {
       keys: keyStore,
       config: () => ({ custom: settings.cloud }),
       // Read fresh on every call, so a switch in Settings takes effect at once.
-      permissions: () => settings.permissions,
+      permissions: () => inferencePermissions(),
       env: process.env,
     })
+    const reviewCloud = createCloudClient({ keys: keyStore, config: () => ({ custom: settings.cloud }), permissions: () => inferencePermissions(), env: process.env,
+      fetchImpl: (input, init) => fetch(input, { ...init, redirect: 'error' }) })
+    reviewer = createTextReviewer({ permissions: () => inferencePermissions(), cloudAllowed: () => automation?.preferences().allowCloudInference !== false, cloud: () => reviewCloud, engine: () => settings.engine })
+    automation = createAutomationService({ file: join(app.getPath('userData'), 'automation.json'), engine: () => settings.engine,
+      runText: (task, preferences, signal) => { memoryOrganizer?.cancel(); return reviewer!.run(task, preferences, signal) },
+      onChanged: (view: AutomationView) => { for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) window.webContents.send('automation:changed', view) } })
+    for (const window of BrowserWindow.getAllWindows()) if (!window.isDestroyed()) try { window.webContents.send('automation:changed', automation.view()) } catch {}
+    app.on('before-quit', () => { void automation?.dispose() })
+    memoryOrganizer = createMemoryOrganizer({
+      store: () => {
+        const changed = (workspace: ReturnType<ReturnType<typeof createMemoryWorkspace>['read']>) => {
+          try { memoryObService?.syncMemoryWorkspace(workspace) } catch (error) { console.error(`[memory-ob] reviewed-memory intake paused: ${(error as Error).message}`) }
+        }
+        const store = createMemoryWorkspace(currentVaultService().files(), undefined, changed)
+        try { changed(store.read()) } catch (error) { console.error(`[memory-ob] reviewed-memory startup intake paused: ${(error as Error).message}`) }
+        return store
+      },
+      busy: () => dispatchingWork || !!engine?.turnBusy() || foregroundApiRequests > 0 || !!automation?.view().current,
+      configuration: () => JSON.stringify({ engine: settings.engine, permissions: inferencePermissions(), cloud: automation?.preferences().allowCloudInference, custom: settings.cloud, keyProviders: keyStore?.ids() }),
+      run: (system, prompt, preferences, signal) => reviewer!.organize(system, prompt, preferences, signal),
+    })
+    app.on('before-quit', () => memoryOrganizer?.dispose())
     const enabled = keyStore.ids().length
     console.log(
       `[cloud] keys ${keyStore.encryption === 'os' ? 'sealed by this machine' : 'held for this run only'}; ` +
@@ -1923,17 +2941,29 @@ app.whenReady().then(async () => {
 
     // The vault lives in this process: no companion server to start, no port to
     // find, and the interface's /api/vault calls land on these files.
-    const vault = createVaultService({ vaultPath: vaultRoot() })
+    const vault = currentVaultService()
     console.log(
       vault.available()
         ? `[vault] ${vault.root}`
         : `[vault] nothing at ${vault.root}; captures will report that rather than create one.`
     )
     try {
+      // The AI-facing video review MCP is a local capability, not an
+      // unauthenticated loopback service. Its random path is OS-protected with
+      // other connector secrets when possible and is written to engine config
+      // only through the existing exact owner review.
+      const videoCapabilityId = 'oddbrain-video-review-capability'
+      let videoCapability = keyStore.get(videoCapabilityId)
+      if (!/^[a-f0-9]{64}$/.test(videoCapability)) {
+        videoCapability = randomBytes(32).toString('hex')
+        try { keyStore.set(videoCapabilityId, videoCapability) } catch { /* this-run capability remains usable */ }
+      }
+      const videoMcpPath = `/api/video-studio-mcp/${videoCapability}`
       // The API is handed the cloud client, so a chat whose model names a
       // provider streams from there — through the same address, as the same
       // records, with no second path for the interface to know about.
-      api = await startLocalApi({ port: API_PORT, rendererDir, vault, cloud: cloud || undefined })
+      api = await startLocalApi({ port: API_PORT, rendererDir, vault, cloud: cloud || undefined, videoMcpPath, videoMcp: (request, session) => videoStudioService ? videoStudioService.aiMcp(request, session) : Promise.resolve({ status: 503, body: { error: 'Video Studio is not ready.' } }), onInferenceActivity: busy => { foregroundApiRequests = Math.max(0, foregroundApiRequests + (busy ? 1 : -1)); if (busy) memoryOrganizer?.cancel() } })
+      videoStudioService?.setAiToolsUrl(`${api.url}${videoMcpPath}`)
       if (api.port !== API_PORT) {
         console.log(`[api] port ${API_PORT} was busy; listening on ${api.port} instead.`)
       }
@@ -1949,21 +2979,25 @@ app.whenReady().then(async () => {
     // the same paired extension. The extension's pairing screen shows where it
     // lives; nothing here trusts the network with it.
     let pairToken = ''
+    const pairFile = join(app.getPath('userData'), 'extension-pair.json')
     try {
-      const pairFile = join(app.getPath('userData'), 'extension-pair.json')
-      const raw = JSON.parse(readFileSync(pairFile, 'utf8')) as { token?: string }
-      if (typeof raw.token === 'string' && raw.token.length >= 32) pairToken = raw.token
-    } catch {}
+      const raw = readRecoverableJson(pairFile, value => {
+        if (!value || typeof value !== 'object' || typeof (value as { token?: unknown }).token !== 'string' || (value as { token: string }).token.length < 32) throw Error('The extension pairing record is damaged.')
+        return value as { token: string }
+      }, { token: '' }).value
+      pairToken = raw.token
+    } catch (error) { console.warn(`[extension] pairing record could not be recovered: ${(error as Error).message}`) }
     if (!pairToken) {
       pairToken = randomBytes(24).toString('hex')
       try {
-        writeFileSync(join(app.getPath('userData'), 'extension-pair.json'), JSON.stringify({ token: pairToken }), 'utf8')
-      } catch {
-        // A failed save means a fresh token next boot; the extension re-pairs. Fine.
+        writeRecoverableJson(pairFile, { token: pairToken })
+      } catch (error) {
+        console.warn(`[extension] fresh pairing token is temporary because it could not be saved: ${(error as Error).message}`)
       }
     }
     extensionApi = await startExtensionApi({
       port: extensionPortWanted(),
+      appearance: () => extensionAppearance,
       vault,
       mayCapture: () => settings.permissions.browserCapture,
       pairToken,
@@ -1976,12 +3010,10 @@ app.whenReady().then(async () => {
     // too — an old extension stops working the moment they rotate.
     handle('extension-pair:get', () => ({ token: pairToken }))
     handle('extension-pair:rotate', () => {
-      pairToken = randomBytes(24).toString('hex')
-      try {
-        writeFileSync(join(app.getPath('userData'), 'extension-pair.json'), JSON.stringify({ token: pairToken }), 'utf8')
-      } catch {
-        // A failed save means the rotation lives until reboot; still told below.
-      }
+      const nextToken = randomBytes(24).toString('hex')
+      try { writeRecoverableJson(pairFile, { token: nextToken }) }
+      catch { return { ok: false, token: pairToken, answer: 'The pairing secret was not rotated because the new secret could not be saved recoverably.' } }
+      pairToken = nextToken
       if (extensionApi) extensionApi.setPairToken(pairToken)
       return { ok: true, token: pairToken }
     })
@@ -1992,6 +3024,10 @@ app.whenReady().then(async () => {
   })
 
   app.on('before-quit', () => {
+    capabilityInspector.cancelAll()
+    mediaService?.cancelAll()
+    marketplaceService?.cancelAll()
+    agyMarketplaceService?.cancelAll()
     void api?.close()
     void extensionApi?.close()
   })
@@ -2000,3 +3036,6 @@ app.whenReady().then(async () => {
     if (process.platform !== 'darwin') app.quit()
   })
 }
+
+// Module scope: registration/window recreation cannot reset the launch ticket.
+const claimUiLaunch = createLaunchGate()

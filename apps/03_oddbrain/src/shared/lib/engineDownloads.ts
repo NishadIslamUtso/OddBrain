@@ -26,24 +26,29 @@ export type EngineDownloadInfo = {
   redirectHosts?: readonly string[]
   /** What the card says before any byte moves. */
   note: string
+  /** Compile-time SHA-256 pin for every executable archive the app accepts. */
+  sha256?: string
   /** For kind 'page': the official page to open by hand. */
   page?: string
 }
 
 export const ENGINE_DOWNLOADS: Record<string, EngineDownloadInfo | undefined> = {
   'claude-code': {
-    windows: 'https://claude.ai/install.ps1',
-    kind: 'installer-script',
-    host: 'claude.ai',
-    redirectHosts: ['downloads.claude.ai'],
-    note: 'Anthropic\u2019s own native installer script. Needs no Node. The app stages it, and running it is a separate permission.',
+    windows: '',
+    kind: 'page',
+    host: 'github.com',
+    page: 'https://github.com/anthropics/claude-code/releases/latest',
+    note: 'Anthropic publishes signed checksum metadata with versioned native releases, but OddBrain does not yet verify that signature chain locally. Install from the official release page; the app will not stage a changing bootstrap script as trusted code.',
   },
   ollama: {
-    windows: 'https://ollama.com/download/ollama-windows-amd64.zip',
+    // Version and digest are updated together. A moving “latest” URL is not an
+    // executable identity and is therefore not accepted by the app.
+    windows: 'https://github.com/ollama/ollama/releases/download/v0.40.7/ollama-windows-amd64.zip',
     kind: 'zip',
-    host: 'ollama.com',
-    redirectHosts: ['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com'],  // verified live 2026-10-17: ollama.com -> github.com/... /releases/download/vX -> release-assets.githubusercontent.com -> 200
-    note: 'The headless runtime only, from ollama.com\u2019s own zip. No desktop app, no tray, nothing autostarts: start and stop it right here — or run your own Ollama and leave this staged copy alone.',
+    host: 'github.com',
+    redirectHosts: ['objects.githubusercontent.com', 'release-assets.githubusercontent.com'],
+    sha256: 'e6527768c53e85ec4596495fb0f035ef07f437b4b591ebc3581684699a4668f4',
+    note: 'Pinned Ollama v0.40.7 headless Windows runtime. OddBrain verifies the compile-time SHA-256 before unpacking; no desktop app, tray or autostart is added.',
   },
   agy: {
     windows: '',

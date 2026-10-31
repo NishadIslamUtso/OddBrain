@@ -1,7 +1,6 @@
-# The installer, made by machines: every push to v3 or main packages the
-# Windows exe on a real Windows runner and uploads it as an artifact anyone
-# (the owner, a judge) can download from the run page - no local build needed.
-# Push a tag v* and the exe + its sha256 attach to a GitHub Release.
+# Windows 11 installer, Authenticode and provenance. Automated runtime tests are
+# intentionally absent until replacements are designed; tagged/public releases
+# remain blocked unless a trusted publisher signature is configured and verifies.
 name: installer
 on:
   push:
@@ -16,42 +15,128 @@ jobs:
   windows-installer:
     runs-on: windows-latest
     permissions:
-      contents: write
+      contents: read
+      id-token: write
+      attestations: write
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@fbc6f3992d24b796d5a048ff273f7fcc4a7b6c09
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444
         with:
-          node-version: 22
-      - name: Install
-        working-directory: apps/03_oddbrain
-        run: npm ci --no-audit --no-fund
-      - name: Build and package the installer
-        working-directory: apps/03_oddbrain
-        run: npm run dist:win
-      - name: Prove it - sha256 into the summary
+          node-version: 24
+      - name: Resolve versioned release paths
+        id: package
         working-directory: apps/03_oddbrain
         shell: pwsh
         run: |
-          $h = (Get-FileHash dist/OddBrain-Setup-0.9.0.exe -Algorithm SHA256).Hash.ToLower()
-          "$h  OddBrain-Setup-0.9.0.exe" | Out-File -Encoding ascii dist/OddBrain-Setup-0.9.0.exe.sha256
-          Add-Content $env:GITHUB_STEP_SUMMARY "## Installer built"
+          $package = Get-Content package.json -Raw | ConvertFrom-Json
+          if ($package.version -notmatch '^\d+\.\d+\.\d+$') { throw 'package.json needs a numeric release version' }
+          $name = "OddBrain-Setup-$($package.version).exe"
+          "name=$name" >> $env:GITHUB_OUTPUT
+          "relative=dist/$name" >> $env:GITHUB_OUTPUT
+          "subject=apps/03_oddbrain/dist/$name" >> $env:GITHUB_OUTPUT
+          "checksum=apps/03_oddbrain/dist/$name.sha256" >> $env:GITHUB_OUTPUT
+      - name: Install
+        working-directory: apps/03_oddbrain
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Install the pinned Electron runtime explicitly
+        working-directory: apps/03_oddbrain
+        run: node node_modules/electron/install.js
+      - name: Security policy invariants
+        working-directory: apps/03_oddbrain
+        run: npm run security:policy
+      - name: Require signing credentials for a tagged release
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: pwsh
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:CSC_LINK) -or [string]::IsNullOrWhiteSpace($env:CSC_KEY_PASSWORD)) {
+            throw 'Tagged Windows releases require WINDOWS_CSC_LINK and WINDOWS_CSC_KEY_PASSWORD repository secrets.'
+          }
+      - name: Build and package the installer
+        working-directory: apps/03_oddbrain
+        env:
+          CSC_LINK: ${{ secrets.WINDOWS_CSC_LINK }}
+          CSC_KEY_PASSWORD: ${{ secrets.WINDOWS_CSC_KEY_PASSWORD }}
+        run: npm run dist:win
+      - name: Verify Authenticode before a tagged artifact can leave this job
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: apps/03_oddbrain
+        shell: pwsh
+        env:
+          INSTALLER: ${{ steps.package.outputs.relative }}
+        run: |
+          $targets = @($env:INSTALLER, 'dist/win-unpacked/OddBrain.exe')
+          foreach ($target in $targets) {
+            $signature = Get-AuthenticodeSignature $target
+            if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate) {
+              throw "$target does not have a valid Authenticode publisher signature (status: $($signature.Status))."
+            }
+          }
+      - name: Generate dependency SBOM
+        working-directory: apps/03_oddbrain
+        shell: pwsh
+        run: npm sbom --sbom-format cyclonedx | Out-File -Encoding utf8 dist/oddbrain-sbom.cdx.json
+      - name: Prove it - sha256 and source identity
+        working-directory: apps/03_oddbrain
+        shell: pwsh
+        env:
+          INSTALLER: ${{ steps.package.outputs.relative }}
+          INSTALLER_NAME: ${{ steps.package.outputs.name }}
+        run: |
+          $h = (Get-FileHash $env:INSTALLER -Algorithm SHA256).Hash.ToLower()
+          "$h  $env:INSTALLER_NAME" | Out-File -Encoding ascii "$env:INSTALLER.sha256"
+          Add-Content $env:GITHUB_STEP_SUMMARY "## Windows 11 installer built"
           Add-Content $env:GITHUB_STEP_SUMMARY '```'
           Add-Content $env:GITHUB_STEP_SUMMARY "sha256: $h"
           Add-Content $env:GITHUB_STEP_SUMMARY '```'
+          Add-Content $env:GITHUB_STEP_SUMMARY 'Source owner: [NishadIslamUtso](https://github.com/NishadIslamUtso) · [OddBrain repository](https://github.com/NishadIslamUtso/OddBrain)'
+          if ($env:GITHUB_REF -like 'refs/tags/v*') { Add-Content $env:GITHUB_STEP_SUMMARY 'Authenticode: verified before artifact upload.' }
+          else { Add-Content $env:GITHUB_STEP_SUMMARY 'Branch CI artifact only; not eligible for public release.' }
+      - name: Verify packaged Electron fuses
+        working-directory: apps/03_oddbrain
+        run: npm run security:fuses
+      - name: Inspect final packaged release output
+        working-directory: apps/03_oddbrain
+        run: npm run security:installer
+      - name: Attest installer build provenance
+        uses: actions/attest-build-provenance@977bb373ede98d70efdf65b84cb5f73e068dcc2a
+        with:
+          subject-path: ${{ steps.package.outputs.subject }}
       - name: Upload the artifact (30 days)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f
         with:
           name: OddBrain-Setup-${{ github.sha }}
           path: |
-            apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe
-            apps/03_oddbrain/dist/OddBrain-Setup-0.9.0.exe.sha256
+            ${{ steps.package.outputs.subject }}
+            ${{ steps.package.outputs.checksum }}
+            apps/03_oddbrain/dist/oddbrain-sbom.cdx.json
           retention-days: 30
           if-no-files-found: error
-      - name: Attach to the release (on a version tag only)
-        if: startsWith(github.ref, 'refs/tags/v')
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: windows-installer
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download the validated installer artifact
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333
+        with:
+          name: OddBrain-Setup-${{ github.sha }}
+          path: release
+      - name: Attach the validated files to the version release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: pwsh
         run: |
-          gh release create "$env:GITHUB_REF_NAME" --generate-notes --title "OddBrain $env:GITHUB_REF_NAME" dist/OddBrain-Setup-0.9.0.exe dist/OddBrain-Setup-0.9.0.exe.sha256
+          $installer = @(Get-ChildItem release -Filter 'OddBrain-Setup-*.exe' -File)
+          if ($installer.Count -ne 1) { throw 'Expected exactly one versioned OddBrain installer.' }
+          $signature = Get-AuthenticodeSignature $installer.FullName
+          if ($signature.Status -ne 'Valid' -or $null -eq $signature.SignerCertificate) {
+            throw "Public release blocked: Authenticode is not valid (status: $($signature.Status))."
+          }
+          gh release create "$env:GITHUB_REF_NAME" --generate-notes --title "OddBrain $env:GITHUB_REF_NAME" $installer.FullName "$($installer.FullName).sha256" release/oddbrain-sbom.cdx.json

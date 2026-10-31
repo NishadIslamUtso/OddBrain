@@ -15,10 +15,12 @@
  * button, and this app does not ship those.
  */
 import { createHash } from 'node:crypto'
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs'
+import { cpSync, existsSync, lstatSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
 import { installPackFromFolder, type PackTargets } from './packs'
+import { boundedResponse } from '../network/boundedResponse'
+import { readRegularFileSync } from '../safeFile'
 
 const MAX_INDEX_BYTES = 2_000_000
 const FETCH_TIMEOUT_MS = 10_000
@@ -51,15 +53,36 @@ export type ReadIndexAnswer =
 
 export type IndexSource = { kind: 'folder'; path: string } | { kind: 'url'; url: string }
 
-/** Every file under the folder, relative, sorted — the digest's input order. */
-function relativeFiles(root: string, dir: string = ''): string[] {
+/**
+ * Every regular file under the folder, relative and sorted. Local packs get
+ * the same file/byte ceilings as downloaded packs, and links are refused: a
+ * checksum must describe bytes physically inside the reviewed pack folder.
+ */
+function relativeFiles(
+  root: string,
+  dir = '',
+  tally: { files: number; bytes: number; entries: number } = { files: 0, bytes: 0, entries: 0 },
+  depth = 0,
+): string[] {
+  if (depth > 32) throw new Error('The pack folder tree is more than 32 levels deep.')
   const abs = dir ? join(root, dir) : root
   const out: string[] = []
   for (const name of readdirSync(abs).sort()) {
     if (name === '.installed.json') continue
+    tally.entries += 1
+    if (tally.entries > MAX_FILES * 2) throw new Error('The pack contains too many folders and files.')
     const rel = dir ? `${dir}/${name}` : name
-    if (statSync(join(abs, name)).isDirectory()) out.push(...relativeFiles(root, rel))
-    else out.push(rel)
+    const info = lstatSync(join(abs, name))
+    if (info.isSymbolicLink()) throw new Error(`The pack contains a symbolic link (${rel}); links are not installable.`)
+    if (info.isDirectory()) out.push(...relativeFiles(root, rel, tally, depth + 1))
+    else if (info.isFile()) {
+      tally.files += 1
+      tally.bytes += info.size
+      if (tally.files > MAX_FILES) throw new Error(`The pack contains more than ${MAX_FILES} files.`)
+      if (info.size > MAX_FILE_BYTES) throw new Error(`The pack contains a file larger than ${MAX_FILE_BYTES.toLocaleString()} bytes (${rel}).`)
+      if (tally.bytes > MAX_PACK_BYTES) throw new Error(`The pack contains more than ${MAX_PACK_BYTES.toLocaleString()} bytes.`)
+      out.push(rel)
+    } else throw new Error(`The pack contains an unsupported filesystem entry (${rel}).`)
   }
   return out
 }
@@ -73,18 +96,22 @@ export function packDigest(folder: string): { digest?: string; problem?: string 
   let files: string[]
   try {
     files = relativeFiles(folder)
-  } catch {
-    return { problem: 'The pack folder cannot be read.' }
+  } catch (error) {
+    return { problem: error instanceof Error ? error.message : 'The pack folder cannot be read.' }
   }
   if (!files.length) return { problem: 'The pack folder is empty.' }
-  const hash = createHash('sha256')
-  for (const rel of files) {
-    hash.update(rel)
-    hash.update('\n')
-    hash.update(createHash('sha256').update(readFileSync(join(folder, rel))).digest('hex'))
-    hash.update('\n')
+  try {
+    const hash = createHash('sha256')
+    for (const rel of files) {
+      hash.update(rel)
+      hash.update('\n')
+      hash.update(createHash('sha256').update(readFileSync(join(folder, rel))).digest('hex'))
+      hash.update('\n')
+    }
+    return { digest: hash.digest('hex') }
+  } catch {
+    return { problem: 'The pack changed or became unreadable while its checksum was being computed.' }
   }
-  return { digest: hash.digest('hex') }
 }
 
 const isHex64 = (value: unknown): value is string =>
@@ -110,13 +137,17 @@ export function parseIndex(raw: string): { name: string; packs: IndexEntry[] } |
   if (!name) return { problem: 'The index needs a name.' }
   const list = record['packs']
   if (!Array.isArray(list)) return { problem: 'The index needs a packs array.' }
+  if (list.length > 500) return { problem: 'The index lists more than 500 packs.' }
   const packs: IndexEntry[] = []
+  const ids = new Set<string>()
   try {
-  for (const item of list.slice(0, 500)) {
+  for (const item of list) {
     if (!item || typeof item !== 'object' || Array.isArray(item)) return { problem: 'A pack entry is not an object.' }
     const entry = item as Record<string, unknown>
     const id = cleanText(entry['id'], 80)
     if (!/^[a-z0-9][a-z0-9.-]{1,78}[a-z0-9]$/.test(id)) return { problem: `A pack entry needs a real id (got "${String(entry['id']).slice(0, 40)}").` }
+    if (ids.has(id)) return { problem: `The index lists the pack "${id}" more than once.` }
+    ids.add(id)
     const packName = cleanText(entry['name'], 80)
     if (!packName) return { problem: `The pack "${id}" needs a name.` }
     const version = cleanText(entry['version'], 20)
@@ -124,7 +155,10 @@ export function parseIndex(raw: string): { name: string; packs: IndexEntry[] } |
     if (!isHex64(entry['checksum'])) return { problem: `The pack "${id}" needs a sha-256 checksum (64 hex characters), an index that cannot prove its packs is not an index this app trusts.` }
     const source = cleanText(entry['source'], 300)
     if (!source) return { problem: `The pack "${id}" needs a source.` }
-    if (source.includes('..') || source.startsWith('/')) return { problem: `The pack "${id}" names a source outside the index folder.` }
+    const sourceParts = source.split('/')
+    if (source.startsWith('/') || source.includes('\\') || source.includes('\0') || sourceParts.some(part => !part || part === '.' || part === '..')) {
+      return { problem: `The pack "${id}" names a source outside the index folder.` }
+    }
     packs.push({
       id,
       name: packName,
@@ -156,11 +190,14 @@ export function parseIndex(raw: string): { name: string; packs: IndexEntry[] } |
 const cleanFileList = (value: unknown, id: string): string[] => {
   if (!Array.isArray(value)) throw new Error(`The pack "${id}" has a files list that is not a list.`)
   if (value.length > MAX_FILES) throw new Error(`The pack "${id}" lists more than ${MAX_FILES} files.`)
+  const seen = new Set<string>()
   return value.map(item => {
     const path = typeof item === 'string' ? item.trim() : ''
-    if (!path || path.length > 300 || path.startsWith('/') || path.includes('\\') || path.includes('..') || /(^|\/)\.\.?($|\/)/.test(path)) {
+    if (!path || path.length > 300 || path.startsWith('/') || path.includes('\\') || path.includes('\0') || path.split('/').some(part => !part || part === '.' || part === '..')) {
       throw new Error(`The pack "${id}" lists a file outside its folder ("${String(item).slice(0, 60)}").`)
     }
+    if (seen.has(path)) throw new Error(`The pack "${id}" lists the file "${path}" more than once.`)
+    seen.add(path)
     return path
   })
 }
@@ -168,48 +205,56 @@ const cleanFileList = (value: unknown, id: string): string[] => {
 /** Fetches any URL to text; injectable so tests serve bytes without a network. */
 export type RawLoader = (url: string) => Promise<string>
 
+function safeIndexUrl(raw: string): { url?: URL; problem?: string } {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    return { problem: 'That is not a URL.' }
+  }
+  if (url.protocol !== 'https:') return { problem: 'Remote index URLs must use HTTPS.' }
+  if (url.username || url.password || url.search || url.hash) return { problem: 'Remote index URLs cannot contain credentials, a query or a fragment.' }
+  return { url }
+}
+
 function readIndexRaw(source: IndexSource, loader?: RawLoader): Promise<{ raw?: string; problem?: string }> {
   if (source.kind === 'folder') {
     const file = join(source.path, 'index.json')
-    if (!existsSync(file)) return Promise.resolve({ problem: 'That folder holds no index.json.' })
-    if (statSync(file).size > MAX_INDEX_BYTES) return Promise.resolve({ problem: 'That index is too large to read in full.' })
-    return Promise.resolve({ raw: readFileSync(file, 'utf8') })
+    try {
+      const { bytes } = readRegularFileSync(file, MAX_INDEX_BYTES)
+      return Promise.resolve({ raw: bytes.toString('utf8') })
+    } catch (error) {
+      return Promise.resolve({ problem: (error as NodeJS.ErrnoException).code === 'ENOENT' ? 'That folder holds no index.json.' : 'That index.json could not be read as a regular file within the size limit.' })
+    }
   }
-  // https URL: one GET from the privileged main process, capped and timed.
-  // electron is imported lazily so the pure parts of this module stay
-  // testable without the runtime.
-  let parsed: URL
-  try {
-    parsed = new URL(source.url)
-  } catch {
-    return Promise.resolve({ problem: 'That is not a URL.' })
-  }
-  if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-    return Promise.resolve({ problem: 'Index URLs must be http or https.' })
-  }
+  // Remote indexes are privileged-process requests: HTTPS only, no redirect,
+  // and both time and bytes are bounded while the body is streaming.
+  const checked = safeIndexUrl(source.url)
+  if (!checked.url) return Promise.resolve({ problem: checked.problem })
+  const parsed = checked.url
   if (loader) {
     // An injected loader (tests, or a future mirror) answers for the network.
     return loader(parsed.toString()).then(text => {
-      if (text.length > MAX_INDEX_BYTES) return { problem: 'That index is too large to read in full.' }
+      if (Buffer.byteLength(text, 'utf8') > MAX_INDEX_BYTES) return { problem: 'That index is too large to read in full.' }
       return { raw: text }
     }).catch((error: unknown) => ({ problem: error instanceof Error ? error.message : 'The index could not be fetched.' }))
   }
-  return new Promise(resolveFetch => {
-    const timer = setTimeout(() => resolveFetch({ problem: 'The index did not answer within ten seconds.' }), FETCH_TIMEOUT_MS)
-    void import('electron')
-      .then(({ net }) =>
-        net.fetch(parsed.toString()).then(async res => {
-          if (!res.ok) throw new Error(`The index answered ${res.status}.`)
-          const text = await res.text()
-          if (text.length > MAX_INDEX_BYTES) throw new Error('That index is too large to read in full.')
-          return text
-        }),
-      )
-      .then(text => resolveFetch({ raw: text }))
-      .catch((error: unknown) => {
-        resolveFetch({ problem: error instanceof Error ? error.message : 'The index could not be fetched.' })
-      })
-      .finally(() => clearTimeout(timer))
+  return import('electron').then(async ({ net }) => {
+    const controller = new AbortController()
+    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS)
+    try {
+      const response = await net.fetch(parsed.toString(), { redirect: 'error', signal: controller.signal })
+      if (!response.ok) throw new Error(`The index answered ${response.status}.`)
+      const raw = await boundedResponse(response, MAX_INDEX_BYTES, 'That index is too large to read in full.')
+      return { raw }
+    } catch (error) {
+      const problem = controller.signal.aborted
+        ? 'The index did not answer within ten seconds.'
+        : error instanceof Error ? error.message : 'The index could not be fetched.'
+      return { problem }
+    } finally {
+      clearTimeout(timer)
+    }
   })
 }
 
@@ -261,35 +306,23 @@ export type InstallFromIndexAnswer =
 /** Fetches one file over http(s). Injectable so tests can serve bytes. */
 export type FileLoader = (url: string) => Promise<string>
 
-const defaultLoader: FileLoader = (url): Promise<string> =>
-  new Promise((resolveFetch, reject) => {
-    let parsed: URL
-    try {
-      parsed = new URL(url)
-    } catch {
-      reject(new Error('That is not a URL.'))
-      return
-    }
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      reject(new Error('Pack files may only be fetched over http or https.'))
-      return
-    }
-    const timer = setTimeout(() => reject(new Error('The download did not answer within fifteen seconds.')), 15_000)
-    void import('electron')
-      .then(({ net }) =>
-        net.fetch(parsed.toString()).then(async res => {
-          if (!res.ok) throw new Error(`The download answered ${res.status}.`)
-          const text = await res.text()
-          if (text.length > MAX_FILE_BYTES) throw new Error('One of the pack\'s files is too large to fetch.')
-          return text
-        }),
-      )
-      .then(text => resolveFetch(text))
-      .catch((error: unknown) => {
-        reject(error instanceof Error ? error : new Error('The download failed.'))
-      })
-      .finally(() => clearTimeout(timer))
-  })
+const defaultLoader: FileLoader = async (raw): Promise<string> => {
+  const checked = safeIndexUrl(raw)
+  if (!checked.url) throw new Error(checked.problem)
+  const { net } = await import('electron')
+  const controller = new AbortController()
+  const timer = setTimeout(() => controller.abort(), 15_000)
+  try {
+    const response = await net.fetch(checked.url.toString(), { redirect: 'error', signal: controller.signal })
+    if (!response.ok) throw new Error(`The download answered ${response.status}.`)
+    return await boundedResponse(response, MAX_FILE_BYTES, 'One of the pack\'s files is too large to fetch.')
+  } catch (error) {
+    if (controller.signal.aborted) throw new Error('The download did not answer within fifteen seconds.')
+    throw error instanceof Error ? error : new Error('The download failed.')
+  } finally {
+    clearTimeout(timer)
+  }
+}
 
 /**
  * Install one entry of an index.
@@ -313,19 +346,32 @@ export async function installFromIndex(
   if (source.kind === 'folder') {
     if (!entry.verified) return { ok: false, answer: entry.problem || 'The pack did not pass the checksum check, so it is refused.' }
     const folder = join(resolve(source.path), entry.source)
-    const result = installPackFromFolder(folder, targets, 'index')
-    if (!result.ok) return { ok: false, answer: result.answer }
-    return { ok: true, answer: `${result.pack.name} ${result.pack.version} installed from the index (checksum verified).`, written: result.written, folder: result.folder }
+    const stagingRoot = mkdtempSync(join(tmpdir(), 'ai-assistant-pack-'))
+    const staged = join(stagingRoot, 'pack')
+    try {
+      // Copy first, then hash the exact immutable-by-us tree handed to the
+      // installer. A source edited between browsing and approval cannot swap
+      // unchecked bytes into the installed copy.
+      cpSync(folder, staged, { recursive: true, errorOnExist: true, force: false })
+      const stagedDigest = packDigest(staged)
+      if (stagedDigest.problem || stagedDigest.digest !== entry.checksum) {
+        return { ok: false, answer: stagedDigest.problem || 'The pack changed after it was reviewed; its staged files do not match the index checksum.' }
+      }
+      const result = installPackFromFolder(staged, targets, 'index')
+      if (!result.ok) return { ok: false, answer: result.answer }
+      return { ok: true, answer: `${result.pack.name} ${result.pack.version} installed from the index (checksum verified).`, written: result.written, folder: result.folder }
+    } catch (error) {
+      return { ok: false, answer: error instanceof Error ? error.message : 'The pack could not be staged safely.' }
+    } finally {
+      rmSync(stagingRoot, { recursive: true, force: true })
+    }
   }
   // URL entry: download, stage, digest-check, install.
   const files = entry.files ?? []
   if (!files.length) return { ok: false, answer: entry.problem || 'This entry lists no files, so there is nothing to download and check.' }
-  let base: URL
-  try {
-    base = new URL(source.url)
-  } catch {
-    return { ok: false, answer: 'The index URL is not a URL.' }
-  }
+  const checked = safeIndexUrl(source.url)
+  if (!checked.url) return { ok: false, answer: checked.problem || 'The index URL is not safe.' }
+  const base = checked.url
   if (!/\/index\.json$/.test(base.pathname)) return { ok: false, answer: 'The index URL does not end in index.json, so the packs beside it cannot be addressed.' }
   base.pathname = base.pathname.replace(/index\.json$/, '')
   const staging = join(mkdtempSync(join(tmpdir(), 'ai-assistant-pack-')))
@@ -341,7 +387,9 @@ export async function installFromIndex(
       } catch (error) {
         return { ok: false, answer: error instanceof Error ? error.message : 'The download failed.' }
       }
-      total += text.length
+      const bytes = Buffer.byteLength(text, 'utf8')
+      if (bytes > MAX_FILE_BYTES) return { ok: false, answer: `The pack file "${relative}" is too large to download.` }
+      total += bytes
       if (total > MAX_PACK_BYTES) return { ok: false, answer: 'The pack is too large to download.' }
       fetched.push({ relative, text })
     }

@@ -1,56 +1,67 @@
 # OddBrain
 
-A desktop app that drives coding-agent CLIs — Claude Code and Google's agy —
-through their own stream-json protocols, and shows their work as reviewable,
-undoable steps inside a local Obsidian-style vault. Local-first: no model,
-no cloud service, no telemetry ships with it. Free local brains come from a
-staged Ollama.
+This repo holds **Memory_OB** — the memory module for
+[Goose](https://github.com/block/goose) — plus the source it is built from.
 
-**Status: built, tested, never used by a human yet.** The honest state of
-every claim lives in [`00_LIVING_DOCS/JUDGE-BRIEF.md`](00_LIVING_DOCS/JUDGE-BRIEF.md).
-Read that before trusting anything else in this repository, including the
-changelog, which records development in a promotional voice.
+There is no OddBrain app. Goose is the platform; features arrive as modules.
 
-## What works
+- **[MEMORY_OB.md](MEMORY_OB.md)** — what Memory_OB is, how to use it, what's done, what's left.
+- **[packages/Memory_OB/goose-addon/README.md](packages/Memory_OB/goose-addon/README.md)** — the addon guide (install, history import, Review window).
 
-- Engines: claude-code (full wire), agy (wire implemented against the real
-  binary; a signed-in turn has not been driven yet), headless Ollama as the
-  free fallback. Engines are detected on the machine, not invented.
-- Permission cards: every file-touching step asks ("Full speed" is the one
-  gear that turns the cards off, and it says so). Deny reaches the engine as a
-  real deny. Checkpoints are taken before an Allow is forwarded — and if a
-  checkpoint cannot be taken, the change is denied, not allowed blind. Every
-  change is restorable, including files the engine created from nothing.
-- Watch mode, recipes, split steps, battles, compaction, turn journal, auto
-  memory, artifact previews with pop-out and PDF export, find-in-conversation,
-  a quick-ask window on a global hotkey — all riding the one send path.
-- The OddBrain motion kit: 77 animations keyed to real engine states, all
-  pausable (Calm/Still, OS reduced-motion), never blocking interaction.
+## Get Memory_OB (one link, one prompt)
 
-## Verify
+**1 — Download the package** (it saves to your Downloads folder):
 
-```bash
-git clone https://github.com/NishadIslamUtso/OddBrain.git
-cd OddBrain/apps/03_oddbrain
-npm ci && npx vitest run      # 99 files / 723 tests
-npx tsc --noEmit && npm run build
+https://raw.githubusercontent.com/NishadIslamUtso/OddBrain/arena/81a07155-oddbrain/release/Memory_OB-addon-1.0.0.zip
+
+**2 — Open PowerShell and paste this one line:**
+
+```powershell
+$z=(Get-ChildItem "$env:USERPROFILE\Downloads" -Filter "Memory_OB-addon-*.zip" | Sort-Object LastWriteTime -Descending | Select-Object -First 1).FullName; Expand-Archive $z $env:USERPROFILE -Force; Set-Location "$env:USERPROFILE\Memory_OB-addon"; $cfg="$env:APPDATA\Block\goose\config\config.yaml"; if(!(Test-Path $cfg)){$cfg="$env:APPDATA\Block\goose\config.yaml"}; if(!(Test-Path $cfg)){$cfg="$env:USERPROFILE\.config\goose\config.yaml"}; $brain="$env:USERPROFILE\Documents\OddBrain\Memory_OB"; node import-goose-history.mjs --brain $brain --apply --yes; "ALLOW" | node install.mjs --goose-config $cfg --brain $brain
 ```
 
-CI runs the same on every push.
+It imports your Goose history into `Documents\OddBrain\Memory_OB` **first**
+(history must go in before install switches Goose's stock memory off), then
+installs. The `ALLOW` in the line is your approval — the exact change is
+printed before anything is written. Restart Goose afterwards.
 
-## Not done yet
+**If Goose ever drops your own extensions from its Extensions page** (its
+config writer discards entries whose old shape no longer parses), one line
+brings them back rebuilt in the current schema — ask for the
+`fix-goose-extensions.mjs` line.
 
-- The owner's first real, signed-in session (Claude Code and agy).
-- A verified Windows install and acceptance run.
-- Screenshots of real model conversations (the gallery mostly shows a clearly
-  labeled test stand-in engine).
+**Your screens live inside Goose itself — no browser, no window.** Ask Goose
+*"show my memory screens"* and one app renders **in the conversation** with
+**Projects, Vault and Review as tabs** — live memory state every time you ask
+(the `memory_ob_screens` tool is linked to its `ui://` screen the way Goose's
+own chart extension does it). Its **Refresh** button asks the chat for the
+screens again. The installer also drops a stamped snapshot beside your other
+apps (`data\apps\memory-ob.html`, on the sidebar's Apps page) that says when
+it was captured and how to get live screens. Records marked Never Send never
+appear in any screen — not their text, titles, ids, or a count. Approving or
+denying memory always happens on the confirmation card in the chat.
 
-## Layout
+**The tools (eleven).** Reads: `status`, `search`, `evidence` (hash-verified
+exact wording), `project`. The one confirmer: `propose` — its card saves
+exactly what it shows. Captures that stay raw or draft forever: `intake`
+(Memory_OB takes anything) and `working_notes`. Undo and owner controls:
+`review` (retract keeps history; nothing is ever permanently deleted),
+`owner` (never-send / trash / restore), `link` (supports / contradicts /
+derived-from / branch-of).
 
-```
-apps/03_oddbrain/    the app (src/main, src/preload, src/renderer, src/shared, tests)
-00_LIVING_DOCS/         judge brief, changelog, receipts; archive/ holds old planning docs
-```
+**Every future module ships the same way** — this is the pattern:
 
-OddBrain's own code is Apache-2.0 (see `LICENSE`). Engine CLIs are the user's
-installs; no Anthropic or Google assets are bundled.
+1. A ready-to-run package on GitHub: `release/<module>-<version>.zip`.
+2. One download link + one PowerShell line in that module's README section —
+   history/import steps always come before anything that changes a tool.
+3. Each module's data lives in its own folder under `Documents\OddBrain\<Module>`
+   — never mixed with the owner's other files.
+
+## In this repo
+
+- `packages/Memory_OB/` — the Memory_OB package: Goose addon, skill, tests.
+- `apps/03_oddbrain/` — the source the memory core is compiled from (the
+  engines behind the addon and the Review window). Not an app to install.
+- `MEMORY_OB.md` — the only status/plan document. Anything else that used to
+  live here (old rulebooks, plans, diaries) was retired as stale AI-written
+  notes; Git history keeps them if ever needed.

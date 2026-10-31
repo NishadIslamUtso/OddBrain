@@ -7,8 +7,8 @@ Source of truth: the kit's own embedded JSON (`<script id="motion-data">`) —
 the word→animation variant map. Re-run after replacing the kit HTML to refresh.
 
 Inputs : $KIT_HTML (default /home/user/uploads/index.html)
-Outputs: apps/03_ai-assistant/src/renderer/src/assets/motion/<id>.svg  (77 files)
-         apps/03_ai-assistant/src/shared/lib/motionKitData.ts          (generated data)
+Outputs: apps/03_oddbrain/src/renderer/src/assets/motion/<id>.svg  (77 files)
+         apps/03_oddbrain/src/shared/lib/motionKitData.ts          (generated data)
 """
 import json
 import re
@@ -16,7 +16,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-APP = ROOT / "apps/03_ai-assistant"
+APP = ROOT / "apps/03_oddbrain"
 KIT_HTML = Path(sys.argv[1] if len(sys.argv) > 1 else "/home/user/uploads/index.html")
 
 html = KIT_HTML.read_text(encoding="utf-8")

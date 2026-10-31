@@ -1,0 +1,48 @@
+# Third-party notices
+
+## Design system tokens — from open-design
+
+The 16 design systems bundled in `apps/03_oddbrain/src/shared/lib/design-systems/` are derived from the
+`design-systems/` directory of **open-design** by nexu-io.
+
+- Source: <https://github.com/nexu-io/open-design>
+- License: **Apache License 2.0** — <https://www.apache.org/licenses/LICENSE-2.0>
+- Copyright 2025 nexu-io / open-design contributors
+
+What was taken: each upstream `tokens.css` (152 systems available; these 16
+were bundled) contributes only its `:root { … }` block of CSS custom
+properties — variable names and colour/type values. Comments, component
+manifest data and all surrounding application code were **not** taken. Each
+system here is a plain ES module exporting that CSS as a string; nothing was
+reimplemented from source.
+
+Bundled systems: claude, default, minimal, modern, shadcn, linear-app, apple,
+stripe, notion, vercel, airbnb, neobrutalism, glassmorphism, editorial,
+dashboard, retro.
+
+The **skills** concept (a named, reusable instruction kept as data rather than
+code) is also modelled on open-design's `skills/` directory. No skill text was
+copied — the mechanism was, and the six built-in roles are our own, tuned for a
+3B model on 4 GB of VRAM.
+
+Per Apache-2.0 §4(d), this notice is reproduced here and the upstream licence
+text is available at the URL above.
+
+## Native Kdenlive MCP protocol reference — lucasscariot/kdenlive
+
+OddBrain’s Kdenlive adapter and independently written editing Skill follow the
+published native MCP tool names, revision envelope and workflow documented by
+the separate **lucasscariot/kdenlive** project.
+
+- Source: <https://github.com/lucasscariot/kdenlive>
+- Reviewed reference: `b9a1a6ce0612d9bb6be2b7df2473c2ffbe71e798`
+- Upstream paths: `docs/native-mcp.md` and
+  `docs/skills/kdenlive-mcp-editing/SKILL.md`
+- Upstream licence: **GNU General Public License v3.0 or later**
+
+No Kdenlive/GPL implementation source or upstream Skill text is bundled into
+OddBrain. Kdenlive remains a separately installed application. OddBrain
+independently implements the documented JSON/MCP boundary, checks the published
+server identity and tool inventory, and keeps its adapted workflow text under
+OddBrain’s licence. The commit pin records what was reviewed; it is not a
+warranty that an installed binary came from that source or works on Windows.

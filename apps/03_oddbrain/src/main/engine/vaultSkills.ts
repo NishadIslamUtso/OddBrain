@@ -1,3 +1,4 @@
+import { configBytes, noLinkedPath } from './configTransaction'
 /**
  * vaultSkills.ts — the skills THIS APP ships to the engines, not from any
  * catalog (A.6: the engine queries the browser).
@@ -101,8 +102,11 @@ export function deployBuiltInSkills(targets: { claudeSkillsDir: string; agySkill
       try {
         const built = dir === targets.claudeSkillsDir ? toClaudeSkill(skill) : toAgySkill(skill)
         const full = join(dir, built.relative)
+        noLinkedPath(full)
+        const previous = configBytes(full)
+        if (previous !== null) continue // preserve installed and hand-edited copies, including older app versions
         mkdirSync(dirname(full), { recursive: true })
-        writeFileSync(full, built.content, 'utf8')
+        writeFileSync(full, built.content, { encoding: 'utf8', flag: 'wx', mode: 0o600 })
         written.push(full)
       } catch {
         // A skills folder that will not take the file is not fatal: the
