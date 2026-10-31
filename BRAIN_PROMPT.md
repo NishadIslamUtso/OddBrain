@@ -311,3 +311,70 @@ authority starts mattering.
   new heavyweight dependencies · telemetry · any route where the agent
   writes/validates its own memory without the library's pipeline ·
   deletion that bypasses trash · features not in this document (ask first).
+
+## 15. Amendment — proof rules (added after the 2026-10-31 audit of the hermes branch)
+
+The last build failed the check mostly on PROOF, not ideas: tests poked
+helper functions while whole screens crashed. These rules outrank §12–13
+wherever they conflict. A feature that violates them is not done.
+
+1. **Same-bytes rule.** Test only a fresh clone/checkout of the exact commit
+   you will report. Never claim results from live-installed copies, edited
+   files, or "the same code" elsewhere. Every report states: commit hash,
+   the exact commands run, their exit codes, and the fresh folder used.
+   "Tested live" without that paper trail counts as NOT tested.
+2. **Whole-car tests, not horn tests.** Helper-only unit tests do not count
+   as acceptance. The acceptance suite must drive the real HTTP surface,
+   end to end: propose → page-shaped approve call → confirmed record lands;
+   deny with reason → archived; search by meaning (a synonym finds the
+   record, or search is not called semantic); context excludes pending,
+   denied, and never_send records — including their previews, titles, and
+   counts; graph returns typed edges (supersedes/contradicts/supports),
+   not only shared tags. The suite runs from a clean checkout with one
+   command and must go red when any law breaks.
+3. **No fake features.** A control that no code consumes is banned: if the
+   model selector's choice is not actually used by named code paths
+   (extract/dream/embed/rerank/chapter), remove the selector. Names must
+   match mechanisms: word-overlap is not TF-IDF, self-hash is not source
+   verification (law 1 checks the quote against the SOURCE, and a changed
+   source must fail loudly), tag-overlap is not the whole graph.
+4. **Field round-trip contract.** Every field the writer stores must come
+   back through the API: proposal_id, destination, quote, quote_hash,
+   speaker, trust, never_send, event_time, capture_time. IDs used in URLs
+   are URL-safe slugs — the same id listed is the id approve/deny accept.
+5. **Token that can actually work.** No default token committed anywhere
+   (a published "brain-local-token" is not auth). The token is generated at
+   install, stored outside git, and the PAGES send it — proven by the
+   page-shaped calls in rule 2, not by curl with a hand-added token.
+   Paths come from env/manifest only; no username hard-coded in code,
+   docs, or sample data.
+6. **Sync is opt-in and on a leash.** Standing-layer sync (MEMORY.md /
+   USER.md) is OFF by default and needs an owner switch. Confirmed records
+   only — demo, unconfirmed, and pending never sync, into either file,
+   ever. Before touching a Hermes memory file: timestamped backup, edit
+   only inside a clearly marked Brain block, hand-written text outside the
+   block never moves, and a second run changes nothing (idempotent).
+7. **Demo data is quarantined.** Shipped sample records live apart from
+   real data and are excluded from search, context, graph, health counts,
+   and sync unless the owner explicitly includes them. Demo text may never
+   reach standing memory.
+8. **Imports as the host loads them.** The package must import the way
+   Hermes actually loads it (no sys.path tricks in tests to hide a broken
+   import). Lint gate before any claim: python compile + undefined-name
+   lint (pyflakes/ruff) + `node --check` on the desktop plugin, all green,
+   on the same bytes. One config module, one copy of each constant, no
+   shadowed duplicates.
+9. **Unknown host APIs stay marked UNKNOWN.** Plugin SDK areas, pet, rest
+   auth behaviour: cite the installed Hermes source/docs for every area
+   string used; if you cannot cite it, the report says UNKNOWN and the UI
+   must not fake a "SDK not available" check with literal strings.
+10. **Conflicts persist.** A detected conflict or doubt becomes a stored
+    ASK card with speakers named (§3) — detection that only appears in one
+    HTTP response and then evaporates is not implemented.
+11. **Windows is the target.** Path, folder-name (spaces, `&`), and shell
+    behaviour are validated for Windows first; a check that only passes on
+    Linux paths does not count for §13's clean-machine criterion.
+12. **Stop-and-report beats invent-and-ship.** When a rule above cannot be
+    met, stop and report the blocker with evidence. Reporting a blocker is
+    success; shipping a placebo and calling it done is the failure mode
+    this amendment exists to end.
