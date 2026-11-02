@@ -378,3 +378,37 @@ wherever they conflict. A feature that violates them is not done.
     met, stop and report the blocker with evidence. Reporting a blocker is
     success; shipping a placebo and calling it done is the failure mode
     this amendment exists to end.
+
+## 16. The current hermes-branch code — REFERENCE MATERIAL ONLY (verified defects)
+
+Do not patch or build on it. Build §1–§11 fresh as specified. Every item
+below was verified against the code itself (commit `9984fa0` and before):
+
+1. Record scanner crashes: it uses `_VAULT_EXTS` / `_SKIP_PREFIXES` but the
+   imports are `VAULT_EXTS` / `SKIP_PREFIXES` — undefined names, so every
+   screen dies once records exist.
+2. Approve/deny are dead three ways: the writer stores `proposal_id`,
+   `destination`, `source`, `conflicts` in frontmatter but the reader drops
+   them (pages approve "undefined"); record ids are raw file paths with
+   spaces/slashes that cannot ride in a URL; POST routes demand a token the
+   pages never send.
+3. Conflicts are attached to the propose HTTP response and then evaporate —
+   nothing persists them (§15 rule 10 exists because of this).
+4. "Semantic search" is word-set overlap (`len(overlap)/len(query_terms)`);
+   the comment calling it TF-IDF is a false name.
+5. Quote verification hashes the quote against its OWN stored hash — it
+   never checks the source (law 1 is not implemented).
+6. Model selector: the model list is a hand-typed literal; the saved choice
+   is displayed on the Health page only; no code path consumes it for any
+   extract/dream/embed/rerank/chapter work.
+7. `body_preview` is built BEFORE never_send redaction — private text leaks
+   through search previews.
+8. `SYNC_STATUSES = {"confirmed", "demo"}` — demo records sync into
+   MEMORY.md/USER.md.
+9. Default token `"brain-local-token"` is committed in `config.py` and
+   `manifest.json`.
+10. Graph edges are shared-tag pairs only — no supersedes/contradicts/
+    supports typing.
+11. Zero mentions anywhere in the plugin code of: trust, speaker, learning,
+    story, merge/undo-merge, consistency sweep, nightly dream, retract,
+    sharing receipts, ask cards, typed edges, or the `brain_lib` engine.
