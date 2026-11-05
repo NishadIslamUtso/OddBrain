@@ -1,16 +1,20 @@
-"""Model selector — the app's aux-model pattern.
+"""Model selector + backends.
 
-Every model slot uses the same three knobs: ``provider``, ``model``,
-``base_url``. ``provider: auto`` follows the main model. Local Ollama is
-selectable explicitly via ``base_url``. Nothing here guesses a paid endpoint.
+The selector is the app's aux-model pattern: every slot is
+``provider / model / base_url`` with ``provider: auto`` as the default.
 
-Slots:
-    main                 — the owner's main model
-    auxiliary.extract    — fact extraction on capture
-    auxiliary.dream      — nightly consolidation / conflicts
-    auxiliary.embed      — embeddings (local model default)
-    auxiliary.rerank     — optional result reranking
-    auxiliary.chapter    — Life Story drafting
+The important part is what ``auto`` *means*:
+
+* **Hosted in Hermes** — ``auto`` resolves through Hermes's own model system:
+  the same provider chain, the same credentials, the same behaviour as every
+  other auxiliary task in the app. Memory_OB never reimplements that chain; it
+  reads Hermes's config and calls through Hermes's local proxy.
+* **Standalone** — ``auto`` falls back to a local Ollama model, or to an
+  explicit ``base_url`` the owner configured.
+
+Backends:
+    HermesBackend  — Hermes proxy → Hermes main endpoint → error
+    LocalBackend   — local Ollama, or any OpenAI-compatible endpoint
 """
 
 from __future__ import annotations
@@ -20,7 +24,9 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Protocol
+
+from . import hermes
 
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 
@@ -115,21 +121,34 @@ class ModelConfig:
         return "\n".join(lines)
 
 
-# --- Calls -----------------------------------------------------------------
+# --- Backends --------------------------------------------------------------
 
 
 class ModelError(RuntimeError):
     """Raised when a model call fails."""
 
 
-def _post_json(url: str, payload: dict[str, Any], timeout: float = 60.0) -> dict[str, Any]:
+class ModelBackend(Protocol):
+    """Something that can answer a chat or an embedding request."""
+
+    name: str
+
+    def chat(self, slot: ModelSlot, messages: list[dict[str, str]]) -> str: ...
+
+    def embed(self, slot: ModelSlot, text: str) -> list[float]: ...
+
+
+def _post_json(
+    url: str,
+    payload: dict[str, Any],
+    timeout: float = 60.0,
+    headers: dict[str, str] | None = None,
+) -> dict[str, Any]:
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        url,
-        data=body,
-        headers={"Content-Type": "application/json"},
-        method="POST",
-    )
+    hdrs = {"Content-Type": "application/json"}
+    if headers:
+        hdrs.update(headers)
+    req = urllib.request.Request(url, data=body, headers=hdrs, method="POST")
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
@@ -137,33 +156,22 @@ def _post_json(url: str, payload: dict[str, Any], timeout: float = 60.0) -> dict
         raise ModelError(f"model call failed: {url}: {exc}") from exc
 
 
-def _ollama_url(base_url: str, path: str) -> str:
-    return base_url.rstrip("/") + path
-
-
-def chat(
-    slot: ModelSlot,
+def _openai_chat(
+    base_url: str,
+    model: str,
     messages: list[dict[str, str]],
     *,
+    api_key: str = "",
     timeout: float = 120.0,
 ) -> str:
-    """Send a chat completion to *slot* and return the assistant text."""
-    model = slot.model or "llama3.2"
-    if slot.is_local or slot.provider in ("ollama", "local"):
-        data = _post_json(
-            _ollama_url(slot.base_url or DEFAULT_OLLAMA_URL, "/api/chat"),
-            {"model": model, "messages": messages, "stream": False},
-            timeout=timeout,
-        )
-        return str(data.get("message", {}).get("content", ""))
-    # OpenAI-compatible endpoint
-    base = slot.base_url or os.environ.get("OPENAI_BASE_URL", "")
-    if not base:
-        raise ModelError("no base_url configured for a non-local model")
+    """Call an OpenAI-compatible ``/chat/completions`` endpoint."""
+    url = base_url.rstrip("/") + "/chat/completions"
+    headers = {"Authorization": f"Bearer {api_key or 'hermes'}"}
     data = _post_json(
-        base.rstrip("/") + "/chat/completions",
-        {"model": model, "messages": messages},
+        url,
+        {"model": model, "messages": messages, "stream": False},
         timeout=timeout,
+        headers=headers,
     )
     try:
         return str(data["choices"][0]["message"]["content"])
@@ -171,11 +179,20 @@ def chat(
         raise ModelError(f"unexpected model response: {data!r}") from exc
 
 
-def embed(slot: ModelSlot, text: str) -> list[float]:
-    """Return an embedding for *text* from a local Ollama model."""
-    model = slot.model or "nomic-embed-text"
+def _ollama_chat(
+    base_url: str, model: str, messages: list[dict[str, str]], timeout: float = 120.0
+) -> str:
     data = _post_json(
-        _ollama_url(slot.base_url or DEFAULT_OLLAMA_URL, "/api/embeddings"),
+        base_url.rstrip("/") + "/api/chat",
+        {"model": model, "messages": messages, "stream": False},
+        timeout=timeout,
+    )
+    return str(data.get("message", {}).get("content", ""))
+
+
+def _ollama_embed(base_url: str, model: str, text: str) -> list[float]:
+    data = _post_json(
+        base_url.rstrip("/") + "/api/embeddings",
         {"model": model, "prompt": text},
         timeout=60.0,
     )
@@ -185,13 +202,140 @@ def embed(slot: ModelSlot, text: str) -> list[float]:
     return [float(x) for x in vec]
 
 
+class HermesBackend:
+    """Routes model calls through Hermes's own model system.
+
+    Order:
+      1. Hermes proxy (``hermes proxy``) — Hermes attaches the real
+         credentials and picks the upstream. This is the same path every other
+         auxiliary task in the app effectively uses.
+      2. Hermes's main endpoint (``model.base_url``) with the main model.
+      3. Nothing else — we never guess a paid endpoint.
+    """
+
+    name = "hermes"
+
+    def __init__(self, config: ModelConfig | None = None) -> None:
+        self.config = config or ModelConfig()
+
+    def _model(self, slot: ModelSlot) -> str:
+        if slot.model:
+            return slot.model
+        return hermes.main_slot().get("model") or "default"
+
+    def chat(self, slot: ModelSlot, messages: list[dict[str, str]]) -> str:
+        model = self._model(slot)
+        if hermes.proxy_available():
+            return _openai_chat(hermes.proxy_base(), model, messages)
+        main = hermes.main_slot()
+        if main.get("base_url"):
+            key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
+            return _openai_chat(main["base_url"], model, messages, api_key=key)
+        raise ModelError(
+            "no Hermes model route available — start one with `hermes proxy start`"
+        )
+
+    def embed(self, slot: ModelSlot, text: str) -> list[float]:
+        # Hermes has no embedding auxiliary block; embeddings stay local.
+        return LocalBackend(self.config).embed(slot, text)
+
+
+class LocalBackend:
+    """Standalone: local Ollama, or any OpenAI-compatible endpoint."""
+
+    name = "local"
+
+    def __init__(self, config: ModelConfig | None = None) -> None:
+        self.config = config or ModelConfig()
+
+    @staticmethod
+    def _ollama(slot: ModelSlot) -> str:
+        return slot.base_url or DEFAULT_OLLAMA_URL
+
+    @staticmethod
+    def _model(slot: ModelSlot, default: str) -> str:
+        return slot.model or default
+
+    def chat(self, slot: ModelSlot, messages: list[dict[str, str]]) -> str:
+        local_providers = ("ollama", "local", "custom", "lmstudio", "vllm", "llamacpp")
+        if slot.is_local or slot.provider in local_providers:
+            return _ollama_chat(self._ollama(slot), self._model(slot, "llama3.2"), messages)
+        base = slot.base_url or os.environ.get("OPENAI_BASE_URL", "")
+        if not base:
+            raise ModelError("no base_url configured for a non-local model")
+        key = os.environ.get("OPENAI_API_KEY", "")
+        return _openai_chat(base, slot.model or "default", messages, api_key=key)
+
+    def embed(self, slot: ModelSlot, text: str) -> list[float]:
+        return _ollama_embed(self._ollama(slot), self._model(slot, "nomic-embed-text"), text)
+
+
+def resolve_backend(config: ModelConfig | None = None) -> ModelBackend:
+    """Pick the backend: Hermes when it is present, otherwise local."""
+    cfg = config or ModelConfig()
+    if hermes.available() and (
+        hermes.proxy_available() or hermes.main_slot().get("base_url")
+    ):
+        return HermesBackend(cfg)
+    return LocalBackend(cfg)
+
+
+def backend_name() -> str:
+    return resolve_backend().name
+
+
+def model_call(slot_name: str, config: ModelConfig | None = None):
+    """Build a ``prompt -> text`` callable that routes through the backend.
+
+    This is the seam the pipeline uses: extraction, the nightly dream and the
+    chapter drafter all call a model the same way the rest of Hermes does.
+    The backend is resolved per call, so a proxy that comes up later is picked
+    up without rebuilding anything.
+    """
+    cfg = config or ModelConfig()
+    slot = cfg.slot(slot_name)
+
+    def call(prompt: str) -> str:
+        return resolve_backend(cfg).chat(
+            slot, [{"role": "user", "content": prompt}]
+        )
+
+    return call
+
+
+# --- Module-level convenience ---------------------------------------------
+
+
+def chat(
+    slot: ModelSlot,
+    messages: list[dict[str, str]],
+    *,
+    backend: ModelBackend | None = None,
+    timeout: float = 120.0,
+) -> str:
+    """Send a chat completion to *slot* and return the assistant text."""
+    b = backend or resolve_backend()
+    return b.chat(slot, messages)
+
+
+def embed(
+    slot: ModelSlot,
+    text: str,
+    *,
+    backend: ModelBackend | None = None,
+) -> list[float]:
+    """Return an embedding for *text*."""
+    b = backend or resolve_backend()
+    return b.embed(slot, text)
+
+
 def is_available(slot: ModelSlot, *, timeout: float = 3.0) -> bool:
     """Cheap liveness check for a local model server."""
-    if not (slot.is_local or slot.provider in ("ollama", "local")):
+    if not slot.is_local:
         return False
     try:
         req = urllib.request.Request(
-            _ollama_url(slot.base_url or DEFAULT_OLLAMA_URL, "/api/tags"),
+            (slot.base_url or DEFAULT_OLLAMA_URL).rstrip("/") + "/api/tags",
             method="GET",
         )
         with urllib.request.urlopen(req, timeout=timeout):

@@ -56,12 +56,18 @@ def cmd_init(args: argparse.Namespace) -> int:
 
 def cmd_capture(args: argparse.Namespace) -> int:
     from .extract import extract_claims
+    from .models import ModelConfig, model_call
 
     st = _open(args)
     raw = args.text
     text = " ".join(raw) if isinstance(raw, list) else str(raw)
     source = {"input": text, "origin": args.origin or "cli"}
-    cands = extract_claims(text, source=source)
+
+    call = None
+    if not args.no_model:
+        s = _settings(args)
+        call = model_call("extract", ModelConfig.load(s.models_path))
+    cands = extract_claims(text, source=source, model_call=call)
     if not cands:
         print("No claims extracted.")
         st.close()
@@ -210,13 +216,22 @@ def cmd_activity(args: argparse.Namespace) -> int:
 
 
 def cmd_models(args: argparse.Namespace) -> int:
-    from .models import ModelConfig, is_available
+    from .models import ModelConfig, backend_name, is_available, resolve_backend
 
     s = _settings(args)
     cfg = ModelConfig.load(s.models_path)
     print(cfg.describe())
     print()
-    print("local server:", "available" if is_available(cfg.slot("embed")) else "not reachable")
+    backend = resolve_backend(cfg)
+    print(f"backend: {backend.name}")
+    if backend.name == "hermes":
+        from . import hermes
+
+        print(f"hermes proxy: {'up' if hermes.proxy_available() else 'down'}")
+        print(f"hermes main model: {hermes.main_slot().get('model') or '(default)'}")
+        print("  start the proxy with: hermes proxy start")
+    else:
+        print(f"local ollama: {'available' if is_available(cfg.slot('embed')) else 'not reachable'}")
     return 0
 
 
@@ -247,6 +262,11 @@ def build_parser() -> argparse.ArgumentParser:
     c = sub.add_parser("capture", help="extract candidate facts from text")
     c.add_argument("text", nargs="+", help="text to capture")
     c.add_argument("--origin", help="where this text came from")
+    c.add_argument(
+        "--no-model",
+        action="store_true",
+        help="use the built-in heuristic instead of the configured model",
+    )
     c.set_defaults(fn=cmd_capture)
 
     s = sub.add_parser("search", help="full-text search")

@@ -51,6 +51,7 @@ def main() -> int:
     failures += lint()
     failures += run_suite("test_laws.py", args.verbose)
     failures += run_suite("test_pipeline.py", args.verbose)
+    failures += run_suite("test_hermes_bridge.py", args.verbose)
     failures += run_suite("test_end_to_end.py", args.verbose)
 
     print()

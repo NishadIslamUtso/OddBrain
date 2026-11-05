@@ -113,6 +113,29 @@ models:
 `provider: auto` follows main. Local Ollama is selectable explicitly via
 `base_url`. Nothing guesses a paid endpoint.
 
+### What `auto` actually means
+
+Memory_OB does **not** reimplement Hermes's provider chain — that would drift
+the moment Hermes changes. Instead it has two backends:
+
+* **HermesBackend** — used whenever a Hermes install is present. `auto` goes
+  through Hermes's own model system:
+  - `hermes config get <key>` resolves the main model and the auxiliary blocks,
+    so Memory_OB reads the *same* settings the app uses.
+  - `hermes proxy` (default `127.0.0.1:8645`) is a local OpenAI-compatible
+    server that attaches Hermes's real credentials. Memory_OB calls it, so
+    `auto` behaves exactly like every other auxiliary task in the app.
+  - Without the proxy, Hermes's main endpoint is used directly.
+* **LocalBackend** — standalone. Local Ollama, or any explicit OpenAI-compatible
+  endpoint.
+
+The pipeline calls `models.model_call("<slot>")`, which resolves the backend
+**per call** — a proxy that comes up later is picked up without restarting
+anything. `memory-ob models` shows which backend is live and why.
+
+Embeddings stay local: Hermes has no embedding auxiliary block, so the `embed`
+slot defaults to a local model.
+
 ## 9. Nightly dream
 
 Dedup scan · supersession detection · conflict detection · theme drift ·
@@ -153,7 +176,7 @@ the Monthly Audit numbers.
 | §5 journal & Life Story | `journal.py` |
 | §6 graph & consistency | `store.edges`, `consistency.py` |
 | §7 recall | `store.search`, `store.search_facts` |
-| §8 model selector | `models.py`, `config.py` |
+| §8 model selector | `models.py`, `hermes.py`, `config.py` |
 | §9 nightly dream | `dream.py` |
 | §10 physical shape | `cli.py`, `api.py`, `vault.py`, `config.py` |
 | §11 laws | enforced in `quotes.py`, `hazards.py`, `paths.py`, `ids.py`, `store.py`, `review.py` |
@@ -167,6 +190,12 @@ the Monthly Audit numbers.
   human view. Markdown-as-database does not survive scale.
 * **Standard library only.** No pip in the target environment; SQLite, FTS5,
   hashlib and urllib cover the engine. FastAPI is optional (the API layer).
+* **Model calls delegate to Hermes, never reimplement it.** Hermes's provider
+  chain is large and changes often. Memory_OB reads Hermes's config and calls
+  through `hermes proxy`, so `auto` means the same thing everywhere. A shadow
+  chain would drift and silently pick the wrong provider.
+* **The backend is resolved per call.** A proxy that starts later is picked up
+  without restarting anything.
 * **Candidates are recallable but labelled.** Search returns confirmed
   records and candidate facts side by side, with candidates marked
   UNVERIFIED. Truth is never implied.

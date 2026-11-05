@@ -96,8 +96,20 @@ def kind_hint_for(claim: str) -> str:
     return NOTE
 
 
-def extract_claims(text: str, *, source: dict[str, Any] | None = None) -> list[Candidate]:
-    """Turn raw evidence into candidate facts. No model needed."""
+def extract_claims(
+    text: str,
+    *,
+    source: dict[str, Any] | None = None,
+    model_call: Any | None = None,
+) -> list[Candidate]:
+    """Turn raw evidence into candidate facts.
+
+    When *model_call* is given the model writes the candidates (and its output
+    is validated: hazards dropped, chatter dropped, every claim re-scored).
+    Without one, a built-in heuristic does the job offline.
+    """
+    if model_call is not None:
+        return extract_with_model(text, model_call=model_call, source=source)
     out: list[Candidate] = []
     for claim in split_claims(text):
         out.append(

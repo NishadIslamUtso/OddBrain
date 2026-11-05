@@ -159,10 +159,15 @@ def create_app() -> FastAPI:
         payload: dict[str, Any], st: Store = Depends(get_store)
     ) -> dict[str, Any]:
         from .extract import extract_claims
+        from .models import ModelConfig, model_call
 
         text = str(payload.get("text", ""))
         source = payload.get("source") or {"origin": "api"}
-        cands = extract_claims(text, source=source)
+        call = None
+        if not payload.get("no_model"):
+            cfg = ModelConfig.load(settings.models_path)
+            call = model_call("extract", cfg)
+        cands = extract_claims(text, source=source, model_call=call)
         for c in cands:
             st.add_fact(c.text, trust=c.trust, source=c.source)
         return {
@@ -190,6 +195,20 @@ def create_app() -> FastAPI:
         from .journal import journal_entries
 
         return [r.to_dict() for r in journal_entries(st, limit=limit)]
+
+    # -- models ------------------------------------------------------------
+
+    @app.get("/api/models")
+    def models() -> dict[str, Any]:
+        from .models import SLOTS, ModelConfig, resolve_backend
+
+        cfg = ModelConfig.load(settings.models_path)
+        backend = resolve_backend(cfg)
+        return {
+            "config": cfg.to_dict(),
+            "backend": backend.name,
+            "slots": {name: cfg.slot(name).to_dict() for name in SLOTS},
+        }
 
     return app
 

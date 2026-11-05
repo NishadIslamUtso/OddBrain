@@ -73,6 +73,45 @@ never_send: flag
 
 ---
 
+## The model selector
+
+Every slot uses the app's aux-model pattern — `provider / model / base_url`,
+with `provider: auto` as the default:
+
+```
+main:                { provider: auto, model: "", base_url: "" }
+auxiliary:
+  extract: { provider: auto, ... }   # fact extraction on capture
+  dream:   { provider: auto, ... }   # nightly consolidation
+  embed:   { provider: auto, ... }   # embeddings (local model default)
+  rerank:  { provider: auto, ... }   # optional result reranking
+  chapter: { provider: auto, ... }   # Life Story drafting
+```
+
+### What `auto` actually means
+
+Memory_OB does **not** keep a shadow provider chain. It has two backends:
+
+* **HermesBackend** — used whenever a Hermes install is present. `auto` goes
+  through Hermes's own model system: Memory_OB reads Hermes's config
+  (`hermes config get …`) and calls through `hermes proxy` (a local
+  OpenAI-compatible server on `127.0.0.1:8645` that attaches Hermes's real
+  credentials). That is the same path every other auxiliary task in the app
+  uses, so `auto` behaves identically everywhere.
+* **LocalBackend** — standalone. Local Ollama, or any OpenAI-compatible
+  endpoint you configure explicitly.
+
+```bash
+memory-ob models          # shows which backend is live and why
+hermes proxy start        # start the bridge (Memory_OB detects it automatically)
+```
+
+The pipeline (capture, the nightly dream, chapter drafting) calls
+`models.model_call("<slot>")`, which resolves the backend per call — so a
+proxy that comes up later is picked up without restarting anything.
+
+---
+
 ## Install
 
 Requires Python 3.10+ (standard library only — no pip install needed).
@@ -150,13 +189,15 @@ memory_ob/
   journal.py      journal & Life Story + chapter drafter
   receipts.py     sharing receipts (folder 07)
   vault.py        the 12-folder markdown view
-  models.py       the model selector
+  models.py       the model selector + backends
+  hermes.py       the Hermes bridge (config + proxy)
   cli.py          the command line
   api.py          the HTTP API
 tests/
-  test_laws.py        the trap suite
-  test_pipeline.py    the layers
-  test_end_to_end.py  the whole-car acceptance suite
+  test_laws.py         the trap suite
+  test_pipeline.py     the layers
+  test_hermes_bridge.py the Hermes bridge and backends
+  test_end_to_end.py   the whole-car acceptance suite
 ```
 
 ## Design
