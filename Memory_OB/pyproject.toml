@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "memory-ob"
+version = "0.1.0"
+description = "Memory_OB — a personal memory engine: capture anything, trust as a score, truth by signature."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Nishad Islam Utso" }]
+dependencies = []
+
+[project.scripts]
+memory-ob = "memory_ob.cli:main"
+
+[tool.setuptools]
+packages = ["memory_ob"]
+
+[tool.setuptools.package-data]
+memory_ob = ["py.typed"]
