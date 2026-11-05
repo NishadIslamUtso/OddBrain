@@ -409,6 +409,9 @@ below was verified against the code itself (commit `9984fa0` and before):
    `manifest.json`.
 10. Graph edges are shared-tag pairs only — no supersedes/contradicts/
     supports typing.
-11. Zero mentions anywhere in the plugin code of: trust, speaker, learning,
-    story, merge/undo-merge, consistency sweep, nightly dream, retract,
-    sharing receipts, ask cards, typed edges, or the `brain_lib` engine.
+11. No MECHANISMS anywhere in the plugin code for: trust scores, speaker
+    tagging, learning/story/capsule records, merge/undo-merge, consistency
+    sweep, nightly dream, retract (docs reference a "retract flow" the code
+    does not implement), sharing receipts (only the folder name exists),
+    ask cards, typed graph edges, or the `brain_lib` engine. (Some of these
+    words appear in folder names and docs — the features do not.)
