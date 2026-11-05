@@ -68,17 +68,35 @@ function MemoryOBPage({ ctx }) {
 
   useEffect(() => {
     let alive = true
-    ctx
-      .rest(UI_HTML + themeQuery())
-      .then((res) => {
-        if (alive && res && typeof res.html === 'string') setHtml(res.html)
-        else if (alive) setFailed(true)
-      })
-      .catch(() => {
-        if (alive) setFailed(true)
-      })
+    const load = () => {
+      ctx
+        .rest(UI_HTML + themeQuery())
+        .then((res) => {
+          if (alive && res && typeof res.html === 'string') {
+            setHtml(res.html)
+            setFailed(false)
+          } else if (alive) {
+            setFailed(true)
+          }
+        })
+        .catch(() => {
+          if (alive) setFailed(true)
+        })
+    }
+    load()
+    // Re-read the host theme when the app switches: Hermes toggles a class
+    // (and data-theme) on <html>, so watching the root's attributes is the
+    // signal. Without this the pane keeps the palette it mounted with.
+    const observer = new MutationObserver(() => {
+      if (alive) load()
+    })
+    observer.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme', 'style'],
+    })
     return () => {
       alive = false
+      observer.disconnect()
     }
   }, [])
 
