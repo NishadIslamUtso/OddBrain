@@ -5,11 +5,13 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Memory_OB</title>
 <style>
-  /* Theme variables. When embedded in Hermes these come from the host;
-     standalone, the fallbacks below apply. */
+  /* Theme variables. When embedded in Hermes the host sets the --ui-* names
+     on <html> (a later rule, so it wins); the values below are the standalone
+     fallbacks. Note --ui-accent is defined plainly — never as
+     var(--ui-accent, …), which is a circular reference CSS invalidates. */
   :root {
-    --ui-accent: var(--ui-accent, #d4a74a);
-    --ui-bg: var(--ui-background, var(--ui-background-secondary, #1a1a1a));
+    --ui-accent: #d4a74a;
+    --ui-bg: var(--ui-background, #1a1a1a);
     --ui-bg-2: var(--ui-background-secondary, #222222);
     --ui-stroke: var(--ui-stroke-secondary, #333333);
     --ui-text: var(--ui-text-primary, #e8e8e8);
@@ -25,33 +27,35 @@
     color: var(--ui-text);
     font-size: 14px;
   }
-  #app { display: flex; height: 100vh; }
-  /* sidebar */
+  /* Column: the tab bar sits on top, the view below. Inside Hermes this keeps
+     a single sidebar (the app's) instead of nesting a second one. */
+  #app { display: flex; flex-direction: column; height: 100vh; }
   nav {
-    width: 200px; flex: 0 0 200px;
+    display: flex; flex-wrap: wrap; align-items: center; gap: 2px;
+    flex: 0 0 auto;
     background: var(--ui-bg-2);
-    border-right: 1px solid var(--ui-stroke);
-    padding: 12px 8px;
-    overflow-y: auto;
+    border-bottom: 1px solid var(--ui-stroke);
+    padding: 6px 10px;
+    overflow-x: auto;
   }
   nav h1 {
-    font-size: 13px; text-transform: uppercase; letter-spacing: .08em;
-    color: var(--ui-text-3); margin: 4px 8px 12px;
+    font-size: 12px; text-transform: uppercase; letter-spacing: .08em;
+    color: var(--ui-text-3); margin: 0 10px 0 2px; white-space: nowrap;
   }
   nav button {
-    display: block; width: 100%; text-align: left;
+    display: inline-block; width: auto; text-align: center;
     background: none; border: 0; color: var(--ui-text-2);
-    padding: 8px 10px; border-radius: 6px; cursor: pointer;
-    font-size: 14px; margin-bottom: 2px;
+    padding: 6px 10px; border-radius: 6px; cursor: pointer;
+    font-size: 13px; margin: 0; white-space: nowrap;
   }
   nav button:hover { background: var(--ui-stroke); color: var(--ui-text); }
   nav button.active { background: var(--ui-stroke); color: var(--ui-accent); }
   nav .badge {
-    float: right; background: var(--ui-accent); color: #000;
+    display: inline-block; margin-left: 5px; background: var(--ui-accent); color: #000;
     border-radius: 10px; padding: 0 6px; font-size: 11px; font-weight: 600;
   }
   /* main */
-  main { flex: 1; overflow-y: auto; padding: 20px 24px; }
+  main { flex: 1 1 auto; overflow-y: auto; padding: 20px 24px; }
   h2 { font-size: 18px; margin: 0 0 4px; }
   .sub { color: var(--ui-text-3); font-size: 13px; margin-bottom: 16px; }
   .card {
@@ -133,17 +137,31 @@
   /* The host injects the API base here when this page is served from a
      plugin backend. Standalone, it stays empty (same origin). */
   window.__MEMORY_OB_BASE__ = "";
-  /* Theme hand-off: the host passes its --ui-* values as query params so the
-     screens match the app. Standalone, the CSS fallbacks apply. */
+  /* Theme: follow the host's appearance live. Inside Hermes this document
+     lives in a same-origin srcdoc iframe, so it can read the app's --ui-*
+     values off the parent and re-apply them whenever the theme changes.
+     Standalone there is no parent to read, so the CSS fallbacks apply. */
   (function () {
     var names = ['accent', 'background', 'background-secondary', 'stroke-secondary',
                  'text-primary', 'text-secondary', 'text-tertiary', 'text-quaternary'];
-    var params = new URLSearchParams(location.search);
+    var host = window.parent;
     var root = document.documentElement;
-    for (var i = 0; i < names.length; i++) {
-      var value = params.get(names[i]);
-      if (value) root.style.setProperty('--ui-' + names[i], value);
+
+    function apply() {
+      if (!host || host === window || !host.document) return;
+      try {
+        var cs = host.getComputedStyle(host.document.documentElement);
+        for (var i = 0; i < names.length; i++) {
+          var value = cs.getPropertyValue('--ui-' + names[i]).trim();
+          if (value) root.style.setProperty('--ui-' + names[i], value);
+        }
+      } catch (e) {
+        /* Cross-origin parent — keep whatever theme we already have. */
+      }
     }
+
+    apply();
+    setInterval(apply, 1000);
   })();
 </script>
 <script>
@@ -164,7 +182,9 @@ const TABS = [
 
 async function api(path, opts) {
   const method = (opts && opts.method) || 'GET';
-  const body = opts && opts.body ? JSON.stringify(opts.body) : undefined;
+  /* The payload stays an OBJECT: the host bridge serializes it, so handing it
+     a string here would double-encode and FastAPI would reject the body. */
+  const payload = opts && opts.body ? opts.body : undefined;
 
   /* Inside the Hermes host shell a plain fetch carries no dashboard session
      token, so the app's authenticated bridge does the calling instead. The
@@ -174,7 +194,7 @@ async function api(path, opts) {
   const bridge = window.parent && window.parent.hermesDesktop && window.parent.hermesDesktop.api;
   if (typeof bridge === 'function') {
     try {
-      return await bridge({ path: API + path, method, body });
+      return await bridge({ path: API + path, method, body: payload });
     } catch (e) {
       throw new Error((e && e.message) || 'request failed');
     }
@@ -183,7 +203,7 @@ async function api(path, opts) {
   const res = await fetch(API + path, opts ? {
     method: method,
     headers: { 'Content-Type': 'application/json' },
-    body: body,
+    body: payload === undefined ? undefined : JSON.stringify(payload),
   } : undefined);
   if (!res.ok) {
     let msg = res.status + ' ' + res.statusText;
@@ -238,13 +258,20 @@ async function render() {
     b.onclick = () => { state.tab = id; render(); };
     nav.appendChild(b);
   }
-
+  /* Capture the tab we are loading. A slow view (Settings reads the model
+     config over the bridge) must never overwrite a tab the owner already
+     clicked past — without this guard the earlier response lands last and
+     the screen "sticks" on Settings. */
+  const tab = state.tab;
   const main = document.getElementById('main');
   main.innerHTML = '<div class="empty">Loading…</div>';
   try {
-    const fn = VIEWS[state.tab];
-    main.innerHTML = await fn(state.data);
+    const fn = VIEWS[tab];
+    const html = await fn(state.data);
+    if (state.tab !== tab) return;
+    main.innerHTML = html;
   } catch (e) {
+    if (state.tab !== tab) return;
     main.innerHTML = `<div class="empty"><span class="err">${esc(e.message)}</span></div>`;
   }
 }
