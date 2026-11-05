@@ -54,6 +54,28 @@ The engine is found via `MEMORY_OB_HOME`, then
 `~/Documents/Hermes/Workspace/Memory_OB`, then
 `~/Documents/Hermes/Memory_OB`.
 
+## Theme sync
+
+The pane follows the app's appearance. `plugin.js` reads the host's
+`--ui-*` values off `document.documentElement` and the backend inlines them
+into the UI markup as `:root` overrides, so a theme switch restyles the pane
+on the next load.
+
+The host names its surfaces `--ui-bg-*`, not `--ui-background`, so
+`plugin.js` maps each host variable to the name the UI stylesheet reads:
+
+| Host | UI |
+|---|---|
+| `--ui-bg-chrome` | `--ui-background` |
+| `--ui-bg-secondary` | `--ui-background-secondary` |
+| `--ui-bg-elevated` | `--ui-background-elevated` |
+| `--ui-stroke-secondary` / `--ui-stroke-tertiary` | `--ui-stroke-secondary` / `--ui-stroke-tertiary` |
+| `--ui-text-primary` … `--ui-text-quaternary` | same |
+| `--ui-accent` | `--ui-accent` |
+
+A host variable that resolves empty is skipped, so the UI keeps its own
+fallback when the app exposes nothing.
+
 ## Why an iframe with `srcDoc`
 
 An iframe cannot carry the dashboard session token, so it may not load the

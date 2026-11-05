@@ -5,9 +5,14 @@
 // `srcDoc`, because an iframe cannot carry the dashboard session token and so
 // may not load the backend's `/ui` page directly.
 //
-// The host's --ui-* theme values are read here and handed over as query
-// parameters; the backend inlines them, since a srcdoc document has no query
-// string of its own.
+// The host's theme values, read here and handed over as query parameters;
+// the backend inlines them, since a srcdoc document has no query string
+// of its own.
+//
+// The host calls its surfaces --ui-bg-* (chrome / sidebar / primary …), not
+// --ui-background, so each entry maps a host variable to the name the UI's
+// stylesheet expects. Reading a name the host does not define yields an
+// empty string, which is skipped — the UI keeps its own fallback.
 //
 // Rules this file obeys:
 //   - imports limited to @hermes/plugin-sdk and react*
@@ -19,15 +24,19 @@ import { useEffect, useState } from 'react'
 
 const UI_HTML = '/ui-html'
 
+/** Host variable -> the name the UI stylesheet reads. */
 const THEME_VARS = [
-  '--ui-accent',
-  '--ui-background',
-  '--ui-background-secondary',
-  '--ui-stroke-secondary',
-  '--ui-text-primary',
-  '--ui-text-secondary',
-  '--ui-text-tertiary',
-  '--ui-text-quaternary',
+  ['--ui-bg-chrome', 'background'],
+  ['--ui-bg-sidebar', 'background-sidebar'],
+  ['--ui-bg-secondary', 'background-secondary'],
+  ['--ui-bg-elevated', 'background-elevated'],
+  ['--ui-stroke-secondary', 'stroke-secondary'],
+  ['--ui-stroke-tertiary', 'stroke-tertiary'],
+  ['--ui-text-primary', 'text-primary'],
+  ['--ui-text-secondary', 'text-secondary'],
+  ['--ui-text-tertiary', 'text-tertiary'],
+  ['--ui-text-quaternary', 'text-quaternary'],
+  ['--ui-accent', 'accent'],
 ]
 
 /** The host's theme as query parameters (empty when the app has none set). */
@@ -35,9 +44,9 @@ function themeQuery() {
   try {
     const cs = getComputedStyle(document.documentElement)
     const parts = []
-    for (const name of THEME_VARS) {
-      const value = cs.getPropertyValue(name).trim()
-      if (value) parts.push(name.replace(/^--ui-/, '') + '=' + encodeURIComponent(value))
+    for (const [hostName, uiName] of THEME_VARS) {
+      const value = cs.getPropertyValue(hostName).trim()
+      if (value) parts.push(uiName + '=' + encodeURIComponent(value))
     }
     return parts.length ? '?' + parts.join('&') : ''
   } catch {
