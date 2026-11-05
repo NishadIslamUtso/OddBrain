@@ -153,15 +153,24 @@ memory-ob export                 # render the vault
 memory-ob models                 # the model selector
 ```
 
-HTTP API:
+HTTP API and the screens:
 
 ```bash
 python -m uvicorn memory_ob.api:app --host 127.0.0.1 --port 8770
 ```
 
+Then open **http://127.0.0.1:8770/ui** — nine screens, themed with the
+`--ui-*` variables so it can be embedded in Hermes Desktop later:
+
+`Review` (diff / proposal / ask / merge cards) · `Vault` (all records) ·
+`Search` (three legs) · `Graph` (typed edges) · `Journal` · `Notes` ·
+`Health` (stats + monthly audit) · `Settings` (model selector) · `Intake`
+(capture, dream, chapter).
+
 Endpoints: `/api/health`, `/api/records`, `/api/search`, `/api/cards`,
 `/api/graph`, `/api/sweep`, `/api/audit`, `/api/dream`, `/api/chapter`,
-`/api/embed`, `/api/capture`, `/api/activity`, `/api/journal`, `/api/models`.
+`/api/embed`, `/api/capture`, `/api/activity`, `/api/journal`, `/api/models`,
+`/api/settings`, `/api/export`.
 
 ### Search is three legs
 
@@ -207,6 +216,7 @@ memory_ob/
   embedder.py     the meaning leg (embeddings + 3-leg search)
   cli.py          the command line
   api.py          the HTTP API
+  web/index.html  the nine screens (vanilla JS, --ui-* theme vars)
 tests/
   test_laws.py         the trap suite
   test_pipeline.py     the layers

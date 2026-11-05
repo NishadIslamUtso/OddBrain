@@ -159,10 +159,12 @@ the Monthly Audit numbers.
 * **Engine** — `memory_ob`, a standalone Python package. Standard library only
   (SQLite + FTS5 + hashlib + urllib). No pip install needed.
 * **CLI** — `memory-ob`, the owner's surface.
-* **API** — FastAPI, one store per request.
+* **API + screens** — FastAPI serves the API and the nine-screen web UI at
+  `/ui`. The UI is vanilla JS themed with the `--ui-*` variables, so it can be
+  embedded in Hermes Desktop later without a rewrite.
 * **Vault** — the 12-folder markdown view, rebuilt from SQLite.
 * **Models** — local Ollama by default; any OpenAI-compatible endpoint
-  configurable.
+  configurable; Hermes when hosted.
 
 ## 11. Laws that never bend
 

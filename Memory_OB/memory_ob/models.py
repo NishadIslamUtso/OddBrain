@@ -24,6 +24,7 @@ import os
 import urllib.error
 import urllib.request
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Protocol
 
 from . import hermes
@@ -99,7 +100,9 @@ class ModelConfig:
             return cls()
 
     def save(self, path: str | os.PathLike[str]) -> None:
-        with open(path, "w", encoding="utf-8") as fh:
+        p = Path(path)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with open(p, "w", encoding="utf-8") as fh:
             json.dump(self.to_dict(), fh, indent=2)
 
     def to_dict(self) -> dict[str, Any]:

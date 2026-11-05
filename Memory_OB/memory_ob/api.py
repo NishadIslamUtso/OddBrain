@@ -9,9 +9,11 @@ Run:
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any, Iterator
 
 from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi.responses import HTMLResponse
 
 from .config import Settings
 from .records import Record
@@ -19,6 +21,8 @@ from .review import CardStore
 from .store import Store
 
 settings = Settings.resolve()
+
+WEB_DIR = Path(__file__).resolve().parent / "web"
 
 
 def get_store() -> Iterator[Store]:
@@ -33,6 +37,19 @@ def get_store() -> Iterator[Store]:
 
 def create_app() -> FastAPI:
     app = FastAPI(title="Memory_OB", version="0.1.0")
+
+    # -- the screens --------------------------------------------------------
+
+    @app.get("/ui")
+    def ui() -> HTMLResponse:
+        index = WEB_DIR / "index.html"
+        if not index.exists():
+            raise HTTPException(status_code=404, detail="ui not built")
+        return HTMLResponse(index.read_text(encoding="utf-8"))
+
+    @app.get("/")
+    def root() -> HTMLResponse:
+        return ui()
 
     # -- records -----------------------------------------------------------
 
@@ -272,6 +289,25 @@ def create_app() -> FastAPI:
             "backend": backend.name,
             "slots": {name: cfg.slot(name).to_dict() for name in SLOTS},
         }
+
+    @app.post("/api/settings")
+    def save_settings(payload: dict[str, Any]) -> dict[str, Any]:
+        """Save the model selector."""
+        from .models import ModelConfig
+
+        cfg = ModelConfig.from_dict(payload)
+        settings.ensure_dirs()
+        cfg.save(settings.models_path)
+        return {"ok": True, "path": str(settings.models_path)}
+
+    @app.post("/api/export")
+    def export_vault() -> dict[str, Any]:
+        """Render the markdown vault from the store."""
+        from .vault import export_all
+
+        with Store(settings.db) as st:
+            n = export_all(st, settings.vault)
+        return {"exported": n, "vault": str(settings.vault)}
 
     return app
 

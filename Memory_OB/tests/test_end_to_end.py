@@ -298,6 +298,44 @@ class ApiCase(unittest.TestCase):
         self.assertEqual(r.status_code, 404)
         self.assertIn("detail", r.json())
 
+    def test_ui_is_served(self) -> None:
+        r = self.client.get("/ui")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Memory_OB", r.text)
+        for tab in ("viewReview", "viewVault", "viewSearch", "viewGraph",
+                    "viewJournal", "viewNotes", "viewHealth", "viewSettings",
+                    "viewIntake"):
+            self.assertIn(tab, r.text)
+
+    def test_root_redirects_to_ui(self) -> None:
+        r = self.client.get("/")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("Memory_OB", r.text)
+
+    def test_settings_roundtrip(self) -> None:
+        payload = {
+            "main": {"provider": "auto", "model": "", "base_url": ""},
+            "auxiliary": {
+                "extract": {"provider": "auto", "model": "", "base_url": ""},
+                "embed": {"provider": "ollama", "model": "nomic-embed-text",
+                          "base_url": "http://127.0.0.1:11434"},
+            },
+        }
+        saved = self.client.post("/api/settings", json=payload)
+        self.assertEqual(saved.status_code, 200, saved.text)
+
+        back = self.client.get("/api/models")
+        self.assertEqual(back.status_code, 200)
+        self.assertEqual(back.json()["slots"]["embed"]["model"], "nomic-embed-text")
+
+    def test_export_endpoint(self) -> None:
+        self.client.post("/api/records", json={
+            "kind": "note", "title": "exported", "body": "body", "speaker": "user"
+        })
+        r = self.client.post("/api/export")
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertGreaterEqual(r.json()["exported"], 1)
+
 
 if __name__ == "__main__":
     unittest.main(verbosity=2)

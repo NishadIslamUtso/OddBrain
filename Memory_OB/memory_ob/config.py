@@ -87,5 +87,6 @@ class Settings:
 
     def ensure_dirs(self) -> None:
         self.db.parent.mkdir(parents=True, exist_ok=True)
+        self.models_path.parent.mkdir(parents=True, exist_ok=True)
         for name in VAULT_FOLDER_NAMES:
             (self.vault / name).mkdir(parents=True, exist_ok=True)

@@ -16,6 +16,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
+from unittest import mock  # noqa: E402
+
 from memory_ob import embedder, models  # noqa: E402
 from memory_ob.store import Store  # noqa: E402
 from tests.test_laws import make_record  # noqa: E402
@@ -179,6 +181,37 @@ class TestCombinedSearch(unittest.TestCase):
         self.assertFalse(embedder.semantic_available(self.store, backend=FakeEmbedder()))
         embedder.ensure_embeddings(self.store, backend=FakeEmbedder())
         self.assertTrue(embedder.semantic_available(self.store, backend=FakeEmbedder()))
+
+
+class SettingsPathCase(unittest.TestCase):
+    """The settings path must be writable even when --db is overridden."""
+
+    def test_ensure_dirs_creates_models_parent(self):
+        from memory_ob.config import Settings
+        from memory_ob.models import ModelConfig
+
+        tmp = tempfile.mkdtemp()
+        vault = Path(tmp) / "vault"
+        db = Path(tmp) / "elsewhere" / "mob.db"
+        with mock.patch.dict(
+            os.environ,
+            {"MEMORY_OB_VAULT": str(vault), "MEMORY_OB_DB": str(db)},
+            clear=False,
+        ):
+            s = Settings.resolve()
+            s.ensure_dirs()
+            cfg = ModelConfig()
+            cfg.save(s.models_path)
+            self.assertTrue(s.models_path.exists())
+            self.assertTrue(s.models_path.parent.is_dir())
+
+    def test_save_creates_parent_on_its_own(self):
+        from memory_ob.models import ModelConfig
+
+        tmp = tempfile.mkdtemp()
+        path = Path(tmp) / "deep" / "nested" / "models.json"
+        ModelConfig().save(path)
+        self.assertTrue(path.exists())
 
 
 class CliCase(unittest.TestCase):
