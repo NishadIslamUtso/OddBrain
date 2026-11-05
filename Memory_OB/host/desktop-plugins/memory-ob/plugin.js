@@ -95,11 +95,16 @@ export default {
   name: 'Memory_OB',
   register(ctx) {
     ctx.register({
-      id: 'pane',
-      area: 'panes',
-      title: 'Memory_OB',
-      data: { placement: 'right', width: '460px' },
+      id: 'page',
+      area: 'routes',
+      data: { path: '/memory-ob' },
       render: () => jsx(MemoryOBPage, { ctx }),
+    })
+
+    ctx.register({
+      id: 'nav',
+      area: 'sidebar.nav',
+      data: { path: '/memory-ob', label: 'Memory_OB', codicon: 'project' },
     })
   },
 }
