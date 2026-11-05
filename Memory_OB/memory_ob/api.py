@@ -90,7 +90,12 @@ def create_app() -> FastAPI:
         limit: int = 20,
         st: Store = Depends(get_store),
     ) -> dict[str, Any]:
-        hits = st.search(q, limit=limit)
+        from .models import ModelConfig, resolve_backend
+
+        cfg = ModelConfig.load(settings.models_path)
+        hits = st.search_all(
+            q, limit=limit, backend=resolve_backend(cfg), slot=cfg.slot("embed")
+        )
         facts = st.search_facts(q, limit=limit)
         return {
             "query": q,
@@ -151,6 +156,64 @@ def create_app() -> FastAPI:
         from .consistency import monthly_audit
 
         return monthly_audit(st)
+
+    # -- nightly dream -----------------------------------------------------
+
+    @app.post("/api/dream")
+    def run_dream(st: Store = Depends(get_store)) -> dict[str, Any]:
+        from .dream import dream
+
+        return dream(st)
+
+    # -- life story --------------------------------------------------------
+
+    @app.post("/api/chapter")
+    def draft_chapter(
+        payload: dict[str, Any] | None = None,
+        st: Store = Depends(get_store),
+    ) -> dict[str, Any]:
+        from .journal import chapter_to_card, draft_chapter
+        from .models import ModelConfig, model_call
+        from .review import CardStore
+
+        payload = payload or {}
+        call = None
+        if not payload.get("no_model"):
+            call = model_call("chapter", ModelConfig.load(settings.models_path))
+        chapter = draft_chapter(
+            st, title=str(payload.get("title") or "Untitled chapter"), model_call=call
+        )
+        if chapter is None:
+            return {"drafted": False, "reason": "no confirmed owner records"}
+        card = CardStore(st).propose_record(
+            new=chapter_to_card(chapter), title=chapter.title, body=chapter.body
+        )
+        return {
+            "drafted": True,
+            "card_id": card.id,
+            "cited": len(chapter.cited_ids),
+            "quotation": chapter.quotation,
+        }
+
+    # -- embeddings --------------------------------------------------------
+
+    @app.post("/api/embed")
+    def embed(
+        payload: dict[str, Any] | None = None,
+        st: Store = Depends(get_store),
+    ) -> dict[str, Any]:
+        from .embedder import ensure_embeddings
+        from .models import ModelConfig, resolve_backend
+
+        payload = payload or {}
+        cfg = ModelConfig.load(settings.models_path)
+        n = ensure_embeddings(
+            st,
+            backend=resolve_backend(cfg),
+            slot=cfg.slot("embed"),
+            limit=int(payload.get("limit", 200)),
+        )
+        return {"computed": n, "cached": st.count_embeddings()}
 
     # -- capture -----------------------------------------------------------
 

@@ -93,6 +93,14 @@ CREATE TABLE IF NOT EXISTS activity (
 
 CREATE INDEX IF NOT EXISTS idx_activity_at ON activity(at);
 
+CREATE TABLE IF NOT EXISTS embeddings (
+    record_id TEXT PRIMARY KEY,
+    vec BLOB NOT NULL,
+    dims INTEGER NOT NULL,
+    model TEXT NOT NULL DEFAULT '',
+    created TEXT NOT NULL
+);
+
 CREATE VIRTUAL TABLE IF NOT EXISTS records_fts USING fts5(
     id UNINDEXED,
     title,
@@ -362,6 +370,24 @@ class Store:
         rows = self.conn.execute(sql, params).fetchall()
         return [dict(r) for r in rows]
 
+    def search_all(
+        self,
+        query: str,
+        *,
+        limit: int = 20,
+        backend: Any = None,
+        slot: Any = None,
+    ) -> list[Record]:
+        """Three-leg search: words + meaning + entities.
+
+        Falls back to words + entities when no embeddings are cached or the
+        embedding model is unreachable — it never claims to be semantic when
+        it is not.
+        """
+        from .embedder import combined_search
+
+        return combined_search(self, query, limit=limit, backend=backend, slot=slot)
+
     def search(self, query: str, *, limit: int = 20) -> list[Record]:
         """Full-text search over non-private, non-trashed records."""
         match = _fts_query(query)
@@ -428,6 +454,56 @@ class Store:
                 " VALUES(?,?,?,?)",
                 (rec.id, rec.title, rec.body, " ".join(rec.tags)),
             )
+        self.conn.commit()
+
+    # -- embeddings (the meaning leg of search) ----------------------------
+
+    def set_embedding(
+        self, record_id: str, vec: list[float], *, model: str = ""
+    ) -> None:
+        import struct
+
+        self.conn.execute(
+            "INSERT OR REPLACE INTO embeddings(record_id, vec, dims, model, created)"
+            " VALUES(?,?,?,?,?)",
+            (
+                record_id,
+                struct.pack(f"<{len(vec)}f", *vec),
+                len(vec),
+                model,
+                _now(),
+            ),
+        )
+        self.conn.commit()
+
+    def get_embedding(self, record_id: str) -> list[float] | None:
+        import struct
+
+        row = self.conn.execute(
+            "SELECT vec FROM embeddings WHERE record_id = ?", (record_id,)
+        ).fetchone()
+        if not row:
+            return None
+        blob = row["vec"]
+        return list(struct.unpack(f"<{len(blob) // 4}f", blob))
+
+    def embedding_ids(self) -> list[str]:
+        rows = self.conn.execute("SELECT record_id FROM embeddings").fetchall()
+        return [r["record_id"] for r in rows]
+
+    def missing_embeddings(self, *, limit: int = 500) -> list[str]:
+        rows = self.conn.execute(
+            "SELECT id FROM records WHERE never_send = 0 AND status != 'trash'"
+            " AND id NOT IN (SELECT record_id FROM embeddings) LIMIT ?",
+            (limit,),
+        ).fetchall()
+        return [r["id"] for r in rows]
+
+    def count_embeddings(self) -> int:
+        return int(self.conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0])
+
+    def drop_embeddings(self) -> None:
+        self.conn.execute("DELETE FROM embeddings")
         self.conn.commit()
 
     # -- activity log ------------------------------------------------------

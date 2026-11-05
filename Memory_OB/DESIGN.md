@@ -91,8 +91,20 @@ Conflict asks argue with names.
 
 * **Standing layer** — confirmed truth, frozen and prompt-cache friendly.
 * **Per-turn layer** — bounded top-k, each labelled with trust and speaker.
-  Three legs: words (FTS5), meaning (embeddings, local model), entities.
 * **Deliberate deep search** — the `memory-full-recall` skill, owner-triggered.
+
+### Three-leg search
+
+1. **words** — FTS5 over title, body and tags. The query is neutralised first
+   (only alphanumeric tokens, AND-ed), so user text can never be read as FTS5
+   syntax and hyphenated words still match.
+2. **meaning** — cosine similarity over cached embeddings. `memory-ob embed`
+   computes them from a local model and stores them as float32 blobs.
+3. **entities** — tag / subject / speaker token matches.
+
+Scores are merged and ranked. When no embedding model is reachable, or no
+embeddings are cached, the meaning leg is skipped and the search silently
+degrades to words + entities. It never claims to be semantic when it is not.
 
 Quotes of truth are hash-verified only. neverSend and the hazard scan run at
 the **exit** — the store takes anything; the door out obeys the law.
@@ -175,7 +187,7 @@ the Monthly Audit numbers.
 | §4 speaker separation | `records.Record.speaker`, `extract.py` |
 | §5 journal & Life Story | `journal.py` |
 | §6 graph & consistency | `store.edges`, `consistency.py` |
-| §7 recall | `store.search`, `store.search_facts` |
+| §7 recall | `store.search`, `store.search_all`, `store.search_facts`, `embedder.py` |
 | §8 model selector | `models.py`, `hermes.py`, `config.py` |
 | §9 nightly dream | `dream.py` |
 | §10 physical shape | `cli.py`, `api.py`, `vault.py`, `config.py` |

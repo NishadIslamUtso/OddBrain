@@ -144,6 +144,9 @@ memory-ob deny <card-id> --note "not true"
 memory-ob graph
 memory-ob sweep                  # consistency sweep
 memory-ob audit                  # monthly audit
+memory-ob dream                  # nightly consolidation → cards
+memory-ob chapter                # draft a Life Story chapter → card
+memory-ob embed                  # compute + cache embeddings
 memory-ob stats
 memory-ob activity
 memory-ob export                 # render the vault
@@ -157,8 +160,18 @@ python -m uvicorn memory_ob.api:app --host 127.0.0.1 --port 8770
 ```
 
 Endpoints: `/api/health`, `/api/records`, `/api/search`, `/api/cards`,
-`/api/graph`, `/api/sweep`, `/api/audit`, `/api/capture`, `/api/activity`,
-`/api/journal`.
+`/api/graph`, `/api/sweep`, `/api/audit`, `/api/dream`, `/api/chapter`,
+`/api/embed`, `/api/capture`, `/api/activity`, `/api/journal`, `/api/models`.
+
+### Search is three legs
+
+1. **words** — FTS5 over title, body and tags
+2. **meaning** — cosine similarity over cached embeddings (local model)
+3. **entities** — tag / subject / speaker matches
+
+Embeddings are computed on demand (`memory-ob embed`) and cached in SQLite.
+When no embedding model is reachable the search silently degrades to words +
+entities — it never claims to be semantic when it is not.
 
 ## Tests
 
@@ -191,12 +204,14 @@ memory_ob/
   vault.py        the 12-folder markdown view
   models.py       the model selector + backends
   hermes.py       the Hermes bridge (config + proxy)
+  embedder.py     the meaning leg (embeddings + 3-leg search)
   cli.py          the command line
   api.py          the HTTP API
 tests/
   test_laws.py         the trap suite
   test_pipeline.py     the layers
   test_hermes_bridge.py the Hermes bridge and backends
+  test_search_and_wiring.py embeddings, 3-leg search, wired commands
   test_end_to_end.py   the whole-car acceptance suite
 ```
 

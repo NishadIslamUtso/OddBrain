@@ -83,8 +83,16 @@ def cmd_capture(args: argparse.Namespace) -> int:
 
 
 def cmd_search(args: argparse.Namespace) -> int:
+    from .models import ModelConfig, resolve_backend
+
     st = _open(args)
-    hits = st.search(args.query, limit=args.limit)
+    cfg = ModelConfig.load(_settings(args).models_path)
+    hits = st.search_all(
+        args.query,
+        limit=args.limit,
+        backend=resolve_backend(cfg),
+        slot=cfg.slot("embed"),
+    )
     facts = st.search_facts(args.query, limit=args.limit)
     if not hits and not facts:
         print("No matches.")
@@ -199,6 +207,58 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_dream(args: argparse.Namespace) -> int:
+    """Run the nightly consolidation and open tomorrow's cards."""
+    from .dream import dream
+
+    st = _open(args)
+    report = dream(st)
+    print(json.dumps(report, indent=2, ensure_ascii=False))
+    st.close()
+    return 0
+
+
+def cmd_chapter(args: argparse.Namespace) -> int:
+    """Draft a Life Story chapter from confirmed owner records."""
+    from .journal import chapter_to_card, draft_chapter
+    from .models import ModelConfig, model_call
+    from .review import CardStore
+
+    st = _open(args)
+    call = None
+    if not args.no_model:
+        call = model_call("chapter", ModelConfig.load(_settings(args).models_path))
+    chapter = draft_chapter(st, title=args.title, model_call=call)
+    if chapter is None:
+        print("No confirmed owner records yet — nothing to draft from.")
+        st.close()
+        return 0
+    card = CardStore(st).propose_record(
+        new=chapter_to_card(chapter), title=chapter.title, body=chapter.body
+    )
+    print(f"Drafted chapter: {chapter.title}")
+    print(f"  cited records: {len(chapter.cited_ids)}")
+    print(f"  quotation: {chapter.quotation or '(none)'}")
+    print(f"  proposal card: {card.id}")
+    st.close()
+    return 0
+
+
+def cmd_embed(args: argparse.Namespace) -> int:
+    """Compute and cache embeddings for records that lack them."""
+    from .embedder import ensure_embeddings
+    from .models import ModelConfig, resolve_backend
+
+    st = _open(args)
+    cfg = ModelConfig.load(_settings(args).models_path)
+    n = ensure_embeddings(
+        st, backend=resolve_backend(cfg), slot=cfg.slot("embed"), limit=args.limit
+    )
+    print(f"Computed {n} embedding(s); {st.count_embeddings()} cached.")
+    st.close()
+    return 0
+
+
 def cmd_stats(args: argparse.Namespace) -> int:
     st = _open(args)
     print(json.dumps(st.stats(), indent=2))
@@ -305,6 +365,22 @@ def build_parser() -> argparse.ArgumentParser:
 
     sw = sub.add_parser("sweep", help="run the consistency sweep")
     sw.set_defaults(fn=cmd_sweep)
+
+    dr = sub.add_parser("dream", help="run the nightly consolidation")
+    dr.set_defaults(fn=cmd_dream)
+
+    ch = sub.add_parser("chapter", help="draft a Life Story chapter")
+    ch.add_argument("--title", default="Untitled chapter")
+    ch.add_argument(
+        "--no-model",
+        action="store_true",
+        help="use the built-in chronology instead of the configured model",
+    )
+    ch.set_defaults(fn=cmd_chapter)
+
+    em = sub.add_parser("embed", help="compute and cache embeddings")
+    em.add_argument("--limit", type=int, default=200)
+    em.set_defaults(fn=cmd_embed)
 
     st = sub.add_parser("stats", help="store statistics")
     st.set_defaults(fn=cmd_stats)
