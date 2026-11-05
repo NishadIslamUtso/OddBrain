@@ -1,0 +1,5 @@
+name: memory_ob
+version: 0.1.0
+description: "Memory_OB — evidence-first memory engine for Hermes. Captures every turn as candidates; only the owner signs truth."
+config_keys:
+  - memory.memory_ob

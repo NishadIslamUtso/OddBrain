@@ -33,7 +33,7 @@ def hermes_home() -> Path:
     return Path.home() / "AppData" / "Local" / "hermes"
 
 
-def _copy_tree(src: Path, dst: Path) -> tuple[int, int]:
+def _copy_tree(src: Path, dst: Path, *, remove_stale: bool = True) -> tuple[int, int]:
     """Copy src into dst, replacing files. Returns (copied, removed)."""
     copied = 0
     for path in src.rglob("*"):
@@ -45,14 +45,34 @@ def _copy_tree(src: Path, dst: Path) -> tuple[int, int]:
         if not target.exists() or target.read_bytes() != path.read_bytes():
             shutil.copy2(path, target)
             copied += 1
-    # Remove stale files that no longer exist upstream.
+    # Remove stale files that no longer exist upstream. Off for a destination
+    # several sources share (the memory_ob plugin dir holds BOTH the dashboard
+    # backend and the memory provider — each source would delete the other).
     removed = 0
-    if dst.exists():
+    if remove_stale and dst.exists():
         for path in dst.rglob("*"):
             if path.is_file() and not (src / path.relative_to(dst)).exists():
                 path.unlink()
                 removed += 1
     return copied, removed
+
+
+def _merge_into(srcs: list[Path], dst: Path) -> tuple[int, int]:
+    """Copy several sources that share one destination, then prune once."""
+    total = 0
+    for src in srcs:
+        copied, _ = _copy_tree(src, dst, remove_stale=False)
+        total += copied
+    removed = 0
+    if dst.exists():
+        for path in dst.rglob("*"):
+            if not path.is_file():
+                continue
+            rel = path.relative_to(dst)
+            if not any((src / rel).exists() for src in srcs):
+                path.unlink()
+                removed += 1
+    return total, removed
 
 
 def install(*, enable: bool = True) -> int:
@@ -61,18 +81,33 @@ def install(*, enable: bool = True) -> int:
         print(f"Hermes home not found: {home}")
         return 1
 
-    pairs = [
-        (SRC / "plugins" / "memory_ob", home / "plugins" / "memory_ob"),
-        (SRC / "desktop-plugins" / "memory-ob", home / "desktop-plugins" / "memory-ob"),
+    # The memory_ob plugin directory holds two halves: the dashboard backend
+    # (screens) and the memory provider (the Hermes memory pipe). They share
+    # one directory, so they merge rather than overwrite.
+    groups: list[tuple[str, list[Path], Path]] = [
+        (
+            "memory_ob",
+            [SRC / "plugins" / "memory_ob", SRC.parent / "provider" / "memory_ob"],
+            home / "plugins" / "memory_ob",
+        ),
+        (
+            "memory-ob",
+            [SRC / "desktop-plugins" / "memory-ob"],
+            home / "desktop-plugins" / "memory-ob",
+        ),
     ]
 
     print(f"Hermes home: {home}")
-    for src, dst in pairs:
-        if not src.is_dir():
-            print(f"  missing source: {src}")
-            return 1
-        copied, removed = _copy_tree(src, dst)
-        print(f"  {src.name:12s} -> {dst}  ({copied} updated, {removed} removed)")
+    for label, srcs, dst in groups:
+        for src in srcs:
+            if not src.is_dir():
+                print(f"  missing source: {src}")
+                return 1
+        if len(srcs) == 1:
+            copied, removed = _copy_tree(srcs[0], dst)
+        else:
+            copied, removed = _merge_into(srcs, dst)
+        print(f"  {label:12s} -> {dst}  ({copied} updated, {removed} removed)")
 
     exe = home / "bin" / "hermes.exe"
     if enable:

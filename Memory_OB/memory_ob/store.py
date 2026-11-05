@@ -134,6 +134,19 @@ def _fts_query(query: str) -> str:
     return " AND ".join(f'"{p}"' for p in parts)
 
 
+def _fts_query_or(query: str) -> str:
+    """Same tokens, OR-joined — the fallback for natural-language questions.
+
+    A question like "which theme do I prefer?" shares only one or two tokens
+    with a record, so the strict AND form finds nothing. OR keeps the match
+    and lets FTS5 rank the records that share more tokens first.
+    """
+    parts = _FTS_TOKEN_RE.findall(query or "")
+    if not parts:
+        return ""
+    return " OR ".join(f'"{p}"' for p in parts)
+
+
 def _json(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
@@ -389,17 +402,28 @@ class Store:
         return combined_search(self, query, limit=limit, backend=backend, slot=slot)
 
     def search(self, query: str, *, limit: int = 20) -> list[Record]:
-        """Full-text search over non-private, non-trashed records."""
+        """Full-text search over non-private, non-trashed records.
+
+        Tries every token (AND) first, then relaxes to any token (OR) so a
+        natural question still reaches a record it only partly overlaps.
+        """
         match = _fts_query(query)
         if not match:
             return []
-        rows = self.conn.execute(
+        rows = self._search_rows(match, limit)
+        if not rows:
+            relaxed = _fts_query_or(query)
+            if relaxed and relaxed != match:
+                rows = self._search_rows(relaxed, limit)
+        return [self._row_to_record(r) for r in rows]
+
+    def _search_rows(self, match: str, limit: int) -> list[Any]:
+        return self.conn.execute(
             "SELECT r.* FROM records_fts f JOIN records r ON r.id = f.id"
             " WHERE records_fts MATCH ? AND r.never_send = 0"
             " AND r.status != 'trash' ORDER BY rank LIMIT ?",
             (match, limit),
         ).fetchall()
-        return [self._row_to_record(r) for r in rows]
 
     # -- edges -------------------------------------------------------------
 

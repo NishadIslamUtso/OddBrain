@@ -1,17 +1,58 @@
 # Memory_OB host shell
 
-The thin adapter that puts Memory_OB inside Hermes Desktop. It has two halves,
-and neither one reimplements the engine — the plugin is a door, not a second
-brain.
+The thin adapter that puts Memory_OB inside Hermes Desktop. It has three
+parts, and none of them reimplements the engine — the shell is a door, not a
+second brain.
 
 ```
 Memory_OB (engine, SQLite + FTS5 + local vectors)
    ▲
-   │  mounts its FastAPI routes
+   │  mounts its FastAPI routes                ← the screens
    │
 host/plugins/memory_ob/dashboard/plugin_api.py   ← backend, at /api/plugins/memory_ob/
 host/desktop-plugins/memory-ob/plugin.js         ← React shell, a dockable pane
+
+   ▲
+   │  implements agent.memory_provider.MemoryProvider   ← the memory pipe
+   │
+host/plugins/memory_ob/__init__.py               ← recall + capture + tools
 ```
+
+The two `host/plugins/memory_ob/` halves share one directory: the dashboard
+backend lives in `dashboard/`, the memory provider at the top level. Both are
+loaded by the same `install.py`, which merges rather than overwrites.
+
+## The memory provider
+
+Hermes calls the provider's hooks every turn; the provider turns them into
+engine calls:
+
+| Hook | What it does |
+|---|---|
+| `prefetch(query)` | recall before a turn — confirmed records first, candidate facts labelled `UNVERIFIED`, `neverSend` records never leave the store |
+| `sync_turn(...)` | after a turn, extract candidate facts in the background |
+| `on_pre_compress(messages)` | capture what compression is about to discard, return a short digest |
+| `on_session_end(messages)` | the same capture at a real session boundary |
+
+Tools the agent can call: `memory_ob_search`, `memory_ob_capture`,
+`memory_ob_review` (list or defer — the agent never confirms or denies),
+`memory_ob_stats`.
+
+Activate:
+
+```bash
+hermes config set memory.provider memory_ob
+```
+
+Check it:
+
+```bash
+hermes memory status     # Provider: memory_ob · available ✓
+```
+
+The engine is found via `MEMORY_OB_HOME`, then
+`~/Documents/Hermes/Workspace/Memory_OB`, then
+`~/Documents/Hermes/Memory_OB`.
 
 ## Why an iframe with `srcDoc`
 
@@ -51,11 +92,13 @@ hermes plugins enable memory_ob
 
 | Path | Role |
 |---|---|
+| `plugins/memory_ob/__init__.py` | the memory provider — recall, capture, agent tools |
+| `plugins/memory_ob/plugin.yaml` | provider manifest |
 | `plugins/memory_ob/dashboard/manifest.json` | dashboard plugin manifest (tab hidden — the desktop shell owns the surface) |
 | `plugins/memory_ob/dashboard/plugin_api.py` | finds the engine, mounts its routes, serves the screens |
 | `plugins/memory_ob/dashboard/index.js` | manifest completeness only |
 | `desktop-plugins/memory-ob/plugin.js` | the React shell: theme hand-off + authenticated iframe |
-| `install.py` | copies both halves into the Hermes home and enables the plugin |
+| `install.py` | copies all three parts into the Hermes home and enables the plugin |
 
 ## Locating the engine
 
