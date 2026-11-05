@@ -130,7 +130,24 @@
   <main id="main"></main>
 </div>
 <script>
-const API = '';
+  /* The host injects the API base here when this page is served from a
+     plugin backend. Standalone, it stays empty (same origin). */
+  window.__MEMORY_OB_BASE__ = "";
+  /* Theme hand-off: the host passes its --ui-* values as query params so the
+     screens match the app. Standalone, the CSS fallbacks apply. */
+  (function () {
+    var names = ['accent', 'background', 'background-secondary', 'stroke-secondary',
+                 'text-primary', 'text-secondary', 'text-tertiary', 'text-quaternary'];
+    var params = new URLSearchParams(location.search);
+    var root = document.documentElement;
+    for (var i = 0; i < names.length; i++) {
+      var value = params.get(names[i]);
+      if (value) root.style.setProperty('--ui-' + names[i], value);
+    }
+  })();
+</script>
+<script>
+const API = window.__MEMORY_OB_BASE__ || '';
 const state = { tab: 'review', data: {}, loading: false, error: '' };
 
 const TABS = [
@@ -146,10 +163,27 @@ const TABS = [
 ];
 
 async function api(path, opts) {
+  const method = (opts && opts.method) || 'GET';
+  const body = opts && opts.body ? JSON.stringify(opts.body) : undefined;
+
+  /* Inside the Hermes host shell a plain fetch carries no dashboard session
+     token, so the app's authenticated bridge does the calling instead. The
+     bridge is reached through the parent window because this document lives
+     in a srcdoc iframe. Standalone (or a plain browser tab) falls through to
+     fetch against the same origin. */
+  const bridge = window.parent && window.parent.hermesDesktop && window.parent.hermesDesktop.api;
+  if (typeof bridge === 'function') {
+    try {
+      return await bridge({ path: API + path, method, body });
+    } catch (e) {
+      throw new Error((e && e.message) || 'request failed');
+    }
+  }
+
   const res = await fetch(API + path, opts ? {
-    method: opts.method || 'GET',
+    method: method,
     headers: { 'Content-Type': 'application/json' },
-    body: opts.body ? JSON.stringify(opts.body) : undefined,
+    body: body,
   } : undefined);
   if (!res.ok) {
     let msg = res.status + ' ' + res.statusText;

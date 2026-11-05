@@ -1,0 +1,10 @@
+{
+  "name": "memory_ob",
+  "label": "Memory_OB",
+  "description": "Personal memory engine — review cards, vault, search, graph, journal, life story.",
+  "icon": "Brain",
+  "version": "0.1.0",
+  "tab": { "path": "/memory-ob", "hidden": true },
+  "entry": "index.js",
+  "api": "plugin_api.py"
+}
