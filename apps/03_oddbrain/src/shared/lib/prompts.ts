@@ -77,17 +77,16 @@ export const BUILT_IN_PROMPTS = Object.freeze([
   },
 ])
 
-const clean = (value: unknown, max: number): string => String(value ?? '').trim().slice(0, max)
+const clean = (value: unknown): string => String(value ?? '').trim()
 
 const normalize = (value: unknown): StoredPrompt[] => Array.isArray(value)
   ? value
       .filter(prompt => prompt && typeof prompt.id === 'string' && typeof prompt.body === 'string')
-      .slice(0, 60)
       .map(prompt => ({
         id: String(prompt.id),
-        name: clean(prompt.name, MAX_NAME) || 'untitled',
-        hint: clean(prompt.hint, 140),
-        body: clean(prompt.body, MAX_BODY),
+        name: clean(prompt.name) || 'untitled',
+        hint: clean(prompt.hint),
+        body: clean(prompt.body),
       }))
       .filter(prompt => prompt.name && prompt.body)
   : []
@@ -97,8 +96,9 @@ export function loadPrompts(): StoredPrompt[] {
 }
 
 function persist(prompts: StoredPrompt[]): StoredPrompt[] {
-  try { writeStored(KEY, normalize(prompts)) } catch { /* a full disk must not lose the draft */ }
-  return normalize(prompts)
+  const exact = normalize(prompts)
+  writeStored(KEY, exact)
+  return exact
 }
 
 export function savePrompt({
@@ -113,13 +113,15 @@ export function savePrompt({
   id?: string
 }): { prompts: StoredPrompt[]; prompt: StoredPrompt } {
   const prompts = loadPrompts()
+  if (name.length > MAX_NAME || hint.length > 140 || body.length > MAX_BODY) throw new Error(`Prompt name, hint, or text exceeds its limit (${MAX_NAME}/${140}/${MAX_BODY} characters). Nothing was shortened or saved.`)
   const entry: StoredPrompt = {
     id: id || `prompt-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`,
-    name: clean(name, MAX_NAME) || 'untitled',
-    hint: clean(hint, 140),
-    body: clean(body, MAX_BODY),
+    name: clean(name) || 'untitled',
+    hint: clean(hint),
+    body: clean(body),
   }
   if (!entry.body) throw new Error('A prompt needs some text.')
+  if (!prompts.some(prompt => prompt.id === entry.id) && prompts.length >= 60) throw new Error('Sixty saved prompts are retained. Delete or export one before adding another; nothing was evicted.')
   const next = prompts.some(prompt => prompt.id === entry.id)
     ? prompts.map(prompt => (prompt.id === entry.id ? entry : prompt))
     : [entry, ...prompts]

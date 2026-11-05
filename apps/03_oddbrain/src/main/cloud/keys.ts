@@ -13,8 +13,9 @@
  * The encrypt/decrypt pair is injected rather than imported, so this file has no
  * Electron in it and can be tested as plain filesystem-and-map behaviour.
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs'
 import { dirname } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 export type KeyStore = {
   /** 'os' when the machine gave the app something to encrypt with, 'none' otherwise. */
@@ -60,12 +61,20 @@ export function createKeyStore(options: {
     }
   }
 
-  function write(): void {
+  function write(next: Map<string, string>): void {
     if (!usable) return
     const out: Record<string, string> = {}
-    for (const [id, key] of stored) out[id] = encrypt!(key)
+    for (const [id, key] of next) out[id] = encrypt!(key)
     mkdirSync(dirname(file), { recursive: true })
-    writeFileSync(file, `${JSON.stringify(out, null, 2)}\n`, { encoding: 'utf8', mode: 0o600 })
+    // Encrypt everything before touching disk. Rename a private sibling file
+    // so failed writes do not truncate the last usable credential store.
+    const temporary = `${file}.${randomUUID()}.tmp`
+    try {
+      writeFileSync(temporary, `${JSON.stringify(out, null, 2)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' })
+      renameSync(temporary, file)
+    } finally {
+      rmSync(temporary, { force: true })
+    }
   }
 
   return {
@@ -77,17 +86,19 @@ export function createKeyStore(options: {
       const value = String(key || '').trim()
       if (!value) return
       if (usable) {
+        const next = new Map(stored); next.set(id, value)
+        write(next)
         stored.set(id, value)
         session.delete(id)
-        write()
         return
       }
       session.set(id, value)
     },
     clear: id => {
+      const next = new Map(stored); next.delete(id)
+      write(next)
       stored.delete(id)
       session.delete(id)
-      write()
     },
     ids: () => [...new Set([...stored.keys(), ...session.keys()])],
   }

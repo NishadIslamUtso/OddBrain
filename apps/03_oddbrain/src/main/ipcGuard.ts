@@ -108,14 +108,17 @@ export function safeExternalUrl(url: string): boolean {
  * and refused when it is not. A citation link can therefore never walk the
  * app window off its own origin — it opens in the browser, where it belonged.
  */
-export function lockNavigation(contents: WebContents): void {
+export function lockNavigation(contents: WebContents, allowExternal = true): void {
   contents.setWindowOpenHandler(({ url }) => {
-    if (safeExternalUrl(url)) void shell.openExternal(url)
+    // Model-authored artifact windows pass false: their scripts may not turn an
+    // automatic window.open into a trusted browser launch. App-authored windows
+    // retain normal citation-link behavior.
+    if (allowExternal && safeExternalUrl(url)) void shell.openExternal(url)
     return { action: 'deny' }
   })
   contents.on('will-navigate', (event, url) => {
     if (urlIsOurs(url)) return
     event.preventDefault()
-    if (safeExternalUrl(url)) void shell.openExternal(url)
+    if (allowExternal && safeExternalUrl(url)) void shell.openExternal(url)
   })
 }

@@ -1,13 +1,6 @@
-/**
- * Design systems — the appearance options the original HTML design had, kept
- * AS IS. Token sets are CSS custom properties from nexu-io/open-design
- * (Apache-2.0), which publishes 152 of them; sixteen ship here, each a whole
- * visual language: palette, type, spacing, radii, shadows, motion timings.
- *
- * They shipped here BEFORE this round — but were only ever used to style
- * generated ARTIFACTS. The owner caught it: the HTML had these looks and the
- * app never offered them for itself. They are the appearance now, wired to
- * every screen through the app's tokens — never a skeleton subset.
+/** Bundled design systems from nexu-io/open-design (Apache-2.0).
+ * Used by artifact styling and the additional app-theme selector. These are
+ * separate from the owner's eight original OddBrain presets and eight layouts.
  */
 import type { DesignSystem } from '../../types'
 import airbnb from './airbnb'
@@ -101,7 +94,7 @@ h1, h2, h3 { font-family: var(--font-display, inherit); }`
 
 /** True when the id is one of the sixteen. */
 export function isDesignSystem(id: string): boolean {
-  return id in TOKENS
+  return Object.hasOwn(TOKENS, id)
 }
 
 /** The system the artifact styler falls back to — unchanged contract. */

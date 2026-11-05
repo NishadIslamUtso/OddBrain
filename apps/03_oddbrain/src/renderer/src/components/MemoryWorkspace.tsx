@@ -1,0 +1,120 @@
+import CopyMemoryEvidence from './CopyMemoryEvidence'
+import { sourceReading } from '@shared/lib/recall'
+import MemoryReviewGroup from './MemoryReviewGroup'
+import { reviewGroups, personRecords, timelineGroups, filterMemoryRecords } from '@shared/lib/memoryReading'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { staleBasis, mergedProfiles, type MemoryAction, type MemoryProposal, type MemoryView } from '@shared/lib/memoryWorkspace'
+import { getMemoryWorkspaceApi } from '@/platform/bridge'
+import { vaultGet } from '@shared/lib/vault'
+import { DiffBlock } from './EnginePanel'
+export type MemoryTab = 'Memory inbox' | 'People' | 'Journal' | 'Life Story'
+export function useMemoryWorkspace() {
+  const [view, setView] = useState<MemoryView | null>(null), [error, setError] = useState(''), [busy, setBusy] = useState(false)
+  const refresh = useCallback(async () => { try { const result = await getMemoryWorkspaceApi().read(); if (!result.ok) throw Error(result.error); setView(result.view!); setError('') } catch (e) { setError((e as Error).message) } }, [])
+  useEffect(() => { void refresh(); const timer = setInterval(() => void refresh(), 10000); return () => clearInterval(timer) }, [refresh])
+  const act = async (input: Omit<MemoryAction, 'expectedRevision'>): Promise<boolean> => {
+    if (!view || busy) return false
+    setBusy(true); setError('')
+    try { const result = await getMemoryWorkspaceApi().act({ ...input, expectedRevision: input.expectedRevision ?? view.revision } as MemoryAction); if (!result.ok) throw Error(result.error); setView(result.view!); return true }
+    catch (e) { setError((e as Error).message); return false } finally { setBusy(false) }
+  }
+  const run = async () => { setBusy(true); try { const r = await getMemoryWorkspaceApi().run(); if (!r.ok) throw Error(r.error); setView(r.view!); setError('') } catch (e) { setError((e as Error).message) } finally { setBusy(false) } }
+  return { view, error, busy, act, refresh, run }
+}
+const Button = ({ children, onClick, disabled = false }: { children: React.ReactNode; onClick: () => void; disabled?: boolean }) => <button type="button" className="ob-small-button" onClick={onClick} disabled={disabled}>{children}</button>
+const interpretationDiff = (item: MemoryProposal, title = item.title, text = item.text, date = item.date, uncertainty = item.uncertainty): string => [
+  '--- not-approved',
+  '+++ would-be-confirmed',
+  `@@ ${item.kind} interpretation @@`,
+  `+ Title: ${title}`,
+  ...text.split('\n').map(line => `+ ${line}`),
+  `+ Event date: ${date || 'not established'}`,
+  ...(uncertainty ? [`+ Qualification: ${uncertainty}`] : []),
+  `+ Evidence: ${item.quote}`,
+  `+ Source: ${item.source.path}`,
+].join('\n')
+function Record({ item, act, busy, desktop }: { item: MemoryProposal; act: (a: Omit<MemoryAction, 'expectedRevision'>) => Promise<boolean>; busy: boolean; desktop: boolean }) {
+  const [text, setText] = useState(item.text), [editing, setEditing] = useState(false), [evidence, setEvidence] = useState(''), [date, setDate] = useState(item.date), [title, setTitle] = useState(item.title), [uncertainty, setUncertainty] = useState(item.uncertainty), [confirming, setConfirming] = useState(false)
+  useEffect(() => { setText(item.text); setDate(item.date); setTitle(item.title); setUncertainty(item.uncertainty); setEditing(false); setConfirming(false) }, [item.id, item.revision, item.text, item.date])
+  const review = (decision: string) => void act({ type: 'review', id: item.id, decision, text, date, title, uncertainty }).then(ok => { if (ok) setConfirming(false) })
+  return <article className="ob-memory-record">
+    <div className="ob-memory-line"><h3>{item.title}</h3><span>{item.kind} · {item.state === 'pending' ? 'Awaiting verification' : item.state === 'approved' ? 'Confirmed by you' : 'Rejected'}</span></div>
+    <p className="ob-memory-caption">{item.source.kind === 'ai' ? 'AI conversation' : item.source.kind === 'confirmed' ? 'Chapter from confirmed records' : 'People / course source'} · {item.source.provider} · {item.source.speaker || item.source.role} · {item.source.title}</p>
+    {item.source.warnings && (item.source.warnings.invisibleText || item.source.warnings.instructionLike) ? <p role="alert" className="ob-memory-caption">Untrusted extension source: {item.source.warnings.invisibleText} invisible-text warning(s), {item.source.warnings.instructionLike} instruction-like phrase(s). This source has no prompt or permission authority. Open the original before confirming this interpretation.</p> : null}
+    {editing ? <><label>Heading<input aria-label="Interpretation heading" value={title} onChange={e => setTitle(e.target.value)} maxLength={300} /></label><label>Interpretation<textarea aria-label="Edit interpretation" value={text} onChange={e => setText(e.target.value)} maxLength={20000} /></label><label>Event date, if established<input aria-label="Event date" type="date" value={date} onChange={e => setDate(e.target.value)} /></label><label>Qualification<textarea aria-label="Interpretation qualification" value={uncertainty} onChange={e => setUncertainty(e.target.value)} maxLength={2000} /></label></> : <p className="ob-memory-prose">{item.text}</p>}
+    {item.uncertainty && <p className="ob-memory-caption">Qualification: {item.uncertainty}</p>}
+    <p className="ob-memory-caption">{item.date ? `Event: ${item.date}` : 'Event date unknown'} · Observed {item.source.observed.slice(0,10)}{item.source.timestamp ? ` · Message time: ${item.source.timestamp}` : ''} · {item.authored === 'ai' ? `AI wording (${item.model})` : 'Corrected by you'}</p>
+    <details><summary>Evidence and revisions</summary><CopyMemoryEvidence item={item} sample={!desktop} disabled={busy || editing} /><blockquote>{item.quote}</blockquote><p className="ob-memory-caption">{item.source.path}</p><Button onClick={() => void (async () => { if (!desktop) { setEvidence('Sample evidence only: ' + item.quote); return } try { const r = await vaultGet('/file?path=' + encodeURIComponent(item.source.path)); setEvidence(r.ok ? sourceReading(r.content) + (r.truncated ? '\nPreview limited; original remains on disk.' : '') : r.error) } catch (reason) { setEvidence(reason instanceof Error && reason.message ? reason.message : 'The original could not be read.') } })()}>Read original source</Button>{evidence && <pre>{evidence}</pre>}{item.history.map((h,i) => <p key={i} className="ob-memory-caption">{h.at} · {h.state}: {h.text}</p>)}</details>
+    {confirming && item.state === 'pending' ? <section className="ob-memory-batch-preview" aria-label="Diff for not-approved interpretation"><h4>Diff of what you have not approved</h4><p>Green lines would become confirmed memory. The source remains quoted evidence, never a prompt. Confirming this interpretation makes the pending count fall immediately; cancel changes nothing.</p><DiffBlock detail={interpretationDiff(item, title, text, date, uncertainty)} /><p>If this is not what the source means, cancel and edit it, reject it, or leave it awaiting review.</p><div className="ob-memory-actions"><Button disabled={busy} onClick={() => review('approve')}>Confirm this exact interpretation</Button><Button disabled={busy} onClick={() => setConfirming(false)}>Cancel</Button></div></section> : null}
+    <div className="ob-memory-actions">{item.state === 'pending' ? <><Button disabled={busy || confirming} onClick={() => setConfirming(true)}>Review diff before approving</Button><Button disabled={busy || confirming} onClick={() => setEditing(!editing)}>{editing ? 'Hide editor' : 'Edit before approving'}</Button><Button disabled={busy || confirming} onClick={() => review('reject')}>Reject</Button></> : item.state === 'approved' ? <><Button disabled={busy} onClick={() => editing ? review('correct') : setEditing(true)}>{editing ? 'Save confirmed correction' : 'Correct this record'}</Button><Button disabled={busy} onClick={() => { if (window.confirm('Withdraw this confirmed interpretation? Its source and revision history will be kept.')) review('retract') }}>Withdraw record</Button></> : null}</div>
+  </article>
+}
+export function OrganizerSettings() {
+  const { view, error, busy, act, run } = useMemoryWorkspace()
+  const [model, setModel] = useState(''), [external, setExternal] = useState(false), [enabled, setEnabled] = useState(true)
+  useEffect(() => { if (view) { setModel(view.preferences.model); setExternal(view.preferences.allowExternal); setEnabled(view.preferences.enabled) } }, [view?.preferences.model, view?.preferences.allowExternal, view?.preferences.enabled])
+  return <section className="ob-memory-settings"><h2>Background organizer</h2><p>New conversation text becomes proposals, never confirmed facts. Chat has priority. Captured files are retained, but this organizer does not transcribe or inspect their contents.</p>
+    {error && <p role="alert">{error}</p>}{view && <p role="status">{view.status}</p>}
+    <label className="ob-memory-check"><input type="checkbox" checked={enabled} onChange={e => setEnabled(e.target.checked)} /> Organize new conversation text while idle</label>
+    <label>Model identifier<input aria-label="Organizer model" value={model} onChange={e => setModel(e.target.value)} placeholder="Use the current engine’s model" /><small>Leave blank to use the selected engine model. Requires an installed local model or an explicitly permitted saved-key provider; no agent/tool session or silent fallback.</small></label>
+    <label className="ob-memory-check"><input type="checkbox" checked={external} onChange={e => setExternal(e.target.checked)} /> Allow sending captured conversation text to the selected external model</label>
+    <p className="ob-memory-caption">External processing is off by default and also requires Agent access permissions. This can include sensitive personal messages and incur provider charges.</p>
+    <div className="ob-memory-actions"><Button disabled={!view || busy} onClick={() => void act({ type: 'preferences', model, allowExternal: external, enabled })}>Save organizer settings</Button><Button disabled={!view || busy} onClick={() => void run()}>Check new sources</Button><Button onClick={() => window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' }))}>Open Memory inbox</Button></div>
+  </section>
+}
+export function MemoryAttention() {
+  const { view } = useMemoryWorkspace(), count = view?.proposals.filter(p => p.state === 'pending').length || 0
+  if (!count) return null
+  return <button className="ob-memory-attention" type="button" onClick={() => window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' }))}>{count} memory interpretation{count === 1 ? '' : 's'} awaiting your verification →</button>
+}
+export default function MemoryWorkspace({ tab }: { tab: MemoryTab }) {
+  const { view, error, busy, act, refresh, run } = useMemoryWorkspace()
+  const [person, setPerson] = useState(''), [name, setName] = useState(''), [target, setTarget] = useState(''), [confirm, setConfirm] = useState<Omit<MemoryAction, 'expectedRevision'> | null>(null), [filter, setFilter] = useState('pending')
+  const [notice, setNotice] = useState(''), [chapterTitle, setChapterTitle] = useState(''), [chapterIds, setChapterIds] = useState<string[]>([]), [personNotes, setPersonNotes] = useState(''), [personName, setPersonName] = useState('')
+  const [managingPerson, setManagingPerson] = useState(false)
+  const [readingQuery, setReadingQuery] = useState(''), [personStatus, setPersonStatus] = useState<'approved' | 'pending'>('approved')
+  const newPersonInput = useRef<HTMLInputElement>(null)
+  useEffect(() => { setManagingPerson(false); setTarget(''); setConfirm(null); setReadingQuery(''); setPersonStatus('approved') }, [person, tab])
+  useEffect(() => { const p = view?.people.find(p => p.id === person); setPersonNotes(p?.notes || ''); setPersonName(p?.name || '') }, [person, view?.people.find(p => p.id === person)?.notes, view?.people.find(p => p.id === person)?.name])
+  if (!view) return <div className="ob-memory-workspace"><p role={error ? 'alert' : 'status'}>{error || 'Reading memory…'}</p><Button onClick={() => void refresh()}>Retry</Button></div>
+  const records = filterMemoryRecords(tab === 'People' ? personRecords(view, person, personStatus) : view.proposals.filter(p => tab === 'Memory inbox' ? p.state === filter : tab === 'Journal' ? p.subject === 'self' && p.kind === 'journal' && p.state === 'approved' : tab === 'Life Story' ? p.subject === 'self' && (p.kind === 'story' || p.kind === 'profile') && p.state === (filter === 'pending' ? 'pending' : 'approved') : false), readingQuery)
+  const pending = view.proposals.filter(p => p.state === 'pending').length
+  const selected = view.people.find(p => p.id === person)
+  return <div className="ob-memory-workspace">
+    <div className="ob-memory-line"><h2>{tab}</h2><Button disabled={busy} onClick={() => void refresh()}>Refresh</Button>{tab === 'Memory inbox' && <Button disabled={busy} onClick={() => void run()}>Check new sources</Button>}</div>
+    <p className="ob-memory-caption" role="status">{view.status}{!view.desktop ? ' · Preview only' : ''}</p>
+    {error && <p role="alert">{error}</p>}{notice && <p role="status">{notice}</p>}
+    {view.scanCapped && <p role="alert">Source discovery reached its scan limit. Some history has not been examined.</p>}
+    {view.discoveryWarnings?.length > 0 && <details><summary>Sources that could not be read ({view.discoveryWarnings.length})</summary>{view.discoveryWarnings.map(w => <p key={w} role="alert">{w}</p>)}</details>}
+    {view.proposals.filter(p => p.state !== 'rejected' && staleBasis(p.source, view)).map(p => <p key={'stale-' + p.id} role="alert">{p.title}: underlying confirmed records changed. Review or draft a replacement chapter.</p>)}
+    {view.projectionWarnings.map(w => <p key={w} role="alert">{w}</p>)}
+    {tab === 'Memory inbox' && <><p>{pending} awaiting review · {view.jobs.filter(j => j.state === 'queued').length} passages waiting · {view.jobs.filter(j => j.state === 'blocked').length} need attention</p><div className="ob-memory-actions">{['pending','approved','rejected'].map(s => <button type="button" key={s} className="ob-small-button" aria-pressed={filter === s} onClick={() => setFilter(s)}>{s === 'pending' ? `Not approved (${pending})` : s === 'approved' ? 'Confirmed' : 'Rejected'}</button>)}</div>{view.jobs.some(j => j.state === 'blocked') && <details><summary>Sources needing attention</summary>{view.jobs.filter(j => j.state === 'blocked').map(j => <p key={j.id}>{j.source.title}: {j.error}</p>)}<Button disabled={busy} onClick={() => void act({ type: 'retry' })}>Retry blocked sources</Button></details>}</>}
+    {tab === 'Life Story' && <><p>A detailed history, with authorship and sources kept visible. AI drafts are separate from material you have verified. Chapters grow from reviewed passages; missing events are not invented.</p><div className="ob-memory-actions"><Button onClick={() => setFilter('approved')}>Confirmed history</Button><Button onClick={() => setFilter('pending')}>AI drafts and interpretations</Button></div></>}
+    {tab === 'Life Story' && <details><summary>Draft a history-book chapter from confirmed records</summary><p>Choose the evidence for one chapter. The model uses up to 32 records within a 12,000-character evidence budget. Each chapter is a new AI draft requiring separate verification.</p><label>Chapter title<input aria-label="Chapter title" value={chapterTitle} onChange={e => setChapterTitle(e.target.value)} maxLength={200} /></label><div className="ob-chapter-evidence">{view.proposals.filter(p => p.state === 'approved' && p.subject === 'self' && p.kind !== 'capsule' && p.source.kind !== 'confirmed').map(p => <label key={p.id} className="ob-memory-check"><input type="checkbox" checked={chapterIds.includes(p.id)} onChange={e => setChapterIds(ids => e.target.checked ? [...ids,p.id] : ids.filter(id => id !== p.id))} />{p.title} · {p.date || 'Date unknown'}</label>)}</div><Button disabled={busy || !chapterTitle.trim() || !chapterIds.length} onClick={() => void act({ type: 'draft-chapter', title: chapterTitle, ids: chapterIds }).then(ok => { if(ok) { setNotice('Chapter queued. The idle organizer will prepare a draft, not publish it.'); setChapterIds([]); setChapterTitle('') } })}>Queue chapter draft</Button></details>}
+    {tab === 'Journal' && <p>Your personal journal, separate from the engine’s work log. Unknown event dates stay unknown.</p>}
+    {tab === 'People' && <>
+      <div className="ob-memory-actions"><label>Person<select aria-label="Person profile" value={person} onChange={e => setPerson(e.target.value)}><option value="">Choose a person</option>{view.people.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label>
+        <button type="button" className="ob-small-button" aria-expanded={managingPerson} aria-controls="ob-person-management" onClick={() => setManagingPerson(value => !value)}>{selected ? 'Manage person' : 'Manage people'}</button>
+        <Button onClick={() => { setManagingPerson(true); requestAnimationFrame(() => newPersonInput.current?.focus()) }}>New person</Button>
+      </div>
+      {selected ? <><h3>{selected.name}</h3>{selected.notes && <p className="ob-memory-prose">{selected.notes}</p>}</> : <p className="ob-empty-line">Choose a person to read their records, or create a profile.</p>}
+      {selected && mergedProfiles(view, person).filter(p => p.notes).map(p => <details key={p.id}><summary>Your notes from merged profile: {p.name}</summary><p className="ob-memory-prose">{p.notes}</p></details>)}
+      {selected && <><div className="ob-memory-actions"><button type="button" className="ob-small-button" aria-pressed={personStatus === 'approved'} onClick={() => setPersonStatus('approved')}>Confirmed timeline</button><button type="button" className="ob-small-button" aria-pressed={personStatus === 'pending'} onClick={() => setPersonStatus('pending')}>Suggestions to check ({personRecords(view, person, 'pending').length})</button></div>{personStatus === 'pending' && <p>These are AI interpretations, not confirmed details about this person.</p>}</>}
+      {selected && <details><summary>All linked source observations</summary>{[...new Map(view.jobs.filter(j => view.accounts.some(a => a.person === person && a.id === j.source.account)).map(j => [j.source.path,j.source])).values()].map(s => <p key={s.path}>{s.provider} · {s.title}<small className="ob-memory-caption">{s.path}</small><Button onClick={() => window.dispatchEvent(new CustomEvent('app:open-source', { detail: { path: s.path, title: s.title } }))}>Read source conversation</Button></p>)}</details>}
+      <section id="ob-person-management" hidden={!managingPerson} aria-label="Person management">
+      <form className="ob-memory-actions" onSubmit={e => { e.preventDefault(); void act({ type: 'person', name }).then(ok => { if(ok) setName('') }) }}><label>New person<input ref={newPersonInput} aria-label="New person name" value={name} onChange={e => setName(e.target.value)} maxLength={200} /></label><button disabled={busy || !name.trim()} className="ob-small-button">Create profile</button></form>
+{selected && <details><summary>Edit profile name and your notes</summary><label>Name<input aria-label="Profile name" value={personName} onChange={e => setPersonName(e.target.value)} maxLength={200} /></label><label>Your notes<textarea aria-label="Profile notes" value={personNotes} onChange={e => setPersonNotes(e.target.value)} maxLength={20000} /></label><Button disabled={busy} onClick={() => void act({ type: 'person', id: person, name: personName, notes: personNotes })}>Save my profile notes</Button></details>}
+        {selected && <div className="ob-memory-actions"><label>Same person as<select aria-label="Merge target" value={target} onChange={e => setTarget(e.target.value)}><option value="">Choose a profile</option>{view.people.filter(p => p.id !== person).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}</select></label><Button disabled={!target || busy} onClick={() => setConfirm({ type: 'merge', from: person, to: target, expectedRevision: view.revision })}>Preview identity merge</Button></div>}
+      <p className="ob-memory-caption">Names are not identity proof. Accounts without exposed stable IDs stay scoped to their source conversation until you link them.</p>
+      <ul className="ob-memory-account-list">{view.accounts.filter(a => !a.person || a.person === person).map(a => <li key={a.id}><div><strong>{a.label}</strong> · {a.provider}<small>{a.scope}</small></div><Button disabled={busy || (!person && !a.person)} onClick={() => setConfirm({ type: 'link', account: a.id, person: a.person ? null : person, expectedRevision: view.revision })}>{a.person ? 'Unlink account' : 'Link to selected person'}</Button></li>)}</ul>
+      {view.merges.length > 0 && <details><summary>Identity merge history</summary>{view.merges.map(m => <div key={m.id} className="ob-memory-actions"><span>{view.people.find(p => p.id === m.from)?.name} → {view.people.find(p => p.id === m.to)?.name} · {m.accounts.length} account links · {m.undone ? 'undone' : m.at.slice(0,10)}</span>{!m.undone && <Button disabled={busy} onClick={() => setConfirm({ type: 'undo-merge', id: m.id, expectedRevision: view.revision })}>Preview undo</Button>}</div>)}</details>}
+      </section>
+    </>}
+    {(tab !== 'People' || selected) && <label className="ob-memory-reading-search">Find in this view<input type="search" aria-label="Find memory records" value={readingQuery} onChange={e => setReadingQuery(e.target.value)} placeholder="Words, person, date or quotation" /></label>}
+    <div className={tab === 'Life Story' ? 'ob-life-story' : ''}>{tab === 'Memory inbox' && filter === 'pending'
+      ? reviewGroups(records).map(group => <MemoryReviewGroup key={group.id} records={group.records} busy={busy} act={act}>{item => <Record key={item.id} item={item} act={act} busy={busy} desktop={view.desktop} />}</MemoryReviewGroup>)
+      : timelineGroups(records).map(group => <section key={group.date} className="ob-memory-timeline"><h3>{group.date}</h3>{group.records.map(item => <Record key={item.id} item={item} act={act} busy={busy} desktop={view.desktop} />)}</section>)}</div>
+    {!records.length && (tab !== 'People' || !!selected) && <p className="ob-empty-line">{readingQuery ? 'No records match these words in this view.' : tab === 'Memory inbox' || (tab === 'People' && personStatus === 'pending') ? 'No interpretations in this view. Capturing a source does not automatically confirm a fact.' : 'No reviewed records here yet. Original conversations remain in Vault.'}</p>}
+    {confirm && <div className="ob-memory-confirm" role="dialog" aria-modal="true" aria-label="Confirm identity change"><h3>Review identity change</h3><p>{confirm.type === 'merge' ? `Move ${view.accounts.filter(a => a.person === confirm.from).length} account links from ${selected?.name} to ${view.people.find(p => p.id === confirm.to)?.name}. Source messages stay untouched. This can be undone; both profile notes remain preserved.` : confirm.type === 'undo-merge' ? 'Restore the account links from this merge. Later identity edits will be checked before restoring.' : `Change the profile link for ${view.accounts.find(a => a.id === confirm.account)?.label}. This changes where its records are shown, not the original messages.`}</p><div className="ob-memory-actions"><Button disabled={busy} onClick={() => void act(confirm).then(ok => { if (ok) { setConfirm(null); setNotice('Identity links updated. Original sources were not changed.') } })}>Confirm identity change</Button><Button onClick={() => setConfirm(null)}>Cancel</Button></div></div>}
+  </div>
+}

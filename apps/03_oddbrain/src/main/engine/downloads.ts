@@ -8,14 +8,17 @@
  * nothing else — this is not a general archiver, it is one trusted file from
  * one trusted host.
  */
+import { randomUUID } from 'node:crypto'
+import { downloadToFile, type DownloadReply } from './downloadStream'
+import { unpackRuntime } from './runtimeArchive'
 import { existsSync } from 'node:fs'
 import { spawn } from 'node:child_process'
-import { mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { inflateRawSync } from 'node:zlib'
-import { ENGINE_DOWNLOADS, MAX_DOWNLOAD_BYTES, humanBytes, isOfficialDownloadHost, isOfficialUrl, parseShaLine } from '../../shared/lib/engineDownloads'
+import { ENGINE_DOWNLOADS, MAX_DOWNLOAD_BYTES, humanBytes, isOfficialDownloadHost, isOfficialUrl } from '../../shared/lib/engineDownloads'
 
-export type DownloadTick = { engine: string; got: number; total: number | null; phase: 'downloading' | 'staged' | 'error'; answer?: string }
+export type DownloadTick = { engine: string; got: number; total: number | null; phase: 'downloading' | 'extracting' | 'staged' | 'error'; answer?: string }
 
 export type InstallRecord = {
   engine: string
@@ -25,7 +28,7 @@ export type InstallRecord = {
   at: string
 }
 
-type FetchLike = (url: string) => Promise<{ ok: boolean; status?: number; headers?: { get(name: string): string | null }; arrayBuffer?: () => Promise<ArrayBuffer>; body?: unknown }>
+type FetchLike = (url: string) => Promise<DownloadReply>
 
 export type DownloadManager = {
   start(engine: string): Promise<{ ok: boolean; answer: string }>
@@ -69,15 +72,17 @@ export function createDownloadManager(options: {
   probe?: () => Promise<boolean>
   /** Overridable for tests — how the app starts an installer it was told to run. */
   spawnImpl?: typeof spawn
+  /** Test-only fixture pins. Production always uses the compile-time table. */
+  trustedDigests?: Record<string, string>
 }): DownloadManager {
   const root = options.root
   const doFetch: FetchLike = options.fetchImpl ?? (async (url) => {
-    const reply = await fetch(url, { redirect: 'manual' })
+    const reply = await fetch(url, { redirect: 'manual', signal: AbortSignal.timeout(30 * 60_000) })
     return {
       ok: reply.ok,
       status: reply.status,
       headers: { get: (name: string) => reply.headers.get(name) },
-      arrayBuffer: () => reply.arrayBuffer(),
+      body: reply.body,
     }
   })
 
@@ -133,6 +138,7 @@ export function createDownloadManager(options: {
     }
   }
 
+  const active = new Set<string>()
   return {
     async start(engine: string): Promise<{ ok: boolean; answer: string }> {
       const info = ENGINE_DOWNLOADS[engine]
@@ -144,6 +150,10 @@ export function createDownloadManager(options: {
         // Code, not promise: a tampered endpoint table cannot send you anywhere else.
         return { ok: false, answer: 'That endpoint is not the official one. Nothing was downloaded.' }
       }
+      if (active.has(engine)) return { ok: false, answer: 'This download is already running.' }
+      active.add(engine)
+      let temporary = ''
+      try {
       onTick({ engine, got: 0, total: null, phase: 'downloading' })
       let reply: Awaited<ReturnType<typeof fetchOfficial>>
       try {
@@ -167,52 +177,38 @@ export function createDownloadManager(options: {
         onTick({ engine, got: 0, total: null, phase: 'error', answer })
         return { ok: false, answer }
       }
-      let bytes: Uint8Array
-      try {
-        bytes = new Uint8Array((await reply.arrayBuffer?.()) ?? new ArrayBuffer(0))
-      } catch (failure) {
-        const answer = `The download broke midway: ${(failure as Error).message}`
-        onTick({ engine, got: 0, total: null, phase: 'error', answer })
-        return { ok: false, answer }
-      }
-      if (!bytes.length) {
-        const answer = `${info.host} sent nothing. Nothing was installed.`
-        onTick({ engine, got: 0, total: null, phase: 'error', answer })
-        return { ok: false, answer }
-      }
-      if (bytes.length > MAX_DOWNLOAD_BYTES) {
-        const answer = 'The download exceeded the size cap. Nothing was installed.'
-        onTick({ engine, got: 0, total: null, phase: 'error', answer })
-        return { ok: false, answer }
-      }
-      onTick({ engine, got: bytes.length, total: bytes.length, phase: 'downloading' })
       const target = stagedPath(engine) ?? join(root, engine, 'download.bin')
       await mkdir(join(root, engine), { recursive: true })
-      await writeFile(target, bytes)
-      const digest = parseShaLine(await import('node:crypto').then(crypto => crypto.createHash('sha256').update(bytes).digest('hex')))
-      const record: InstallRecord = {
-        engine,
-        file: target,
-        endpoint: info.windows,
-        sha256: digest,
-        at: new Date().toISOString(),
-      }
-      await writeRecords(engine, record)
-      // A zip for the app's own runtime is unpacked right away; an installer
-      // script waits for its own run permission.
+      temporary = target + '.part-' + randomUUID()
+      const result = await downloadToFile(reply, temporary, MAX_DOWNLOAD_BYTES,
+        (got, total) => onTick({ engine, got, total, phase: 'downloading' }))
+      const expectedDigest = options.trustedDigests?.[engine] ?? info.sha256 ?? ''
+      if (!/^[a-f0-9]{64}$/.test(expectedDigest)) throw Error('This executable download has no compile-time SHA-256 pin. Nothing was staged or run.')
+      if (result.sha256 !== expectedDigest) throw Error(`The downloaded bytes did not match the pinned SHA-256 for ${engine}. Nothing was staged, unpacked or run.`)
       if (info.kind === 'zip') {
-        const unpacked = await unzipArchive(bytes, join(root, engine, 'app'))
-        if (!unpacked.ok) {
-          const answer = `The archive could not be unpacked: ${unpacked.answer}`
-          onTick({ engine, got: 0, total: null, phase: 'error', answer })
-          return { ok: false, answer }
-        }
+        let last = 0
+        const unpacked = await unpackRuntime(temporary, join(root, engine, 'app'), (got, total) => {
+          if (Date.now() - last > 100 || got === total) { last = Date.now(); onTick({ engine, got, total, phase: 'extracting' }) }
+        })
+        if (!unpacked.ok) throw Error(`The archive could not be unpacked: ${unpacked.answer}`)
       }
+      await rename(temporary, target)
+      temporary = ''
+      const record: InstallRecord = { engine, file: target, endpoint: info.windows, sha256: result.sha256, at: new Date().toISOString() }
+      await writeRecords(engine, record)
       const answer = info.kind === 'zip'
-        ? 'Downloaded from the official endpoint and unpacked into the app\u2019s own engines folder. (The file\u2019s SHA-256 is recorded below; the official source is pinned by URL.)'
-        : 'Staged. Running the official installer is a separate permission, shown in full before it runs.'
-      onTick({ engine, got: bytes.length, total: bytes.length, phase: 'staged', answer })
+        ? 'Downloaded from the versioned official endpoint, matched the compile-time SHA-256 pin, and unpacked into the app\u2019s own engines folder.'
+        : 'Staged only after matching its compile-time SHA-256 pin. Running the installer is a separate permission, shown in full before it runs.'
+      onTick({ engine, got: result.bytes, total: result.bytes, phase: 'staged', answer })
       return { ok: true, answer }
+      } catch (failure) {
+        const answer = (failure as Error).message
+        onTick({ engine, got: 0, total: null, phase: 'error', answer })
+        return { ok: false, answer }
+      } finally {
+        active.delete(engine)
+        if (temporary) await rm(temporary, { force: true }).catch(() => undefined)
+      }
     },
 
     async status() {
@@ -225,6 +221,7 @@ export function createDownloadManager(options: {
     },
 
     async remove(engine: string) {
+      if (active.has(engine)) return { ok: false, answer: 'Wait for the active download before removing it.' }
       if (!ENGINE_DOWNLOADS[engine]) return { ok: false, answer: `Nothing is known about ${engine}.` }
       await rm(join(root, engine), { recursive: true, force: true })
       return { ok: true, answer: `Removed the app-managed ${engine}.` }

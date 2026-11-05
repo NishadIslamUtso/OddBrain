@@ -32,7 +32,7 @@ export const DEFAULT_PROFILE_ID = '4gb'
 export const INFERENCE_PROFILES: readonly InferenceProfile[] = Object.freeze([
   {
     id: '4gb',
-    label: '4 GB VRAM (recommended)',
+    label: '4 GB VRAM',
     options: { num_ctx: 4096, num_batch: 256, num_predict: 1024 },
     keepAlive: '5m',
   },

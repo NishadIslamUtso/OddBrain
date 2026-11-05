@@ -1,56 +1,71 @@
 {
   "name": "oddbrain",
-  "version": "0.9.0",
+  "version": "1.0.0",
   "private": true,
   "description": "OddBrain — a local-first desktop assistant. Your files, your models, your machine.",
-  "author": "",
+  "author": {
+    "name": "NishadIslamUtso",
+    "url": "https://github.com/NishadIslamUtso"
+  },
+  "homepage": "https://github.com/NishadIslamUtso/OddBrain",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/NishadIslamUtso/OddBrain.git"
+  },
   "license": "Apache-2.0",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "dev:web": "vite --config vite.web.config.ts",
-    "build": "npm run typecheck && electron-vite build",
-    "build:web": "vite build --config vite.web.config.ts",
+    "build": "npm run typecheck && electron-vite build && node scripts/build-memory-ob-mcp.mjs && node scripts/build-memory-ob-core.mjs && node scripts/build-brain-window.mjs && node scripts/build-goose-import.mjs && node scripts/build-semantic.mjs && node scripts/check-renderer-chunks.mjs && node scripts/build-ui-preview.mjs",
+    "build:web": "node scripts/build-ui-preview.mjs && vite build --config vite.web.config.ts",
+    "build:memory-ob": "node scripts/build-memory-ob-mcp.mjs && node scripts/build-memory-ob-core.mjs && node scripts/build-goose-import.mjs && node scripts/build-semantic.mjs",
+    "build:brain-window": "node scripts/build-brain-window.mjs",
+    "package:addon": "node scripts/package-addon.mjs",
     "start": "electron-vite preview",
     "preview:web": "vite preview --config vite.web.config.ts --port 4174",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "smoke": "electron-vite build && electron . --smoke",
     "dist:win": "npm run build && electron-builder --win",
     "dist:win:dir": "npm run build && electron-builder --win --dir",
-    "dist:linux": "npm run build && electron-builder --linux"
+    "build:ui-preview": "node scripts/build-ui-preview.mjs",
+    "security:policy": "node scripts/check-security-policy.cjs",
+    "security:release": "node scripts/check-release-output.cjs --build",
+    "security:fuses": "node scripts/check-packaged-fuses.cjs",
+    "security:installer": "node scripts/check-release-output.cjs --installer"
   },
   "dependencies": {
-    "lucide-react": "^0.469.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "yaml": "^2.9.1",
-    "zustand": "^5.0.2"
+    "@napi-rs/canvas": "1.0.11",
+    "fast-xml-parser": "5.11.2",
+    "image-size": "2.0.4",
+    "lucide-react": "0.469.0",
+    "pdfjs-dist": "6.4.299",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "yaml": "2.9.1",
+    "yauzl": "3.4.0"
   },
   "devDependencies": {
-    "@electron/fuses": "^1.8.0",
-    "@resvg/resvg-js": "^2.6.2",
-    "@tailwindcss/vite": "^4.0.0",
-    "@types/node": "^22.10.2",
-    "@types/react": "^19.0.2",
-    "@types/react-dom": "^19.0.2",
-    "@vitejs/plugin-react": "^4.7.0",
-    "electron": "^41.10.7",
-    "electron-builder": "^26.15.3",
-    "electron-vite": "^5.0.0",
-    "jsdom": "^24.1.3",
-    "playwright-core": "^1.64.1",
-    "png-to-ico": "^3.0.2",
-    "tailwindcss": "^4.0.0",
-    "typescript": "^5.7.2",
-    "vite": "^6.4.4",
-    "vitest": "^2.1.9"
+    "@electron/asar": "3.4.1",
+    "@electron/fuses": "1.8.0",
+    "@resvg/resvg-js": "2.6.2",
+    "@tailwindcss/vite": "4.3.3",
+    "@types/node": "24.19.2",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@types/yauzl": "3.4.0",
+    "@vitejs/plugin-react": "4.7.0",
+    "electron": "41.10.7",
+    "electron-builder": "26.17.0",
+    "electron-vite": "5.0.0",
+    "png-to-ico": "3.0.2",
+    "tailwindcss": "4.3.3",
+    "typescript": "5.9.3",
+    "vite": "6.4.4"
   },
   "overrides": {
-    "sprintf-js": "^1.1.2"
+    "@electron/get": "5.1.0"
   },
   "engines": {
-    "node": ">=22.12"
+    "node": ">=24 <25"
   }
 }

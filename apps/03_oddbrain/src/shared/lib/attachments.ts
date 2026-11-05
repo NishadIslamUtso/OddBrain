@@ -81,7 +81,26 @@ export async function persistAttachments(attachments: Attachment[]): Promise<Sto
       database.close()
     }
   }
-  return attachments.map(({ data, ...metadata }) => metadata)
+  return attachments.map(({ data, originalFile, originalId, originalSource, ...metadata }) => metadata)
+}
+
+/** Read small originals once; desktop-selected large sources use opaque main-process handles. */
+export async function originalSourceFiles(attachments: Attachment[]): Promise<import('./media').EngineSourceFile[]> {
+  const unique = new Map<string, Pick<Attachment, 'name' | 'mime' | 'originalFile' | 'originalSource'>>()
+  for (const attachment of attachments) if (attachment.originalId && !unique.has(attachment.originalId) && (attachment.originalSource || attachment.originalFile)) unique.set(attachment.originalId, attachment)
+  const files: import('./media').EngineSourceFile[] = []
+  for (const [id, source] of unique) {
+    if (source.originalSource) {
+      files.push({ id, name: source.originalFile?.name || source.name, mime: source.originalFile?.type || source.mime || '', handle: source.originalSource.handle, bytes: source.originalSource.bytes, sha256: source.originalSource.sha256, storage: source.originalSource.storage }); continue
+    }
+    const file = source.originalFile!
+    if (!file.size) throw Error(`${file.name}: the original file is empty. Nothing was sent.`)
+    if (file.size > 8 * 1024 * 1024) throw Error(`${file.name}: reattach this source in the desktop app so it can stream from disk instead of entering renderer memory. Nothing was sent.`)
+    const data = new Uint8Array(await file.arrayBuffer())
+    if (data.byteLength !== file.size) throw Error(`${file.name}: the original file changed while being read. Nothing was sent.`)
+    files.push({ id, name: file.name, mime: file.type, data })
+  }
+  return files
 }
 
 export async function loadImage(file: { id: string; name?: string; data?: string }): Promise<string> {

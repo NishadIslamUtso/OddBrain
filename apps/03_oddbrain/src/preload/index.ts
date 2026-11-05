@@ -1,4 +1,21 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import type { WorkflowMode, WorkflowStep } from '../shared/lib/workflows'
+import type { ScheduleInput } from '../shared/lib/schedules'
+import type { ShellRequest } from '../shared/lib/commands'
+import type { SkillDraft } from '../shared/lib/installedSkills'
+import type { NativeConversation, NativeSessionLink, NativeContextTarget } from '../shared/lib/nativeConversation'
+import { type EngineCapabilityReport } from '../shared/lib/engineCapabilities'
+import type { ThinkingMode } from '../shared/lib/engine'
+import type { MemoryBridge } from '../shared/lib/memoryWorkspace'
+import type { MemoryObBridge } from '../shared/lib/memoryOb'
+import type { ProcessingLedgerBridge } from '../shared/lib/processingLedger'
+import type { AttachmentCenterBridge } from '../shared/lib/attachmentCenter'
+import type { FolderAccessBridge } from '../shared/lib/folderAccess'
+import type { MediaBridge } from '../shared/lib/mediaBridge'
+import type { VideoStudioBridge } from '../shared/lib/videoStudio'
+import type { EngineSourceFile } from '../shared/lib/media'
+import type { MarketplaceBridge } from '../shared/lib/marketplace'
+import type { AutomationBridge, AutomationPreferences, AutomationView, ReviewInput } from '../shared/lib/automation'
+import { contextBridge, ipcRenderer, webUtils } from 'electron'
 import type {
   CloudModelsAnswer,
   CloudTestAnswer,
@@ -8,6 +25,9 @@ import type { Permissions } from '../shared/lib/permissions'
 import type { ApprovalMode, EngineAvailability, EngineEvent, EngineId, EngineModelEntry, EngineSettings } from '../shared/lib/engine'
 import type { HouseRules } from '../shared/lib/houseRules'
 import type { Project } from '../shared/lib/projects'
+import type { ChatStoreBridge, ChatStoreMigration, ChatStoreWrite } from '../shared/lib/chatStore'
+import type { WorkingNotesBridge } from '../shared/lib/workingNotesStore'
+import type { ReadTrustBridge } from '../shared/lib/readTrust'
 import type {
   AdoptInput,
   ItemAnswer,
@@ -16,6 +36,11 @@ import type {
   RemoveAnswer,
   SaveInput,
 } from '../main/artifacts/store'
+
+const extensionPairApi = {
+  get: (): Promise<{ token: string }> => ipcRenderer.invoke('extension-pair:get'),
+  rotate: (): Promise<{ ok: boolean; token: string }> => ipcRenderer.invoke('extension-pair:rotate'),
+}
 
 /**
  * The only bridge between the window and the machine.
@@ -29,7 +54,7 @@ import type {
 /** The engine, exactly as the window may touch it: ask, task, answer, watch. */
 const engineApi = {
   /** The chosen engine, whether it is working, and what it last said. */
-  read: (): Promise<{ engine: EngineSettings; running: boolean; history: EngineEvent[] }> =>
+  read: (): Promise<{ engine: EngineSettings; running: boolean; history: EngineEvent[]; lastSequence?: number; active?: { transcriptId: string; chatId?: string; prompt: string }; busy?: boolean }> =>
     ipcRenderer.invoke('engine:read'),
   /** Choose which engine thinks inside the app. */
   pick: (id: EngineId): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:pick', id),
@@ -45,6 +70,15 @@ const engineApi = {
     ipcRenderer.invoke('engine:clear-binary', id),
   binaryOverride: (id: 'claude-code' | 'agy'): Promise<{ path: string }> =>
     ipcRenderer.invoke('engine:binary-override', id),
+  /** The CLI's own sign-in answer. agy has none, and says so. */
+  authStatus: (id?: 'claude-code' | 'agy'): Promise<{ ok: boolean; loggedIn: boolean; method: string; provider: string; answer: string }> =>
+    ipcRenderer.invoke('engine:auth-status', id),
+  /** Open the engine's own login in a terminal; nothing is read back. */
+  restart: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:restart'),
+  openLogin: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:open-login'),
+  /** The Ollama answering on the door, plus whether Claude Code can use it. */
+  ollamaVersion: (): Promise<{ ok: boolean; version: string; compatible: boolean; answer: string }> =>
+    ipcRenderer.invoke('engine:ollama-version'),
   /** Bring a brain home; progress arrives through onPullEvent. */
   pull: (name: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('engine:pull', name),
   /** Take a brain off this machine. */
@@ -64,17 +98,22 @@ const engineApi = {
     return () => ipcRenderer.removeListener(channel, wrapped)
   },
   /** Pick which brain the engine thinks with (provider brains say which door). */
-  setModel: (model: string, provider?: 'anthropic'): Promise<{ ok: boolean; answer: string }> =>
-    ipcRenderer.invoke('engine:model', model, provider),
+  setModel: (model: string, provider?: 'anthropic' | 'native', expectedEngine?: EngineId): Promise<{ ok: boolean; answer: string }> =>
+    ipcRenderer.invoke('engine:model', model, provider, expectedEngine),
   /** Set the throttle: how much the engine may do before asking. */
   setApproval: (mode: ApprovalMode): Promise<{ ok: boolean; answer: string }> =>
     ipcRenderer.invoke('engine:approval', mode),
-  setThinking: (mode: 'default' | 'extended'): Promise<{ ok: boolean; answer: string }> =>
-    ipcRenderer.invoke('engine:thinking', mode),
+  capabilities: (): Promise<EngineCapabilityReport> => ipcRenderer.invoke('engine:capabilities'),
+  setThinking: (mode: ThinkingMode, target: string): Promise<{ ok: boolean; answer: string }> =>
+    ipcRenderer.invoke('engine:thinking', mode, target),
   memory: {
+    chooseFolder: (): Promise<{ ok: boolean; answer: string; folder?: string; canceled?: boolean }> => ipcRenderer.invoke('memory:choose-folder'),
+    defaultFolder: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:default-folder'),
     list: (): Promise<{ ok: boolean; folder?: string; files?: Array<{ name: string; path: string; updated: string; content: string; clipped: boolean }> }> =>
       ipcRenderer.invoke('memory:list'),
-    remove: (name: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:remove', name),
+    listTrash: (): Promise<{ ok: boolean; folder?: string; files?: Array<{ id: string; name: string; path: string; trashedAt: string; updated: string; content: string; clipped: boolean }> }> => ipcRenderer.invoke('memory:trash-list'),
+    remove: (name: string, expectedFolder?: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:remove', name, expectedFolder),
+    restore: (id: string, expectedFolder?: string): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('memory:restore', id, expectedFolder),
   },
   journal: {
     list: (): Promise<{ ok: boolean; entries: Array<{ at: string; prompt: string; answer: string; sessionId: string | null; usage: string; workspace: string }> }> =>
@@ -87,10 +126,12 @@ const engineApi = {
   pickWorkspace: (): Promise<{ ok: boolean; answer: string }> =>
     ipcRenderer.invoke('engine:pick-workspace'),
   /** Hand the engine a task. Events arrive through `onEvent` from then on. */
-  send: (prompt: string, cwd: string, pictures?: Array<{ mime: string; data: string }>): Promise<{ ok: boolean; answer: string }> =>
-    ipcRenderer.invoke('engine:send', prompt, cwd, pictures),
+  send: (prompt: string, cwd: string, pictures?: Array<{ mime: string; data: string }>, conversation?: NativeConversation, queuedId?: string, originalFiles?: EngineSourceFile[]): Promise<{ ok: boolean; answer: string; transcriptId?: string }> =>
+    ipcRenderer.invoke('engine:send', prompt, cwd, pictures, conversation, queuedId, originalFiles),
   /** What the app kept before allowed writes, and the way back. */
   checkpoints: {
+    preview: (copy: string, original: string) => ipcRenderer.invoke('engine:checkpoint:preview', copy, original),
+    decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('engine:checkpoint:decide', token, decision),
     list: (): Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }> =>
       ipcRenderer.invoke('engine:checkpoints:list'),
     restore: (copy: string, original?: string): Promise<{ ok: boolean; answer: string }> =>
@@ -152,15 +193,19 @@ const engineApi = {
       return () => ipcRenderer.removeListener('engine:download-event', channel)
     },
   },
-  extensionPair: {
-    get: (): Promise<{ token: string }> => ipcRenderer.invoke('extension-pair:get'),
-    rotate: (): Promise<{ ok: boolean; token: string }> => ipcRenderer.invoke('extension-pair:rotate'),
-  },
+  extensionPair: extensionPairApi,
+  readTrust: {
+    list: () => ipcRenderer.invoke('engine:read-trust:list'),
+    approve: (requestId, mode) => ipcRenderer.invoke('engine:read-trust:approve', requestId, mode),
+    revoke: id => ipcRenderer.invoke('engine:read-trust:revoke', id),
+    migrateLegacy: raw => ipcRenderer.invoke('engine:read-trust:migrate', raw),
+    onChanged: listener => { const hear = (): void => listener(); ipcRenderer.on('engine:read-trust-changed', hear); return () => ipcRenderer.removeListener('engine:read-trust-changed', hear) },
+  } satisfies ReadTrustBridge,
   /** Answer one of the engine's permission cards. */
   answer: (requestId: string, allow: boolean): Promise<{ ok: boolean }> =>
     ipcRenderer.invoke('engine:answer', requestId, allow),
   /** Make the engine stop. */
-  stop: (): Promise<{ ok: boolean }> => ipcRenderer.invoke('engine:stop'),
+  stop: (): Promise<{ ok: boolean; answer?: string }> => ipcRenderer.invoke('engine:stop'),
   /** Watch the engine live. Returns the unsubscribe function. */
   onEvent: (listener: (event: EngineEvent) => void): (() => void) => {
     const channel = (_outer: unknown, event: EngineEvent): void => listener(event)
@@ -169,8 +214,117 @@ const engineApi = {
   },
 }
 
+const automationApi: AutomationBridge = {
+  history: (before?: string) => ipcRenderer.invoke('automation:history', before),
+  saved: (id: string) => ipcRenderer.invoke('automation:saved', id),
+  read: () => ipcRenderer.invoke('automation:read'),
+  update: (patch: Partial<AutomationPreferences>) => ipcRenderer.invoke('automation:update', patch),
+  models: () => ipcRenderer.invoke('automation:models'),
+  review: (input: ReviewInput) => ipcRenderer.invoke('automation:review', input),
+  cancel: () => ipcRenderer.invoke('automation:cancel'),
+  onChanged: listener => { const hear = (_event: unknown, view: AutomationView): void => listener(view); ipcRenderer.on('automation:changed', hear); return () => ipcRenderer.removeListener('automation:changed', hear) },
+}
+const mediaApi: MediaBridge = {
+  authorizeRecording: expected => ipcRenderer.invoke('media:authorize-recording', expected),
+  onCancelled: listener => { const fn = (): void => listener(); ipcRenderer.on('media:cancelled', fn); return () => ipcRenderer.removeListener('media:cancelled', fn) },
+  read: () => ipcRenderer.invoke('media:read'), update: patch => ipcRenderer.invoke('media:update', patch),
+  chooseDecoder: () => ipcRenderer.invoke('media:decoder'), chooseOcrAdapter: () => ipcRenderer.invoke('media:ocr-adapter'), decode: input => ipcRenderer.invoke('media:decode', input),
+  decodeFile: (file, input) => ipcRenderer.invoke('media:decode-file', webUtils.getPathForFile(file), input),
+  releaseSource: handle => ipcRenderer.invoke('media:release-source', handle),
+  dictate: () => ipcRenderer.invoke('media:dictate'), cancel: () => ipcRenderer.invoke('media:cancel'),
+}
+const videoStudioApi: VideoStudioBridge = {
+  read: () => ipcRenderer.invoke('video-studio:read'),
+  update: patch => ipcRenderer.invoke('video-studio:update', patch),
+  chooseKdenlive: () => ipcRenderer.invoke('video-studio:choose-kdenlive'),
+  chooseProjectFolder: () => ipcRenderer.invoke('video-studio:choose-project'),
+  chooseYtDlp: () => ipcRenderer.invoke('video-studio:choose-ytdlp'),
+  saveSecret: (kind, value) => ipcRenderer.invoke('video-studio:save-secret', kind, value),
+  clearSecret: kind => ipcRenderer.invoke('video-studio:clear-secret', kind),
+  testKdenlive: () => ipcRenderer.invoke('video-studio:test'),
+  openKdenlive: () => ipcRenderer.invoke('video-studio:open'),
+  search: (query, kind, page, intendedUse) => ipcRenderer.invoke('video-studio:search', query, kind, page, intendedUse),
+  preview: token => ipcRenderer.invoke('video-studio:preview', token),
+  prepareAsset: token => ipcRenderer.invoke('video-studio:prepare-asset', token),
+  decideAsset: (token, decision, importIntoKdenlive) => ipcRenderer.invoke('video-studio:decide-asset', token, decision, importIntoKdenlive),
+  chooseLocalVideo: () => ipcRenderer.invoke('video-studio:choose-local'),
+  decideLocalVideo: (token, decision, storage, videoOcr) => ipcRenderer.invoke('video-studio:decide-local', token, decision, storage, videoOcr),
+  preflightUrl: url => ipcRenderer.invoke('video-studio:preflight-url', url),
+  acquireUrl: (token, decision, importIntoKdenlive) => ipcRenderer.invoke('video-studio:acquire-url', token, decision, importIntoKdenlive),
+  workspace: () => ipcRenderer.invoke('video-studio:workspace'),
+  captureKdenliveFrame: position => ipcRenderer.invoke('video-studio:capture-frame', position),
+  prepareKdenliveRender: (mode, start, end, intent, audioIntent) => ipcRenderer.invoke('video-studio:prepare-kdenlive-render', mode, start, end, intent, audioIntent),
+  decideKdenliveRender: (token, decision) => ipcRenderer.invoke('video-studio:decide-kdenlive-render', token, decision),
+  kdenliveRenderStatus: () => ipcRenderer.invoke('video-studio:kdenlive-render-status'),
+  prepareKdenlivePreviewInspection: (path, videoOcr) => ipcRenderer.invoke('video-studio:prepare-preview-inspection', path, videoOcr),
+  decideKdenlivePreviewInspection: (token, decision) => ipcRenderer.invoke('video-studio:decide-preview-inspection', token, decision),
+  expandEvidence: (id, moments, question) => ipcRenderer.invoke('video-studio:expand-evidence', id, moments, question),
+  readEvidenceFrame: (id, at) => ipcRenderer.invoke('video-studio:read-evidence-frame', id, at),
+  retryEvidence: id => ipcRenderer.invoke('video-studio:retry-evidence', id),
+  confirmEvidenceDescription: (id, at, description) => ipcRenderer.invoke('video-studio:confirm-evidence', id, at, description),
+  prepareEditPlan: plan => ipcRenderer.invoke('video-studio:prepare-edit-plan', plan),
+  decideEditPlan: (token, decision) => ipcRenderer.invoke('video-studio:decide-edit-plan', token, decision),
+  prepareKdenliveAction: action => ipcRenderer.invoke('video-studio:prepare-kdenlive-action', action),
+  decideKdenliveAction: (token, decision) => ipcRenderer.invoke('video-studio:decide-kdenlive-action', token, decision),
+  stop: () => ipcRenderer.invoke('video-studio:stop'),
+  prepareDesignKit: format => ipcRenderer.invoke('video-studio:prepare-design-kit', format),
+  decideDesignKit: (token, decision, importTitleIntoKdenlive) => ipcRenderer.invoke('video-studio:decide-design-kit', token, decision, importTitleIntoKdenlive),
+}
+const marketplaceApi: MarketplaceBridge = {
+  inspect: (repo, plugin, engine) => ipcRenderer.invoke('market:inspect', repo, plugin, engine),
+  sources: engine => ipcRenderer.invoke('market:sources', engine), browse: (repo, engine) => ipcRenderer.invoke('market:browse', repo, engine),
+  probe: engine => ipcRenderer.invoke('market:probe', engine), installed: engine => ipcRenderer.invoke('market:installed', engine),
+  plan: (repo, action, plugin, engine) => ipcRenderer.invoke('market:plan', repo, action, plugin, engine),
+  confirm: (token, engine) => ipcRenderer.invoke('market:confirm', token, engine), cancel: engine => ipcRenderer.invoke('market:cancel', engine),
+}
 const api = {
+  chats: {
+    read: () => ipcRenderer.invoke('chats:read'),
+    onLoadProgress: listener => {
+      const wrapped = (_event: Electron.IpcRendererEvent, progress: { done: number; total: number }) => listener(progress)
+      ipcRenderer.on('chats:load-progress', wrapped)
+      return () => { ipcRenderer.removeListener('chats:load-progress', wrapped) }
+    },
+    migrate: (input: ChatStoreMigration) => ipcRenderer.invoke('chats:migrate', input),
+    write: (input: ChatStoreWrite) => ipcRenderer.invoke('chats:write', input),
+    exportRecovery: (input: ChatStoreMigration) => ipcRenderer.invoke('chats:export-recovery', input),
+    importRecovery: () => ipcRenderer.invoke('chats:import-recovery'),
+    openLocation: () => ipcRenderer.invoke('chats:open-location'),
+  } satisfies ChatStoreBridge,
+  appData: {
+    backup: (operation: 'create' | 'restore', rendererPreferences: Record<string, string> = {}) => ipcRenderer.invoke('app-data:backup', operation, rendererPreferences),
+    completeMemoryBackup: (operation: 'create' | 'restore', rendererPreferences: Record<string, string> = {}) => ipcRenderer.invoke('complete-memory:backup', operation, rendererPreferences),
+  },
+  workingNotes: {
+    read: chatId => ipcRenderer.invoke('working-notes:read', chatId),
+    save: input => ipcRenderer.invoke('working-notes:save', input),
+    rejectProposal: input => ipcRenderer.invoke('working-notes:reject-proposal', input),
+    migrate: input => ipcRenderer.invoke('working-notes:migrate', input),
+    fork: input => ipcRenderer.invoke('working-notes:fork', input),
+    exportRecovery: chatId => ipcRenderer.invoke('working-notes:export', chatId),
+    importRecovery: chatId => ipcRenderer.invoke('working-notes:import', chatId),
+  } satisfies WorkingNotesBridge,
+  transcripts: { raw: (id: string) => ipcRenderer.invoke('transcripts:raw', id), image: (id: string, imageId: string) => ipcRenderer.invoke('transcripts:image', id, imageId), attachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:attachment', id, attachmentId), saveAttachment: (id: string, attachmentId: string) => ipcRenderer.invoke('transcripts:save-attachment', id, attachmentId), recover: (chatIds: string[], knownTranscriptIds: string[], before?: string) => ipcRenderer.invoke('transcripts:recover', chatIds, knownTranscriptIds, before), list: (before?: string) => ipcRenderer.invoke('transcripts:list', before), read: (id: string) => ipcRenderer.invoke('transcripts:read', id) },
+  media: mediaApi, videoStudio: videoStudioApi, marketplace: marketplaceApi,
+  // Settings consumes pairing beside the other top-level services. Keep the
+  // engine alias below for older renderer bundles, but do not make the current
+  // desktop UI depend on an unrelated engine namespace.
+  extensionPair: extensionPairApi,
+  automation: automationApi,
+  memoryWorkspace: { read: () => ipcRenderer.invoke('memory-workspace:read'), act: action => ipcRenderer.invoke('memory-workspace:act', action), run: () => ipcRenderer.invoke('memory-workspace:run') } satisfies MemoryBridge,
+  memoryOb: {
+    read: input => ipcRenderer.invoke('memory-ob:read', input),
+    project: projectId => ipcRenderer.invoke('memory-ob:project', projectId),
+    search: input => ipcRenderer.invoke('memory-ob:search', input),
+    goosePreview: () => ipcRenderer.invoke('memory-ob:goose-preview'),
+    gooseDecide: (token, decision) => ipcRenderer.invoke('memory-ob:goose-decide', token, decision),
+  } satisfies MemoryObBridge,
+  processing: { read: () => ipcRenderer.invoke('processing:read'), resume: id => ipcRenderer.invoke('processing:resume', id), setLimits: limits => ipcRenderer.invoke('processing:set-limits', limits) } satisfies ProcessingLedgerBridge,
+  attachmentCenter: { read: () => ipcRenderer.invoke('attachments:read'), previewDelete: id => ipcRenderer.invoke('attachments:preview-delete', id), confirmDelete: token => ipcRenderer.invoke('attachments:confirm-delete', token) } satisfies AttachmentCenterBridge,
+  folderAccess: { read: () => ipcRenderer.invoke('folders:read'), choose: input => ipcRenderer.invoke('folders:choose', input), revoke: id => ipcRenderer.invoke('folders:revoke', id), list: id => ipcRenderer.invoke('folders:list', id) } satisfies FolderAccessBridge,
   app: {
+    previewHtml: (): Promise<{ ok: boolean; html?: string; error?: string }> => ipcRenderer.invoke('app:preview-html'),
+    claimLaunch: (): Promise<boolean> => ipcRenderer.invoke('app:claim-launch'),
     /** Which build is running. Used by the About panel and bug reports. */
     version: process.env['npm_package_version'] ?? '0.1.0',
     platform: process.platform,
@@ -196,22 +350,32 @@ const api = {
       return () => ipcRenderer.removeListener(String(channel), listener)
     },
   },
+  workflows: { list: (before?: string) => ipcRenderer.invoke('workflows:list', before), save: (input: { name: string; cwd: string; steps: WorkflowStep[]; mode?: WorkflowMode }) => ipcRenderer.invoke('workflows:save', input), archive: (id: string, archived: boolean) => ipcRenderer.invoke('workflows:archive', id, archived), preview: (id: string) => ipcRenderer.invoke('workflows:preview', id), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('workflows:decide', token, decision), cancel: () => ipcRenderer.invoke('workflows:cancel'), runs: (before?: string) => ipcRenderer.invoke('workflows:runs', before), readRun: (id: string) => ipcRenderer.invoke('workflows:read-run', id) },
+  schedules: { list: () => ipcRenderer.invoke('schedules:list'), preview: (input: ScheduleInput) => ipcRenderer.invoke('schedules:preview', input), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('schedules:decide', token, decision), pause: (id: string) => ipcRenderer.invoke('schedules:pause', id), inbox: (before?: string) => ipcRenderer.invoke('schedules:inbox', before), acknowledge: (id: string) => ipcRenderer.invoke('schedules:acknowledge', id) },
+  commands: { saved: (before?: string) => ipcRenderer.invoke('commands:saved', before), save: (input: { name: string; command: string; cwd: string }) => ipcRenderer.invoke('commands:save', input), archiveSaved: (id: string, archived: boolean) => ipcRenderer.invoke('commands:archive-saved', id, archived), previewSaved: (id: string) => ipcRenderer.invoke('commands:preview-saved', id), context: () => ipcRenderer.invoke('commands:context'), preview: (request: ShellRequest) => ipcRenderer.invoke('commands:preview', request), decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('commands:decide', token, decision), cancel: () => ipcRenderer.invoke('commands:cancel'), history: (before?: string) => ipcRenderer.invoke('commands:history', before), read: (id: string) => ipcRenderer.invoke('commands:read', id), output: (id: string, stream: 'stdout' | 'stderr') => ipcRenderer.invoke('commands:output', id, stream) },
   projects: {
+    attach: (projectId: string) => ipcRenderer.invoke('projects:attach', projectId),
     read: (): Promise<Project[]> => ipcRenderer.invoke('projects:read'),
-    write: (projects: Project[]): Promise<{ ok: boolean; projects: Project[] }> =>
-      ipcRenderer.invoke('projects:write', projects),
+    write: (projects: Project[], expected?: Project[]): Promise<{ ok: boolean; projects: Project[] }> =>
+      ipcRenderer.invoke('projects:write', projects, expected),
     blank: (name: string): Promise<Project> => ipcRenderer.invoke('projects:new', name),
   },
   engine: {
+    queue: { read: () => ipcRenderer.invoke('queue:read'), hold: (id: string) => ipcRenderer.invoke('queue:hold', id), enqueue: (prompt: string, conversation?: NativeConversation) => ipcRenderer.invoke('queue:enqueue', prompt, conversation), resume: (id: string, acknowledge?: boolean) => ipcRenderer.invoke('queue:resume', id, acknowledge), cancel: (id: string) => ipcRenderer.invoke('queue:cancel', id), history: (before?: string) => ipcRenderer.invoke('queue:history', before) },
+    contextTarget: (input: NativeConversation): Promise<NativeContextTarget> => ipcRenderer.invoke('engine:context-target', input),
+    chatSessions: (chatId: string): Promise<NativeSessionLink[]> => ipcRenderer.invoke('engine:chat-sessions', chatId),
     setWorkspace: (folder: string): Promise<{ ok: boolean; answer: string }> =>
       ipcRenderer.invoke('engine:workspace-set', folder),
     sessions: (): Promise<Array<{ workspace: string; sessionId: string }>> => ipcRenderer.invoke('engine:sessions'),
     boardRead: (): Promise<unknown> => ipcRenderer.invoke('sessions:board-read'),
-    boardWrite: (board: unknown): Promise<{ ok: boolean }> => ipcRenderer.invoke('sessions:board-write', board),
+    boardWrite: (board: unknown, expected: unknown): Promise<{ ok: boolean }> => ipcRenderer.invoke('sessions:board-write', board, expected),
     pickFiles: (): Promise<string[]> => ipcRenderer.invoke('sessions:pick-files'),
     forgetSession: (workspace: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('engine:sessions-forget', workspace),
     openFolder: (folder: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('app:open-folder', folder),
     checkpoints: {
+    preview: (copy: string, original: string) => ipcRenderer.invoke('engine:checkpoint:preview', copy, original),
+    decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('engine:checkpoint:decide', token, decision),
+      inspect: (copy: string): Promise<{ ok: boolean; content?: string; clipped?: boolean; answer?: string }> => ipcRenderer.invoke('engine:checkpoint:inspect', copy),
       list: (): Promise<{ ok: boolean; checkpoints: Array<{ copy: string; original: string; at: string }> }> =>
         ipcRenderer.invoke('engine:checkpoints:list'),
       restore: (copy: string, original?: string): Promise<{ ok: boolean; answer: string }> =>
@@ -219,6 +383,9 @@ const api = {
     },
   },
   houseRules: {
+    previewGlobal: (engine: 'claude-code' | 'agy') => ipcRenderer.invoke('rules:preview-global', engine),
+    previewProject: (projectId: string, engine: 'claude-code' | 'agy') => ipcRenderer.invoke('rules:preview-project', projectId, engine),
+    decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('rules:decide', token, decision),
     read: (): Promise<{ rules: HouseRules; defaults: HouseRules }> => ipcRenderer.invoke('houserules:read'),
     write: (rules: HouseRules): Promise<{ ok: boolean; written: string[] }> =>
       ipcRenderer.invoke('houserules:write', rules),
@@ -235,7 +402,7 @@ const api = {
      * what happened; the renderer is told the result rather than assuming one.
      */
     update: (
-      patch: { vaultPath?: string; cloud?: { baseUrl?: string; model?: string }; permissions?: Permissions }
+      patch: { vaultPath?: string; cloud?: { baseUrl?: string; model?: string }; permissions?: Partial<Permissions> }
     ): Promise<{
       ok: boolean
       error?: string
@@ -262,6 +429,13 @@ const api = {
     test: (id: string): Promise<CloudTestAnswer> => ipcRenderer.invoke('cloud:test', id),
   },
   skills: {
+    planCatalog: (name: string) => ipcRenderer.invoke('skills:plan-catalog', name),
+    decideCatalog: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('skills:decide-catalog', token, decision),
+    cancelCatalog: () => ipcRenderer.invoke('skills:cancel-catalog'),
+    inventory: (engine: 'claude-code' | 'agy') => ipcRenderer.invoke('skills:inventory', engine),
+    inspectInstalled: (engine: 'claude-code' | 'agy', id: string) => ipcRenderer.invoke('skills:inspect-installed', engine, id),
+    previewCreate: (draft: SkillDraft) => ipcRenderer.invoke('skills:preview-create', draft),
+    decideCreate: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('skills:decide-create', token, decision),
     /** Install one skill from the app's own catalog, into every engine. */
     installCatalog: (name: string): Promise<{ ok: boolean; answer: string; written?: string[] }> =>
       ipcRenderer.invoke('skills:install-catalog', name),
@@ -291,12 +465,15 @@ const api = {
       ipcRenderer.invoke('mods:community-index'),
   },
   mcp: {
+    preview: (servers: unknown) => ipcRenderer.invoke('mcp:preview', servers),
+    decide: (token: string, decision: 'allow' | 'deny') => ipcRenderer.invoke('mcp:decide', token, decision),
+    inventory: (engine: 'claude-code' | 'agy') => ipcRenderer.invoke('mcp:inventory', engine),
     /** The one MCP server list, and which engine configs it was deployed to. */
-    read: (): Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }> }> =>
+    read: (): Promise<{ servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>; problem: string }> =>
       ipcRenderer.invoke('mcp:read'),
     write: (
       servers: Array<{ name: string; command?: string; args?: string[]; url?: string }>,
-    ): Promise<{ ok: boolean; written: string[] }> => ipcRenderer.invoke('mcp:write', { servers }),
+    ): Promise<{ ok: boolean; written: string[]; answer: string }> => ipcRenderer.invoke('mcp:write', { servers }),
   },
   structure: {
     /** What a folder is, and exactly what a structure apply would add. */
@@ -327,12 +504,15 @@ const api = {
     saveHandoff: (name: string, markdown: string): Promise<{ ok: boolean; answer: string }> =>
       ipcRenderer.invoke('vault:save-handoff', { name, markdown }),
     /** A timestamped portable copy of the vault, written to the exports folder. */
+    backup: (operation: 'create' | 'restore'): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('vault:backup', operation),
     exportCopy: (): Promise<{ ok: boolean; answer: string }> => ipcRenderer.invoke('vault:export-copy'),
     /** The open conversation, captured into the vault as a capsule. */
     captureChat: (title: string, markdown: string): Promise<{ ok: boolean; answer: string }> =>
       ipcRenderer.invoke('vault:capture-chat', { title, markdown }),
   },
   extension: {
+    export: (destination: 'downloads' | 'choose'): Promise<{ ok: boolean; answer: string; path?: string }> => ipcRenderer.invoke('extension:export', destination),
+    publishAppearance: (value: import('../shared/lib/extensionAppearance').ExtensionAppearance): Promise<{ ok: boolean }> => ipcRenderer.invoke('extension:appearance', value),
     /**
      * Whether the browser extension can reach this app, and at what address. A
      * port that is open is a fact the interface shows rather than something to
@@ -363,6 +543,8 @@ const api = {
   },
 
   artifacts: {
+    trashList: (): Promise<{ ok: boolean; items: import('../main/artifacts/store').TrashItem[]; error?: string }> => ipcRenderer.invoke('artifacts:trash-list'),
+    trashRestore: (key: string): Promise<ItemAnswer> => ipcRenderer.invoke('artifacts:trash-restore', key),
     list: (): Promise<ListAnswer> => ipcRenderer.invoke('artifacts:list'),
     /** One document. `version` is 1-based, the number the chips show. */
     read: (id: string, version?: number): Promise<ReadAnswer> => ipcRenderer.invoke('artifacts:read', id, version),

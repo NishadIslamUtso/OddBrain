@@ -1,297 +1,83 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
 import { bridge } from '../platform/bridge'
+import { vaultGet } from '@shared/lib/vault'
+import usePersistentState from '../hooks/usePersistentState'
+import { DEFAULT_GRAPH, GRAPH_KEY, normalizeGraph } from '../state/graph'
+import { buildGraph, newCamera } from '../lib/graphScene'
+import { mountGraph, type GraphRenderOptions } from '../lib/graphCanvas'
+import { getMotionMode, subscribeMotionMode } from '../motion/motionMode'
+import { useLook } from '../ui/LookContext'
+import { Mascot } from '../motion/Mascot'
+import GraphAppearance from './GraphAppearance'
 
-/**
- * ConnectionGraph — the vault's [[links]] as a 3D graph, drawn on a plain
- * canvas with a hand-rolled force layout. No library, no network: the data is
- * the app's own link check (edges = unambiguously resolved links only), the
- * physics is ~40 lines, and drag/wheel are the whole interface. A node you
- * cannot reach by a link is not pretended into an edge.
- *
- * Honest caps: above 400 nodes the most-connected 400 are drawn and the rest
- * are counted in words, not hidden.
- */
-
-type Links = {
-  files: number
-  checked: number
-  dead: Array<{ from: string; target: string }>
-  ambiguous: Array<{ from: string; target: string; matches: string[] }>
-  edges: Array<{ from: string; to: string }>
-  error?: string
-}
-
-const MAX_NODES = 400
-
-export default function ConnectionGraph({
-  path,
-  isDemo,
-  /** 'card' = the compact embed in Settings › Vault; 'full' = the Brain view's
-   *  whole pane — same engine, borderless, the parent draws the frame. */
-  variant = 'card',
-}: {
-  path: string
-  isDemo: boolean
-  variant?: 'card' | 'full'
-}) {
-  const canvasRef = useRef<HTMLCanvasElement | null>(null)
-  const stateRef = useRef<{ yaw: number; pitch: number; zoom: number; dragging: boolean }>({ yaw: 0.6, pitch: 0.35, zoom: 1, dragging: false })
-
+export default function ConnectionGraph({ path, isDemo, variant = 'card' }: { path: string; isDemo: boolean; variant?: 'card' | 'full' }) {
+  const [warning, setWarning] = useState('')
+  const [prefs, setPrefs] = usePersistentState(GRAPH_KEY, DEFAULT_GRAPH, normalizeGraph, setWarning)
+  const [data, setData] = useState<Awaited<ReturnType<typeof bridge.structure.linkCheck>> | null>(null)
+  const [files, setFiles] = useState<string[]>([]), [sourceNote, setSourceNote] = useState(''), [error, setError] = useState('')
+  const [revision, setRevision] = useState(0), [loading, setLoading] = useState(false), [appearance, setAppearance] = useState(false)
+  const [selected, setSelected] = useState(''), [query, setQuery] = useState(''), [preview, setPreview] = useState<{ path: string; text: string; loading?: boolean } | null>(null)
+  const canvas = useRef<HTMLCanvasElement>(null), camera = useRef(newCamera()), controller = useRef<ReturnType<typeof mountGraph>>(null), readTicket = useRef(0)
+  const helpId = useId(), panelId = useId()
+  const motion = useSyncExternalStore(subscribeMotionMode, getMotionMode), look = useLook()
+  const allowMotion = !motion.osReduced && motion.mode !== 'still' && !motion.paused && !look.paused
   useEffect(() => {
-    if (isDemo || !path) return
-    const canvas = canvasRef.current
-    if (!canvas) return
     let live = true
-    let stop = () => {}
-    bridge.structure
-      .linkCheck()
-      .then(links => {
-        if (!live) return
-        stop = startGraph(canvas, links, stateRef)
-      })
-      .catch(() => {})
-    return () => {
-      live = false
-      stop()
-    }
-  }, [path, isDemo])
-
-  if (isDemo || !path) {
-    return (
-      <div className="rounded-lg border border-line bg-card p-3 text-[12px] text-muted">
-        The connections graph draws from the real vault, in the desktop app.
-      </div>
-    )
+    setData(null); setFiles([]); setError(''); setSourceNote(''); setSelected(''); setPreview(null); readTicket.current++
+    if (isDemo || !path) { setLoading(false); return }
+    setLoading(true)
+    Promise.all([bridge.structure.linkCheck(), vaultGet('/files').catch(() => null)]).then(([links, tree]) => {
+      if (!live) return
+      if (links.error) { setError(links.error); return }
+      setData(links)
+      if (tree?.ok && Array.isArray(tree.files)) { setFiles(tree.files.filter((file: unknown): file is string => typeof file === 'string')); if (tree.capped) setSourceNote('The vault file listing is capped; some unlinked notes may be missing.') }
+      else setSourceNote('Unlinked notes could not be loaded. Showing resolved link endpoints only.')
+    }).catch(reason => { if (live) setError(reason instanceof Error ? reason.message : 'Connections could not be read.') }).finally(() => { if (live) setLoading(false) })
+    return () => { live = false; readTicket.current++ }
+  }, [path, isDemo, revision])
+  const scene = useMemo(() => buildGraph(data?.edges ?? [], files, prefs), [data, files, prefs.mode, prefs.spacing, prefs.repulsion, prefs.maxNodes, prefs.showOrphans])
+  const select = (name: string): void => { readTicket.current++; setSelected(name); setPreview(null) }
+  const options = useRef<GraphRenderOptions>({ prefs, selected, allowMotion, onSelect: select })
+  options.current = { prefs, selected, allowMotion, onSelect: select }
+  useEffect(() => {
+    if (!canvas.current || !scene.names.length) return
+    const view = mountGraph(canvas.current, scene, camera.current, () => options.current)
+    controller.current = view
+    if (!view) setError('Canvas drawing is unavailable in this window.')
+    return () => { view?.dispose(); controller.current = null }
+  }, [scene])
+  useEffect(() => { controller.current?.refresh() }, [prefs, selected, allowMotion])
+  useEffect(() => { if (selected && !scene.names.includes(selected)) select('') }, [scene, selected])
+  const readNote = async (): Promise<void> => {
+    const name = selected, ticket = ++readTicket.current
+    setPreview({ path: name, text: '', loading: true })
+    try {
+      const reply = await vaultGet(`/file?path=${encodeURIComponent(name)}`)
+      if (ticket !== readTicket.current) return
+      if (!reply?.ok) throw Error(String(reply?.error || 'This note could not be read.'))
+      setPreview({ path: name, text: `${String(reply.content || '').slice(0, 40000)}${reply.truncated || String(reply.content || '').length > 40000 ? '\n\n[Preview truncated]' : ''}` })
+    } catch (reason) { if (ticket === readTicket.current) setPreview({ path: name, text: reason instanceof Error ? reason.message : 'This note could not be read.' }) }
   }
-
-  if (variant === 'full') {
-    return (
-      <canvas
-        ref={canvasRef}
-        className="block h-full w-full cursor-grab active:cursor-grabbing"
-        aria-label="3D graph of vault connections"
-      />
-    )
-  }
-
-  return (
-    <div className="overflow-hidden rounded-lg border border-line bg-card">
-      <canvas
-        ref={canvasRef}
-        className="block h-[240px] w-full cursor-grab active:cursor-grabbing"
-        aria-label="3D graph of vault connections"
-      />
-      <p className="border-t border-line px-2.5 py-1.5 text-[10.5px] text-muted">
-        Connections, drag to rotate, scroll to zoom. Edges are resolved [[links]]; dead and ambiguous ones are counted
-        in Structure details.
-      </p>
+  const matches = scene.names.filter(name => name.toLowerCase().includes(query.trim().toLowerCase()))
+  return <section className={`ob-graph ob-graph--${variant}`} aria-label="Vault connections">
+    <div className="ob-graph-toolbar">
+      <div className="ob-graph-modes" aria-label="Graph dimensions">{(['3d', '2d'] as const).map(mode => <button key={mode} type="button" aria-pressed={prefs.mode === mode} onClick={() => { setPrefs({ ...prefs, mode }); controller.current?.reset() }}>{mode.toUpperCase()}</button>)}</div>
+      <button type="button" aria-label="Zoom in" disabled={!scene.names.length} onClick={() => controller.current?.zoom(1.2)}>+</button><button type="button" aria-label="Zoom out" disabled={!scene.names.length} onClick={() => controller.current?.zoom(1 / 1.2)}>−</button><button type="button" disabled={!scene.names.length} onClick={() => controller.current?.reset()}>Fit view</button>
+      <button type="button" disabled={loading || isDemo || !path} onClick={() => setRevision(n => n + 1)}>Refresh</button>
+      <button type="button" aria-expanded={appearance} aria-controls={panelId} onClick={() => setAppearance(!appearance)}>Appearance</button>
+      <details className="ob-graph-help"><summary>Controls</summary><p id={helpId}>Drag to orbit in 3D or pan in 2D. Shift-drag pans. Scroll or +/− to zoom. Arrow keys move the view; Home fits it. Select a node or choose a note below.</p></details>
     </div>
-  )
-}
-
-/** Build the simulation + renderer. Returns a stop function for cleanup. */
-function startGraph(
-  canvas: HTMLCanvasElement,
-  links: Links,
-  view: React.RefObject<{ yaw: number; pitch: number; zoom: number; dragging: boolean }>
-): () => void {
-  const context = canvas.getContext('2d')
-  if (!context) return () => {}
-
-  // Nodes: every endpoint, plus degree; above the cap keep the most connected.
-  const degree = new Map<string, number>()
-  for (const edge of links.edges) {
-    degree.set(edge.from, (degree.get(edge.from) ?? 0) + 1)
-    degree.set(edge.to, (degree.get(edge.to) ?? 0) + 1)
-  }
-  let names = [...degree.keys()]
-  const total = names.length
-  if (total > MAX_NODES) names = [...names].sort((a, b) => (degree.get(b) ?? 0) - (degree.get(a) ?? 0)).slice(0, MAX_NODES)
-  const index = new Map(names.map((name, i) => [name, i]))
-
-  // State: positions in a unit sphere, velocities, per-node radius by degree.
-  const n = names.length
-  const pos = new Float32Array(n * 3)
-  const vel = new Float32Array(n * 3)
-  const radius = new Float32Array(n)
-  const maxDegree = Math.max(1, ...names.map(name => degree.get(name) ?? 0))
-  for (let i = 0; i < n; i++) {
-    // Deterministic-ish spread: golden-angle spiral on a sphere.
-    const t = i / Math.max(1, n)
-    const y = 1 - 2 * t
-    const r = Math.sqrt(Math.max(0, 1 - y * y))
-    const phi = i * 2.399963
-    pos[i * 3] = Math.cos(phi) * r
-    pos[i * 3 + 1] = y
-    pos[i * 3 + 2] = Math.sin(phi) * r
-    radius[i] = 1.5 + ((degree.get(names[i]) ?? 0) / maxDegree) * 3.5
-  }
-  const edges = links.edges
-    .map(edge => [index.get(edge.from), index.get(edge.to)] as [number | undefined, number | undefined])
-    .filter((pair): pair is [number, number] => pair[0] !== undefined && pair[1] !== undefined)
-
-  // Sizing with device pixel ratio.
-  const resize = (): void => {
-    const ratio = window.devicePixelRatio || 1
-    canvas.width = Math.max(1, canvas.clientWidth * ratio)
-    canvas.height = Math.max(1, canvas.clientHeight * ratio)
-  }
-  resize()
-  const observer = new ResizeObserver(resize)
-  observer.observe(canvas)
-
-  // Drag to rotate, wheel to zoom.
-  let last: { x: number; y: number } | null = null
-  const down = (event: PointerEvent): void => {
-    view.current.dragging = true
-    last = { x: event.clientX, y: event.clientY }
-    canvas.setPointerCapture(event.pointerId)
-  }
-  const move = (event: PointerEvent): void => {
-    if (!view.current.dragging || !last) return
-    view.current.yaw += (event.clientX - last.x) * 0.008
-    view.current.pitch = Math.max(-1.4, Math.min(1.4, view.current.pitch + (event.clientY - last.y) * 0.008))
-    last = { x: event.clientX, y: event.clientY }
-  }
-  const up = (): void => {
-    view.current.dragging = false
-    last = null
-  }
-  const wheel = (event: WheelEvent): void => {
-    event.preventDefault()
-    view.current.zoom = Math.max(0.5, Math.min(3, view.current.zoom * (event.deltaY < 0 ? 1.1 : 0.9)))
-  }
-  canvas.addEventListener('pointerdown', down)
-  canvas.addEventListener('pointermove', move)
-  canvas.addEventListener('pointerup', up)
-  canvas.addEventListener('pointercancel', up)
-  canvas.addEventListener('wheel', wheel, { passive: false })
-
-  // Labels: only the most-connected few, or the picture drowns in text.
-  const labelSet = new Set([...names].sort((a, b) => (degree.get(b) ?? 0) - (degree.get(a) ?? 0)).slice(0, 10))
-
-  let raf = 0
-  let frame = 0
-
-  const step = (): void => {
-    // Physics: pair repulsion + edge springs + centering, in 3D.
-    const repulsion = 0.0016
-    const spring = 0.02
-    const rest = 0.28
-    for (let i = 0; i < n; i++) {
-      for (let j = i + 1; j < n; j++) {
-        const dx = pos[j * 3] - pos[i * 3]
-        const dy = pos[j * 3 + 1] - pos[i * 3 + 1]
-        const dz = pos[j * 3 + 2] - pos[i * 3 + 2]
-        const d2 = dx * dx + dy * dy + dz * dz + 0.0025
-        const f = repulsion / d2
-        const d = Math.sqrt(d2)
-        const fx = (dx / d) * f
-        const fy = (dy / d) * f
-        const fz = (dz / d) * f
-        vel[i * 3] -= fx
-        vel[i * 3 + 1] -= fy
-        vel[i * 3 + 2] -= fz
-        vel[j * 3] += fx
-        vel[j * 3 + 1] += fy
-        vel[j * 3 + 2] += fz
-      }
-    }
-    for (const [a, b] of edges) {
-      const dx = pos[b * 3] - pos[a * 3]
-      const dy = pos[b * 3 + 1] - pos[a * 3 + 1]
-      const dz = pos[b * 3 + 2] - pos[a * 3 + 2]
-      const d = Math.sqrt(dx * dx + dy * dy + dz * dz) || 0.001
-      const f = (spring * (d - rest)) / d
-      vel[a * 3] += dx * f
-      vel[a * 3 + 1] += dy * f
-      vel[a * 3 + 2] += dz * f
-      vel[b * 3] -= dx * f
-      vel[b * 3 + 1] -= dy * f
-      vel[b * 3 + 2] -= dz * f
-    }
-    for (let i = 0; i < n * 3; i++) {
-      vel[i] = vel[i] * 0.86 - pos[i] * 0.0015
-      pos[i] += vel[i]
-    }
-  }
-
-  const draw = (): void => {
-    const ratio = canvas.width / Math.max(1, canvas.clientWidth)
-    const w = canvas.width
-    const h = canvas.height
-    context.clearRect(0, 0, w, h)
-    const scale = (Math.min(w, h) / 2.4) * view.current.zoom
-    const cx = w / 2
-    const cy = h / 2
-    const { yaw, pitch } = view.current
-    const cosY = Math.cos(yaw)
-    const sinY = Math.sin(yaw)
-    const cosP = Math.cos(pitch)
-    const sinP = Math.sin(pitch)
-    const project = (i: number): { x: number; y: number; depth: number } => {
-      const x = pos[i * 3]
-      const y = pos[i * 3 + 1]
-      const z = pos[i * 3 + 2]
-      const x1 = x * cosY - z * sinY
-      const z1 = x * sinY + z * cosY
-      const y1 = y * cosP - z1 * sinP
-      const z2 = y * sinP + z1 * cosP
-      const depth = z2
-      return { x: cx + x1 * scale, y: cy + y1 * scale, depth }
-    }
-    // Edges first, dimmer with depth.
-    const projected = new Array(n)
-    for (let i = 0; i < n; i++) projected[i] = project(i)
-    context.lineWidth = 1 * ratio
-    for (const [a, b] of edges) {
-      const pa = projected[a]
-      const pb = projected[b]
-      const depth = (pa.depth + pb.depth) / 2
-      const alpha = 0.5 - depth * 0.32
-      context.strokeStyle = `rgba(176, 74, 106, ${Math.max(0.08, alpha)})`
-      context.beginPath()
-      context.moveTo(pa.x, pa.y)
-      context.lineTo(pb.x, pb.y)
-      context.stroke()
-    }
-    // Nodes far to near.
-    const order = [...projected.keys()].sort((a, b) => projected[a].depth - projected[b].depth)
-    for (const i of order) {
-      const p = projected[i]
-      const alpha = 0.9 - p.depth * 0.4
-      context.fillStyle = `rgba(59, 67, 84, ${Math.max(0.25, alpha)})`
-      context.beginPath()
-      context.arc(p.x, p.y, radius[i] * ratio, 0, Math.PI * 2)
-      context.fill()
-    }
-    // Labels for the hubs only.
-    context.font = `${10 * ratio}px system-ui, sans-serif`
-    context.fillStyle = 'rgba(59, 67, 84, 0.75)'
-    for (let i = 0; i < n; i++) {
-      if (!labelSet.has(names[i])) continue
-      const p = projected[i]
-      const short = names[i].split('/').slice(-1)[0].replace(/\.md$/, '')
-      context.fillText(short, p.x + radius[i] * ratio + 2, p.y + 3)
-    }
-  }
-
-  const loop = (): void => {
-    frame++
-    if (n <= 300 || frame < 220) step()
-    if (!view.current.dragging) view.current.yaw += 0.0016
-    draw()
-    raf = requestAnimationFrame(loop)
-  }
-  raf = requestAnimationFrame(loop)
-
-  return () => {
-    cancelAnimationFrame(raf)
-    observer.disconnect()
-    canvas.removeEventListener('pointerdown', down)
-    canvas.removeEventListener('pointermove', move)
-    canvas.removeEventListener('pointerup', up)
-    canvas.removeEventListener('pointercancel', up)
-    canvas.removeEventListener('wheel', wheel)
-  }
+    <div className="ob-graph-body"><div className="ob-graph-stage">
+      {scene.names.length ? <canvas ref={canvas} tabIndex={0} aria-label={`${prefs.mode.toUpperCase()} graph of vault connections`} aria-describedby={helpId} /> : <div className="ob-screen-empty"><Mascot motion={loading ? 'flashlight-search' : 'branch-merge'} size={80} static={!loading} /><p role="status">{isDemo ? 'Vault connections are available in the desktop app.' : !path ? 'Choose a vault folder to see its connections.' : loading ? 'Reading vault connections…' : error || 'No notes to show with these filters.'}</p></div>}
+    </div>{appearance && <div id={panelId}><GraphAppearance value={prefs} onChange={setPrefs} /></div>}</div>
+    <footer className="ob-graph-footer">
+      {error && scene.names.length > 0 && <p role="status">{error}</p>}
+      {data && <p>{scene.names.length} of {scene.total} notes · {scene.edges.length} connections{scene.total > scene.names.length ? ' · Most-connected notes shown first' : ''}{data.dead.length || data.ambiguous.length ? ` · ${data.dead.length} unresolved, ${data.ambiguous.length} ambiguous links (not drawn)` : ''}</p>}
+      {data && <details><summary>Link details</summary><p>{data.files} files scanned · {data.checked} links checked. Repeated and reciprocal links share one connection. Self-links are not drawn.</p></details>}
+      {sourceNote && <p>{sourceNote}</p>}{warning && <p role="status">{warning}</p>}
+      {scene.names.length > 0 && <div className="ob-graph-picker"><input type="search" aria-label="Find graph note" placeholder="Find a note…" value={query} onChange={e => setQuery(e.target.value)} /><select aria-label="Select graph note" value={selected} onChange={e => select(e.target.value)}><option value="">{matches.length ? 'Select a note' : 'No matching notes'}</option>{selected && !matches.includes(selected) && <option value={selected}>{selected}</option>}{matches.map(name => <option key={name} value={name}>{name}</option>)}</select>{selected && <><button type="button" onClick={() => void readNote()}>Read note</button><button type="button" onClick={() => select('')}>Clear</button></>}</div>}
+      {selected && <p className="ob-graph-selection">{selected} · {scene.degrees[scene.names.indexOf(selected)] ?? 0} connected notes</p>}
+      {preview?.path === selected && <pre className="ob-graph-note" aria-live="polite">{preview.loading ? 'Reading note…' : preview.text || '(Empty note)'}</pre>}
+    </footer>
+  </section>
 }

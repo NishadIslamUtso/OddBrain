@@ -6,7 +6,7 @@ import { DEFAULT_PERMISSIONS, type Permissions } from '@shared/lib/permissions'
 import { bridge, isDemo } from '../platform/bridge'
 
 /** Nothing is assumed about a model until Ollama's own metadata says so. */
-const UNVERIFIED: ModelCapabilities = { verified: false, vision: false, thinking: false }
+const UNVERIFIED: ModelCapabilities = { verified: false, vision: false, thinking: false, contextWindowTokens: null }
 
 export type InstalledModel = {
   name: string

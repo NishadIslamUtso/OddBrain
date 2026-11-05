@@ -1,6 +1,7 @@
 import { toPosix } from '../vault/files'
-import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, lstatSync, realpathSync, writeFileSync } from 'node:fs'
+import { join, sep } from 'node:path'
+import { randomUUID } from 'node:crypto'
 
 /**
  * The artifact library on disk.
@@ -122,7 +123,7 @@ export function validId(id: unknown): id is string {
 
 function cleanTitle(value: unknown, fallback: string): string {
   const text = typeof value === 'string' ? value.trim().replace(/\s+/g, ' ') : ''
-  return (text || fallback).slice(0, MAX_TITLE)
+  return text || fallback
 }
 
 function isKind(value: unknown): value is ArtifactKind {
@@ -164,7 +165,7 @@ function normalizeRecord(raw: unknown): ArtifactRecord | null {
     versions.push({
       file: candidate.file,
       savedAt: isoOr(candidate.savedAt, nowIso()),
-      ...(typeof candidate.note === 'string' && candidate.note ? { note: candidate.note.slice(0, 300) } : {}),
+      ...(typeof candidate.note === 'string' && candidate.note ? { note: candidate.note } : {}),
     })
   }
   // A record whose files all failed validation is not a record.
@@ -182,8 +183,8 @@ function normalizeRecord(raw: unknown): ArtifactRecord | null {
     current,
     versions,
   }
-  if (typeof value.chatId === 'string' && value.chatId) record.chatId = value.chatId.slice(0, 64)
-  if (typeof value.messageId === 'string') record.messageId = value.messageId.slice(0, 64)
+  if (typeof value.chatId === 'string' && value.chatId) record.chatId = value.chatId
+  if (typeof value.messageId === 'string') record.messageId = value.messageId
   return record
 }
 
@@ -194,11 +195,15 @@ function normalizeRecord(raw: unknown): ArtifactRecord | null {
  * version files still can. The title becomes the id, because inventing one would
  * be worse than admitting we no longer know it.
  */
-function recoverRecord(root: string, id: string): ArtifactRecord | null {
+function recoverRecord(root: string, id: string, indexedFiles?: Set<string>): ArtifactRecord | null {
   if (!validId(id)) return null
   const folder = itemDir(root, id)
   let names: string[]
   try {
+    // Recovery imports real library files only, never linked trees.
+    if (lstatSync(join(root, ITEMS_DIR)).isSymbolicLink()) return null
+    const info = lstatSync(folder)
+    if (info.isSymbolicLink() || !info.isDirectory()) return null
     names = readdirSync(folder)
   } catch {
     return null
@@ -207,10 +212,15 @@ function recoverRecord(root: string, id: string): ArtifactRecord | null {
   let type: ArtifactKind = 'html'
   for (const name of names.sort((a, b) => Number(a.slice(1).split('.')[0]) - Number(b.slice(1).split('.')[0]))) {
     const match = VERSION_FILE_PATTERN.exec(name)
-    if (!match) continue
-    const stats = statSync(join(folder, name))
-    versions.push({ file: name, savedAt: stats.mtime.toISOString() })
-    type = match[2] === 'svg' ? 'svg' : 'html'
+    if (!match || indexedFiles?.has(name)) continue
+    try {
+      const stats = lstatSync(join(folder, name))
+      if (!stats.isFile() || stats.isSymbolicLink()) continue
+      versions.push({ file: name, savedAt: stats.mtime.toISOString() })
+      type = match[2] === 'svg' ? 'svg' : 'html'
+    } catch {
+      // One disappearing/unreadable file must not hide the rest of the library.
+    }
   }
   if (!versions.length) return null
   const first = Date.parse(versions[0].savedAt)
@@ -250,33 +260,49 @@ function readIndex(root: string): { index: Index; recovered: boolean } {
   if (!broken && parsed && typeof parsed === 'object') {
     const rows = (parsed as { items?: unknown }).items
     if (Array.isArray(rows)) {
+      const identities = new Set<string>()
       for (const row of rows) {
         const record = normalizeRecord(row)
         // A row that fails validation is dropped and the library is marked as
         // recovered: silently keeping a malformed row would hand the screen a
         // card it cannot open.
-        if (record) items.push(record)
-        else broken = true
+        if (record && !identities.has(record.id)) {
+          items.push(record)
+          identities.add(record.id)
+        } else broken = true
       }
     } else {
       broken = true
     }
   }
 
-  // Anything on disk that the index does not know about is recovered into it, so
-  // files copied in by hand appear rather than vanish.
-  let known = new Set(items.map(item => item.id))
+  // Reconcile existing records as well as unknown folders: a crash between
+  // writing a version and updating the index must not hide that version forever.
+  const known = new Map(items.map(item => [item.id, item]))
   try {
     for (const name of readdirSync(join(root, ITEMS_DIR))) {
-      if (known.has(name)) continue
-      const record = recoverRecord(root, name)
-      if (record) {
-        items.push(record)
+      const record = known.get(name)
+      // Known versions need no extra stat calls on every read/list operation.
+      const recovered = recoverRecord(root, name, record && new Set(record.versions.map(version => version.file)))
+      if (!recovered) continue
+      if (!record) {
+        items.push(recovered)
+        known.set(name, recovered)
+        broken = true
+        continue
+      }
+      const files = new Set(record.versions.map(version => version.file))
+      for (const version of recovered.versions) {
+        if (files.has(version.file)) continue
+        // Append, rather than sort: public version numbers are array positions.
+        // Preserve title, notes, provenance, and the explicitly selected version.
+        record.versions.push(version)
+        files.add(version.file)
         broken = true
       }
     }
   } catch {
-    // No items folder yet: an empty library, not a problem.
+    // No readable items folder: keep any valid indexed records available.
   }
 
   if (broken && items.length) {
@@ -340,7 +366,8 @@ export function read(root: string, id: unknown, version?: unknown): ReadAnswer {
   const { index } = readIndex(root)
   const record = index.items.find(item => item.id === id)
   if (!record) return { ok: false, error: 'That artifact is not in the library any more.' }
-  const wanted = Number.isInteger(version) ? Math.min(Math.max((version as number) - 1, 0), record.versions.length - 1) : record.current
+  if (version !== undefined && (!Number.isInteger(version) || (version as number) < 1 || (version as number) > record.versions.length)) return { ok: false, error: 'That exact artifact version is unavailable. No other version was substituted.' }
+  const wanted = version === undefined ? record.current : (version as number) - 1
   try {
     const content = readFileSync(versionPath(root, record, wanted), 'utf8')
     return { ok: true, item: summarize(root, record), content, version: wanted + 1 }
@@ -350,12 +377,28 @@ export function read(root: string, id: unknown, version?: unknown): ReadAnswer {
 }
 
 function writeVersion(root: string, record: ArtifactRecord, content: string, savedAt: string, note?: string): void {
-  const next = record.versions.length + 1
   const folder = itemDir(root, record.id)
   mkdirSync(folder, { recursive: true })
-  const file = `v${next}.${record.type}`
-  writeFileSync(join(folder, file), content, 'utf8')
-  record.versions.push({ file, savedAt, ...(note ? { note: note.slice(0, 300) } : {}) })
+  // A repaired index may contain gaps, and a crash can leave an unindexed
+  // version on disk. History is append-only: neither may be overwritten.
+  let next = 1
+  for (const name of [...record.versions.map(version => version.file), ...readdirSync(folder)]) {
+    const match = VERSION_FILE_PATTERN.exec(name)
+    if (match) next = Math.max(next, Number(match[1]) + 1)
+  }
+  let file: string
+  for (;;) {
+    if (!Number.isSafeInteger(next)) throw Error('Artifact version number is outside the supported range.')
+    file = `v${next}.${record.type}`
+    try {
+      writeFileSync(join(folder, file), content, { encoding: 'utf8', flag: 'wx' })
+      break
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'EEXIST') throw error
+      next++
+    }
+  }
+  record.versions.push({ file, savedAt, ...(note ? { note: note } : {}) })
   record.current = record.versions.length - 1
 }
 
@@ -369,6 +412,9 @@ export function save(root: string, input: SaveInput): ItemAnswer {
   if (!input || typeof input !== 'object' || typeof input.content !== 'string' || !input.content.trim()) {
     return { ok: false, error: 'There is nothing to save: the artifact is empty.' }
   }
+  if (typeof input.title === 'string' && input.title.trim().replace(/\s+/g, ' ').length > MAX_TITLE) return { ok: false, error: `Artifact title exceeds ${MAX_TITLE} characters. Nothing was shortened or saved.` }
+  if (typeof input.note === 'string' && input.note.length > 300) return { ok: false, error: 'Artifact version note exceeds 300 characters. Nothing was shortened or saved.' }
+  if ((typeof input.chatId === 'string' && input.chatId.length > 500) || (typeof input.messageId === 'string' && input.messageId.length > 500)) return { ok: false, error: 'Artifact provenance identity exceeds 500 characters. Nothing was shortened or saved.' }
   const bytes = Buffer.byteLength(input.content, 'utf8')
   if (bytes > MAX_CONTENT_BYTES) {
     return { ok: false, error: `That document is ${Math.round(bytes / 1_000_000)} MB, past the 4 MB a version may hold.` }
@@ -415,8 +461,8 @@ export function save(root: string, input: SaveInput): ItemAnswer {
     current: 0,
     versions: [],
   }
-  if (typeof input.chatId === 'string' && input.chatId) record.chatId = input.chatId.slice(0, 64)
-  if (typeof input.messageId === 'string' && input.messageId) record.messageId = input.messageId.slice(0, 64)
+  if (typeof input.chatId === 'string' && input.chatId) record.chatId = input.chatId
+  if (typeof input.messageId === 'string' && input.messageId) record.messageId = input.messageId
   writeVersion(root, record, input.content, at, input.note)
   index.items.push(record)
   writeIndex(root, index)
@@ -438,6 +484,7 @@ export function rename(root: string, id: unknown, title: unknown): ItemAnswer {
   if (!validId(id)) return { ok: false, error: 'That is not an id this app made.' }
   const clean = typeof title === 'string' ? title.trim() : ''
   if (!clean) return { ok: false, error: 'A title cannot be empty.' }
+  if (clean.replace(/\s+/g, ' ').length > MAX_TITLE) return { ok: false, error: `Artifact title exceeds ${MAX_TITLE} characters. Nothing was shortened.` }
   const { index } = readIndex(root)
   const record = index.items.find(item => item.id === id)
   if (!record) return { ok: false, error: 'That artifact is not in the library any more.' }
@@ -474,6 +521,7 @@ export function remove(root: string, id: unknown): RemoveAnswer {
   const destination = toPosix(join(TRASH_DIR, `${id}-${stamp}`))
   try {
     mkdirSync(join(root, TRASH_DIR), { recursive: true })
+    writeFileSync(join(itemDir(root, id), '.oddbrain-trash.json'), JSON.stringify(record), 'utf8')
     renameSync(itemDir(root, id), join(root, destination))
   } catch (error) {
     return { ok: false, error: `The files could not be moved aside: ${(error as Error).message}` }
@@ -493,7 +541,7 @@ export function remove(root: string, id: unknown): RemoveAnswer {
  */
 export function adopt(root: string, records: unknown): { ok: true; adopted: number; skipped: number; refused: number } {
   const { index } = readIndex(root)
-  const known = new Set(index.items.map(item => item.id))
+  const known = new Set([...index.items.map(item => item.id), ...listTrash(root).items.map(item => item.originalId)])
   let adopted = 0
   let skipped = 0
   let refused = 0
@@ -524,8 +572,8 @@ export function adopt(root: string, records: unknown): { ok: true; adopted: numb
       current: 0,
       versions: [],
     }
-    if (typeof row.chatId === 'string' && row.chatId) record.chatId = row.chatId.slice(0, 64)
-    if (typeof row.messageId === 'string' && row.messageId) record.messageId = row.messageId.slice(0, 64)
+    if (typeof row.chatId === 'string' && row.chatId) record.chatId = row.chatId
+    if (typeof row.messageId === 'string' && row.messageId) record.messageId = row.messageId
     try {
       writeVersion(root, record, row.content, record.createdAt)
       index.items.push(record)
@@ -554,4 +602,62 @@ export function ensureRoot(root: string): void {
 /** Only used by tests and repair scripts: drop the folder entirely. */
 export function discardAll(root: string): void {
   rmSync(root, { recursive: true, force: true })
+}
+
+
+export type TrashItem = { key: string; originalId: string; title: string; type: ArtifactKind; removedAt: string; versionCount: number; recoveredMetadata: boolean }
+const TRASH_KEY = /^[A-Za-z0-9_-]{1,180}$/
+function checkedTrashFolder(root: string, key: unknown): string {
+  if (typeof key !== 'string' || !TRASH_KEY.test(key)) throw Error('That is not a trash entry.')
+  const base = join(root, TRASH_DIR), full = join(base, key)
+  if (lstatSync(base).isSymbolicLink() || lstatSync(full).isSymbolicLink() || !lstatSync(full).isDirectory()) throw Error('Trash links are not followed.')
+  if (!realpathSync(full).startsWith(realpathSync(base) + sep)) throw Error('The trash entry is outside the library.')
+  return full
+}
+function trashRecord(folder: string, key: string): { record: ArtifactRecord; recovered: boolean } {
+  let record: ArtifactRecord | null = null
+  try { if (!lstatSync(join(folder, '.oddbrain-trash.json')).isSymbolicLink()) record = normalizeRecord(JSON.parse(readFileSync(join(folder, '.oddbrain-trash.json'), 'utf8'))) } catch {}
+  let recovered = false
+  if (!record) {
+    recovered = true
+    const files = readdirSync(folder).filter(f => VERSION_FILE_PATTERN.test(f)).sort((a, b) => Number(a.slice(1).split('.')[0]) - Number(b.slice(1).split('.')[0]))
+    const id = /^(.*)-\d{4}-\d\d-\d\dT/.exec(key)?.[1] || ''
+    if (!files.length || !validId(id)) throw Error('The old trash metadata could not be recovered.')
+    const versions = files.map(file => ({ file, savedAt: statSync(join(folder, file)).mtime.toISOString() }))
+    record = { id, title: id, type: files.at(-1)!.endsWith('.svg') ? 'svg' : 'html', createdAt: versions[0].savedAt, updatedAt: versions.at(-1)!.savedAt, origin: 'import', current: versions.length - 1, versions }
+  }
+  for (const version of record.versions) {
+    const file = join(folder, version.file), info = lstatSync(file)
+    if (!info.isFile() || info.isSymbolicLink() || !realpathSync(file).startsWith(realpathSync(folder) + sep)) throw Error('A trash version is not a real file inside its entry.')
+  }
+  return { record, recovered }
+}
+export function listTrash(root: string): { ok: boolean; items: TrashItem[]; error?: string } {
+  const items: TrashItem[] = []
+  if (!existsSync(join(root, TRASH_DIR))) return { ok: true, items }
+  try {
+    if (lstatSync(join(root, TRASH_DIR)).isSymbolicLink()) throw Error('Trash links are not followed.')
+    for (const key of readdirSync(join(root, TRASH_DIR))) try {
+      const folder = checkedTrashFolder(root, key), { record, recovered } = trashRecord(folder, key)
+      items.push({ key, originalId: record.id, title: record.title, type: record.type, removedAt: statSync(folder).mtime.toISOString(), versionCount: record.versions.length, recoveredMetadata: recovered })
+    } catch { /* Malformed/symlink entries never become usable paths. */ }
+    items.sort((a, b) => b.removedAt.localeCompare(a.removedAt))
+    return { ok: true, items }
+  } catch { return { ok: false, items, error: 'The trash folder could not be read.' } }
+}
+export function restoreTrash(root: string, key: unknown): ItemAnswer {
+  let folder = '', destination = ''
+  try {
+    folder = checkedTrashFolder(root, key)
+    const { record } = trashRecord(folder, String(key)), { index } = readIndex(root)
+    // Never overwrite a newer active artifact with the same id.
+    if (index.items.some(item => item.id === record.id) || existsSync(itemDir(root, record.id))) record.id = randomUUID()
+    record.updatedAt = nextStamp(index.items)
+    if (existsSync(join(root, ITEMS_DIR)) && lstatSync(join(root, ITEMS_DIR)).isSymbolicLink()) throw Error('The active library is a symbolic link.')
+    destination = itemDir(root, record.id); mkdirSync(join(root, ITEMS_DIR), { recursive: true })
+    renameSync(folder, destination)
+    index.items.push(record)
+    try { writeIndex(root, index) } catch (error) { renameSync(destination, folder); throw error }
+    return { ok: true, item: summarize(root, record) }
+  } catch (error) { return { ok: false, error: `The artifact could not be recovered: ${(error as Error).message}` } }
 }

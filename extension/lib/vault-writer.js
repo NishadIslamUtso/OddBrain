@@ -1,4 +1,8 @@
 const LOCAL_API = "http://127.0.0.1:8765";
+async function localApiBase() { const {appPort = 8765} = await safeStorageGet({appPort:8765}); return `http://127.0.0.1:${Number.isInteger(appPort) && appPort > 0 && appPort < 65536 ? appPort : 8765}`; }
+const requestTimeout = () => AbortSignal.timeout(6000);
+let outboxLock = Promise.resolve();
+function withOutbox(task) { const next = outboxLock.then(task, task); outboxLock = next.catch(() => {}); return next; }
 
 /**
  * The pairing secret: the person copies it once from OddBrain (Settings >
@@ -57,7 +61,8 @@ async function safeStorageSet(obj) {
  * clearable from the popup.)
  */
 function rejectionRecord(dataWithTime, reason) {
-  return { type: dataWithTime.type, url: dataWithTime.url, title: dataWithTime.title, captured_at: dataWithTime.captured_at, success: false, queued: false, reason };
+  const text = (v, limit) => typeof v === "string" ? v.slice(0,limit) : undefined;
+  return { type: text(dataWithTime.type,100), url: text(dataWithTime.url,2000), title: text(dataWithTime.title,500), captured_at: dataWithTime.captured_at, success: false, queued: false, reason: text(reason,1000) };
 }
 
 async function recordActivity(entry) {
@@ -77,11 +82,12 @@ async function recordActivity(entry) {
  * content script -> this handler in the background (extension origin + pair
  * token) -> OddBrain. The popup may run it directly - same code.
  */
-async function handleCaptureRelay(payload) {
+async function handleCaptureRelay(payload) { return withOutbox(() => handleCaptureRelayUnlocked(payload)); }
+async function handleCaptureRelayUnlocked(payload) {
   const dataWithTime = {...payload, captured_at: new Date().toISOString()};
   try {
-    const res = await fetch(`${LOCAL_API}/capture`, {
-      method: "POST",
+    const res = await fetch(`${await localApiBase()}/capture`, {
+      method: "POST", signal: requestTimeout(),
       headers: await pairHeaders(true),
       body: JSON.stringify(dataWithTime)
     });
@@ -89,12 +95,21 @@ async function handleCaptureRelay(payload) {
       // Not paired (or rotated out), or the origin was refused: the app
       // declined this capture. Nothing but the metadata is kept.
       await recordActivity(rejectionRecord(dataWithTime, res.status === 401
-        ? "not paired - paste the token from OddBrain Settings > Plugins > Agent access"
+        ? "not paired - paste the token from OddBrain Settings > Apps & extensions > Agent access"
         : "refused by the app (" + res.status + ")"));
       return {ok:false, unpaired: res.status === 401};
     }
+    if (!res.ok && res.status < 500) {
+      await recordActivity(rejectionRecord(dataWithTime, "Capture refused (" + res.status + ")"));
+      return {ok:false,error:"Capture refused (" + res.status + "). Nothing was saved."};
+    }
     if (!res.ok) throw new Error("API not ok "+res.status);
-    await recordActivity({...dataWithTime, success:true});
+    const result = await res.json().catch(() => ({}));
+    if (result.ok === false || result.skipped) {
+      await recordActivity(rejectionRecord(dataWithTime, result.reason || result.error || "Capture skipped"));
+      return {ok:false,error:result.reason || result.error || "Capture skipped"};
+    }
+    await recordActivity({...rejectionRecord(dataWithTime, "Saved to vault"), success:true});
     return {ok:true};
   } catch (e) {
     // Network failure (the app is down, the context died mid-write): the
@@ -102,10 +117,10 @@ async function handleCaptureRelay(payload) {
     // here made a live content script run this handler AGAIN, parking the
     // same capture twice. A dead context has nothing to queue into; stay quiet.
     try {
-      await queueCapture(dataWithTime);
+      await queueCaptureUnlocked(dataWithTime);
       return {ok:false, queued:true};
     } catch (queued) {
-      return {ok:false, queued:false, offline:true};
+      return {ok:false, queued:false, offline:true, error:"Could not keep this capture: " + String(queued.message || queued)};
     }
   }
 }
@@ -122,20 +137,22 @@ async function postCapture(payload) {
   return handleCaptureRelay(payload);
 }
 
-async function queueCapture(payload) {
+async function queueCapture(payload) { return withOutbox(() => queueCaptureUnlocked(payload)); }
+async function queueCaptureUnlocked(payload) {
   if (!isExtensionValid()) return;
   try {
     const data = await safeStorageGet({queue: [], activity: []});
     const q = data.queue || [];
     const activity = data.activity || [];
+    if (q.length >= 200 || JSON.stringify(q).length + JSON.stringify(payload).length > 4_000_000) throw new Error("Outbox full");
     q.push(payload);
-    activity.push({...payload, success:false, queued:true, reason:"app offline"});
+    activity.push({...rejectionRecord(payload, "Waiting for app"), queued:true});
     if (activity.length > 100) activity.shift();
-    if (q.length > 200) q.shift();
-    await safeStorageSet({queue: q, activity});
+
+    await chrome.storage.local.set({queue: q, activity});
   } catch(e) {
     // If context invalidated, silently ignore
-    if (e.message && e.message.includes("Extension context invalidated")) return;
+    throw e;
   }
 }
 
@@ -146,35 +163,57 @@ async function queueCapture(payload) {
  * anything else (5xx, network) stays for the next flush. Only a thrown fetch
  * used to be retried, which silently deleted captures on a plain HTTP error.
  */
-async function flushQueue() {
+async function discardQueuedCapsule(item) {
+  if (item.type !== "capsule" || !item.capsule) return;
+  const data = await safeStorageGet({capsules:[]});
+  if (!Array.isArray(data.capsules)) return;
+  const capsules = data.capsules.filter(c => !(c.id === item.capsule.id && Number(c.version || 1) === Number(item.capsule.version || 1)));
+  if (capsules.length !== data.capsules.length) await chrome.storage.local.set({capsules});
+}
+async function flushQueue() { return withOutbox(flushQueueUnlocked); }
+async function flushQueueUnlocked() {
   if (!isExtensionValid()) return;
   try {
     const data = await safeStorageGet({queue: []});
     const q = data.queue || [];
     if (q.length === 0) return;
     const remaining = [];
+    let processed = 0;
     for (const item of q) {
+      if (processed++ >= 20) { remaining.push(item); continue; }
       try {
-        const res = await fetch(`${LOCAL_API}/capture`, {method:"POST", headers: await pairHeaders(true), body: JSON.stringify(item)});
-        if (res.ok) continue;
+        if (typeof checkBlacklist === "function" && item.url && await checkBlacklist(item.url)) { await discardQueuedCapsule(item); await recordActivity(rejectionRecord(item,"Excluded site: removed from outbox")); continue; }
+        const res = await fetch(`${await localApiBase()}/capture`, {method:"POST", signal: requestTimeout(), headers: await pairHeaders(true), body: JSON.stringify(item)});
+        if (res.ok) {
+          const result = await res.json().catch(() => ({}));
+          if (result.skipped || result.ok === false) await discardQueuedCapsule(item);
+          await recordActivity({...rejectionRecord(item,result.skipped || result.ok === false ? result.reason || "Capture skipped" : "Saved to vault"),success:!result.skipped && result.ok !== false});
+          continue;
+        }
         if (res.status === 401 || res.status === 403) {
+          await discardQueuedCapsule(item);
           await recordActivity(rejectionRecord(item, res.status === 401 ? "not paired - dropped from the outbox" : "refused by the app - dropped from the outbox"));
           continue;
         }
+        if (res.status >= 400 && res.status < 500) { await discardQueuedCapsule(item); await recordActivity(rejectionRecord(item,"Capture refused ("+res.status+")")); continue; }
         remaining.push(item);
       } catch(e) {
         remaining.push(item);
       }
     }
-    await safeStorageSet({queue: remaining});
+    await chrome.storage.local.set({queue: remaining});
   } catch(e) {}
 }
 
 async function getContext(query) {
   if (!isExtensionValid()) return {capsules: [], entities: [], claims: []};
+  try {
+    const answer = await chrome.runtime.sendMessage({type:"ob-context", query:String(query || "").slice(0,500)});
+    if (answer?.context) return answer.context;
+  } catch(e) {}
   // Try local API first
   try {
-    const res = await fetch(`${LOCAL_API}/context?q=${encodeURIComponent(query)}`, { headers: await pairHeaders(false) });
+    const res = await fetch(`${await localApiBase()}/context?q=${encodeURIComponent(query)}`, { signal: requestTimeout(), headers: await pairHeaders(false) });
     if (res.ok) {
       const data = await res.json();
       if (data.capsules) {
@@ -217,7 +256,7 @@ async function getContext(query) {
   }
 }
 
-setInterval(() => { try { flushQueue(); } catch(e) {} }, 30000);
+// MV3 wakes the worker through chrome.alarms in background.js, not page timers.
 
 /* Test seam: a plain-script library in the browser, a module under test. */
 if (typeof module !== "undefined" && module.exports) {

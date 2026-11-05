@@ -21,6 +21,11 @@ module.exports = async function afterPack(context) {
     [FuseV1Options.RunAsNode]: false,
     [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
     [FuseV1Options.EnableNodeCliInspectArguments]: false,
+    // Never fall back to a loose resources/app directory beside app.asar.
+    [FuseV1Options.OnlyLoadAppFromAsar]: true,
+    // Electron's embedded ASAR-integrity validation is currently macOS-only;
+    // turn it on for any future macOS target without misrepresenting Windows.
+    [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: context.electronPlatformName === 'darwin',
   })
   console.log(`[fuses] flipped for ${exe}`)
 }

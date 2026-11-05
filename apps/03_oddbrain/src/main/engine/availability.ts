@@ -13,13 +13,13 @@
  * a CLI is cheap, but launching it on every redraw is not.
  */
 import { execFile } from 'node:child_process'
-import { engineCandidates, enginePathSync, shellSafeCommand } from './enginePath'
+import { engineCandidates, enginePathSync, resolveEngineCommand } from './enginePath'
 import { existsSync } from 'node:fs'
 import type { EngineAvailability, EngineId } from '../../shared/lib/engine'
 
 const INSTALL_HINT: Record<EngineId, string> = {
   'claude-code':
-    'Install it once in PowerShell: npm install -g @anthropic-ai/claude-code, then fully quit and reopen OddBrain.',
+    'Install Claude Code’s native Windows build (recommended), or the current @anthropic-ai/claude-code package that contains bin/claude.exe, then re-scan.',
   agy: 'Install it from google-antigravity/antigravity-cli (antigravity.google), beware fake "gemini-antigravity-cli" repos that hand out exe files.',
 }
 
@@ -33,8 +33,8 @@ export function defaultCandidates(id: EngineId, env: NodeJS.ProcessEnv = process
 
 /**
  * Ask one engine binary whether it exists. Injected runner for tests: in
- * production this is execFile, with the shell on Windows because the engines
- * live behind npm `.cmd` shims there.
+ * production this is shell-free execFile. Windows command-script shims are
+ * never probes; current packages are resolved to their native executable.
  */
 export function checkBinary(
   command: string,
@@ -55,14 +55,16 @@ export function checkBinary(
   const run =
     options.runner ??
     ((cmd: string, args: string[], onDone: (error: unknown, stdout: string) => void) => {
-      execFile(cmd, args, { shell: process.platform === 'win32', timeout: options.timeoutMs ?? 4000, env: { ...process.env, PATH: enginePathSync() } }, (error, stdout) =>
+      execFile(cmd, args, { shell: false, timeout: options.timeoutMs ?? 4000, env: { ...process.env, PATH: enginePathSync() } }, (error, stdout) =>
         onDone(error, typeof stdout === 'string' ? stdout : ''),
       )
     })
   const exists = options.exists ?? ((p: string) => { try { return existsSync(p) } catch { return false } })
-  const candidates = (options.candidates ?? defaultCandidates(id)).filter(exists)
+  // Discovery may list legacy shims so guidance can find the adjacent native
+  // package executable, but version probes never execute command scripts.
+  const candidates = (options.candidates ?? defaultCandidates(id)).filter(path => !/\.(?:cmd|bat)$/i.test(path)).filter(exists)
   return new Promise((resolve) => {
-    run(shellSafeCommand(command), ['--version'], (error, stdout) => {
+    run(command, ['--version'], (error, stdout) => {
       if (!error && plausibleVersion(stdout)) {
         resolve({ id, found: true, version: stdout.trim().split('\n')[0].slice(0, 80), path: command, install: INSTALL_HINT[id] })
         return
@@ -76,7 +78,7 @@ export function checkBinary(
           resolve({ id, found: false, version: '', install: INSTALL_HINT[id] })
           return
         }
-        run(shellSafeCommand(candidates[index]), ['--version'], (probeError, probeOut) => {
+        run(candidates[index], ['--version'], (probeError, probeOut) => {
           if (!probeError && plausibleVersion(probeOut)) {
             resolve({
               id,
@@ -103,7 +105,7 @@ const cache = new Map<EngineId, { at: number; answer: EngineAvailability }>()
 export async function detectEngine(id: EngineId, fresh = false): Promise<EngineAvailability> {
   const hit = cache.get(id)
   if (!fresh && hit && Date.now() - hit.at < CACHE_MS) return hit.answer
-  const answer = await checkBinary(id === 'agy' ? 'agy' : 'claude', id)
+  const answer = await checkBinary(resolveEngineCommand(id), id)
   cache.set(id, { at: Date.now(), answer })
   return answer
 }
@@ -118,23 +120,13 @@ export type ModelSource = {
   models(): Promise<{ ok: boolean; models: Array<{ name: string; cloud: boolean; sizeGB: number | null }>; error?: string }>
 }
 
-export function agyModelSource(installed: boolean): ModelSource {
+export function agyModelSource(installed: boolean, inspect?: () => Promise<import('../../shared/lib/engineCapabilities').EngineCapabilityReport>): ModelSource {
   return {
     async models() {
-      if (!installed) {
-        return {
-          ok: false,
-          models: [],
-          error:
-            'agy is not on this machine yet, its brain list is Google\u2019s own (plan-dependent) and appears once agy is installed and signed in. Your Ollama brains cannot plug into agy: it has no custom door.',
-        }
-      }
-      return {
-        ok: false,
-        models: [],
-        error:
-          'agy is installed. Sign in once by running `agy` in a terminal, then reopen the bay, its own brain list (Gemini family, plan-gated) will be read from the machine. Ollama brains cannot plug into agy.',
-      }
+      if (!installed) return { ok: false, models: [], error: 'agy is not on this machine. Install it and sign in first; there is no custom door for Ollama models.' }
+      if (!inspect) return { ok: false, models: [], error: 'agy model inspection is unavailable in this window. Refresh from the desktop app.' }
+      const report = await inspect()
+      return { ok: report.ok, models: report.models, ...(!report.ok ? { error: report.effort.note } : {}) }
     },
   }
 }

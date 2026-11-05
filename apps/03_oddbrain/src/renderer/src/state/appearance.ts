@@ -37,6 +37,8 @@ export type Appearance = {
   motion: MotionName
   /** The little mood word under the mascot on the home screen. */
   mascotWords: boolean
+  /** Show the opening animation on normal launches. */
+  startupAnimation: boolean
   /** The quiet explanation line under a settings row. Off, the rows are terse. */
   rowExplanations: boolean
   /**
@@ -60,7 +62,7 @@ export const APPEARANCE_KEY = 'ai-assistant.appearance'
  * It is not decoration — it is the readability guarantee. White text on the
  * raw hues fails the WCAG line on all five (violet 4.35:1, amber 2.19:1),
  * so violet is deepened just enough for white to clear 4.5:1, and the four
- * lighter hues carry near-black ink instead. tests/accent-contrast.test.ts
+ * lighter hues carry near-black ink instead.
  * computes the ratios, so no hue can ship unreadable again.
  */
 export const ACCENTS: readonly { name: AccentName; label: string; hex: string; ink: string }[] = Object.freeze([
@@ -113,9 +115,10 @@ export const DEFAULT_APPEARANCE: Appearance = Object.freeze({
   width: 'comfortable',
   textSize: 'medium',
   font: 'sans',
-  motion: 'system',
-  mascotWords: true,
-  rowExplanations: true,
+  motion: 'balanced',
+  mascotWords: false,
+  startupAnimation: true,
+  rowExplanations: false,
   packCss: '',
   designSystem: '',
 })
@@ -162,6 +165,7 @@ export function normalizeAppearance(value: unknown): Appearance {
       : (input as { motion?: unknown }).motion === 'reduced'
         ? 'still'
         : DEFAULT_APPEARANCE.motion,
+    startupAnimation: typeof input.startupAnimation === 'boolean' ? input.startupAnimation : DEFAULT_APPEARANCE.startupAnimation,
     mascotWords: typeof input.mascotWords === 'boolean' ? input.mascotWords : DEFAULT_APPEARANCE.mascotWords,
     rowExplanations:
       typeof input.rowExplanations === 'boolean' ? input.rowExplanations : DEFAULT_APPEARANCE.rowExplanations,

@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
 import { Plus, Terminal, Trash2 } from 'lucide-react'
-import { getEngineApi } from '@/platform/bridge'
+import { bridge, getEngineApi } from '@/platform/bridge'
 import { HOOK_EVENTS, type AppHook, type HookEvent } from '@shared/lib/hooks'
+import ShellReview from './ShellReview'
 
 const EVENT_LABELS: Record<HookEvent, string> = {
   'turn-done': 'when a turn finishes',
@@ -22,7 +23,7 @@ export default function HooksSection() {
   const [command, setCommand] = useState('')
   const [status, setStatus] = useState('')
   const [error, setError] = useState('')
-  const [testOut, setTestOut] = useState('')
+  const [reviewing, setReviewing] = useState<{ key: string; command: string } | null>(null)
 
   const refresh = (): void => {
     void getEngineApi().hooks.list().then((answer) => setHooks((answer.hooks ?? []) as AppHook[]))
@@ -50,10 +51,9 @@ export default function HooksSection() {
     refresh()
   }
 
-  const runOnce = async (): Promise<void> => {
+  const reviewOnce = (key: string, exactCommand: string): void => {
     setError('')
-    const answer = await getEngineApi().hooks.test(command)
-    setTestOut(answer.answer)
+    setReviewing({ key, command: exactCommand })
   }
 
   return (
@@ -64,9 +64,9 @@ export default function HooksSection() {
           Hooks
         </h2>
         <p className="mt-1 text-[12.5px] leading-relaxed text-muted">
-          Your own commands, run by the app when the engine's turn finishes, fails, or asks permission. The command runs
-          as-is on this machine — no engine output is piped in, and a pack can never add one. A hook that fails is
-          reported in the turn's story; it never breaks the work.
+          Your own command reminders for engine events. An event never runs a command by itself: it reports that the
+          hook is ready, then you review the exact command, shell and working folder and allow that one run here. No
+          engine output is piped in, and a pack can never add a hook.
         </p>
       </header>
 
@@ -86,14 +86,23 @@ export default function HooksSection() {
                 </p>
                 <code className="mt-1 block break-words font-mono text-[11.5px] text-muted">{hook.command}</code>
               </div>
-              <button
-                type="button"
-                onClick={() => void remove(hook.id)}
-                aria-label={`Remove ${hook.name}`}
-                className="shrink-0 rounded-lg border border-line p-1.5 text-muted hover:text-warn"
-              >
-                <Trash2 size={12} aria-hidden />
-              </button>
+              <div className="flex shrink-0 items-center gap-1">
+                <button
+                  type="button"
+                  onClick={() => reviewOnce(hook.id, hook.command)}
+                  className="rounded-lg border border-line px-2 py-1 text-[11px] text-muted hover:text-ink"
+                >
+                  Review &amp; run once
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void remove(hook.id)}
+                  aria-label={`Remove ${hook.name}`}
+                  className="rounded-lg border border-line p-1.5 text-muted hover:text-warn"
+                >
+                  <Trash2 size={12} aria-hidden />
+                </button>
+              </div>
             </div>
           </li>
         ))}
@@ -103,6 +112,16 @@ export default function HooksSection() {
           </li>
         ) : null}
       </ul>
+
+      {reviewing && reviewing.key !== 'draft' ? (
+        <div className="mt-3 rounded-xl border border-line bg-card p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <strong className="text-[12px] text-ink">Fresh one-use command review</strong>
+            <button type="button" className="ob-small-button" onClick={() => setReviewing(null)}>Close review</button>
+          </div>
+          <ShellReview key={reviewing.key} port={bridge.commands} initialCommand={reviewing.command} />
+        </div>
+      ) : null}
 
       <div className="mt-4 rounded-xl border border-line bg-card px-3 py-3">
         <p className="text-[12.5px] font-medium text-ink">Set a hook</p>
@@ -145,18 +164,29 @@ export default function HooksSection() {
         <div className="mt-2 flex items-center justify-between gap-2">
           <button
             type="button"
-            onClick={() => void runOnce()}
-            className="rounded-lg border border-line px-2.5 py-1 text-[11.5px] text-muted hover:text-ink"
+            disabled={!command.trim()}
+            onClick={() => reviewOnce('draft', command.trim())}
+            className="rounded-lg border border-line px-2.5 py-1 text-[11.5px] text-muted hover:text-ink disabled:opacity-50"
           >
-            Run once (without setting it)
+            Review once (without setting it)
           </button>
-          {testOut ? <span className="min-w-0 flex-1 truncate text-right text-[11.5px] text-muted">{testOut}</span> : null}
+          <span className="min-w-0 flex-1 text-right text-[11.5px] text-muted">Nothing runs until the one-use review is allowed.</span>
         </div>
       </div>
 
+      {reviewing?.key === 'draft' ? (
+        <div className="mt-3 rounded-xl border border-line bg-card p-3">
+          <div className="mb-2 flex items-center justify-between gap-2">
+            <strong className="text-[12px] text-ink">Fresh one-use command review</strong>
+            <button type="button" className="ob-small-button" onClick={() => setReviewing(null)}>Close review</button>
+          </div>
+          <ShellReview key={`${reviewing.key}:${reviewing.command}`} port={bridge.commands} initialCommand={reviewing.command} />
+        </div>
+      ) : null}
+
       <p className="mt-4 text-[11.5px] leading-relaxed text-muted">
         Hooks are yours alone: they live in this app's data folder as plain JSON, and a plugin pack that tries to
-        contribute one is refused by the pack rules — a hook is a command on your machine, so it is only ever added by you.
+        contribute one is refused by the pack rules. Event matches are reminders, not saved execution permission; every run uses the same fresh OS-command review and durable outcome record as the Command runner.
       </p>
     </div>
   )

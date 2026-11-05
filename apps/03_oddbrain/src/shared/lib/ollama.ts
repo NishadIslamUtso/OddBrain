@@ -43,13 +43,17 @@ export function isRemoteModel(
   )
 }
 
-export function getCapabilities(metadata?: { capabilities?: string[] }): ModelCapabilities {
-  // Do not guess vision/thinking support from a model's name.
+export function getCapabilities(metadata?: { capabilities?: string[]; model_info?: Record<string, unknown> }): ModelCapabilities {
+  // Do not guess vision/thinking or context support from a model's name.
   const supported = new Set(metadata?.capabilities || [])
+  const lengths = Object.entries(metadata?.model_info || {})
+    .filter(([key, value]) => /(?:^|\.)context_length$/.test(key) && Number.isSafeInteger(value) && Number(value) > 0)
+    .map(([, value]) => Number(value))
   return {
     verified: Array.isArray(metadata?.capabilities),
     vision: supported.has('vision'),
     thinking: supported.has('thinking'),
+    contextWindowTokens: lengths.length ? Math.min(...lengths) : null,
   }
 }
 
@@ -109,7 +113,8 @@ export async function streamChat(
   signal: AbortSignal | undefined,
   onRecord: (record: OllamaRecord) => void,
   inference?: InferenceSettings | string,
-  keepAliveOverride?: string | number
+  keepAliveOverride?: string | number,
+  contextTokensOverride?: number
 ): Promise<void> {
   // Inference options are the caller's business, so the memory profile can be
   // changed in Settings without touching this file. Anything unresolvable
@@ -120,7 +125,7 @@ export async function streamChat(
   const response = await fetch(`${API}/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ ...payload, stream: true, keep_alive: effective, options }),
+    body: JSON.stringify({ ...payload, stream: true, keep_alive: effective, options: contextTokensOverride ? { ...options, num_ctx: contextTokensOverride } : options }),
     signal,
   })
   if (!response.ok) {

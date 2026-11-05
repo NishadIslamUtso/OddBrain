@@ -1,5 +1,14 @@
-import { useEffect, useRef, useState } from 'react'
-import { ArrowUp, ChevronDown, CookingPot, Cpu, FolderOpen, Layers, ListOrdered, Map, Mic, MicOff, Paperclip, Play, ScrollText, Square, Swords, X } from 'lucide-react'
+import CommandPanel from '../ui/CommandPanel'
+import PromptEditor from '../ui/PromptEditor'
+import { draftLease, replaceDraft, looksLikeNativeSlashCommand, safeSlashAction } from '@shared/lib/chatDraft'
+import { insertFileMentions } from '@shared/lib/fileMentions'
+import SavedDrafts from '../ui/SavedDrafts'
+import { AGY_APPROVAL_CHOICES, AGY_APPROVAL_NOTE } from '@shared/lib/engineApproval'
+import ReasoningEffort from './ReasoningEffort'
+import { useContext, useEffect, useRef, useState, type ReactNode } from 'react'
+import { ArrowUp, ChevronDown, CookingPot, Cpu, FolderOpen, Layers, ListOrdered, Map, MoreHorizontal, Mic, MicOff, Paperclip, Play, ScrollText, Square, Swords, X } from 'lucide-react'
+import { filterPrompts, loadPrompts } from '@shared/lib/prompts'
+import useDictation from '../hooks/useDictation'
 import { modelLabel } from '@shared/lib/engine'
 import type { Project } from '@shared/lib/projects'
 import type { Attachment } from '@shared/types'
@@ -7,10 +16,13 @@ import type { Recipe } from '@shared/lib/recipes'
 import { renderRecipe } from '@shared/lib/recipes'
 import { loadRecipes, runRecipe, useRecipes } from '@/state/recipes'
 import { mapContextBlock } from '@shared/lib/repoMap'
-import { getEngineApi } from '@/platform/bridge'
+import { getEngineApi, bridge, isDemo } from '@/platform/bridge'
 import { vaultGet, type VaultReply } from '@shared/lib/vault'
 import { useEngine, type EngineTurn } from '@/state/engine'
 import useDismiss from '@/hooks/useDismiss'
+import BriefContext from '../ui/BriefContext'
+import ComposerSurface from '../ui/ComposerSurface'
+import { LookActions, useLook } from '../ui/LookContext'
 
 /**
  * The composer.
@@ -28,10 +40,12 @@ import useDismiss from '@/hooks/useDismiss'
  */
 export default function Composer({
   value,
+  draftScope = 'unscoped',
   onChange,
   onSend,
   onStop,
   busy,
+  preparing = false,
   notice,
   preview,
   projects = [],
@@ -40,13 +54,16 @@ export default function Composer({
   /** Pictures and files waiting to ride with the next send. */
   attachments = [],
   onFiles,
+  fileTools,
   onDetach,
 }: {
   value: string
+  draftScope?: string
   onChange: (value: string) => void
   onSend: () => void
   onStop: () => void
   busy: boolean
+  preparing?: boolean
   notice: string
   /** Set in the browser preview, where there is no machine behind the window. */
   preview?: string
@@ -56,63 +73,63 @@ export default function Composer({
   onProject?: (id: string | null) => void
   attachments?: Attachment[]
   /** Hand the app the files a person picked or pasted; it reads and refuses honestly. */
+  fileTools?: ReactNode
   onFiles?: (files: File[]) => void
   onDetach?: (id: string) => void
 }) {
   const box = useRef<HTMLTextAreaElement | null>(null)
   const [boxOpen, setBoxOpen] = useState<'engine' | 'models' | null>(null)
+  const [commandsOpen, setCommandsOpen] = useState<'command' | 'workflows' | null>(null)
   const [cook, setCook] = useState(false)
-  const [listening, setListening] = useState(false)
+  const [editor, setEditor] = useState<{ scope: string; text: string } | null>(null)
+  const cookBase = useRef({ scope: draftScope, text: value })
+  const lease = useRef(draftLease()), picking = useRef(false), currentScope = useRef(draftScope)
+  const engine = useEngine()
+  if (currentScope.current !== draftScope) { currentScope.current = draftScope; lease.current.invalidate() }
+  useEffect(() => { if (busy || preparing) lease.current.invalidate() }, [busy, preparing])
+  const runSafeSlash = (action: NonNullable<ReturnType<typeof safeSlashAction>>): void => {
+    lease.current.invalidate(); onChange('')
+    if (action === 'help') { setFileNote('Safe app commands: /status checks the selected connection, /doctor re-scans installed engines, and /cost shows usage this window. They run app controls and are never forwarded to a native terminal.'); return }
+    if (action === 'cost') { const totals = engine.totals; setFileNote(`Usage seen by this window: ${totals.turns} completed turn${totals.turns === 1 ? '' : 's'}, ${totals.inTokens.toLocaleString()} input tokens, ${totals.outTokens.toLocaleString()} output tokens${totals.costUsd ? `, $${totals.costUsd.toFixed(4)} reported cost` : ', no reported dollar cost'}.`); return }
+    if (action === 'status') {
+      setFileNote('Checking the selected engine…')
+      void getEngineApi().read().then(view => setFileNote(`${view.engine.id} · ${view.running || view.busy ? 'working' : 'idle'} · model ${view.engine.model || 'engine default'} · ${view.engine.workspace || 'default working folder'}. No native slash command was sent.`)).catch(() => setFileNote('The engine status could not be read. Nothing was sent.'))
+      return
+    }
+    setFileNote('Re-scanning installed engines…')
+    void getEngineApi().detect(true).then(found => setFileNote(found.map(item => `${item.id}: ${item.found ? item.version || 'found' : 'not found'}`).join(' · ') + '. Nothing was sent to a model.')).catch(() => setFileNote('The installed-engine check could not finish. Nothing was sent.'))
+  }
+  const sendDraft = () => {
+    const action = safeSlashAction(liveDraft.current)
+    if (action) { runSafeSlash(action); return }
+    if (looksLikeNativeSlashCommand(liveDraft.current)) { setFileNote('That native slash command is not a verified app action. Use /help for the safe read-only controls or the engine’s own terminal; nothing was sent.'); return }
+    lease.current.invalidate(); onSend()
+  }
+  const [savedDrafts, setSavedDrafts] = useState(false)
+  const [fileNote, setFileNote] = useState(''), [pickingFiles, setPickingFiles] = useState(false)
+  const liveDraft = useRef(value); liveDraft.current = value
+  const mounted = useRef(true)
+  useEffect(() => { mounted.current = true; return () => { mounted.current = false; lease.current.invalidate() } }, [])
+  const mentionFiles = async () => {
+    if (isDemo) { setFileNote('File references require the desktop picker. No paths or files were sent.'); return }
+    if (picking.current) return
+    picking.current = true
+    const request = lease.current.begin()
+    setPickingFiles(true)
+    try { const paths = await bridge.engine.pickFiles(); if (mounted.current && lease.current.current(request) && paths.length) { onChange(insertFileMentions(liveDraft.current, paths)); setFileNote('Paths inserted, not file contents. The engine uses its own tools and permissions when you send.') } }
+    catch (e) { if (mounted.current && lease.current.current(request)) setFileNote((e as Error).message || 'Files could not be selected.') }
+    finally { picking.current = false; if (mounted.current) setPickingFiles(false) }
+  }
+  const [tools, setTools] = useState(false)
+  const toolsRef = useRef<HTMLDivElement | null>(null)
+  const look = useLook(), changeLook = useContext(LookActions)
+  useDismiss(toolsRef, () => setTools(false), tools)
+  const dictation = useDictation(value, onChange)
+  const listening = dictation.active
   const fileInput = useRef<HTMLInputElement | null>(null)
-  const recognition = useRef<{ stop: () => void } | null>(null)
   const pickerRef = useRef<HTMLDivElement | null>(null)
   useDismiss(pickerRef, () => setBoxOpen(null), boxOpen !== null)
-
-  /**
-   * Dictation: the window's own speech recognition (Chromium's), words into
-   * the draft. Where the machine has no microphone or no listener, the button
-   * says so instead of pretending. The notice rides the app's own channel.
-   */
-  const toggleDictation = (): void => {
-    if (listening) {
-      recognition.current?.stop()
-      return
-    }
-    type SpeechCtor = new () => {
-      lang: string
-      interimResults: boolean
-      continuous: boolean
-      start: () => void
-      stop: () => void
-      onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null
-      onerror: (() => void) | null
-      onend: (() => void) | null
-    }
-    const Ctor = (globalThis as unknown as { webkitSpeechRecognition?: SpeechCtor }).webkitSpeechRecognition
-    if (typeof Ctor !== 'function') {
-      window.dispatchEvent(new CustomEvent('app:notice', { detail: 'This window has no speech listener: dictation needs a microphone.' }))
-      return
-    }
-    try {
-      const ear = new Ctor()
-      ear.lang = navigator.language || 'en-US'
-      ear.interimResults = false
-      ear.continuous = true
-      ear.onresult = (event) => {
-        let said = ''
-        for (let i = 0; i < event.results.length; i += 1) said += `${event.results[i][0].transcript} `
-        if (said.trim()) onChange(`${value ? `${value.trimEnd()} ` : ''}${said.trim()}`)
-      }
-      ear.onerror = () => setListening(false)
-      ear.onend = () => setListening(false)
-      ear.start()
-      recognition.current = ear
-      setListening(true)
-    } catch {
-      setListening(false)
-      window.dispatchEvent(new CustomEvent('app:notice', { detail: 'Could not open the microphone. Nothing was recorded.' }))
-    }
-  }
+  const toggleDictation = (): void => { void dictation.toggle() }
 
   // Grow with the text, up to a point, then scroll. A composer that stays one
   // line high while you write a paragraph hides what you are writing.
@@ -123,7 +140,16 @@ export default function Composer({
     element.style.height = `${Math.min(element.scrollHeight, 200)}px`
   }, [value])
 
-  const canSend = (value.trim().length > 0 || attachments.length > 0) && !busy
+  const [slashDismissed, setSlashDismissed] = useState(false), [slashIndex, setSlashIndex] = useState(0)
+  useEffect(() => { setSlashDismissed(false); setSlashIndex(0) }, [value])
+  const promptChoices = value.startsWith('/') && !/\s/.test(value.slice(1)) ? filterPrompts(loadPrompts(), value.slice(1)) : []
+  const slashOpen = !safeSlashAction(value) && !slashDismissed && !busy && !preparing && !listening && promptChoices.length > 0
+  const pickPrompt = (index: number): void => { const chosen = promptChoices[index]; if (chosen) { onChange(chosen.body); setSlashDismissed(true); box.current?.focus() } }
+  // A running native turn does not lock the composer: another text request can
+  // be durably queued and will run only after the active turn finishes. Exact
+  // image/source bytes cannot be represented by that text-only queue.
+  const queueHasFiles = busy && attachments.some(entry => entry.kind === 'image' || !!entry.originalFile)
+  const canSend = (value.trim().length > 0 || attachments.length > 0) && !preparing && !listening && !queueHasFiles
 
   /** Files pasted straight onto the box ride like picked files. */
   const paste = (event: React.ClipboardEvent<HTMLTextAreaElement>): void => {
@@ -135,9 +161,19 @@ export default function Composer({
   }
 
   const keydown = (event: React.KeyboardEvent<HTMLTextAreaElement>): void => {
+    if (event.nativeEvent.isComposing) return
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 'e') { event.preventDefault(); setEditor({ scope: draftScope, text: value }); return }
+    if ((event.ctrlKey || event.metaKey) && event.shiftKey && event.key.toLowerCase() === 's') { event.preventDefault(); setSavedDrafts(true); return }
+    if (slashOpen && ['ArrowDown', 'ArrowUp', 'Escape', 'Tab', 'Enter'].includes(event.key)) {
+      event.preventDefault()
+      if (event.key === 'Escape') setSlashDismissed(true)
+      else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') setSlashIndex(index => (index + (event.key === 'ArrowDown' ? 1 : -1) + promptChoices.length) % promptChoices.length)
+      else pickPrompt(Math.min(slashIndex, promptChoices.length - 1))
+      return
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault()
-      if (canSend) onSend()
+      if (canSend) sendDraft()
       return
     }
     if (event.key === 'Escape') {
@@ -147,8 +183,11 @@ export default function Composer({
   }
 
   return (
-    <div className="shrink-0 px-6 pb-4">
-      <div className="rounded-2xl border border-line bg-card focus-within:border-accent/50">
+    <div className="ob-composer-host shrink-0 px-6 pb-4">
+      <BriefContext />
+      <ComposerSurface>
+        {/(?:^|\s)@$/.test(value) && !listening ? <div className="px-4 py-2 text-[12px]"><button type="button" className="ob-text-button" disabled={pickingFiles} onClick={() => void mentionFiles()}>Choose files to mention</button><span className="text-muted"> · Paths only, not an upload</span></div> : null}
+        {slashOpen ? <ul id="composer-prompts" role="listbox" aria-label="Prompt templates" className="max-h-[160px] overflow-y-auto border-b border-line p-2">{promptChoices.map((prompt, index) => <li key={prompt.id} id={`composer-prompt-${index}`} role="option" aria-selected={index === slashIndex}><button type="button" className="w-full px-2 py-1 text-left text-[12px] hover:bg-panel" onClick={() => pickPrompt(index)}><strong>/{prompt.name}</strong> · {prompt.hint}</button></li>)}</ul> : null}
         <textarea
           ref={box}
           value={value}
@@ -156,10 +195,14 @@ export default function Composer({
           onKeyDown={keydown}
           onPaste={paste}
           rows={1}
-          placeholder="How can I help you today?"
+          placeholder="Ask anything"
           aria-label="Message"
+          aria-controls={slashOpen ? "composer-prompts" : undefined}
+          aria-activedescendant={slashOpen ? `composer-prompt-${slashIndex}` : undefined}
           className="block max-h-[200px] w-full resize-none bg-transparent px-4 pt-3.5 text-[14px] leading-relaxed text-ink outline-none placeholder:text-muted"
         />
+        {dictation.active ? <div role="status" className="px-4 py-2 text-[12px] text-muted">{dictation.label}<button type="button" className="ml-3 underline" onClick={dictation.cancel}>Cancel dictation</button></div> : null}
+        {fileTools}
         {attachments.length > 0 && onDetach ? (
           <ul className="flex flex-wrap gap-1.5 px-4 pt-2" aria-label="Attached">
             {attachments.map(entry => (
@@ -177,12 +220,10 @@ export default function Composer({
           </ul>
         ) : null}
         <div className="flex items-center gap-1.5 px-2.5 pb-2 pt-1" ref={pickerRef}>
-          <ProjectDropdown projects={projects} project={project} onProject={onProject} />
           <input
             ref={fileInput}
             type="file"
             multiple
-            accept="image/png,image/jpeg,image/webp,video/mp4,video/webm,.txt,.md,.csv,.json,.ts,.tsx,.js,.jsx,.py"
             className="hidden"
             onChange={event => {
               const files = Array.from(event.target.files ?? [])
@@ -194,7 +235,8 @@ export default function Composer({
             type="button"
             onClick={() => fileInput.current?.click()}
             aria-label="Attach"
-            title="Attach a picture, a video (its frames), or a text file"
+            title="Attach a document, image, audio or video"
+            disabled={listening}
             className="flex h-7 w-7 items-center justify-center rounded-lg text-muted hover:text-ink"
           >
             <Paperclip size={13} />
@@ -204,17 +246,36 @@ export default function Composer({
             onClick={toggleDictation}
             aria-label={listening ? 'Stop dictation' : 'Dictate'}
             aria-pressed={listening}
-            title={listening ? 'Listening. Press again to stop.' : 'Speak into the box: the window\u2019s own listener types what you say'}
+            title={listening ? 'Press again to stop. Use Cancel to discard.' : 'Dictate using the mode selected in Voice & files'}
+            disabled={busy && !listening}
             className={`flex h-7 w-7 items-center justify-center rounded-lg ${listening ? 'text-warn' : 'text-muted hover:text-ink'}`}
           >
             {listening ? <MicOff size={13} /> : <Mic size={13} />}
           </button>
-          <RecipeButton />
-          <MapButton onInsert={(map) => onChange(value.trim() ? `${value.trimEnd()}\n\n${map}\n` : `${map}\n`)} />
           <span className="ml-auto" />
           <EngineChip open={boxOpen === 'engine'} onToggle={() => setBoxOpen(boxOpen === 'engine' ? null : 'engine')} />
           <ModelChip open={boxOpen === 'models'} onToggle={() => setBoxOpen(boxOpen === 'models' ? null : 'models')} />
+          <div className="ob-more-tools" ref={toolsRef}>
+            <button type="button" className="ob-icon-button" onClick={() => setTools(v => !v)} aria-label="More chat tools" aria-expanded={tools} title="More chat tools"><MoreHorizontal size={15} /></button>
+            {tools ? <div className="ob-tools-popup" role="dialog" aria-label="Chat tools">
+              <ProjectDropdown projects={projects} project={project} onProject={onProject} />
+              <RecipeButton />
+              <button type="button" onClick={() => { setCommandsOpen('command'); setTools(false) }}>Review an OS command</button>
+              <button type="button" onClick={() => { setCommandsOpen('workflows'); setTools(false) }}>Workflows &amp; schedules</button>
+              <button type="button" disabled={listening || pickingFiles} onClick={() => { void mentionFiles(); setTools(false) }}><Paperclip size={14} />Mention files</button>
+              <button type="button" disabled={listening} onClick={() => { setSavedDrafts(true); setTools(false) }}><ScrollText size={14} />Saved drafts</button>
+              <MapButton onInsert={map => onChange(value.trim() ? `${value.trimEnd()}\n\n${map}\n` : `${map}\n`)} />
+              <button type="button" onClick={() => { setEditor({ scope: draftScope, text: value }); setTools(false) }}>Edit prompt text · Ctrl+Shift+E</button>
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { cookBase.current = { scope: draftScope, text: value }; setCook(true); setTools(false) }}><CookingPot size={14} />Cook context</button>
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:battle', { detail: value })); setTools(false) }}><Swords size={14} />Brain battle</button>
+              <button type="button" disabled={!value.trim() || busy} onClick={() => { window.dispatchEvent(new CustomEvent('app:split', { detail: value })); setTools(false) }}><ListOrdered size={14} />Split a task</button>
+              <button type="button" aria-pressed={look.showThinking} title="Only shows thinking supplied by the engine. This does not change reasoning effort or request an explanation." onClick={() => changeLook({ showThinking: !look.showThinking })}><ScrollText size={14} />Show thinking<span>{look.showThinking ? 'On' : 'Off'}</span></button>
+              <button type="button" onClick={() => { window.dispatchEvent(new CustomEvent('app:memory-open', { detail: 'Memory inbox' })); setTools(false) }}><ListOrdered size={14} />Memory inbox</button>
+              <button type="button" onClick={() => { window.dispatchEvent(new Event('app:show-journal')); setTools(false) }}><ListOrdered size={14} />Turn journal</button>
+            </div> : null}
+          </div>
           <span className="ml-auto flex items-center gap-2">
+            {preparing ? <span role="status" className="text-[11.5px] text-muted">Saving before send…</span> : queueHasFiles ? <span role="status" className="text-[11.5px] text-muted">Exact files can’t enter the text queue. Remove them to queue text, or wait.</span> : null}
             {busy ? (
               <button
                 type="button"
@@ -228,54 +289,26 @@ export default function Composer({
             ) : null}
             <button
               type="button"
-              onClick={onSend}
+              onClick={sendDraft}
               disabled={!canSend}
-              aria-label="Send"
-              title="Send (Enter)"
-              className={`flex h-7 w-7 items-center justify-center rounded-lg transition-colors ${
+              aria-label={queueHasFiles ? 'Files cannot be queued' : busy ? 'Add request to queue' : 'Send'}
+              title={queueHasFiles ? 'Remove the files to queue text, or wait for current work to finish' : busy ? 'Add to queue (Enter)' : 'Send (Enter)'}
+              className={`flex h-7 items-center justify-center gap-1 rounded-lg transition-colors ${busy ? 'px-2 text-[11.5px]' : 'w-7'} ${
                 canSend ? 'bg-accent text-[var(--accent-ink)] hover:bg-accent/90' : 'bg-white/[0.06] text-muted'
               }`}
             >
-              <ArrowUp size={15} />
+              <ArrowUp size={15} />{busy ? 'Queue' : null}
             </button>
           </span>
         </div>
-      </div>
-
-      {value.trim() && !busy ? (
-        <div className="relative px-1 pt-1.5">
-          <button
-            type="button"
-            onClick={() => setCook(open => !open)}
-            aria-expanded={cook}
-            title="Cook this prompt: pull matching vault notes in as [Title: line] context, preview, then send"
-            className="flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <CookingPot size={11} aria-hidden />
-            Cook This Prompt
-          </button>
-          {cook ? <CookDialog draft={value} onDone={(next) => { if (next !== null) onChange(next); setCook(false) }} /> : null}
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent('app:battle', { detail: value }))}
-            title="Battle: run this prompt on two brains and pick the better answer (blind, private tally)"
-            className="ml-1.5 flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <Swords size={11} aria-hidden />
-            Battle
-          </button>
-          <button
-            type="button"
-            onClick={() => window.dispatchEvent(new CustomEvent('app:split', { detail: value }))}
-            title="Split: the engine breaks this work order into steps, then the app runs them one by one"
-            className="ml-1.5 flex h-7 items-center gap-1.5 rounded-lg border border-line bg-card px-2.5 text-[11.5px] text-muted hover:text-ink"
-          >
-            <ListOrdered size={11} aria-hidden />
-            Split
-          </button>
-        </div>
-      ) : null}
+      </ComposerSurface>
+      {commandsOpen && <CommandPanel initialView={commandsOpen} close={() => setCommandsOpen(null)} />}
+      {editor ? <PromptEditor initial={editor.text} apply={text => onChange(replaceDraft({ scope: currentScope.current, text: liveDraft.current }, editor, text))} close={() => setEditor(null)} /> : null}
+      {savedDrafts ? <SavedDrafts draft={value} insert={text => onChange(liveDraft.current ? `${liveDraft.current}\n\n${text}` : text)} close={() => setSavedDrafts(false)} /> : null}
+      {cook ? <CookDialog draft={value} onDone={next => { if (next !== null) { try { onChange(replaceDraft({ scope: currentScope.current, text: liveDraft.current }, cookBase.current, next)) } catch { setFileNote('Cook result was not inserted because the draft changed. Reopen Cook context for the current draft; your draft and attachments are unchanged.') } } setCook(false) }} /> : null}
       {preview ? <p className="px-1 pt-2 text-[12px] text-muted">{preview}</p> : null}
+      {looksLikeNativeSlashCommand(value) && !slashOpen ? <p className="ob-control-scope">{safeSlashAction(value) ? 'This safe command runs an OddBrain control and is not sent to the model.' : 'This native slash command is not forwarded. Use /help for safe app controls.'}</p> : null}
+      {fileNote ? <p role="status" className="px-1 pt-2 text-[12px] text-muted">{fileNote}</p> : null}
       {notice ? <p className="px-1 pt-2 text-[12px] text-warn">{notice}</p> : null}
     </div>
   )
@@ -508,7 +541,7 @@ function EngineChip({ open, onToggle }: { open: boolean; onToggle: () => void })
           <div className="mt-1 border-t border-line px-2.5 pb-1 pt-2 text-[10px] font-medium uppercase tracking-wide text-muted">
             Before it acts
           </div>
-          {modes.map(mode => (
+          {(engine.settings.id === 'agy' ? AGY_APPROVAL_CHOICES : modes).map(mode => (
             <button
               key={mode.id}
               type="button"
@@ -523,26 +556,9 @@ function EngineChip({ open, onToggle }: { open: boolean; onToggle: () => void })
               {mode.label}
             </button>
           ))}
-          <div className="mt-1 flex items-center justify-between gap-1.5 border-t border-line px-2.5 pb-1 pt-2" role="group" aria-label="The engine's own thinking budget">
-            <span className="text-[10.5px] uppercase tracking-wide text-muted">Thinking</span>
-            <div className="flex items-center gap-1">
-              {([['default', 'Default'], ['extended', 'Extended']] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="menuitemradio"
-                  aria-checked={(engine.settings.thinking ?? 'default') === value}
-                  title={value === 'extended' ? 'The engine gets its own big thinking budget (its MAX_THINKING_TOKENS, set at launch).' : 'The engine decides how much to think.'}
-                  onClick={() => void engine.setThinking(value)}
-                  className={`rounded-lg px-2 py-1 text-[11px] ${ (engine.settings.thinking ?? 'default') === value ? 'bg-white/[0.06] text-ink' : 'text-muted hover:text-ink' }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-          </div>
+          <ReasoningEffort />
           <p className="px-2.5 pb-1.5 pt-1.5 text-[10.5px] leading-relaxed text-muted">
-            These are the engine's own modes. The app adds no rules of its own.
+            {engine.settings.id === 'agy' ? AGY_APPROVAL_NOTE : 'These are the engine’s own modes. The app adds no rules of its own.'}
           </p>
         </div>
       ) : null}
@@ -595,8 +611,7 @@ function ModelChip({ open, onToggle }: { open: boolean; onToggle: () => void }) 
           {/* The engine's own choice, always first and always real: it is
               whatever the engine itself logs in with — never a name this app
               invented. */}
-          {engine.settings.id === 'claude-code' ? (
-            <button
+          <button
               type="button"
               role="menuitemradio"
               aria-checked={engine.settings.model === ''}
@@ -610,8 +625,7 @@ function ModelChip({ open, onToggle }: { open: boolean; onToggle: () => void }) 
             >
               <span className="min-w-0 flex-1 truncate">{modelLabel('')}</span>
               <span className="shrink-0 text-[10.5px] text-muted">its own login</span>
-            </button>
-          ) : null}
+          </button>
           {engine.models.entries.length === 0 ? (
             <p className="px-2.5 py-2 text-[12px] leading-relaxed text-muted">
               {engine.models.loading
@@ -621,21 +635,21 @@ function ModelChip({ open, onToggle }: { open: boolean; onToggle: () => void }) 
           ) : (
             entries.map(entry => (
               <button
-                key={entry.name}
+                key={`${entry.provider || "ollama"}:${entry.name}`}
                 type="button"
                 role="menuitemradio"
-                aria-checked={entry.name === engine.settings.model}
+                aria-checked={entry.name === engine.settings.model && (entry.provider || '') === engine.settings.cloudProvider}
                 onClick={() => {
                   void engine.setModel(entry.name, entry.provider)
                   onToggle()
                 }}
                 className={`flex w-full items-center gap-2 rounded-lg px-2.5 py-1.5 text-left text-[12.5px] ${
-                  entry.name === engine.settings.model ? 'bg-white/[0.06] text-ink' : 'text-muted hover:text-ink'
+                  entry.name === engine.settings.model && (entry.provider || '') === engine.settings.cloudProvider ? 'bg-white/[0.06] text-ink' : 'text-muted hover:text-ink'
                 }`}
               >
-                <span className="min-w-0 flex-1 truncate">{entry.name}</span>
+                <span className="min-w-0 flex-1 truncate">{entry.displayName || entry.name}</span>
                 {entry.cloud ? (
-                  <span className="shrink-0 rounded-md border border-line px-1.5 text-[10px] text-muted">cloud</span>
+                  <span className="shrink-0 rounded-md border border-line px-1.5 text-[10px] text-muted">{entry.provider === 'native' ? (engine.settings.id === 'agy' ? 'agy' : 'CLI login') : entry.provider === 'anthropic' ? 'Anthropic API' : 'cloud'}</span>
                 ) : typeof entry.sizeGB === 'number' ? (
                   <span className="shrink-0 text-[10.5px] text-muted">{entry.sizeGB.toFixed(1)} GB</span>
                 ) : null}

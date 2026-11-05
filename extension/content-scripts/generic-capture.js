@@ -1,28 +1,20 @@
-function isExtensionValid() {
-  try { return !!(chrome.runtime && chrome.runtime.id); } catch(e) { return false; }
-}
-
-async function extractReadable() {
-  try {
-    const clone = document.cloneNode(true);
-    clone.querySelectorAll('script, style, nav, footer, iframe, noscript').forEach(el=>el.remove());
-    const text = clone.body?.innerText || "";
-    return text.trim().slice(0,10000);
-  } catch(e) { return ""; }
-}
-
+/* Optional broad-access capture. Manual saves use the same safe extractor. */
 (async () => {
-  if (!isExtensionValid()) return;
   try {
-    const url = location.href;
-    if (await checkBlacklist(url)) return;
-    const aiHosts = ["chat.openai.com","chatgpt.com","claude.ai","gemini.google.com","chat.deepseek.com","grok.com","perplexity.ai","copilot.microsoft.com"];
-    if (aiHosts.some(h => location.hostname.includes(h))) return;
-    const title = document.title;
-    const content = await extractReadable();
-    if (content.length < 100) return;
-    try { await postCapture({type: "web_page", url, title, content, completeness: "full"}); } catch(e) {
-      try { await postCapture({type: "wasnt_accessible", url, reason: "app offline or extraction failed"}); } catch(err) {}
-    }
-  } catch(e) {}
+    if (chrome.extension?.inIncognitoContext || !chrome.runtime?.id) return;
+    if (await checkBlacklist(location.href)) return;
+    const prefs = await chrome.storage.local.get({ autoCapturePages: false });
+    if (!prefs.autoCapturePages) return;
+    const read = oddExtractPage("page");
+    if (read.ok && read.content.length >= 100)
+      await postCapture({
+        type: "web_page",
+        url: read.url,
+        title: read.title,
+        content: read.content,
+        completeness: read.completeness,
+      });
+  } catch {
+    /* Extension reloads invalidate existing page scripts. */
+  }
 })();

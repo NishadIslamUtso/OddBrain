@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>OddBrain extension preview</title>
+    <link rel="stylesheet" href="/preview/preview.css" />
+  </head>
+  <body>
+    <header>
+      <div>
+        <strong>OddBrain / Browser companion</strong>
+        <p>
+          Interactive UI preview. Browser access and vault writes are simulated.
+        </p>
+      </div>
+      <label
+        >App appearance
+        <select id="look" aria-label="Preview app appearance"></select></label
+      ><label
+        >Browser surface
+        <select id="surface">
+          <option value="panel">Side panel</option>
+          <option value="popup">Toolbar popup</option>
+        </select></label
+      >
+    </header>
+    <main>
+      <article>
+        <div class="address">
+          <span aria-hidden="true">↶ &nbsp; ↷ &nbsp; ⟳</span
+          ><span>fieldnotes.example / a-small-reading-room</span
+          ><span class="pin">OddBrain pinned</span>
+        </div>
+        <div class="page">
+          <p class="section">FIELD NOTES / EVERYDAY PLACES</p>
+          <h1>A small reading room,<br />with room to think.</h1>
+          <p class="lede">
+            The useful parts of a place are not always the things you notice
+            first.
+          </p>
+          <div class="rule"></div>
+          <p>
+            At the back of the library, six chairs face a long window. There is
+            a shelf for books people are still reading, a table for unfinished
+            notes, and a lamp someone remembered to repair.
+          </p>
+          <p>
+            A good reading room makes it easy to return. Keep the tools within
+            reach. Leave enough space for an open notebook. Put the books back
+            where the next person will look.
+          </p>
+          <h2>Keep the useful bit</h2>
+          <p>
+            Select a passage, save the page, or turn it into a capsule with a
+            goal and a constraint. OddBrain’s side panel stays beside the page,
+            so you can check what you are saving.
+          </p>
+          <blockquote>Leave a little room for the next thought.</blockquote>
+          <p class="note">
+            This article and the capsules in the preview are sample content.
+            Install the unpacked extension to work with real pages.
+          </p>
+        </div>
+      </article>
+      <aside>
+        <iframe
+          id="extension"
+          title="OddBrain extension interface"
+          src="/popup/popup.html?panel=1&preview=1"
+        ></iframe>
+      </aside>
+    </main>
+    <script src="/preview/preview.js"></script>
+  </body>
+</html>

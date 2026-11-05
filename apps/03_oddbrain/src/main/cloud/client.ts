@@ -32,6 +32,7 @@ import {
 import type { OllamaMessage, OllamaRecord } from '../../shared/types'
 import { cloudEnabled, DEFAULT_PERMISSIONS, type Permissions } from '../../shared/lib/permissions'
 import type { KeyStore } from './keys'
+import { boundedResponse } from '../network/boundedResponse'
 
 export type CloudModel = CloudModelView
 
@@ -52,8 +53,31 @@ export type CloudClient = {
 
 /** How much of a reply is asked for. Cloud providers require a ceiling. */
 const MAX_TOKENS = 4096
-/** A model list is a small document; this is a guard, not a budget. */
+/** A model list is a small document; these are guards, not budgets. */
 const LIST_TIMEOUT_MS = 20_000
+const MAX_LIST_BYTES = 2_000_000
+const MAX_ERROR_BYTES = 64_000
+const MAX_STREAM_BYTES = 16_000_000
+
+/**
+ * API keys and conversation text may only cross authenticated transport.
+ * Plain HTTP remains useful for a provider running on this machine, but it is
+ * never accepted for a remote host. Credentials/query fragments are refused
+ * because concatenating API paths onto those URLs is ambiguous and can leak.
+ */
+function safeBaseUrl(provider: CloudProvider, raw: string): string {
+  let url: URL
+  try {
+    url = new URL(raw)
+  } catch {
+    throw new Error(`${provider.label} needs a valid base URL.`)
+  }
+  const loopback = ['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)
+  if (url.username || url.password || url.search || url.hash || !(url.protocol === 'https:' || (loopback && url.protocol === 'http:'))) {
+    throw new Error(`${provider.label} needs HTTPS, or HTTP on loopback, with no credentials, query or fragment in its base URL.`)
+  }
+  return url.toString().replace(/\/+$/, '')
+}
 
 function sentence(provider: CloudProvider, status: number, detail: string): string {
   if (status === 401 || status === 403) {
@@ -70,7 +94,7 @@ function sentence(provider: CloudProvider, status: number, detail: string): stri
 
 async function failureText(response: Response): Promise<string> {
   try {
-    const text = await response.text()
+    const text = await boundedResponse(response, MAX_ERROR_BYTES)
     if (!text) return ''
     try {
       const parsed = JSON.parse(text) as { error?: { message?: string } | string; message?: string }
@@ -127,32 +151,36 @@ export function createCloudClient(options: {
     if (off) throw new Error(off)
     const apiKey = keyFor(provider)
     if (!apiKey) throw new Error(`No key is saved for ${provider.label}.`)
-    const baseUrl = baseFor(provider)
-    if (!baseUrl) throw new Error(`${provider.label} needs a base URL. Set it in Settings > Models.`)
+    const configuredBase = baseFor(provider)
+    if (!configuredBase) throw new Error(`${provider.label} needs a base URL. Set it in Settings > Models.`)
+    const baseUrl = safeBaseUrl(provider, configuredBase)
     const spec = buildModelsRequest(provider, apiKey, baseUrl)
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), LIST_TIMEOUT_MS)
-    let response: Response
     try {
-      response = await request(spec.url, { method: spec.method, headers: spec.headers, signal: controller.signal })
-    } catch (error) {
-      const reason = (error as Error).name === 'AbortError' ? 'it did not answer in 20 seconds' : (error as Error).message
-      throw new Error(`Could not reach ${provider.label}: ${reason}.`)
+      let response: Response
+      try {
+        response = await request(spec.url, { method: spec.method, headers: spec.headers, redirect: 'error', signal: controller.signal })
+      } catch (error) {
+        const reason = (error as Error).name === 'AbortError' ? 'it did not answer in 20 seconds' : (error as Error).message
+        throw new Error(`Could not reach ${provider.label}: ${reason}.`)
+      }
+      if (!response.ok) throw new Error(sentence(provider, response.status, await failureText(response)))
+      let payload: unknown
+      try {
+        payload = JSON.parse(await boundedResponse(response, MAX_LIST_BYTES))
+      } catch {
+        if (controller.signal.aborted) throw new Error(`${provider.label} did not finish its model list in 20 seconds.`)
+        throw new Error(`${provider.label} sent a model list this app could not read within the ${MAX_LIST_BYTES.toLocaleString()}-byte limit.`)
+      }
+      return readModelNames(payload).map(model => ({
+        name: `${provider.id}/${model}`,
+        provider: provider.id,
+        label: model,
+      }))
     } finally {
       clearTimeout(timer)
     }
-    if (!response.ok) throw new Error(sentence(provider, response.status, await failureText(response)))
-    let payload: unknown
-    try {
-      payload = await response.json()
-    } catch {
-      throw new Error(`${provider.label} sent a model list this app could not read.`)
-    }
-    return readModelNames(payload).map(model => ({
-      name: `${provider.id}/${model}`,
-      provider: provider.id,
-      label: model,
-    }))
   }
 
   return {
@@ -206,8 +234,9 @@ export function createCloudClient(options: {
       if (off) throw new Error(off)
       const apiKey = keyFor(provider)
       if (!apiKey) throw new Error(`No key is saved for ${provider.label}. Add one in Settings > Models.`)
-      const baseUrl = baseFor(provider)
-      if (!baseUrl) throw new Error(`${provider.label} needs a base URL. Set it in Settings > Models.`)
+      const configuredBase = baseFor(provider)
+      if (!configuredBase) throw new Error(`${provider.label} needs a base URL. Set it in Settings > Models.`)
+      const baseUrl = safeBaseUrl(provider, configuredBase)
       const spec = buildChatRequest({
         provider,
         model,
@@ -222,6 +251,7 @@ export function createCloudClient(options: {
           method: spec.method,
           headers: spec.headers,
           body: spec.body,
+          redirect: 'error',
           signal: input.signal,
         })
       } catch (error) {
@@ -236,9 +266,12 @@ export function createCloudClient(options: {
       const decoder = new TextDecoder()
       const reader = response.body.getReader()
       let stopped = false
+      let received = 0
       try {
         for (;;) {
           const { value, done } = await reader.read()
+          received += value?.byteLength ?? 0
+          if (received > MAX_STREAM_BYTES) throw new Error(`${provider.label} streamed more than the ${MAX_STREAM_BYTES.toLocaleString()}-byte reply limit.`)
           const text = done ? decoder.decode() : decoder.decode(value, { stream: true })
           for (const event of parser.push(text)) {
             const delta = translateSseEvent(provider.wire, event)
@@ -260,6 +293,9 @@ export function createCloudClient(options: {
           if (done) break
         }
       } finally {
+        // Cancelling a completed stream is harmless; on a size/parser failure it
+        // stops the provider from continuing to feed bytes we already refused.
+        await reader.cancel().catch(() => undefined)
         try {
           reader.releaseLock()
         } catch {

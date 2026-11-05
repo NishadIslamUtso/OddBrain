@@ -17,5 +17,5 @@ export function extractCitations(text = ''): Citation[] {
     seen.add(url)
     out.push({ id: `${out.length}-${url}`, url, label: label.trim() })
   }
-  return out.slice(0, 8)
+  return out
 }

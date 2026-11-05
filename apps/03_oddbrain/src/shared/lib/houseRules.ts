@@ -38,7 +38,7 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
     'You work in the folder the app gives you. The app shows your work, so keep machine-readable output exact and your words plain.',
   artifacts:
     'Anything visual or shareable, a page, a chart, a diagram, a document, is written as a standalone file in the ' +
-    'artifacts/ folder of the workspace (HTML, SVG or Markdown), so the app can show it live. ' +
+    'artifacts/ folder of the workspace (HTML, SVG or Markdown), so the app can inspect changed standalone HTML/SVG files after the turn and add them to its artifact library. Markdown remains in the working folder. File observation is not an automatic quality check. ' +
     'Never describe what you could build: build the file.',
   permissions:
     'When a step needs approval, use the engine\u2019s own approval channel; the app shows it to the owner as a card. ' +
@@ -65,7 +65,7 @@ export const DEFAULT_HOUSE_RULES: HouseRules = {
 export const REMEMBERING_SECTION =
   'You keep a memory file at 06 Review/Memory/engine-notes.md in your working folder. ' +
   'When you learn something worth keeping for future sessions — a decision made, a preference shown, a fact learned, work left open — ' +
-  'append it under a heading like \'## 2026-10-16\' for today, one short line per item. ' +
+  'append it under a YYYY-MM-DD heading for the actual current date, one short line per item. If the date is unknown, ask rather than invent it. ' +
   'Never delete or rewrite lines that are already there; if nothing is worth keeping, write nothing. ' +
   'Your writes go through the usual approval channel, so the owner sees every change before it lands.'
 
@@ -90,7 +90,7 @@ const HEADING: Record<EngineId, string> = {
  * Compile the canonical rulebook for one engine: the body is the same — that
  * is the whole point — only the file name and heading are native to it.
  */
-export function compileFor(engine: EngineId, rules: HouseRules = DEFAULT_HOUSE_RULES): string {
+export function compileFor(engine: EngineId, rules: HouseRules = DEFAULT_HOUSE_RULES, memoryFolder = ''): string {
   if (!HOUSE_RULES_FILENAME[engine]) {
     throw new Error(`no house-rules channel for engine: ${String(engine)}`)
   }
@@ -99,7 +99,7 @@ export function compileFor(engine: EngineId, rules: HouseRules = DEFAULT_HOUSE_R
     ['Artifacts', rules.artifacts],
     ['Approvals', rules.permissions],
     ['Memory and searching', rules.memory],
-    ['What you keep', REMEMBERING_SECTION],
+    ['What you keep', memoryFolder ? REMEMBERING_SECTION.replace('at 06 Review/Memory/engine-notes.md in your working folder', 'at ' + JSON.stringify(memoryFolder.replace(/\\/g, '/') + '/engine-notes.md') + ' in the explicit memory directory chosen by the owner') : REMEMBERING_SECTION],
     ['How you write', rules.style],
   ]
   const body = sections
@@ -156,8 +156,8 @@ export function modelHints(model: string): string {
 }
 
 /** The full instruction block for a turn: rules, then the brain's footnote. */
-export function instructionBlock(engine: EngineId, model: string, rules: HouseRules = DEFAULT_HOUSE_RULES): string {
+export function instructionBlock(engine: EngineId, model: string, rules: HouseRules = DEFAULT_HOUSE_RULES, memoryFolder = ''): string {
   const hints = modelHints(model)
-  const base = compileFor(engine, rules)
+  const base = compileFor(engine, rules, memoryFolder)
   return hints ? `${base}\n## Notes for this brain\n\n${hints}\n` : base
 }

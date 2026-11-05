@@ -1,159 +1,93 @@
-/**
- * The kit's scenes, alive in the app.
- *
- * Rules this component enforces (the owner's brief, §8):
- *  - the shipped SVGs play byte-exact — every instance namespaces its own copy;
- *  - a bounded number of scenes animate at once (six), the rest wait paused;
- *  - off-screen instances pause; Still mode and the OS reduced-motion
- *    preference stop everything, exported bytes untouched;
- *  - the word under a scene is flavour and never travels without the honest
- *    state name beside it (the callers keep that name).
- */
-
-import { useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
-import { MOTIONS } from '@shared/lib/motionKitData'
-import { durationScaleFor, motionPaused, pairingAt, type MotionPairing, type MotionModeName, type MotionRole } from '@shared/lib/motionKit'
+import { useContext, useEffect, useId, useMemo, useRef, useState, useSyncExternalStore } from 'react'
+import { SCENES as MOTIONS } from '../ui/sceneCatalog'
+import { durationScaleFor, motionPaused, pairingAt, type MotionPairing, type MotionRole } from '@shared/lib/motionKit'
 import { prepareMotionSvg } from '@shared/lib/motionSvg'
 import { getMotionMode, subscribeMotionMode } from './motionMode'
+import { useLook } from '../ui/LookContext'
+import { MotionOverride } from '../ui/MotionContext'
 
 const RAW = import.meta.glob('../assets/motion/*.svg', { query: '?raw', import: 'default', eager: true }) as Record<string, string>
-
-/** scene id → pristine SVG string, read once. */
 const PRISTINE: Record<string, string> = {}
 for (const [path, svg] of Object.entries(RAW)) {
   const id = path.split('/').at(-1)?.replace(/\.svg$/, '') ?? ''
   if (id) PRISTINE[id] = svg
 }
-
-export function motionAsset(id: string): string | null {
-  return PRISTINE[id] ?? null
-}
-
-/** How many scenes may animate at once on one screen (the brief's bound). */
+export function motionAsset(id: string): string | null { return PRISTINE[id] ?? null }
 export const INSTANCE_BUDGET = 6
-
-let runningInstances = 0
-const budgetSubscribers = new Set<() => void>()
-function releaseBudgetSlot(): void {
-  runningInstances = Math.max(0, runningInstances - 1)
-  for (const notify of budgetSubscribers) notify()
+const slots = new Set<string>()
+const waiting = new Set<() => void>()
+let noticeQueued = false
+function budgetChanged(): void {
+  if (noticeQueued) return
+  noticeQueued = true
+  queueMicrotask(() => { noticeQueued = false; for (const notify of [...waiting]) if (waiting.has(notify)) notify() })
 }
-function acquireBudgetSlot(): boolean {
-  if (runningInstances >= INSTANCE_BUDGET) return false
-  runningInstances += 1
-  // A grant changes the budget picture as much as a release does: subscribers
-  // that waited on a full board must hear "a seat opened" in both directions.
-  for (const notify of budgetSubscribers) notify()
-  return true
-}
-
-function motionDuration(id: string): number {
-  return (MOTIONS.find((mo) => mo.id === id)?.duration ?? 3) * 1000 + 400
-}
-
-function useMotionEnvironment(): { mode: MotionModeName; osReduced: boolean; used: number } {
-  const env = useSyncExternalStore(subscribeMotionMode, getMotionMode)
-  const [used, setUsed] = useState(runningInstances)
+/** A slot belongs to its instance, so reaching six never pauses the sixth
+ * owner and releases/reacquires it forever. Waiters only acquire free slots. */
+function useSlot(uid: string, enabled: boolean): boolean {
+  const [owned, setOwned] = useState(false)
   useEffect(() => {
-    const notify = () => setUsed(runningInstances)
-    budgetSubscribers.add(notify)
-    return () => {
-      budgetSubscribers.delete(notify)
+    if (!enabled) { setOwned(false); return }
+    let held = false
+    const acquire = (): void => {
+      if (held || slots.size >= INSTANCE_BUDGET) return
+      slots.add(uid); held = true; setOwned(true); budgetChanged()
     }
-  }, [])
-  return { mode: env.mode, osReduced: env.osReduced, used }
+    waiting.add(acquire); acquire()
+    return () => { waiting.delete(acquire); if (held) { slots.delete(uid); budgetChanged() } }
+  }, [uid, enabled])
+  return enabled && owned
 }
-
+export function scenePairing(role: MotionRole, tick: number, roles: Partial<Record<MotionRole, string>>, seed = 0): MotionPairing {
+  const assigned = roles[role]
+  const scene = assigned && assigned !== 'auto' ? MOTIONS.find(m => m.id === assigned) : undefined
+  if (!scene) return pairingAt(role, tick, seed)
+  return { word: scene.words.length ? scene.words[Math.abs(tick + seed) % scene.words.length] : scene.defaultWord, motionIds: [scene.id] }
+}
 export type MascotProps = {
-  /** An explicit scene id (e.g. the waiting loader). */
-  motion?: string
-  /** Or a role whose rotation decides the scene. */
-  role?: MotionRole
-  /** Pixel size; the brief's sizes: hero 158 · chat empty 104 · loader 24-64. */
-  size: number
-  /** Show the flavour word under the scene (callers keep the honest state nearby). */
-  withWord?: boolean
-  /** Rotation period while the role is live. */
-  periodMs?: number
-  /** Stable per mount position, so two mascots never show the same word. */
-  seed?: number
-  /** When false the rotation freezes on the current word (a finished turn). */
-  active?: boolean
-  className?: string
+  motion?: string; role?: MotionRole; size: number; withWord?: boolean
+  periodMs?: number; seed?: number; active?: boolean; className?: string
+  /** Thumbnail/static preview, independent of the global preference. */
+  static?: boolean
 }
-
-/** The mascot: one namespaced, budgeted, pausable scene — with its word. */
-export function Mascot({ motion, role, size, withWord = false, periodMs = 5500, seed = 0, active = true, className }: MascotProps): React.JSX.Element {
-  const reactId = useId()
-  const uid = `i${reactId.replace(/[^a-z0-9-]/gi, '')}`
+export function Mascot({ motion, role, size, withWord = false, periodMs = 5500, seed = 0, active = true, className, static: forceStatic = false }: MascotProps): React.JSX.Element {
+  const id = useId(), uid = `i${id.replace(/[^a-z0-9-]/gi, '')}`
   const holder = useRef<HTMLSpanElement | null>(null)
   const [onScreen, setOnScreen] = useState(true)
-  const { mode, osReduced, used } = useMotionEnvironment()
-  const pausedByMode = motionPaused(mode, osReduced)
-
-  // Off-screen instances pause (an IntersectionObserver, nothing polling).
+  const env = useSyncExternalStore(subscribeMotionMode, getMotionMode)
+  const override = useContext(MotionOverride), mode = override ?? env.mode, look = useLook()
+  const staticPose = forceStatic || env.mode === 'still' || motionPaused(mode, env.osReduced)
+  const frozen = staticPose || look.paused || env.paused
   useEffect(() => {
     const node = holder.current
     if (!node || typeof IntersectionObserver === 'undefined') return
-    const observer = new IntersectionObserver((entries) => {
-      setOnScreen(entries.some((entry) => entry.isIntersecting))
-    })
-    observer.observe(node)
-    return () => observer.disconnect()
+    const observer = new IntersectionObserver(entries => setOnScreen(entries.some(entry => entry.isIntersecting)))
+    observer.observe(node); return () => observer.disconnect()
   }, [])
-
-  // The word wheel: words turn over while active; Still freezes them.
   const [tick, setTick] = useState(0)
   useEffect(() => {
-    if (!role || !active || pausedByMode) return
-    const timer = window.setInterval(() => setTick((n) => n + 1), Math.max(1200, periodMs))
+    if (!role || !active || frozen || !onScreen) return
+    const timer = window.setInterval(() => setTick(n => n + 1), Math.max(1200, periodMs))
     return () => window.clearInterval(timer)
-  }, [role, active, pausedByMode, periodMs])
-
-  const current: MotionPairing | null = role ? pairingAt(role, tick, seed) : null
-  const sceneId = motion ?? (current ? current.motionIds[0] : null)
+  }, [role, active, frozen, onScreen, periodMs])
+  const pairing = role ? scenePairing(role, tick, look.roles, seed) : null
+  const sceneId = motion ?? pairing?.motionIds[0] ?? null
   const pristine = sceneId ? PRISTINE[sceneId] : null
-
-  const overBudget = used >= INSTANCE_BUDGET
-  const paused = pausedByMode || !onScreen || overBudget
-  const svg = useMemo(() => {
-    if (!pristine) return null
-    return prepareMotionSvg(pristine, uid, durationScaleFor(mode, osReduced))
-  }, [pristine, uid, mode, osReduced])
-
-  // One-shots (the two `Special` scenes) stop after their single run.
-  const isOneShot = sceneId === 'assemble' || sceneId === 'shades-drop'
+  const scale = durationScaleFor(mode, env.osReduced) / look.speed
+  const svg = useMemo(() => pristine ? prepareMotionSvg(pristine, uid, scale) : null, [pristine, uid, scale])
+  const oneShot = sceneId === 'assemble' || sceneId === 'shades-drop'
   const [shotDone, setShotDone] = useState(false)
+  useEffect(() => setShotDone(false), [sceneId])
+  const ownsSlot = useSlot(uid, !!svg && onScreen && !frozen && !shotDone)
   useEffect(() => {
-    setShotDone(false)
-    if (!isOneShot || paused) return
-    const timer = window.setTimeout(() => setShotDone(true), motionDuration(sceneId ?? ''))
+    if (!oneShot || !ownsSlot) return
+    const timer = window.setTimeout(() => setShotDone(true), ((MOTIONS.find(m => m.id === sceneId)?.duration ?? 3) * 1000 + 400) * scale)
     return () => window.clearTimeout(timer)
-  }, [isOneShot, paused, sceneId])
-
-  // Budget accounting: a mounted, visible, animating instance holds a slot.
-  const holdsSlot = !pausedByMode && onScreen && !overBudget && !shotDone
-  useEffect(() => {
-    if (!holdsSlot || !svg) return
-    const got = acquireBudgetSlot()
-    if (!got) return
-    return () => releaseBudgetSlot()
-  }, [holdsSlot, svg])
-
-  const still = paused || shotDone
-  return (
-    <span ref={holder} className={`ob-mascot inline-flex flex-col items-center ${className ?? ''}`} style={{ width: size }}>
-      {svg ? (
-        <span
-          className={`ob-scene block ${still ? 'ob-still' : ''}`}
-          style={{ width: size, height: size }}
-          aria-hidden="true"
-          dangerouslySetInnerHTML={{ __html: svg }}
-        />
-      ) : null}
-      {withWord && current ? (
-        <span className="mt-1 max-w-full truncate text-[11px] text-muted" aria-hidden="true">{current.word}</span>
-      ) : null}
-    </span>
-  )
+  }, [oneShot, ownsSlot, sceneId, scale])
+  const scene = MOTIONS.find(m => m.id === sceneId)
+  const word = motion ? scene?.defaultWord : pairing?.word
+  return <span ref={holder} className={`ob-mascot inline-flex flex-col items-center ${className ?? ''}`} style={{ width: size }} data-motion={sceneId ?? ''}>
+    {svg ? <span className={`ob-scene block ${staticPose ? 'ob-static' : look.paused || env.paused || !ownsSlot || shotDone ? 'ob-still' : ''}`} style={{ width: size, height: size }} aria-hidden="true" dangerouslySetInnerHTML={{ __html: svg }} /> : null}
+    {withWord && word ? <span className="mt-1 max-w-full truncate text-[11px] text-muted" aria-hidden="true">{word}</span> : null}
+  </span>
 }

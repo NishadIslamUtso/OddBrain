@@ -1,0 +1,14 @@
+# High-impact execution and supply-chain surfaces. GitHub only enforces these
+# reviews when branch protection requires Code Owner approval.
+/.github/workflows/ @NishadIslamUtso
+/apps/03_oddbrain/package.json @NishadIslamUtso
+/apps/03_oddbrain/package-lock.json @NishadIslamUtso
+/apps/03_oddbrain/electron-builder.yml @NishadIslamUtso
+/apps/03_oddbrain/scripts/apply-fuses.cjs @NishadIslamUtso
+/apps/03_oddbrain/scripts/check-security-policy.cjs @NishadIslamUtso
+/apps/03_oddbrain/scripts/check-release-output.cjs @NishadIslamUtso
+/apps/03_oddbrain/scripts/check-packaged-fuses.cjs @NishadIslamUtso
+/apps/03_oddbrain/src/main/engine/claudeCode.ts @NishadIslamUtso
+/apps/03_oddbrain/src/main/engine/agy.ts @NishadIslamUtso
+/apps/03_oddbrain/src/main/workflows/ @NishadIslamUtso
+/apps/03_oddbrain/src/main/commands/ @NishadIslamUtso

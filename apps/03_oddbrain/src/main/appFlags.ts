@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 /**
  * Two machine-level "keep it running" flags, in one small file the app owns:
  *
@@ -11,7 +12,7 @@
  * about a conversation, and a damaged line degrades to "off" — never to a
  * surprise process.
  */
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, readFileSync, writeFileSync, renameSync, rmSync } from 'node:fs'
 
 export type AppFlags = { loginItem: boolean; warmRuntime: boolean; keepLoadedAlways: boolean }
 
@@ -31,10 +32,33 @@ export function loadAppFlags(file: string): AppFlags {
   }
 }
 
+/** Settings must distinguish an unreadable file from an OFF choice. Startup
+ * still uses the fail-closed loader above; it must never launch from bad data. */
+export function readAppFlagsStrict(file: string): AppFlags {
+  let raw: string
+  try { raw = readFileSync(file, 'utf8') } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { ...DEFAULT_FLAGS }
+    throw error
+  }
+  const parsed = JSON.parse(raw)
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw Error('The machine settings file is damaged.')
+  const result = { ...DEFAULT_FLAGS }
+  for (const key of Object.keys(result) as Array<keyof AppFlags>) {
+    if (key in parsed && typeof parsed[key] !== 'boolean') throw Error('The machine settings file is damaged.')
+    if (key in parsed) result[key] = parsed[key]
+  }
+  return result
+}
+
 export function saveAppFlags(file: string, patch: Partial<AppFlags>): AppFlags {
-  const next = { ...loadAppFlags(file), ...patch }
-  writeFileSync(file, JSON.stringify(next, null, 2))
-  return next
+  const next = readAppFlagsStrict(file)
+  for (const key of Object.keys(next) as Array<keyof AppFlags>) if (typeof patch[key] === 'boolean') next[key] = patch[key]!
+  const temporary = file + '.next-' + randomUUID()
+  try {
+    writeFileSync(temporary, JSON.stringify(next, null, 2), { flag: 'wx', mode: 0o600 })
+    renameSync(temporary, file)
+    return readAppFlagsStrict(file)
+  } finally { rmSync(temporary, { force: true }) }
 }
 
 export function flagsExist(file: string): boolean {

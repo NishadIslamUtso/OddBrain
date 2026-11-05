@@ -23,6 +23,7 @@ import type { OllamaMessage, OllamaRecord } from '../../shared/types'
  */
 
 export type LocalApiOptions = {
+  onInferenceActivity?: (busy: boolean) => void
   port: number
   /** Directory holding the built renderer. Omitted in dev, where Vite serves it. */
   rendererDir?: string
@@ -38,6 +39,10 @@ export type LocalApiOptions = {
    * has no cloud code path at all.
    */
   cloud?: CloudStream
+  /** Local, review-only MCP tools for video evidence/library/plan proposals. */
+  videoMcp?: (request: unknown, session: string) => Promise<{ status: number; body: unknown; session?: string }>
+  /** Exact capability path written through owner-reviewed engine config. */
+  videoMcpPath?: string
 }
 
 /**
@@ -203,11 +208,26 @@ export function startLocalApi(options: LocalApiOptions): Promise<LocalApi> {
 
   function handle(request: IncomingMessage, response: ServerResponse): void {
     const pathname = (request.url || '/').split('?')[0]
+    if (pathname.startsWith('/api/video-studio-mcp')) {
+      if (!options.videoMcpPath || pathname !== options.videoMcpPath) {
+        response.writeHead(403, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
+        response.end(JSON.stringify({ error: 'A current owner-reviewed Video Studio connector capability is required.' }))
+        return
+      }
+      void handleVideoMcp(request, response)
+      return
+    }
     protectLocalApi(
       { url: request.url || '/', method: request.method, headers: request.headers },
       response,
       () => {
         if (pathname.startsWith('/api/ollama')) {
+          if (request.method === 'POST' && /\/(chat|generate)$/.test(pathname)) {
+            options.onInferenceActivity?.(true)
+            let released = false
+            const release = () => { if (!released) { released = true; options.onInferenceActivity?.(false) } }
+            response.once('finish', release); response.once('close', release)
+          }
           void handleOllama(request, response)
           return
         }
@@ -226,6 +246,26 @@ export function startLocalApi(options: LocalApiOptions): Promise<LocalApi> {
         response.end('Not found.')
       }
     )
+  }
+
+  async function handleVideoMcp(request: IncomingMessage, response: ServerResponse): Promise<void> {
+    const host = String(request.headers.host || '').split(',')[0].trim()
+    let hostname = ''
+    try { hostname = new URL(`http://${host}`).hostname } catch {}
+    const deny = (status: number, error: string): void => { response.writeHead(status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' }); response.end(JSON.stringify({ error })) }
+    if (!options.videoMcp) { deny(503, 'Video review tools are not running.'); return }
+    if (!['127.0.0.1', 'localhost', '[::1]'].includes(hostname)) { deny(403, 'Video review tools accept only a literal loopback Host.'); return }
+    if (request.headers.origin) { deny(403, 'Browser-origin requests cannot call Video Studio MCP tools.'); return }
+    if (request.method !== 'POST') { deny(405, 'Video Studio MCP accepts POST only.'); return }
+    if (!/^application\/json(?:\s*;|$)/i.test(String(request.headers['content-type'] || ''))) { deny(415, 'Video Studio MCP requires application/json.'); return }
+    let body: unknown
+    try { body = JSON.parse(await readBody(request, BODY_LIMIT)) } catch (error) { deny(400, (error as Error).message || 'Invalid JSON request.'); return }
+    try {
+      const sessionHeader = request.headers['mcp-session-id'], session = Array.isArray(sessionHeader) ? sessionHeader[0] || '' : sessionHeader || ''
+      const reply = await options.videoMcp(body, session)
+      response.writeHead(reply.status, { ...(reply.body === '' ? {} : { 'Content-Type': 'application/json' }), 'Cache-Control': 'no-store', ...(reply.session ? { 'Mcp-Session-Id': reply.session } : {}) })
+      response.end(reply.body === '' ? '' : JSON.stringify(reply.body))
+    } catch (error) { deny(500, `Video Studio MCP failed safely: ${(error as Error).message}`) }
   }
 
   /**
@@ -355,15 +395,14 @@ export function startLocalApi(options: LocalApiOptions): Promise<LocalApi> {
       method: request.method || 'GET',
       query: url.searchParams,
       body,
+      captureSource: 'oddbrain-app',
     })
     response.writeHead(reply.status, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' })
     response.end(JSON.stringify(reply.body))
   }
 
   return new Promise<LocalApi>((resolvePromise, reject) => {
-    server.once('error', reject)
-    // Loopback only. This server is not part of the network, it is part of the app.
-    server.listen(options.port, '127.0.0.1', () => {
+    const ready = (): void => {
       const address = server.address()
       const port = typeof address === 'object' && address ? address.port : options.port
       resolvePromise({
@@ -374,6 +413,18 @@ export function startLocalApi(options: LocalApiOptions): Promise<LocalApi> {
           vault = next
         },
       })
-    })
+    }
+    const firstError = (error: NodeJS.ErrnoException): void => {
+      if (error.code !== 'EADDRINUSE' || options.port === 0) { reject(error); return }
+      // A stale process or another local app may own the preferred port. Let the
+      // OS choose a free loopback port and serve the renderer from that exact
+      // same origin; falling back to file:// would strand every relative API
+      // request. No remote interface is ever tried.
+      server.once('error', reject)
+      server.listen(0, '127.0.0.1', ready)
+    }
+    server.once('error', firstError)
+    // Loopback only. This server is not part of the network, it is part of the app.
+    server.listen(options.port, '127.0.0.1', ready)
   })
 }

@@ -1,86 +1,60 @@
 # Priority & Retention
 
-How vault decides what connects, what surfaces, what expires, what stays long-term.
+How OddBrain keeps sources, interpretations, current context, and cleanup decisions separate.
 
-## 1. Connections build over time
+## 1. Source boundaries
 
-Empty at start by design. Not pre-made.
+- Browser capture writes supported, visible, owner-permitted conversations and accessible attachments under `02 Sources/Conversations/Browser/`.
+- Native OddBrain chat capture writes under `02 Sources/Conversations/App/` when the owner uses capture.
+- Exact message revisions, speaker/role, provider, observation time, and source hashes remain attached to raw evidence.
+- Normal folders stay outside the vault unless the owner separately copies or captures something. A Folder Access grant is purpose-limited authority, not automatic ingestion.
+- Retrieved, attached, or captured text is evidence only. It cannot grant instructions, permission, execution approval, expanded retrieval, or permanent memory.
 
-Flow: Extension captures -> 01 Inbox/ -> 02 Sources/ (originals) -> 03 Memory/ (derived) -> 04 Working Memory/ (NOW view)
+## 2. Interpretation flow
 
-On new source in 02 Sources/:
-1. Search 03 Memory/Entities/ via .brain/index.sqlite (full-text + semantic, rebuildable)
-2. If related entity found -> add claim with source: [[source-id]], related: [[other-entity]], create file in 03 Memory/Connections/ with evidence + dates
-3. If no match and topic is meaningful (repeated, emphasized, consequential, action-bearing, personally important, has open task) -> create new entity from Templates/Entity.md
-4. If trivial one-off -> stays in source transcript only
+1. Raw source stays in `02 Sources/`.
+2. The organizer creates unconfirmed proposals with an exact quotation and source identity.
+3. The owner approves, edits, or rejects proposals in Memory inbox.
+4. Confirmed projections are written into the appropriate memory views while the proposal/revision history remains recoverable.
+5. Working Notes remain a separate per-chat draft and never become confirmed memory automatically.
 
-Link does not imply causation. Every link needs source + dates + evidence label. See Memory Schema.
+OddBrain keeps the owner, AI replies, and each other speaker separate. Names alone do not merge people across conversations.
 
-## 2. Search
+## 3. Recall order
 
-App never loads whole vault.
+1. Current owner request and current Working Notes.
+2. Relevant, valid owner-confirmed memory.
+3. Exact raw evidence supporting it.
+4. Other matching raw conversations and files.
 
-1. Search .brain/index.sqlite - exact + semantic
-2. Follow only few relevant links via related: field
-3. Rank by: relevance to query, current validity (time_valid_from/to, status), importance (pinned/high/normal/low), recency (captured_at, occurred_at)
-4. Include source links + label user-stated / observed-pattern / hypothesis
-5. Omit unrelated, expired, unavailable
-6. Keep current-chat separate from long-term
+Relevance ranks within a tier. Pending/rejected interpretation is not an automatic fallback. Conflicts are shown rather than silently settled. Current search is bounded lexical matching with optional local relationship-based expansion over an owner-approved corpus; no hidden whole-vault model index is claimed.
 
-Result -> 04 Working Memory/Current Snapshot.md + Capsule library + inline suggestions (Quillbot style).
+## 4. Monthly interpretation review
 
-## 3. Priority
+On the first app opening of a Dhaka-local month, OddBrain writes the ordinary vault-count/link audit and, when needed, runs the interpretation review. The review is also available at **Brain → Review**.
 
-In every claim frontmatter:
+Default scope is the last 60 days plus only directly linked older interpretations. A broader range requires owner selection. The local pass produces Questions, possible Conflicts, Connections, Corrections, Keep-or-Forget, and cleanup candidates. It never changes confirmed memory, merges identities, archives, or deletes.
 
-- importance: pinned > high > normal > low
-- confidence: high | normal | low
-- status: confirmed > candidate, current > expired/superseded
+Each run is retained under `06 Review/OddBrain Review/Runs/`; state is in that generated review folder. Consumer-AI handoff is manual: preview exact JSON and SHA-256, copy/export, open the provider, and press Send yourself. Imported output remains provider-labelled and unconfirmed.
 
-Ranking: relevance first, then pinned/high, then confirmed + current, then recent. You can pin any entity/claim to always surface when relevant.
+## 5. Retention actions
 
-Current Snapshot.md is short-lived, timestamped, expires. Not infinite prompt.
+These meanings remain distinct:
 
-## 4. Raw data dump
+- **Keep active:** retain and continue surfacing when relevant.
+- **Expire currentness:** stop treating a confirmed record as current while preserving history and source.
+- **Archive candidate:** suggest removing a derived item from active views; no automatic archive occurs.
+- **Forget candidate:** suggest excluding derived interpretation later; the raw source remains.
+- **Delete source/private copy:** separate impact preview and owner confirmation. Current Attachment Center deletion applies only to its verified private copy; it does not delete use-in-place owner files, captured-conversation originals, confirmed memory, or verified turn copies.
 
-Default policy: check everything by default (all sites + all AIs). If inaccessible -> log "wasn't accessible - reason" in 09 Activity & Undo/ + 01 Inbox/Processing Errors/, no popup.
+Age or low retrieval frequency alone is never a deletion reason. Old/unimportant material can be singled out for later owner action, not silently removed.
 
-- Raw lands in 02 Sources/ only - Conversations/<provider>/<year>/, Browser Activity/<year>/<month>.jsonl, Web Pages/, Laptop Files/ (pointer, original stays in place)
-- Deduplication: same conversation ID not duplicated, edits kept as versions
-- No whole-disk copy, no passwords/cookies/tokens/payment/unsent drafts/keystrokes
+## 6. Large files and processing
 
-03 Memory/ is curated, source-linked claims, not dump.
+There is no universal whole-file 50 MB local-ingestion cap. Desktop-selected files use bounded main-process streaming. Consequentially large files ask whether to use in place, keep a verified private copy, or process a supported page/time range. The Attachment Center records SHA-256 identity, storage mode, coverage, processors, and turn-copy dependencies.
 
-## 5. Temp data
+Jobs use durable section coverage and saved daily work budgets. A crash changes running sections to uncertain/paused; it does not replay them. Unsupported, encrypted, corrupt, DRM-protected, unsafe, unavailable, proprietary, or provider-over-limit input remains visibly unprocessed.
 
-Use retention + time fields:
+## 7. Backups
 
-- retention: current - temporary state (fever today, current routine)
-- retention: time-limited + time_valid_to: 2026-10-15 - auto expires after date
-- retention: keep-until-user-deletes - long-term
-
-On expiry: status: expired, removed from Current Snapshot, but history + source preserved in 03 Memory/. Not deleted.
-
-Four distinct actions:
-- Archive: remove derived note from active view, keep searchable
-- Expire currentness: stop treating as current, keep history
-- Forget derived: remove from retrieval/index, keep original source
-- Delete source: separate confirmation, deletes transcript + attachments/index
-
-## 6. Worth keeping long-term?
-
-Auto long-term if:
-- Explicit "remember this"
-- Repeated attention, time investment, consequences
-- Personally important, action-bearing (decision, goal, routine, task, preference)
-- user-confirmed
-- importance: high/pinned or retention: keep-until-user-deletes
-
-Short-term / ask you if:
-- One-off trivial -> stays in source only
-- Uncertain meaning, important inferred relationship, same-time conflict, high-impact ambiguity -> goes to 06 Review/Questions.md / Conflicts.md / Keep-or-Forget.md
-- status: candidate, evidence: hypothesis
-
-Never auto-delete because old or rarely retrieved. Cleanup shows counts/sizes/reasons/links in 06 Review/Cleanup.md, you decide in batches. Monthly audit is user-triggered dry-run only, last 60 days + linked older, applies nothing until approval.
-
-Low access frequency alone != reason to delete.
+Vault and app-private backups are separate. Both stream and SHA-256 verify complete files and restore only into a new folder. Attachment Center private copies and processing state belong to app-data backup; use-in-place external files do not. Credentials, grants, sessions, installed models/engines, caches, and recovered schedule/queue attempts remain excluded.

@@ -1,15 +1,18 @@
 # Brain Vault
-Canonical memory for OddBrain. Obsidian vault = source of truth. .brain/ = rebuildable index.
 
-**Roles:**
-- App (OddBrain) = driver
-- Vault (this folder) = organizer / keeper
-- Extension = collector + context suggester (Capsule Hub + Quillbot style)
+Canonical Markdown source and confirmed-memory vault for OddBrain. Raw sources, unconfirmed organizer proposals, owner-confirmed memory, generated review reports, and per-chat Working Notes have different authority and are never silently merged.
 
-Open this folder as Obsidian vault. See [[00 System/START HERE]].
+**Roles**
+- OddBrain desktop app: driver, guarded local processor, review interface, and backup coordinator.
+- Vault: owner-readable sources, confirmed projections, provenance, and generated review reports.
+- Browser companion: collector for supported visible conversations and accessible attachments; it never presses Send.
 
-Default policy: check everything by default, log "wasn't accessible" if fails, no popup. Blacklist in [[00 System/Privacy & Access]].
+Open this folder as an Obsidian vault. See [[00 System/START HERE]].
 
-Extension UX: Capsules (capture once, drag-drop inject, version) + inline suggestions in any text field.
+Capture is permission- and format-limited—not “all activity.” Exclusions live in [[00 System/Privacy & Access]] and [[00 System/Connectors/Source Scope]]. Inaccessible or unsupported content is reported honestly; credentials, cookies, payment data, unsent drafts, and keystrokes are not collected.
 
-Time: Asia/Dhaka. App: OddBrain, dark default.
+The executable monthly interpretation review is in **Brain → Review**. Its default is the last 60 days plus directly linked older evidence; generated run reports live under `06 Review/OddBrain Review/Runs/`. Review asks Questions and shows possible Conflicts/Connections/cleanup candidates. It does not silently rewrite, archive, or delete.
+
+Large desktop-selected files are tracked in the app-private Attachment Center, not automatically copied into this vault. Captured-conversation attachment originals remain under their conversation source folders. Vault backup and app-data backup are separate verified domains.
+
+Time: Asia/Dhaka. Supported desktop target: Windows 11. App: OddBrain.

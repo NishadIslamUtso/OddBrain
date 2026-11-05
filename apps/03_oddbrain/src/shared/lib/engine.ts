@@ -19,8 +19,8 @@ export type EngineId = 'claude-code' | 'agy'
  */
 /** How much the engine may do before it asks. The app imposes no more. */
 export type ApprovalMode = 'ask' | 'plan' | 'edits' | 'full'
-/** How much room the engine's own thinking gets: its flag, our switch. */
-export const THINKING_MODES = ['default', 'extended'] as const
+/** Requested native effort. Display-only thinking visibility lives elsewhere. */
+export const THINKING_MODES = ['default', 'low', 'medium', 'high', 'xhigh', 'max'] as const
 export type ThinkingMode = (typeof THINKING_MODES)[number]
 
 export const APPROVAL_MODES: ApprovalMode[] = ['ask', 'plan', 'edits', 'full']
@@ -51,8 +51,9 @@ export type EngineSettings = {
   workspace: string
   /** The throttle: how much the engine may do before asking. */
   approval: ApprovalMode
-  /** The engine's own thinking budget, as its environment variable. */
+  /** Requested effort, applied only to the route that was checked. */
   thinking: ThinkingMode
+  effortTarget?: string
   /**
    * The door the brain lives behind. Empty means "whatever this machine
    * already has", which lets an Anthropic key work later without app changes.
@@ -61,9 +62,10 @@ export type EngineSettings = {
   /**
    * When the chosen brain comes from a provider (a key saved in Models),
    * the engine is launched pointed there WITH that key — riding the engine,
-   * never around it. Empty means the engine's own local door.
+   * never around it. 'native' keeps the CLI login. Empty uses the local
+   * endpoint for a named model, or the CLI login for an empty model.
    */
-  cloudProvider: '' | 'anthropic'
+  cloudProvider: '' | 'anthropic' | 'native'
 }
 
 export const DEFAULT_ENGINE: EngineSettings = {
@@ -101,9 +103,11 @@ export type EngineModelEntry = {
    * Which provider door this brain was read from. Empty = the engine's own
    * local door. 'anthropic' = read from the Anthropic API with a key from
    * Models; sending routes the ENGINE there with that key — the app itself
-   * never calls the provider.
+   * never calls the provider. 'native' is the CLI-reported catalog, sent
+   * through its own login instead of the configured Ollama endpoint.
    */
-  provider?: 'anthropic'
+  provider?: 'anthropic' | 'native'
+  displayName?: string
 }
 
 /** What a whole engine looks like from the machine it runs on. */
@@ -133,7 +137,12 @@ const ENGINES: readonly EngineId[] = ['claude-code', 'agy']
  * rule is a pattern, not a comment: letters, digits, dots, colons, and a few
  * separator characters — nothing that a shell could interpret.
  */
-const MODEL_PATTERN = /^[\w.:@/-]+$/
+const MODEL_PATTERN = /^(?!-)[\w.:@/-]+$/
+
+/** True for a model name the launch line can carry without a shell seeing it. */
+export function isValidModelName(value: unknown): value is string {
+  return typeof value === 'string' && value.length > 0 && value.length <= 120 && MODEL_PATTERN.test(value)
+}
 
 /**
  * Read engine settings from a parsed settings file without ever throwing —
@@ -145,7 +154,7 @@ export function normalizeEngine(raw: unknown): EngineSettings {
   const value = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>
   const id = ENGINES.includes(value.id as EngineId) ? (value.id as EngineId) : DEFAULT_ENGINE.id
   const text = (input: unknown, fallback: string, limit: number): string => {
-    const trimmed = typeof input === 'string' ? input.trim().slice(0, limit) : ''
+    const trimmed = typeof input === 'string' && input.length <= limit ? input.trim() : ''
     return trimmed || fallback
   }
   const model = text(value.model, DEFAULT_ENGINE.model, 300)
@@ -155,12 +164,14 @@ export function normalizeEngine(raw: unknown): EngineSettings {
     // older builds carry it. It migrates to the honest empty choice.
     model: MODEL_PATTERN.test(model) && model !== 'gemma4:cloud' ? model : '',
     baseUrl: text(value.baseUrl, DEFAULT_ENGINE.baseUrl, 2048),
-    workspace: typeof value.workspace === 'string' ? value.workspace.trim().slice(0, 4096) : '',
+    workspace: typeof value.workspace === 'string' && value.workspace.length <= 4096 ? value.workspace.trim() : '',
     approval: APPROVAL_MODES.includes(value.approval as ApprovalMode)
       ? (value.approval as ApprovalMode)
       : 'ask',
-    thinking: value.thinking === 'extended' ? 'extended' : 'default',
-    cloudProvider: value.cloudProvider === 'anthropic' ? 'anthropic' : '',
+    // Old Extended was a fixed budget, not model effort. Never silently convert it.
+    thinking: THINKING_MODES.includes(value.thinking as ThinkingMode) ? value.thinking as ThinkingMode : 'default',
+    ...(typeof value.effortTarget === 'string' && value.effortTarget.length < 8192 ? { effortTarget: value.effortTarget } : {}),
+    cloudProvider: value.cloudProvider === 'anthropic' || value.cloudProvider === 'native' ? value.cloudProvider : '',
   }
 }
 
@@ -169,19 +180,20 @@ export function normalizeEngine(raw: unknown): EngineSettings {
  * as they arrive: text becomes bubbles, tool entries become activity cards,
  * a permission becomes an approve/deny card, done/error closes the turn.
  */
-export type EngineEvent =
+export type EngineEvent = { sequence?: number; artifacts?: import('./nativeArtifacts').NativeArtifactLink[]; chatId?: string; transcriptId?: string; context?: import('./nativeConversation').ContextReceipt } & (
   | { kind: 'status'; text: string }
   | { kind: 'text'; text: string }
   | { kind: 'tool'; name: string; summary: string }
-  | { kind: 'permission'; requestId: string; tool: string; summary: string; detail?: string; file?: string }
+  | { kind: 'permission'; requestId: string; tool: string; summary: string; detail?: string; file?: string; risk?: string; readScopes?: import('./readTrust').ReadApprovalScopes }
   /** The engine opened a resumable session (its init sentence carries the id). */
   | { kind: 'session'; id: string }
   /** A piece of the engine's words as they form — the stream, not the summary. */
   | { kind: 'delta'; text: string }
   | { kind: 'thinking'; text: string }
-  | { kind: 'done'; text: string; usage?: EngineUsage }
+  | { kind: 'done'; text: string; usage?: EngineUsage; alreadyDisplayed?: boolean }
   | { kind: 'error'; text: string; usage?: EngineUsage }
   | { kind: 'closed' }
+)
 
 /**
  * A short human sentence about a tool call — what it touches, not its whole
@@ -219,4 +231,9 @@ export function toolSummary(name: string, input: unknown): string {
   if (name === 'Glob' || name === 'Grep') return string_('pattern').slice(0, 120)
   const text = JSON.stringify(value) ?? ''
   return text.length <= 160 ? text : `${text.slice(0, 157)}…`
+}
+
+/** Engine-specific model/provider choices never leak into another adapter. */
+export function selectEngine(current: EngineSettings, id: EngineId): EngineSettings {
+  return current.id === id ? current : { ...current, id, model: '', cloudProvider: '', thinking: 'default', effortTarget: undefined }
 }

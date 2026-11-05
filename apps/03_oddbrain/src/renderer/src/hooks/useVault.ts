@@ -1,3 +1,4 @@
+import { sampleEnabled } from '@shared/lib/sampleWorkspace'
 import { useEffect, useState } from 'react'
 import { vaultGet } from '@shared/lib/vault'
 import { isDemo } from '../platform/bridge'
@@ -29,7 +30,7 @@ export default function useVault(revision?: unknown): VaultState {
   const [vault, setVault] = useState<VaultState>({ state: 'unknown', path: '', error: '' })
 
   useEffect(() => {
-    if (isDemo) return
+    if (isDemo && !sampleEnabled()) return
     let cancelled = false
     const controller = new AbortController()
     vaultGet('/status', controller.signal)

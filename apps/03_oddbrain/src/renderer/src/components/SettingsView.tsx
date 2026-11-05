@@ -1,18 +1,28 @@
-import { useEffect, useState } from 'react'
+import { SECTIONS, type SectionId } from './settingsSections'
+import MachineFlagRow from './MachineFlagRow'
+import ExtensionInstall from './ExtensionInstall'
+import { SETTINGS_AREAS, areaForSection } from '../state/settingsNavigation'
+import SampleWorkspaceControls from '../ui/SampleWorkspaceControls'
+import { captureSamplePage, sampleEnabled } from '@shared/lib/sampleWorkspace'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import { bridge, isDemo } from '../platform/bridge'
 import HouseRulesSection from './HouseRulesSection'
 import BrainStructureSection from './BrainStructureSection'
 import SkillsCatalogSection from './SkillsCatalogSection'
 import BrowserControlSection from './BrowserControlSection'
-import ModsSection from './ModsSection'
-import { DESIGN_SYSTEMS } from '@shared/lib/design-systems'
+import ExtensionsSection from './ExtensionsSection'
+import MediaSettings from './MediaSettings'
+import VideoStudioSettings from './VideoStudioSettings'
 import ConnectorsSection from './ConnectorsSection'
 import ErrorBoundary from './ErrorBoundary'
 import EngineBay from './EngineBay'
+import ReadTrustManager from './ReadTrustManager'
+import type { ChatState } from '../state/useChats'
+import AutomationControls from '../ui/AutomationControls'
 import RecipesSection from './RecipesSection'
 import HooksSection from './HooksSection'
-import MemorySection from './MemorySection'
+import { OrganizerSettings } from './MemoryWorkspace'
 import { useEngine } from '@/state/engine'
 import type { VaultState } from '../hooks/useVault'
 import {
@@ -23,9 +33,14 @@ import {
   type InferenceSettings,
 } from '@shared/lib/inference'
 import { CLOUD_PROVIDERS, type CloudProviderView } from '@shared/lib/providers'
-import { DEFAULT_PERMISSIONS, type Permissions } from '@shared/lib/permissions'
-import usePersistentState from '../hooks/usePersistentState'
-import { ACCENTS, DEFAULT_APPEARANCE, WIDTHS, TEXT_SIZES, FONTS, THEMES, MOTIONS, type Appearance } from '../state/appearance'
+import { DEFAULT_PERMISSIONS, permissionChanges, type Permissions } from '@shared/lib/permissions'
+import { DEFAULT_APPEARANCE, type Appearance } from '../state/appearance'
+import { DEFAULT_LOOK, DEFAULT_SIDEBAR, type LookPreferences, type SidebarPreferences } from '../state/look'
+import AppearancePanel from '../ui/AppearancePanel'
+import WatchSection from './WatchSection'
+import { useQuickPreference, setQuickPreference } from '../state/quickPreference'
+import ModelContextProfiles, { type ContextModelChoice } from './ModelContextProfiles'
+import type { ModelContextOverrides } from '@shared/lib/modelContext'
 import {
   CUSTOM_FIELDS,
   DEFAULT_INFERENCE,
@@ -84,7 +99,7 @@ function AgentAccessCard({ isDemo }: { isDemo: boolean }): ReactNode {
     <div className="min-w-0">
       <div className="text-[12.5px]">The browser extension proves itself with this token.</div>
       <div className="mt-0.5 text-[11.5px] text-muted">
-        Copy it once into the extension popup (Pairing tab). It never travels over the network; rotating it makes every
+        Copy it once into the extension popup (Settings tab). It never travels over the network; rotating it makes every
         already-paired extension ask again.
       </div>
       <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
@@ -104,7 +119,7 @@ function AgentAccessCard({ isDemo }: { isDemo: boolean }): ReactNode {
           aria-label="Copy the pairing token"
           onClick={() => {
             void navigator.clipboard?.writeText(token)
-            setNote('Copied. Paste it into the extension popup, Pairing tab.')
+            setNote('Copied. Paste it into the extension popup, Settings tab.')
           }}
           className="rounded-lg border border-line px-2 py-0.5 text-[11px] text-ink hover:border-accent"
         >
@@ -114,6 +129,7 @@ function AgentAccessCard({ isDemo }: { isDemo: boolean }): ReactNode {
           type="button"
           aria-label="Rotate the pairing token"
           onClick={() => {
+            if (!window.confirm('Rotate the pairing token? Already-paired extensions will lose access until you enter the new token. Updated extensions keep waiting captures for their original vault. Update older extensions and let them finish saving first. Saved vault files are unchanged.')) return
             void bridge.extensionPair.rotate().then(view => {
               if (view.ok) {
                 setToken(view.token)
@@ -133,7 +149,7 @@ function AgentAccessCard({ isDemo }: { isDemo: boolean }): ReactNode {
   )
 }
 
-export type SectionId = 'agents' | 'hooks' | 'memory' | 'house' | 'skills' | 'recipes' | 'extensions' | 'engine' | 'system' | 'connectors' | 'appearance' | 'models' | 'performance' | 'vault'
+export { SECTIONS, type SectionId } from './settingsSections'
 
 type Row = {
   /** What the row is called, and what the rail's search matches on. */
@@ -145,34 +161,16 @@ type Row = {
   body: ReactNode
 }
 
-const SECTIONS: readonly {
-  id: SectionId
-  title: string
-  group: string
-  /** True when the section holds preferences, which are the only things a reset can restore. */
-  resettable?: boolean
-}[] = Object.freeze([
-  { id: 'system', title: 'System', group: 'This computer' },
-  { id: 'connectors', title: 'Connectors', group: 'This computer' },
-  { id: 'agents', title: 'Agent access', group: 'This app', resettable: true },
-  { id: 'hooks', title: 'Hooks', group: 'This app' },
-  { id: 'memory', title: 'Memory', group: 'This app' },
-  { id: 'house', title: 'House rules', group: 'This app' },
-  { id: 'skills', title: 'Skills', group: 'This app' },
-  { id: 'recipes', title: 'Recipes', group: 'This app' },
-  { id: 'extensions', title: 'Plugins', group: 'This app' },
-  { id: 'engine', title: 'Engine', group: 'This computer' },
-  { id: 'appearance', title: 'Appearance', group: 'This app', resettable: true },
-  { id: 'models', title: 'Models', group: 'This app' },
-  { id: 'performance', title: 'Performance', group: 'This app', resettable: true },
-  { id: 'vault', title: 'Vault', group: 'This app' },
-])
-
-const GROUPS = ['This computer', 'This app'] as const
+const COMPOSED_SECTIONS = new Set<SectionId>(['appearance', 'maps', 'engine', 'connectors', 'extensions', 'media', 'house', 'skills', 'recipes', 'hooks', 'memory', 'vault'])
 
 /** Four glyphs, drawn here rather than pulled from a font or a package. */
 function SectionIcon({ id }: { id: SectionId }) {
   const paths: Record<SectionId, ReactNode> = {
+    video: <><rect x="2" y="4" width="16" height="12" rx="2" /><path d="m9 8 4 2-4 2Z" /></>,
+    media: <><rect x="7" y="2" width="6" height="11" rx="3" /><path d="M4 9a6 6 0 0 0 12 0M10 15v3M6 18h8" /></>,
+    windows: <><rect x="2" y="3" width="16" height="13" rx="2" /><path d="M2 7h16" /></>,
+    maps: <><path d="m2 4 5-2 6 3 5-2v13l-5 2-6-3-5 2ZM7 2v13M13 5v13" /></>,
+    about: <><circle cx="10" cy="10" r="8" /><path d="M10 9v6M10 5v.1" /></>,
     house: (
       <svg width="14" height="14" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
         <path d="M4 8.5 10 3l6 5.5V16a1 1 0 0 1-1 1h-3.5v-4.5h-3V17H5a1 1 0 0 1-1-1V8.5Z" />
@@ -301,6 +299,53 @@ function Switch({
   )
 }
 
+function safeBackupPreferences(): Record<string, string> {
+  const kept: Record<string, string> = {}
+  for (let index = 0; index < localStorage.length; index++) {
+    const key = localStorage.key(index); if (!key || key.includes('read-trust') || key.startsWith('oddbrain.sample.')) continue
+    if (!key.startsWith('ai-assistant.') && !key.startsWith('oddbrain.') && !['ai_assistant_prompts', 'claude_exact_skills'].includes(key)) continue
+    const value = localStorage.getItem(key); if (value !== null) kept[key] = value
+  }
+  return kept
+}
+
+function AppDataBackupControls(): React.JSX.Element {
+  const [busy, setBusy] = useState(''), [notice, setNotice] = useState('')
+  const run = async (operation: 'create' | 'restore'): Promise<void> => {
+    if (busy) return
+    setBusy(operation); setNotice('')
+    try { const answer = await bridge.appData.backup(operation, operation === 'create' ? safeBackupPreferences() : {}); setNotice(answer.answer) }
+    catch { setNotice('The app-data operation failed. No complete backup or restore is reported.') }
+    finally { setBusy('') }
+  }
+  return <div><p className="text-[12px] leading-relaxed text-muted">A verified app-data backup is separate from the vault. It includes app chats, native transcripts, Working Notes and review differences, artifacts, projects, recipes, handoffs, reviewed outcomes, durable Video Studio evidence/frames/render receipts, and non-secret interface preferences.</p><p className="mt-1 text-[11.5px] text-muted">It excludes credentials, pairing secrets, saved access grants, engine sessions, installed engines/models, caches, schedule/queue attempts, and external files. Restore creates a separate folder; it never replaces live data automatically.</p><div className="ob-inline-actions mt-2"><button type="button" disabled={!!busy} onClick={() => void run('create')}>{busy === 'create' ? 'Backing up…' : 'Back up app data'}</button><button type="button" disabled={!!busy} onClick={() => void run('restore')}>{busy === 'restore' ? 'Verifying…' : 'Restore app data to new folder'}</button></div>{notice ? <p className="ob-inline-note" role="status">{notice}</p> : null}</div>
+}
+
+function CompleteMemoryBackupControls(): React.JSX.Element {
+  const [busy, setBusy] = useState(''), [notice, setNotice] = useState('')
+  const run = async (operation: 'create' | 'restore'): Promise<void> => {
+    if (busy) return
+    setBusy(operation); setNotice('')
+    try { const answer = await bridge.appData.completeMemoryBackup(operation, operation === 'create' ? safeBackupPreferences() : {}); setNotice(answer.answer) }
+    catch { setNotice('The Complete Memory operation failed. No complete backup or restore is reported.') }
+    finally { setBusy('') }
+  }
+  return <div><p className="text-[12px] leading-relaxed text-muted">The recommended backup coordinates the full vault and app-private data, including <strong>Memory_OB</strong>, chats, transcripts, Projects, Working Notes, private attachment copies and manifests, under one revision receipt.</p><p className="mt-1 text-[11.5px] text-muted">Every listed file is hashed. Use-in-place external files and secrets are explicitly excluded. Restore verifies both domains first, then creates an inactive new profile; live data is never replaced or activated automatically.</p><div className="ob-inline-actions mt-2"><button type="button" disabled={!!busy} onClick={() => void run('create')}>{busy === 'create' ? 'Creating…' : 'Create Complete Memory Backup'}</button><button type="button" disabled={!!busy} onClick={() => void run('restore')}>{busy === 'restore' ? 'Verifying…' : 'Verify and restore to new profile'}</button></div>{notice ? <p className="ob-inline-note" role="status">{notice}</p> : null}</div>
+}
+
+function ChatStorageControls({ storage }: { storage: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'importRecovery' | 'openStorageLocation'> }): React.JSX.Element {
+  const [busy, setBusy] = useState(''), [notice, setNotice] = useState('')
+  const run = async (action: 'retry' | 'export' | 'import' | 'open'): Promise<void> => {
+    if (busy) return
+    setBusy(action); setNotice('')
+    try {
+      if (action === 'retry') setNotice(await storage.retryStorage() ? 'Conversation storage is working.' : 'Conversation storage still needs attention.')
+      else setNotice((action === 'export' ? await storage.exportRecovery() : action === 'import' ? await storage.importRecovery() : await storage.openStorageLocation()).answer)
+    } finally { setBusy('') }
+  }
+  return <div><p className="text-[12px] leading-relaxed text-muted">App chats use private revisioned storage, separate from the vault. A vault backup does not include them. Recovery import previews the result and merges without silently replacing existing chats.</p><p className={`mt-1 text-[11.5px] ${storage.storage.state === 'attention' ? 'text-warn' : 'text-muted'}`}>{storage.storage.message}</p><div className="ob-inline-actions mt-2"><button type="button" disabled={!!busy} onClick={() => void run('retry')}>{busy === 'retry' ? 'Retrying…' : 'Retry storage'}</button><button type="button" disabled={!!busy} onClick={() => void run('export')}>{busy === 'export' ? 'Exporting…' : 'Export recovery'}</button><button type="button" disabled={!!busy} onClick={() => void run('import')}>{busy === 'import' ? 'Importing…' : 'Import recovery'}</button><button type="button" disabled={!!busy} onClick={() => void run('open')}>{busy === 'open' ? 'Opening…' : 'Open storage folder'}</button></div>{notice ? <p className="ob-inline-note" role="status">{notice}</p> : null}</div>
+}
+
 export default function SettingsView({
   open,
   /** The pane to land on when opened; the account menu can aim straight at
@@ -311,32 +356,48 @@ export default function SettingsView({
   onChanged,
   appearance,
   onAppearanceChange,
+  look, onLookChange, sidebar, onSidebarChange, profileName, onProfileNameChange, onTryWorkspace, onReplaySetup, onSectionChange,
   onOpenBrain,
   inference,
   onInferenceChange,
   permissions,
   onPermissionsChange,
+  chatStorage,
+  contextModels = [],
+  contextProfiles = {},
+  onContextProfilesChange = () => undefined,
 }: {
   open: boolean
   initialSection?: SectionId
+  onSectionChange?: (section: SectionId) => void
   onClose: () => void
   permissions: Permissions
   onPermissionsChange: (next: Permissions) => void
+  chatStorage: Pick<ChatState, 'storage' | 'retryStorage' | 'exportRecovery' | 'importRecovery' | 'openStorageLocation'>
   vault: VaultState
   /** Called after the vault moves, so the rest of the app re-reads it. */
   onChanged: () => void
   appearance: Appearance
   onAppearanceChange: (next: Appearance) => void
+  look: LookPreferences
+  onLookChange: (next: LookPreferences) => void
+  sidebar: SidebarPreferences
+  onSidebarChange: (next: SidebarPreferences) => void
+  profileName: string
+  onProfileNameChange: (name: string) => void
+  onTryWorkspace: () => void
+  onReplaySetup: () => void
   /** Jump to the first-class Brain view (Settings closes; the graph fills the app). */
   onOpenBrain?: () => void
   inference: InferenceSettings
   onInferenceChange: (next: InferenceSettings) => void
+  contextModels: ContextModelChoice[]
+  contextProfiles: ModelContextOverrides
+  onContextProfilesChange: (next: ModelContextOverrides) => void
 }) {
-  const [section, setSection] = useState<SectionId>(initialSection ?? 'system')
-  /** A caller that names a pane while the sheet is closed gets it on open. */
-  useEffect(() => {
-    if (open && initialSection) setSection(initialSection)
-  }, [open, initialSection])
+  const [localSection, setLocalSection] = useState<SectionId>(initialSection ?? 'appearance')
+  const section = initialSection ?? localSection
+  const setSection = (next: SectionId): void => { setLocalSection(next); onSectionChange?.(next) }
   const [providers, setProviders] = useState<CloudProviderView[]>([])
   const [providersError, setProvidersError] = useState('')
   const [keyEncryption, setKeyEncryption] = useState<'os' | 'none'>('none')
@@ -350,6 +411,18 @@ export default function SettingsView({
   const [extension, setExtension] = useState({ listening: false, port: 8765, url: '', error: '' })
   const [permissionProblem, setPermissionProblem] = useState('')
   const [query, setQuery] = useState('')
+  const lastInArea = useRef<Record<string, SectionId>>({})
+  useEffect(() => { if (section !== 'maps') lastInArea.current[areaForSection(section).id] = section }, [section])
+  useEffect(() => {
+    if (open && section === 'maps') window.dispatchEvent(new Event('app:capture-sources'))
+  }, [open, section])
+  const [helpNote, setHelpNote] = useState('')
+  // Back may change the controlled section while a search is open. Internal
+  // selections already updated localSection, so they keep their search text.
+  const restoringSection = initialSection !== undefined && initialSection !== localSection
+  useEffect(() => {
+    if (initialSection && restoringSection) { setLocalSection(initialSection); setQuery('') }
+  }, [initialSection, restoringSection])
 
   useEffect(() => {
     if (!open) return
@@ -454,7 +527,7 @@ export default function SettingsView({
    * this component just asked for.
    */
   async function setPermission(next: Permissions): Promise<void> {
-    const result = await bridge.settings.update({ permissions: next })
+    const result = await bridge.settings.update({ permissions: permissionChanges(permissions, next) })
     if (!result?.ok || !result.settings?.permissions) {
       setPermissionProblem(result?.error || 'That permission could not be saved.')
       return
@@ -520,40 +593,31 @@ export default function SettingsView({
   const keyedProviders = providers.filter(provider => provider.hasKey)
 
   const rowsById: Record<SectionId, Row[]> = {
+    windows: [
+      { label: 'Quick window', terms: 'quick smaller window hotkey ctrl shift o shortcut', body: <div className="ob-form-column"><QuickShortcutRow /><button className="ob-small-button" type="button" onClick={() => { void bridge.quick.open().then(r => { if (!r.ok) setHelpNote('The quick window opens in the Windows app.') }).catch(() => setHelpNote('The quick window could not be opened.')) }}>Open quick window</button></div> },
+      { label: 'Run at startup', terms: 'startup windows login boot launch', body: <StartupRow flag="loginItem" onLabel="Opens with Windows" offLabel="Opens when you open it" /> },
+      { label: 'Warm runtime', terms: 'warm ollama runtime background staged', body: <StartupRow flag="warmRuntime" onLabel="Starts with the app" offLabel="Starts when you press start" /> },
+      { label: 'Shortcuts', terms: 'keyboard ctrl comma settings new chat find search', body: <dl className="ob-shortcuts"><div><dt>Settings</dt><dd>Ctrl+,</dd></div><div><dt>Find chat or screen</dt><dd>Ctrl+K</dd></div><div><dt>Find in conversation</dt><dd>Ctrl+F</dd></div><div><dt>Quick window</dt><dd>Ctrl+Shift+O</dd></div><div><dt>Send / new line</dt><dd>Enter / Shift+Enter</dd></div></dl> },
+    ],
+    maps: [{ label: 'Capture sources', terms: 'browsing maps sources pages visits history capture read timeline', body: <div><p>Saved conversations, files and capture coverage now live in Vault. No browser history is collected.</p><button type="button" className="ob-small-button" onClick={() => window.dispatchEvent(new Event('app:capture-sources'))}>Open Capture sources in Vault</button></div> }],
+    about: [
+      { label: 'Setup', terms: 'first run setup welcome onboarding replay', body: <button type="button" className="ob-small-button" onClick={onReplaySetup}>Replay first-run setup</button> },
+      { label: 'OddBrain', terms: 'about version windows help learn more repository author source', body: <div className="ob-form-column"><span>{bridge.app.version} · Windows 11</span><span>Source identity: NishadIslamUtso. This link identifies the project owner; it is not a Windows code-signing certificate.</span><a href="https://github.com/NishadIslamUtso" onClick={e => { e.preventDefault(); if (isDemo) { if (!window.open('https://github.com/NishadIslamUtso', '_blank', 'noopener,noreferrer')) setHelpNote('Open github.com/NishadIslamUtso in your browser.'); return } void bridge.app.openExternal?.('https://github.com/NishadIslamUtso').then(r => { if (!r.ok) setHelpNote('The browser could not be opened.') }).catch(() => setHelpNote('The browser could not be opened.')) }}>NishadIslamUtso on GitHub</a><a href="https://github.com/NishadIslamUtso/OddBrain" onClick={e => { e.preventDefault(); if (isDemo) { if (!window.open('https://github.com/NishadIslamUtso/OddBrain', '_blank', 'noopener,noreferrer')) setHelpNote('Open github.com/NishadIslamUtso/OddBrain in your browser.'); return } void bridge.app.openExternal?.('https://github.com/NishadIslamUtso/OddBrain').then(r => { if (!r.ok) setHelpNote('The browser could not be opened.') }).catch(() => setHelpNote('The browser could not be opened.')) }}>OddBrain source repository & help</a></div> },
+      ...(isDemo ? [{ label: 'This preview', terms: 'preview browser offline', body: <div><p>The actual app interface with an optional sample workspace. Real engines, Windows shortcuts, files and provider keys require the installed Windows app.</p>{(window as unknown as { __oddbrainEphemeralStorage?: boolean }).__oddbrainEphemeralStorage ? <p className="mt-2">Choices last for this session. Export a look or the offline HTML to keep them.</p> : null}</div> }] : []),
+      ...(isDemo ? [{ label: 'Sample workspace', terms: 'reset restore sample demo workspace', body: <SampleWorkspaceControls /> }] : []),
+
+    ],
     connectors: [
       {
-        label: 'The three brains',
+        label: 'Installed engines',
         terms: 'claude-code agy ollama engine connector connect install login sign in winget local cli brains',
-        body: <ConnectorsSection />,
+        body: <ConnectorsSection onOpenSection={setSection} />,
       },
       {
         label: 'Browser extension',
         terms: 'browser extension chrome capture connector port 8765',
-        body: (
-          <div className="flex items-start gap-2">
-            <span
-              className={`mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full ${
-                isDemo ? 'bg-muted' : extension.listening ? 'bg-ok' : 'bg-warn'
-              }`}
-            />
-            <div className="min-w-0">
-              <div className="text-[12.5px]">
-                {isDemo
-                  ? 'Not in this window'
-                  : extension.listening
-                    ? `Connected - listening at ${extension.url.replace(/^https?:\/\//, '')}`
-                    : 'Not connected'}
-              </div>
-              <div className="mt-0.5 break-all text-[11.5px] text-muted">
-                {isDemo
-                  ? 'The extension connects to this app over the local loopback port.'
-                  : extension.listening
-                    ? 'Pages and conversations the extension captures arrive here. One-time setup: chrome://extensions → Developer mode → Load unpacked → choose the extension folder that ships with this app.'
-                    : extension.error || 'The extension cannot reach this app at the moment.'}
-              </div>
-            </div>
-          </div>
-        ),
+        body: <><ExtensionInstall onPermissions={() => setSection('agents')} />{sampleEnabled() && <button type="button" className="ob-small-button mt-3" onClick={() => { try { captureSamplePage(); setHelpNote('Sample page captured. Open Vault → Capture sources to inspect it.'); onChanged() } catch { setHelpNote('Sample capture could not be saved to browser storage.') } }}>Capture sample page</button>}
+          <p className="ob-control-scope mt-3">{isDemo ? 'Preview only: no browser is paired here.' : extension.listening ? `Capture service ready at ${extension.url}. Pair the extension to connect it.` : extension.error || 'Capture service is not listening. Restart the desktop app and check the configured port.'}</p></>,
       },
       {
         label: 'Agent access',
@@ -580,18 +644,6 @@ export default function SettingsView({
       },
     ],
     system: [
-      {
-        label: 'Run at startup',
-        terms: 'startup boot login launch windows start with computer',
-        note: 'OddBrain opens when the computer starts. The switch is Windows\u2019 own Startup list — you can undo it there too.',
-        body: <StartupRow flag="loginItem" onLabel="Opens with Windows" offLabel="Opens when you open it" />,
-      },
-      {
-        label: 'Warm runtime',
-        terms: 'warm runtime ollama headless background always running startup local',
-        note: 'The staged local runtime starts quietly with the app, so the free brains answer instantly instead of cold-loading. Nothing autostarts unless this is on.',
-        body: <StartupRow flag="warmRuntime" onLabel="Starts with the app" offLabel="Starts when you press start" />,
-      },
       {
         label: 'App',
         terms: 'version platform about',
@@ -635,7 +687,7 @@ export default function SettingsView({
             />
             <div className="min-w-0">
               <div className="text-[12.5px]">
-                {isDemo
+                {sampleEnabled() ? 'Sample extension · not connected to a browser' : isDemo
                   ? 'Not in this window'
                   : extension.listening
                     ? `Listening at ${extension.url.replace(/^https?:\/\//, '')}`
@@ -662,12 +714,17 @@ export default function SettingsView({
               <div className="text-[12.5px]">{keeping.label}</div>
               {keeping.detail && <div className="mt-0.5 break-all text-[11.5px] text-muted">{keeping.detail}</div>}
               {vault.state === 'ready' && typeof vault.files === 'number' && (
-                <div className="mt-0.5 text-[11.5px] text-muted">{vault.files} files on disk</div>
+                <div className="mt-0.5 text-[11.5px] text-muted">{vault.files} {sampleEnabled() ? 'sample notes' : 'files on disk'}</div>
               )}
             </div>
           </div>
         ),
       },
+      ...(!isDemo ? [
+        { label: 'Complete Memory Backup', terms: 'complete coordinated backup restore memory vault chats transcripts projects attachments revision verify inactive profile', body: <CompleteMemoryBackupControls /> },
+        { label: 'App-data backup', terms: 'backup restore app private data transcripts working notes artifacts projects preferences', body: <AppDataBackupControls /> },
+        { label: 'App-chat storage', terms: 'chat conversation storage recovery export import restore merge retry folder backup', body: <ChatStorageControls storage={chatStorage} /> },
+      ] : []),
       ...(isDemo
         ? [
             {
@@ -767,14 +824,23 @@ export default function SettingsView({
             ),
           },
           {
-            label: 'Not built yet',
+            label: 'Reviewed OS commands',
+            terms: 'shell command runner terminal execute permission',
+            body: <div><Switch label="Allow reviewed OS commands" checked={permissions.manualCommands === true} onChange={checked => void setPermission({ ...permissions, manualCommands: checked })} /><p className="ob-control-scope">Off by default. Each command still needs explicit approval. Commands run as your OS user, outside the engine sandbox, and can access files or networks. Turning this off requests a stop for active app commands. This does not certify that background descendants have stopped.</p></div>,
+          },
+          {
+            label: 'Tool approvals',
             terms: 'files shell web mcp future tools',
             body: (
               <p className="text-[12px] leading-relaxed text-muted">
-                Files, Shell, Web and MCP tools are not built yet, so there is nothing to grant. Each one appears
-                here as its own permission when it exists.
+                Claude Code tool requests appear in chat and eligible Read choices can be remembered below. agy currently exposes no interactive permission-card channel, so OddBrain does not pretend it can remember approvals for requests agy never reports. Connected tools may also require permission in their own app.
               </p>
             ),
+          },
+          {
+            label: 'Remembered reads',
+            terms: 'read approvals remembered file folder project revoke recovery',
+            body: <ReadTrustManager always />,
           },
           ...(permissionProblem
             ? [
@@ -786,263 +852,16 @@ export default function SettingsView({
               ]
             : []),
         ],
-    appearance: [
-      {
-        label: 'Design system',
-        terms: 'design system claude linear apple stripe notion vercel airbnb glassmorphism neobrutalism editorial retro dashboard shadcn minimal modern theme look style whole appearance',
-        note: 'A whole look from the original design — palette, type, corners, shadows, every screen. It replaces the accent while active.',
-        body: (
-          <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4 sm:justify-end">
-            <button
-              type="button"
-              className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-[12px] ${
-                appearance.designSystem === '' ? 'border-accent text-ink' : 'border-line text-muted hover:text-ink'
-              }`}
-              onClick={() => onAppearanceChange({ ...appearance, designSystem: '' })}
-              aria-label="Design system: the app's own look"
-              aria-pressed={appearance.designSystem === ''}
-            >
-              <span className="h-5 w-5 shrink-0 rounded-md border border-line bg-bg" />
-              <span className="min-w-0 truncate">App default</span>
-            </button>
-            {DESIGN_SYSTEMS.map(system => (
-              <button
-                key={system.id}
-                type="button"
-                className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-[12px] ${
-                  appearance.designSystem === system.id ? 'border-accent text-ink' : 'border-line text-muted hover:text-ink'
-                }`}
-                onClick={() => onAppearanceChange({ ...appearance, designSystem: system.id, packCss: '' })}
-                aria-label={`Design system: ${system.label}`}
-                aria-pressed={appearance.designSystem === system.id}
-                title={system.label}
-              >
-                <span
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md border border-line"
-                  style={{ background: system.bg }}
-                >
-                  <span className="h-2 w-2 rounded-full" style={{ background: system.accent }} />
-                </span>
-                <span className="min-w-0 truncate">{system.label}</span>
-              </button>
-            ))}
-          </div>
-        ),
-      },
-      {
-        label: 'Theme',
-        terms: 'theme dark light system appearance night day palette',
-        note: 'System follows the OS. Dark is the app\u2019s own palette.',
-        body: (
-          <div className="flex flex-wrap gap-1.5 sm:justify-end">
-            {THEMES.map(theme => (
-              <button
-                key={theme.name}
-                type="button"
-                className={`rounded-full border px-3 py-1 text-[12px] ${
-                  appearance.theme === theme.name
-                    ? 'border-accent bg-accent/15 text-ink'
-                    : 'border-line text-muted hover:bg-white/[0.06]'
-                }`}
-                onClick={() => onAppearanceChange({ ...appearance, theme: theme.name })}
-                aria-label={`Theme: ${theme.label}`}
-                aria-pressed={appearance.theme === theme.name}
-              >
-                {theme.label}
-              </button>
-            ))}
-          </div>
-        ),
-      },
-      {
-        label: 'Accent',
-        terms: 'colour color theme violet blue teal amber rose',
-        note: 'The text on accent buttons picks its own readable ink, so every colour stays legible.',
-        body: (
-          <div className="flex flex-wrap gap-1.5 sm:justify-end">
-            {ACCENTS.map(accent => (
-              <button
-                key={accent.name}
-                type="button"
-                className={`h-6 w-6 rounded-full border-2 ${
-                  appearance.accent === accent.name ? 'border-ink' : 'border-transparent'
-                }`}
-                style={{ background: accent.hex }}
-                onClick={() => onAppearanceChange({ ...appearance, accent: accent.name })}
-                aria-label={`Accent: ${accent.label}`}
-                aria-pressed={appearance.accent === accent.name}
-                title={accent.label}
-              />
-            ))}
-          </div>
-        ),
-      },
-      {
-        label: 'Transcript text size',
-        terms: 'text size small medium large font reading transcript',
-        body: (
-          <div className="flex flex-wrap gap-1.5 sm:justify-end">
-            {TEXT_SIZES.map(size => (
-              <button
-                key={size.name}
-                type="button"
-                className={`rounded-full border px-3 py-1 text-[12px] ${
-                  appearance.textSize === size.name
-                    ? 'border-accent bg-accent/15 text-ink'
-                    : 'border-line text-muted hover:bg-white/[0.06]'
-                }`}
-                onClick={() => onAppearanceChange({ ...appearance, textSize: size.name })}
-                aria-label={`Transcript text size: ${size.label}`}
-                aria-pressed={appearance.textSize === size.name}
-                title={`${size.px} pixels`}
-              >
-                {size.label}
-              </button>
-            ))}
-          </div>
-        ),
-      },
-      {
-        label: 'Chat font',
-        terms: 'font serif sans reading typeface',
-        body: (
-          <div className="flex flex-wrap gap-1.5 sm:justify-end">
-            {FONTS.map(font => (
-              <button
-                key={font.name}
-                type="button"
-                className={`rounded-full border px-3 py-1 text-[12px] ${
-                  appearance.font === font.name
-                    ? 'border-accent bg-accent/15 text-ink'
-                    : 'border-line text-muted hover:bg-white/[0.06]'
-                }`}
-                onClick={() => onAppearanceChange({ ...appearance, font: font.name })}
-                aria-label={`Chat font: ${font.label}`}
-                aria-pressed={appearance.font === font.name}
-                style={font.name === 'serif' ? { fontFamily: 'Georgia, serif' } : undefined}
-              >
-                {font.label}
-              </button>
-            ))}
-          </div>
-        ),
-      },
-      {
-        label: 'Quick window',
-        terms: 'quick window hotkey global shortcut ask anywhere Ctrl+Shift+O',
-        note: 'Ctrl+Shift+O opens the small window \u2014 the same engine, the same cards.',
-        body: (
-          <QuickShortcutRow />
-        ),
-      },
-      {
-        label: 'Motion',
-        terms: 'animation motion calm balanced playful still reduced pulse streaming',
-        body: (
-          <div className="flex flex-wrap gap-1.5 sm:justify-end">
-            {MOTIONS.map(mode => (
-              <button
-                key={mode.name}
-                type="button"
-                className={`rounded-full border px-3 py-1 text-[12px] ${
-                  appearance.motion === mode.name
-                    ? 'border-accent bg-accent/15 text-ink'
-                    : 'border-line text-muted hover:bg-white/[0.06]'
-                }`}
-                onClick={() => onAppearanceChange({ ...appearance, motion: mode.name })}
-                aria-label={`Motion: ${mode.label}`}
-                aria-pressed={appearance.motion === mode.name}
-              >
-                {mode.label}
-              </button>
-            ))}
-          </div>
-        ),
-      },
-      {
-        label: 'Conversation width',
-        terms: 'column readable layout focused comfortable wide',
-        body: (
-          <div className="flex flex-wrap gap-1.5 sm:justify-end">
-            {WIDTHS.map(width => (
-              <button
-                key={width.name}
-                type="button"
-                className={`rounded-full border px-3 py-1 text-[12px] ${
-                  appearance.width === width.name
-                    ? 'border-accent bg-accent/15 text-ink'
-                    : 'border-line text-muted hover:bg-white/[0.06]'
-                }`}
-                onClick={() => onAppearanceChange({ ...appearance, width: width.name })}
-                aria-label={`Conversation width: ${width.label}`}
-                aria-pressed={appearance.width === width.name}
-                title={`${width.px} pixels wide`}
-              >
-                {width.label}
-              </button>
-            ))}
-          </div>
-        ),
-      },
-      {
-        label: 'Mascot mood words',
-        terms: 'mascot mood word caption appreciating welcome greeting words',
-        note: 'The little word under the mascot on the home screen.',
-        body: (
-          <div className="flex flex-wrap gap-1.5 sm:justify-end">
-            {[
-              { label: 'On', value: true },
-              { label: 'Off', value: false },
-            ].map(option => (
-              <button
-                key={option.label}
-                type="button"
-                className={`rounded-full border px-3 py-1 text-[12px] ${
-                  appearance.mascotWords === option.value
-                    ? 'border-accent bg-accent/15 text-ink'
-                    : 'border-line text-muted hover:bg-white/[0.06]'
-                }`}
-                onClick={() => onAppearanceChange({ ...appearance, mascotWords: option.value })}
-                aria-label={`Mascot mood words: ${option.label}`}
-                aria-pressed={appearance.mascotWords === option.value}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        ),
-      },
-      {
-        label: 'Row explanations',
-        terms: 'row explanations notes terse help text quiet',
-        note: 'On, a quiet line under some rows explains it. Off, the rows are terse.',
-        body: (
-          <div className="flex flex-wrap gap-1.5 sm:justify-end">
-            {[
-              { label: 'On', value: true },
-              { label: 'Off', value: false },
-            ].map(option => (
-              <button
-                key={option.label}
-                type="button"
-                className={`rounded-full border px-3 py-1 text-[12px] ${
-                  appearance.rowExplanations === option.value
-                    ? 'border-accent bg-accent/15 text-ink'
-                    : 'border-line text-muted hover:bg-white/[0.06]'
-                }`}
-                onClick={() => onAppearanceChange({ ...appearance, rowExplanations: option.value })}
-                aria-label={`Row explanations: ${option.label}`}
-                aria-pressed={appearance.rowExplanations === option.value}
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        ),
-      },
-    ],
+    appearance: [{ label: 'Appearance', terms: 'display name profile palette theme color colour font size width spacing density motion speed pause mascot brain scenes layout mix preset words explanations compare quiz shortlist', body: <AppearancePanel appearance={appearance} onAppearanceChange={onAppearanceChange} look={look} onLookChange={onLookChange} sidebar={sidebar} onSidebarChange={onSidebarChange} name={profileName} onNameChange={onProfileNameChange} engine={engineState.settings.id} model={engineState.settings.model || 'Choose a model'} onTry={onTryWorkspace} /> }],
+    video: [{ label: 'Kdenlive & video', terms: 'video studio kdenlive mcp creative library pixabay openverse wikimedia yt-dlp timeline editor captions assets', body: <VideoStudioSettings /> }],
+    media: [{ label: 'Voice & attachments', terms: 'media attachments PDF Word Excel PowerPoint document image audio video FFmpeg transcription dictation speech voice read aloud provider OCR DeepSeek', body: <MediaSettings /> }],
     models: isDemo
       ? [
+          {
+            label: 'Context capacity',
+            terms: 'model context window tokens auto manual unknown capacity working memory',
+            body: <ModelContextProfiles choices={contextModels} value={contextProfiles} save={onContextProfilesChange} />,
+          },
           {
             label: 'Providers',
             terms: 'claude anthropic gpt openai gemini openrouter groq deepseek grok xai custom key',
@@ -1050,14 +869,18 @@ export default function SettingsView({
               <div className="flex flex-col gap-1">
                 <span className="text-[12.5px]">{CLOUD_PROVIDERS.map(provider => provider.label).join(' · ')}</span>
                 <span className="text-[11.5px] text-muted">
-                  Keys are kept by your machine’s own keychain, in the desktop app. This window is the interface only, so
-                  there is no keychain behind it and no provider to ask.
+                  Provider keys are managed in the desktop app.
                 </span>
               </div>
             ),
           },
         ]
       : [
+          {
+            label: 'Context capacity',
+            terms: 'model context window tokens auto manual unknown capacity working memory overflow retry',
+            body: <ModelContextProfiles choices={contextModels} value={contextProfiles} save={onContextProfilesChange} />,
+          },
           {
             label: 'Keys',
             terms: 'keychain encryption sealed safe storage',
@@ -1211,6 +1034,8 @@ export default function SettingsView({
             : []),
         ],
     performance: [
+      { label: 'Stream replies', terms: 'stream streaming live reply output buffer', note: 'When off, answer text appears when the turn finishes. Tools, Stop and approval questions remain live.', body: <div className="ob-choices" role="group" aria-label="Stream replies">{[{ label: 'On', value: true }, { label: 'Off', value: false }].map(o => <button key={o.label} type="button" className="ob-choice" aria-pressed={look.streamReplies === o.value} onClick={() => onLookChange({ ...look, streamReplies: o.value })}>{o.label}</button>)}</div> },
+
       {
         label: 'Model stays loaded',
         terms: 'keep alive warm loaded always memory cold start ollama',
@@ -1289,29 +1114,32 @@ export default function SettingsView({
         : []),
     ],
     house: [
+      { label: 'Second-pass review', terms: 'automatic second pass review on off report only reviewer local cloud', body: <AutomationControls scope="review" /> },
+      { label: 'Auto-keep before a write', terms: 'auto keep before approved write checkpoint backup copies restore', body: <AutomationControls scope="keep" /> },
       {
-        label: 'The rulebook',
+        label: 'Instructions',
         terms: 'house rules instructions identity artifacts approvals memory style ask unsure CLAUDE.md AGENTS.md',
         body: <HouseRulesSection />,
       },
     ],
     engine: [
       {
-        label: 'The engine bay',
-        terms: 'engine agent claude-code agy brain model pull download detect install throttle folder',
+        label: 'Engine & workspace',
+        terms: 'engine agent claude-code agy model selection approval workspace folder restart connection redacted setup summary diagnostics',
         body: <EngineBay />,
       },
     ],
     memory: [
       {
-        label: 'What the engine remembers',
+        label: 'Engine memory',
         terms: 'memory remember facts decisions preferences vault notes auto keep forget engine notes',
-        body: <MemorySection />,
+        body: <OrganizerSettings />,
       },
     ],
     hooks: [
+      { label: 'Folder watches', terms: 'watch files folder changes trigger automatic work', body: <WatchSection /> },
       {
-        label: 'Your commands at the engine\u2019s moments',
+        label: 'Event hooks',
         terms: 'hooks commands run turn done error permission automate formatter terminal events claude code',
         body: <HooksSection />,
       },
@@ -1339,45 +1167,50 @@ export default function SettingsView({
       {
         label: 'Plugins',
         terms: 'plugins mods packs install community store manifest permissions themes prompts skills',
-        body: <ModsSection onAppearanceChange={onAppearanceChange} appearance={appearance} />,
+        body: <ExtensionsSection onAppearanceChange={next => { onAppearanceChange(next); onLookChange({ ...look, palette: 'app', paletteAccent: false, paletteTheme: false, chatFollowsInterface: false }) }} appearance={appearance} />,
       },
     ],
     vault: [      {
         label: 'Folder',
         terms: 'vault path choose folder default documents assistant second brain structure conflict links',
-        body: <BrainStructureSection vault={vault} isDemo={isDemo} onChanged={onChanged} onOpenBrain={onOpenBrain} />,
+        body: <BrainStructureSection vault={vault} isDemo={isDemo && !sampleEnabled()} onChanged={onChanged} onOpenBrain={onOpenBrain} />,
       },
     ],
   }
 
+  const sectionAliases: Partial<Record<SectionId, string>> = { video: 'kdenlive video studio creative library mcp stock assets', media: 'voice & files voice & attachments OCR', models: 'get api keys provider credentials encryption', connectors: 'install apps extensions connection runtime', extensions: 'plugins community packs marketplace', windows: 'smaller quick window shortcut startup warm runtime', performance: 'model stays loaded keep alive resource memory', maps: 'browsing maps sources reading history timeline', about: 'learn more help about repository', appearance: 'startup animation opening splash display name profile account looks lab compare quiz shortlist ratings notes design systems layouts styles palettes fonts motion typography density mixes' }
+  rowsById.agents = [{ label: 'Cloud inference', terms: 'allow cloud external inference local transport remote model', body: <AutomationControls scope="access" /> }, ...rowsById.agents]
   const needle = query.trim().toLowerCase()
   const rowText = (row: Row): string => `${row.label} ${row.terms || ''}`.toLowerCase()
   const matches = (row: Row): boolean => !needle || rowText(row).includes(needle)
   const sectionFound = (id: SectionId): boolean => {
     const meta = SECTIONS.find(entry => entry.id === id)
     if (!meta) return false
-    return meta.title.toLowerCase().includes(needle) || rowsById[id].some(matches)
+    return meta.title.toLowerCase().includes(needle) || areaForSection(id).title.toLowerCase().includes(needle) || !!sectionAliases[id]?.includes(needle) || rowsById[id].some(matches)
   }
+
+  const captureSearch = !!needle && 'capture sources browsing maps saved conversations'.includes(needle)
 
   // A search that would leave the open section empty opens the first section it
   // did find, so the pane never sits blank next to a list of results.
-  const visible = SECTIONS.filter(meta => sectionFound(meta.id))
+  const visible = SECTIONS.filter(meta => meta.id !== 'maps' && sectionFound(meta.id))
   useEffect(() => {
-    if (!needle) return
+    if (!needle || restoringSection) return
     if (visible.some(meta => meta.id === section)) return
     const first = visible[0]
     if (first) setSection(first.id)
-  }, [needle, section, visible])
+  }, [needle, section, visible, restoringSection])
 
-  if (!open) return null
+  if (!open || section === 'maps') return null
 
   const active = SECTIONS.find(meta => meta.id === section) || SECTIONS[0]
+  const area = areaForSection(active.id)
   const allRows = rowsById[active.id]
   const found = allRows.filter(matches)
-  const rows = !needle ? allRows : found.length ? found : active.title.toLowerCase().includes(needle) ? allRows : []
+  const rows = !needle ? allRows : found.length ? found : (active.title.toLowerCase().includes(needle) || area.title.toLowerCase().includes(needle) || sectionAliases[active.id]?.includes(needle)) ? allRows : []
 
   function resetSection(): void {
-    if (section === 'appearance') onAppearanceChange(DEFAULT_APPEARANCE)
+    if (section === 'appearance') { onAppearanceChange(DEFAULT_APPEARANCE); onLookChange(DEFAULT_LOOK); onSidebarChange(DEFAULT_SIDEBAR) }
     if (section === 'performance') onInferenceChange(DEFAULT_INFERENCE)
     // Every permission back to its own default, which is the safe answer rather
     // than the last one: a local model may answer, a local vault may keep, and
@@ -1386,10 +1219,11 @@ export default function SettingsView({
   }
 
   return (
-    <div className="absolute inset-0 z-40 flex bg-bg" role="dialog" aria-modal="true" aria-label="Settings">
-      <aside className="flex w-[236px] shrink-0 flex-col border-r border-line bg-panel">
+    <div className="ob-settings-view absolute inset-0 z-40 flex bg-bg" role="dialog" aria-modal="true" aria-label="Settings">
+      <aside className="ob-settings-navigation flex shrink-0 flex-col border-r border-line bg-panel">
         <div className="p-3">
           <input
+            id="ob-settings-search"
             className="w-full rounded-lg border border-line bg-card px-3 py-1.5 text-[12.5px] outline-none focus:border-accent"
             value={query}
             onChange={event => setQuery(event.target.value)}
@@ -1400,86 +1234,49 @@ export default function SettingsView({
         </div>
 
         <nav className="min-h-0 flex-1 overflow-y-auto px-2 pb-2">
-          {GROUPS.map(group => {
-            const items = visible.filter(meta => meta.group === group)
-            if (!items.length) return null
-            return (
-              <div key={group} className="mb-2">
-                <div className="px-3 py-1.5 text-[11px] text-muted">{group}</div>
-                {items.map(meta => {
-                  const current = meta.id === section
-                  return (
-                    <button
-                      key={meta.id}
-                      type="button"
-                      className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[12.5px] ${
-                        current ? 'bg-accent/15 text-ink' : 'text-muted hover:bg-white/[0.06] hover:text-ink'
-                      }`}
-                      onClick={() => setSection(meta.id)}
-                      aria-label={`Section: ${meta.title}`}
-                      aria-current={current ? 'page' : undefined}
-                    >
-                      <SectionIcon id={meta.id} />
-                      {meta.title}
-                    </button>
-                  )
-                })}
-              </div>
-            )
+          {!needle ? SETTINGS_AREAS.map(item => {
+            const current = item.id === area.id
+            const entry = item.sections[0]
+            return <div key={item.id} className="ob-settings-area-group"><button type="button" className={`ob-settings-area mb-0.5 flex w-full items-start gap-2 rounded-lg px-3 py-2 text-left text-[12.5px] ${current ? 'bg-accent/15 text-ink' : 'text-muted hover:bg-white/[0.06] hover:text-ink'}`}
+              aria-label={item.sections.length === 1 ? `Section: ${SECTIONS.find(s => s.id === entry)!.title}` : `Settings area: ${item.title}`}
+              aria-current={current ? 'page' : undefined} aria-expanded={item.sections.length > 1 ? current : undefined}
+              onClick={() => setSection(lastInArea.current[item.id] || entry)}>
+              <SectionIcon id={entry} /><span><span className="ob-settings-area-title">{item.title}</span><small className="ob-settings-area-description">{item.description}</small></span>
+            </button>
+            {current && item.sections.length > 1 && <nav className="ob-settings-subsections" aria-label={item.title}>
+              {item.sections.map(id => { const meta = SECTIONS.find(s => s.id === id)!; return <button key={id} type="button" className="ob-text-button" aria-label={`Section: ${meta.title}`} aria-current={section === id ? 'page' : undefined} onClick={() => setSection(id)}>{meta.title}</button> })}
+            </nav>}</div>
+          }) : SETTINGS_AREAS.map(item => {
+            const results = visible.filter(meta => item.sections.includes(meta.id))
+            if (!results.length) return null
+            return <div key={item.id} className="mb-2"><div className="px-3 py-1.5 text-[11px] text-muted">{item.title}</div>
+              {results.map(meta => <button key={meta.id} type="button" className={`mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-1.5 text-left text-[12.5px] ${meta.id === section ? 'bg-accent/15 text-ink' : 'text-muted hover:bg-white/[0.06] hover:text-ink'}`}
+                aria-label={`Section: ${meta.title}`} aria-current={meta.id === section ? 'page' : undefined} onClick={() => setSection(meta.id)}>
+                <SectionIcon id={meta.id} />{meta.title}
+              </button>)}
+            </div>
           })}
-          {!visible.length && <p className="px-3 py-2 text-[12px] text-muted">Nothing matches that.</p>}
+          {captureSearch && <button type="button" className="ob-text-button px-3 py-2" onClick={() => window.dispatchEvent(new Event('app:capture-sources'))}>Open Capture sources in Vault</button>}
+          {!visible.length && !captureSearch && <p className="px-3 py-2 text-[12px] text-muted">Nothing matches that.</p>}
         </nav>
 
-        <div className="border-t border-line p-2">
-          <button
-            type="button"
-            className="w-full rounded-lg px-3 py-2 text-left text-[12.5px] text-muted enabled:hover:bg-white/[0.06] disabled:opacity-40"
-            onClick={resetSection}
-            disabled={!active.resettable}
-            aria-label="Reset section"
-            title={
-              active.resettable
-                ? `Put ${active.title} back to its defaults`
-                : 'Nothing in this section is a preference to reset'
-            }
-          >
-            Reset
-          </button>
-        </div>
+        {engineState.turn?.permissions.length ? <div className="border-t border-line p-2"><button type="button" className="ob-text-button" onClick={onTryWorkspace}>Review {engineState.turn.permissions.length} request{engineState.turn.permissions.length === 1 ? '' : 's'}</button></div> : null}
       </aside>
 
-      <section className="min-w-0 flex-1 overflow-y-auto">
+      <section className={`ob-settings-content ${section === 'appearance' ? 'is-appearance' : ''} min-w-0 flex-1 overflow-y-auto`}>
         <header className="flex items-center gap-2 border-b border-line px-5 py-3.5">
           <h1 className="text-[15px] font-medium">{active.title}</h1>
-          <button
-            type="button"
-            className="ml-auto rounded-lg px-2 py-1 text-muted hover:bg-white/[0.06] hover:text-ink"
-            onClick={onClose}
-            aria-label="Close settings"
-          >
-            <svg
-              width="16"
-              height="16"
-              viewBox="0 0 20 20"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              aria-hidden="true"
-            >
-              <path d="M5 5l10 10M15 5 5 15" />
-            </svg>
-          </button>
+          {active.resettable && section !== 'appearance' ? <button type="button" className="ob-text-button ml-auto" aria-label="Reset section" onClick={resetSection}>Reset</button> : null}
         </header>
 
-        <div className="mx-auto w-full max-w-[720px] px-5 py-5">
+        <div className={`ob-settings-body mx-auto w-full ${section === 'appearance' ? '' : 'max-w-[860px]'} px-5 py-5`}>
           {rows.length === 0 ? (
             <p className="text-[12.5px] text-muted">Nothing here matches “{query.trim()}”.</p>
           ) : (
             <div className="flex flex-col gap-5">
               {rows.map(row => (
-                <div key={row.label} className="grid gap-1.5 sm:grid-cols-[180px_1fr] sm:gap-4">
-                  <div className="text-[12.5px] text-muted sm:pt-1">{row.label}</div>
+                <div key={row.label} className={`ob-setting-row ${COMPOSED_SECTIONS.has(section) ? 'ob-full-setting-row' : 'grid gap-1.5 sm:grid-cols-[180px_1fr] sm:gap-4'}`}>
+                  <div className={`text-[12.5px] text-muted sm:pt-1 ${COMPOSED_SECTIONS.has(section) ? (rows.length === 1 || section === 'engine' || section === 'house' ? 'sr-only' : 'ob-setting-section-title') : ''}`}>{row.label}</div>
                   <div className="min-w-0">
                     <ErrorBoundary label={row.label}>{row.body}</ErrorBoundary>
                     {appearance.rowExplanations && row.note ? (
@@ -1490,6 +1287,7 @@ export default function SettingsView({
               ))}
             </div>
           )}
+          {helpNote ? <p className="ob-inline-note" role="status">{helpNote}</p> : null}
         </div>
       </section>
     </div>
@@ -1505,120 +1303,15 @@ export default function SettingsView({
  * keeps the same answer for the road it still drives.
  */
 function KeepLoadedRow(): React.JSX.Element {
-  const [state, setState] = useState<{ on: boolean; loaded: boolean }>({ on: false, loaded: false })
-  useEffect(() => {
-    if (isDemo) return
-    void bridge.app?.flags
-      ?.get()
-      .then(flags => setState({ on: flags.keepLoadedAlways === true, loaded: true }))
-      .catch(() => setState({ on: false, loaded: true }))
-  }, [])
-  const flip = (): void => {
-    const next = !state.on
-    setState({ on: next, loaded: true })
-    if (!isDemo) void bridge.app?.flags?.set({ keepLoadedAlways: next }).catch(() => undefined)
-  }
-  if (isDemo) {
-    return <span className="text-[11.5px] text-muted">A desktop-app switch — this window is the interface only.</span>
-  }
-  return (
-    <div className="flex gap-1.5 sm:justify-end">
-      {[
-        { label: 'Off', value: false },
-        { label: 'Always', value: true },
-      ].map(option => (
-        <button
-          key={option.label}
-          type="button"
-          className={`rounded-full border px-3 py-1 text-[12px] ${
-            state.on === option.value ? 'border-accent bg-accent/15 text-ink' : 'border-line text-muted hover:bg-white/[0.06]'
-          }`}
-          onClick={() => { if (option.value !== state.on) flip() }}
-          aria-pressed={state.on === option.value}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  )
+  return <MachineFlagRow flag="keepLoadedAlways" onLabel="Always" offLabel="Off" />
 }
-
-/**
- * The machine-level keep-it-running switches (login item, warm runtime).
- * Read from the app's own flags file through the guarded door; the desktop
- * app is the only machine they exist on, so the browser preview says so.
- */
-function StartupRow({
-  flag,
-  onLabel,
-  offLabel,
-}: {
-  flag: 'loginItem' | 'warmRuntime'
-  onLabel: string
-  offLabel: string
-}): React.JSX.Element {
-  const [state, setState] = useState<{ on: boolean; loaded: boolean }>({ on: false, loaded: false })
-  useEffect(() => {
-    if (isDemo) return
-    void bridge.app?.flags
-      ?.get()
-      .then(flags => setState({ on: flags[flag] === true, loaded: true }))
-      .catch(() => setState({ on: false, loaded: true }))
-  }, [flag])
-  const flip = (): void => {
-    const next = !state.on
-    setState({ on: next, loaded: true })
-    if (!isDemo) void bridge.app?.flags?.set({ [flag]: next }).catch(() => undefined)
-  }
-  if (isDemo) {
-    return <span className="text-[11.5px] text-muted">A desktop-app switch — this window is the interface only.</span>
-  }
-  return (
-    <div className="flex items-center gap-3 sm:justify-end">
-      <button
-        type="button"
-        role="switch"
-        aria-checked={state.on}
-        aria-label={flag === 'loginItem' ? 'Run at startup' : 'Warm runtime'}
-        onClick={flip}
-        className={`relative h-[22px] w-[40px] shrink-0 rounded-full border transition-colors ${
-          state.on ? 'border-accent bg-accent/30' : 'border-line bg-card'
-        } ${state.loaded ? '' : 'opacity-50'}`}
-      >
-        <span
-          className={`absolute top-[2px] h-[16px] w-[16px] rounded-full transition-all ${state.on ? 'left-[20px] bg-accent' : 'left-[2px] bg-muted'}`}
-        />
-      </button>
-      <span className="text-[11.5px] text-muted">{state.on ? onLabel : offLabel}</span>
-    </div>
-  )
+function StartupRow(props: { flag: 'loginItem' | 'warmRuntime'; onLabel: string; offLabel: string }): React.JSX.Element {
+  return <MachineFlagRow {...props} />
 }
 
 /** The quick window's global hotkey (Ctrl+Shift+O). One toggle; the main
  *  window always keeps its own Send — this only moves the system-wide key. */
-function QuickShortcutRow(): React.JSX.Element {
-  const [on, setOn] = usePersistentState<boolean>('oddbrain.quickShortcut', true)
-  return (
-    <div className="flex flex-wrap gap-1.5 sm:justify-end">
-      {[
-        { label: 'On', value: true },
-        { label: 'Off', value: false },
-      ].map(option => (
-        <button
-          key={option.label}
-          type="button"
-          className={`rounded-full border px-3 py-1 text-[12px] ${
-            on === option.value ? 'border-accent bg-accent/15 text-ink' : 'border-line text-muted hover:bg-white/[0.06]'
-          }`}
-          onClick={() => {
-            setOn(option.value)
-            if (!isDemo) void bridge.quick.shortcut(option.value)
-          }}
-          aria-pressed={on === option.value}
-        >
-          {option.label}
-        </button>
-      ))}
-    </div>
-  )
+export function QuickShortcutRow(): React.JSX.Element {
+  const on = useQuickPreference(), [error, setError] = useState(''), [busy, setBusy] = useState(false)
+  return <div><div className="ob-choices" role="group" aria-label="Quick window">{[{ label: 'On', value: true }, { label: 'Off', value: false }].map(option => <button key={option.label} type="button" disabled={busy} className="ob-choice" aria-pressed={on === option.value} onClick={() => { setBusy(true); setError(''); void setQuickPreference(option.value).catch(failure => setError(String(failure.message))).finally(() => setBusy(false)) }}>{option.label}</button>)}</div>{error ? <p className="ob-inline-note" role="alert">{error}</p> : null}</div>
 }

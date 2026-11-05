@@ -1,9 +1,11 @@
+import { sampleEnabled } from '@shared/lib/sampleWorkspace'
 import { useEffect, useMemo, useState } from 'react'
 import { vaultGet } from '@shared/lib/vault'
+import CopyText from '../ui/CopyText'
 import { isDemo } from '../platform/bridge'
 
 /**
- * Browsing Maps — what was read and when.
+ * Capture sources — what was read and when.
  *
  * The vault already holds every conversation the app kept and everything the
  * browser extension captured. This is the surface that lets a person *see* it:
@@ -98,7 +100,7 @@ function size(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
 }
 
-export default function MemoryMap({ open, onClose }: { open: boolean; onClose: () => void }) {
+export default function MemoryMap({ open, onClose, embedded = false }: { open: boolean; onClose: () => void; embedded?: boolean }) {
   const [entries, setEntries] = useState<Entry[]>([])
   const [summary, setSummary] = useState<MapReply['summary'] | null>(null)
   const [state, setState] = useState<'loading' | 'ready' | 'empty' | 'missing' | 'offline'>('loading')
@@ -113,7 +115,7 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
   // asked for what is on screen rather than filtered here, so the counts above
   // the list are always the counts of the list.
   useEffect(() => {
-    if (!open || isDemo) return
+    if (!open || (isDemo && !sampleEnabled())) return
     let cancelled = false
     const controller = new AbortController()
     setState(current => (current === 'ready' ? 'ready' : 'loading'))
@@ -149,12 +151,13 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
 
   useEffect(() => {
     if (!open) return
+    if (embedded) return
     const onKey = (event: KeyboardEvent): void => {
       if (event.key === 'Escape') onClose()
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [open, onClose])
+  }, [open, onClose, embedded])
 
   // Days, from the entries themselves — the summary lists them, and each day's
   // rows are the ones the server sent, nothing regrouped behind its back.
@@ -174,9 +177,9 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
   const busiest = topHosts[0]?.count || 1
 
   return (
-    <div className="absolute inset-0 z-40 flex flex-col bg-bg" role="dialog" aria-modal="true" aria-label="Browsing Maps">
-      <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
-        <h1 className="text-[15px] font-medium">Browsing Maps</h1>
+    <div className={embedded ? "ob-embedded-map flex flex-col bg-bg" : "absolute inset-0 z-40 flex flex-col bg-bg"} role={embedded ? undefined : "dialog"} aria-modal={embedded ? undefined : true} aria-label="Capture sources">
+      {!embedded ? <header className="flex flex-wrap items-center gap-3 border-b border-line px-5 py-3.5">
+        <h1 className="text-[15px] font-medium">Capture sources</h1>
         {summary ? (
           <span className="text-[12px] text-muted">
             {summary.total} {summary.total === 1 ? 'entry' : 'entries'}
@@ -187,15 +190,15 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
           type="button"
           className="ml-auto rounded-lg px-2 py-1 text-muted hover:bg-white/[0.06] hover:text-ink"
           onClick={onClose}
-          aria-label="Close browsing maps"
+          aria-label="Close capture sources"
         >
           <svg width="16" height="16" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
             <path d="M5 5l10 10M15 5 5 15" />
           </svg>
         </button>
-      </header>
+      </header> : null}
 
-      {isDemo ? (
+      {isDemo && !sampleEnabled() ? (
         <div className="p-5">
           <p className="max-w-[560px] text-[12.5px] leading-relaxed text-muted">
             There is no vault behind this window. The map is drawn from what the app kept on your own machine: your
@@ -348,7 +351,7 @@ export default function MemoryMap({ open, onClose }: { open: boolean; onClose: (
                           </button>
                           {opened === entry.id ? (
                             <div className="px-1 pb-2 pl-[82px] text-[11.5px] leading-relaxed text-muted">
-                              {entry.url ? <div className="break-all">{entry.url}</div> : null}
+                              {entry.url ? <div className="break-all">{entry.url}</div> : null}<CopyText text={JSON.stringify(entry, null, 2)} label="Copy source details" />
                               <div className="break-all">{entry.path}</div>
                               <div>
                                 {size(entry.bytes) ? `${size(entry.bytes)} · ` : ''}

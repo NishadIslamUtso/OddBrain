@@ -38,23 +38,30 @@ export type Artifact = {
 export type AttachmentKind = 'image' | 'text'
 
 export type Attachment = {
+  /** What was decoded, sampled or sent to a chosen provider; travels with the work order. */
+  extraction?: string
   id: string
   name: string
   size?: number
   /** MIME type as the browser reported it. */
   mime?: string
   kind?: AttachmentKind
-  /** Base64 image bytes, with no `data:` prefix. Images only, and not kept in
-   *  the transcript — it lives in IndexedDB and is loaded when it is needed. */
+  /** Base64 image bytes, with no `data:` prefix. Images live in IndexedDB for
+   *  chat reuse; a native send also retains and hashes the exact dispatched bytes
+   *  in the private main-process turn archive. */
   data?: string
   /** What will actually read this picture: 'direct', or the bridge model's name. */
   seenBy?: string
   /** Plain text of a text/code attachment, already read. */
   text?: string
+  /** Composer-only handles to the exact source. Removed before a chat message is stored. */
+  originalFile?: File
+  originalId?: string
+  originalSource?: import('./lib/mediaBridge').MediaSourceHandle
 }
 
-/** An attachment as it is kept in a message: the bytes are stored separately. */
-export type StoredAttachment = Omit<Attachment, 'data'>
+/** An attachment as it is kept in a message: the bytes and File handles are stored separately. */
+export type StoredAttachment = Omit<Attachment, 'data' | 'originalFile' | 'originalId' | 'originalSource'>
 
 /** The bridge's description of an image, kept so follow-up turns still work. */
 export type BridgeRecord = {
@@ -71,6 +78,7 @@ export type Citation = { id: string; url: string; label: string }
 export type MessageStatus = 'streaming' | 'complete' | 'stopped' | 'error'
 
 export type Message = {
+  nativeRecord?: { pictures?: number; images?: import('./lib/transcripts').TranscriptImage[]; attachments?: import('./lib/transcripts').TranscriptAttachment[]; artifacts?: import('./lib/nativeArtifacts').NativeArtifactLink[]; transcriptId: string; chatId: string; engine: 'claude-code' | 'agy'; sessionId: string | null; context?: import('./lib/nativeConversation').ContextReceipt }
   id: string
   role: Role
   content: string
@@ -99,6 +107,8 @@ export type Message = {
   citations?: Citation[]
   /** How long the reply took, in milliseconds. */
   ms?: number
+  /** Inspectable record of what a local/API model received and any overflow repack. */
+  contextReceipt?: import('./lib/modelContext').ModelContextReceipt
   /** An error string when the turn failed. Never a silent empty reply. */
   error?: string
 }
@@ -111,6 +121,10 @@ export type Chat = {
   pinned?: boolean
   /** null means "no project", which is different from "not loaded yet". */
   projectId?: string | null
+  /** Recoverable lifecycle. Missing on older chats means active. */
+  lifecycle?: 'active' | 'archived' | 'trash'
+  /** Moving to Trash preserves the exact chat and records how to restore it. */
+  trash?: { at: string; by: 'owner' | 'ai'; reason: string; previous: 'active' | 'archived' }
   /** The chat this one was branched from, if any. */
   branchOf?: string
   /** Epoch milliseconds, used for ordering search results. */
@@ -124,6 +138,8 @@ export type Chat = {
   branches?: number
   /** Set on a branch, pointing back at what it came from. */
   branchedFrom?: { chatId: string; messageId: string; at: string }
+  /** Added only by reviewed recovery import; preserves the source identity even when an ID collision needs a new local ID. */
+  recoveredFrom?: { exportedAt: string; originalChatId: string; sha256: string }
 }
 
 export type Profile = {
@@ -189,6 +205,8 @@ export type ModelCapabilities = {
   verified: boolean
   vision: boolean
   thinking: boolean
+  /** Model metadata only. null means the model/runtime did not report it. */
+  contextWindowTokens: number | null
 }
 
 /** One turn as the model API expects it. */

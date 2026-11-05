@@ -10,7 +10,7 @@
  * and must NOT cover bank.com.evil.org — that look-alike is exactly the spoof
  * these rules exist to stop. The browser extension keeps its own copy of the
  * same rules (extension/lib/blacklist.js) and
- * tests/blacklist-parity.test.ts asserts the two implementations agree.
+ * Keep this implementation and the browser companion implementation aligned.
  */
 import { parse as parseYaml, parseDocument, stringify as stringifyYaml } from 'yaml'
 
@@ -42,7 +42,7 @@ export function excluded(url: string | undefined | null, patterns: string[]): bo
     const [host, ...rest] = value.split('/')
     // A subdomain is part of the same site; a look-alike suffix is not, because
     // it would have to end with ".bank.com" or be exactly "bank.com".
-    const hostRegex = new RegExp(`^(?:[^.]+\.)*${escapePattern(host)}$`, 'i')
+    const hostRegex = new RegExp(`^(?:[^.]+\\.)*${escapePattern(host)}$`, 'i')
     if (!hostRegex.test(parsed.hostname)) return false
     if (!rest.length) return true
     return new RegExp(`^/${escapePattern(rest.join('/'))}$`, 'i').test(parsed.pathname + parsed.search)

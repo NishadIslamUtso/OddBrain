@@ -1,98 +1,45 @@
 import { useSyncExternalStore } from 'react'
-import { engineStore, type EngineItem } from './engine'
-import { parseVerdict, REVIEW_ORDER, verdictLine, type ReviewVerdict } from '@shared/lib/review'
+import { engineStore } from './engine'
+import { getAutomationApi } from '../platform/bridge'
+import { automationState, useAutomation } from './automation'
+import type { ReviewRecord } from '@shared/lib/automation'
+import type { ReviewVerdict } from '@shared/lib/review'
 
-/**
- * The reviewer, orchestrated. One press: the review order goes through the
- * engine store's ONE path as a normal turn (visible, stoppable, cards wide
- * awake), the finished block is read, and the verdict is kept here so the
- * card can show it beside the work it judged. Report-only by construction:
- * the review's turn is a turn like any other, and nothing in this module
- * sends anything but the review.
- */
-
-export type ReviewState = {
-  running: boolean
-  verdict: ReviewVerdict | null
-  /** The verdict line for the card, kept until the next turn replaces it. */
-  line: string
-  error: string
-}
-
-let state: ReviewState = { running: false, verdict: null, line: '', error: '' }
-
+/** Both automatic and manual reviews use the main process's tool-free text
+ * transport. A review never replaces the work turn, sends an agent command,
+ * answers a permission card or causes the turn-done hook to run. */
+export type ReviewState = { running: boolean; verdict: ReviewVerdict | null; line: string; error: string; record?: ReviewRecord }
+let running = false, error = '', manual: ReviewRecord | undefined, version = 0
 const listeners = new Set<() => void>()
-let version = 0
-
-const emit = (): void => {
-  version += 1
-  for (const listener of listeners) listener()
+const emit = (): void => { version++; for (const notify of listeners) notify() }
+function describe(record?: ReviewRecord): string {
+  if (!record || record.state !== 'done') return ''
+  const outcome = record.verdict?.kind === 'clean' ? 'the model said CLEAN' : `${record.verdict?.kind === 'issues' ? record.verdict.lines.length : 0} findings`
+  return `Review (${record.model}): ${outcome} for “${record.prompt.slice(0, 80)}”. Text evidence only; no app tools or approvals were available.`
 }
-
-const patch = (part: Partial<ReviewState>): void => {
-  state = { ...state, ...part }
-  emit()
-}
-
-const settle = async (capMs = 300_000): Promise<'done' | 'error' | 'timeout'> => {
-  const store = engineStore()
-  const deadline = Date.now() + capMs
-  for (;;) {
-    const turn = store.turn
-    if (!turn) return 'error'
-    if (turn.state === 'done') return 'done'
-    if (turn.state === 'error') return 'error'
-    if (Date.now() > deadline) return 'timeout'
-    await new Promise(resolve => setTimeout(resolve, 250))
-  }
-}
-
-/** Press Review on a finished turn: the engine reports on itself. */
 export async function runReview(): Promise<boolean> {
-  if (state.running) return false
-  const store = engineStore()
-  if (store.turn?.state === 'running') {
-    patch({ error: 'Wait for the work to finish before asking for the review of it.' })
-    return false
-  }
-  if (!store.turn) {
-    patch({ error: 'There is no finished work here to review yet.' })
-    return false
-  }
-  patch({ running: true, error: '' })
-  const sent = await store.send(REVIEW_ORDER)
-  if (!sent.ok) {
-    patch({ running: false, error: sent.answer })
-    return false
-  }
-  const ended = await settle()
-  if (ended !== 'done') {
-    patch({ running: false, error: ended === 'timeout' ? 'The review took too long; nothing was changed.' : 'The review could not run; nothing was changed.' })
-    return false
-  }
-  // The finished block wins: the review's last words are the verdict.
-  const texts = (store.turn?.items ?? [])
-    .filter((item): item is Extract<EngineItem, { text: string }> => item.kind === 'text')
-    .map(item => item.text)
-  const last = texts.at(-1) ?? ''
-  const verdict = parseVerdict(last)
-  patch({ running: false, verdict, line: verdictLine(verdict), error: '' })
-  return true
+  if (running || automationState().current) return false
+  const turn = engineStore().turn
+  if (!turn) { error = 'There is no finished work here to review yet.'; emit(); return false }
+  if (turn.state === 'running') { error = 'Wait for the work to finish before reviewing it.'; emit(); return false }
+  const answer = turn.items.filter(item => item.kind === 'text').map(item => 'text' in item ? item.text : '').join('\n')
+  if (!answer.trim()) { error = 'There is no completed answer to review.'; emit(); return false }
+  running = true; error = ''; emit()
+  try {
+    const result = await getAutomationApi().review({ prompt: turn.prompt, answer, transcriptId: turn.transcriptId })
+    if (!result.ok || !result.record) throw Error(result.error || 'The review did not complete.')
+    manual = result.record; return true
+  } catch (failure) { error = String((failure as Error).message || failure); return false }
+  finally { running = false; emit() }
 }
-
-export const clearReviewError = (): void => patch({ error: '' })
-
-/** The state without React, for orchestration and tests. */
-export const reviewState = (): ReviewState => state
-
+export const clearReviewError = (): void => { error = ''; emit() }
+export function reviewState(): ReviewState {
+  const view = automationState(), latest = view.reports[0]
+  const record = latest && (!manual || latest.at >= manual.at) ? latest : manual
+  return { running: running || !!view.current, verdict: record?.verdict || null, line: describe(record), error, record }
+}
 export function useReview(): ReviewState {
-  useSyncExternalStore(
-    listener => {
-      listeners.add(listener)
-      return () => listeners.delete(listener)
-    },
-    () => version,
-  )
-  return state
+  useAutomation()
+  useSyncExternalStore(notify => { listeners.add(notify); return () => listeners.delete(notify) }, () => version)
+  return reviewState()
 }
-

@@ -1,114 +1,406 @@
-import { useCallback, useMemo } from 'react'
+import { workspaceKey } from '@shared/lib/sampleWorkspace'
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import type { Chat } from '@shared/types'
-import { normalizeChats } from '@shared/lib/storage'
-import { newId } from '@shared/lib/storage'
-import usePersistentState from '@/hooks/usePersistentState'
+import { normalizeChats, newId, readStored, writeStored } from '@shared/lib/storage'
+import { bridge, isDemo } from '@/platform/bridge'
 
 /**
  * The conversation list, and which one is open.
  *
- * Deliberately small: chats live in local storage until the vault service takes
- * them (that move is planned, and reads these same two keys), and nothing here
- * decides anything about a conversation's contents.
+ * Desktop conversations live in the main process behind an atomic index. Full
+ * snapshots and bounded text-delta records are immutable and content-addressed;
+ * long streams compact without weakening the previous complete revision. The
+ * browser-only preview keeps sample state in localStorage because it has no main
+ * process. On the first desktop
+ * launch after this change, valid legacy localStorage is copied once; the exact
+ * raw strings remain in the main-process recovery folder.
  */
 
 const CHATS_KEY = 'ai-assistant.chats'
 const CURRENT_KEY = 'ai-assistant.current-chat'
+const WRITE_INTERVAL_MS = 500
+const streamingWriteInterval = (chats: Chat[], current: string): number => {
+  const active = chats.find(chat => chat.id === current)
+  if (!active) return WRITE_INTERVAL_MS
+  // Disk writes are incremental, but validating and transferring a very large
+  // active chat still costs CPU and memory. Keep frequent small checkpoints
+  // without serializing multi-megabyte state twice every second.
+  const characters = JSON.stringify(active).length
+  return characters > 1_000_000 ? 2_000 : characters > 250_000 ? 1_000 : WRITE_INTERVAL_MS
+}
+
+/** Preserve both sides of a revision conflict without replaying a stale library. */
+export function mergeChatConflict(remote: import('@shared/lib/chatStore').ChatStoreSnapshot, local: Chat[], localCurrent: string): { chats: Chat[]; currentChat: string; copies: number } {
+  const merged = [...remote.chats], remoteById = new Map(remote.chats.map(chat => [chat.id, chat]))
+  const used = new Set(remote.chats.map(chat => chat.id)), remapped = new Map<string, string>()
+  let copies = 0
+  for (const chat of local) {
+    const authoritative = remoteById.get(chat.id)
+    if (!authoritative) { merged.push(chat); used.add(chat.id); continue }
+    if (JSON.stringify(authoritative) === JSON.stringify(chat)) continue
+    let id = newId()
+    while (used.has(id)) id = newId()
+    used.add(id); remapped.set(chat.id, id); copies += 1
+    merged.push({ ...chat, id, title: `${chat.title || 'Untitled'} — conflict copy`, updatedAt: Date.now() })
+  }
+  const selected = remapped.get(localCurrent) || localCurrent
+  return { chats: merged, currentChat: merged.some(chat => chat.id === selected) ? selected : remote.currentChat, copies }
+}
+
+export type ChatStorageHealth = { state: 'loading' | 'ready' | 'saving' | 'attention'; message: string }
 
 export type ChatState = {
   chats: Chat[]
-  /** The raw setter, for the chat hook: replies stream into a message in place,
-   *  which is a different kind of edit from opening or deleting a chat. */
-  setChats: (update: Chat[] | ((previous: Chat[]) => Chat[])) => void
+  /** Replies stream in place; checkpoints run at most twice a second and slow down for large chats. */
+  setChats: (update: SetStateAction<Chat[]>) => void
+  /** Save and verify before a native send or branch is opened. */
+  commit: (change: (previous: Chat[]) => Chat[]) => Promise<boolean>
   currentChat: string
+  ready: boolean
+  storage: ChatStorageHealth
+  retryStorage: () => Promise<boolean>
+  exportRecovery: () => Promise<{ ok: boolean; answer: string }>
+  importRecovery: () => Promise<{ ok: boolean; answer: string }>
+  openStorageLocation: () => Promise<{ ok: boolean; answer: string }>
   open: (chatId: string) => void
   create: () => string
+  /** Move to recoverable Trash; this never purges the stored conversation. */
   remove: (chatId: string) => void
+  restore: (chatId: string) => void
   rename: (chatId: string, title: string) => void
   pin: (chatId: string, pinned: boolean) => void
   setProject: (chatId: string, projectId: string | null) => void
 }
 
-export function useChats(onWarning?: (message: string) => void): ChatState {
-  const [chats, setChats] = usePersistentState<Chat[]>(
-    CHATS_KEY,
-    [],
-    normalizeChats,
-    onWarning
-  )
-  const [currentChat, setCurrentChat] = usePersistentState<string>(
-    CURRENT_KEY,
-    '',
-    value => (typeof value === 'string' ? value : ''),
-    onWarning
-  )
-
-  const open = useCallback(
-    (chatId: string) => setCurrentChat(chatId),
-    [setCurrentChat]
-  )
-
-  /**
-   * A new chat is not created here. It comes into being when the first message
-   * is sent, so that clicking "New chat" and changing your mind does not leave an
-   * empty conversation in the list forever.
-   */
-  const create = useCallback(() => {
-    setCurrentChat('')
-    return ''
-  }, [setCurrentChat])
-
-  const remove = useCallback(
-    (chatId: string) => {
-      setChats(previous => previous.filter(chat => chat.id !== chatId))
-      if (currentChat === chatId) setCurrentChat('')
-    },
-    [setChats, setCurrentChat, currentChat]
-  )
-
-  const pin = useCallback(
-    (chatId: string, pinned: boolean) => {
-      setChats(previous => previous.map(chat => (chat.id === chatId ? { ...chat, pinned } : chat)))
-    },
-    [setChats]
-  )
-
-  const setProject = useCallback(
-    (chatId: string, projectId: string | null) => {
-      setChats(previous => previous.map(chat => (chat.id === chatId ? { ...chat, projectId } : chat)))
-    },
-    [setChats]
-  )
-
-  const rename = useCallback(
-    (chatId: string, title: string) => {
-      const clean = String(title || '').trim().slice(0, 80)
-      if (!clean) return
-      setChats(previous =>
-        previous.map(chat => (chat.id === chatId ? { ...chat, title: clean } : chat))
-      )
-    },
-    [setChats]
-  )
-
-  const value = useMemo<ChatState>(
-    () => ({ chats, setChats, currentChat, open, create, remove, rename, pin, setProject }),
-    [chats, setChats, currentChat, open, create, remove, rename]
-  )
-
-  return value
+type ReadyGate = { promise: Promise<void>; resolve: () => void }
+const readyGate = (): ReadyGate => {
+  let resolve = (): void => undefined
+  const promise = new Promise<void>(done => { resolve = done })
+  return { promise, resolve }
 }
 
-/**
- * Group the list the way the sidebar shows it. New chats are stamped 'Today' when
- * they are created, and everything older is grouped by that stamp — no guessing
- * from timestamps, so the headings never disagree with what was stored.
- */
+export function useChats(onWarning?: (message: string) => void): ChatState {
+  const chatsKey = workspaceKey(CHATS_KEY), currentKey = workspaceKey(CURRENT_KEY)
+  const initial = useRef<{
+    chats: ReturnType<typeof readStored<Chat[]>>
+    current: ReturnType<typeof readStored<string>>
+    rawChats: string | null
+    rawCurrent: string | null
+  } | null>(null)
+  if (!initial.current) {
+    let rawChats: string | null = null, rawCurrent: string | null = null
+    try { rawChats = localStorage.getItem(chatsKey); rawCurrent = localStorage.getItem(currentKey) } catch { /* readStored supplies the visible warning */ }
+    initial.current = {
+      chats: readStored(chatsKey, [], normalizeChats),
+      current: readStored(currentKey, '', value => typeof value === 'string' ? value : ''),
+      rawChats,
+      rawCurrent,
+    }
+  }
+
+  const [chats, setChatValue] = useState<Chat[]>(initial.current.chats.value)
+  const [currentChat, setCurrentValue] = useState(initial.current.current.value)
+  const [ready, setReady] = useState(isDemo)
+  const [storage, setStorageValue] = useState<ChatStorageHealth>(isDemo ? { state: 'ready', message: 'Browser preview storage' } : { state: 'loading', message: 'Opening conversation storage…' })
+  const storageRef = useRef(storage)
+  storageRef.current = storage
+  const updateStorage = useCallback((next: ChatStorageHealth) => { storageRef.current = next; setStorageValue(next) }, [])
+  const chatsRef = useRef(chats), currentRef = useRef(currentChat)
+  const revision = useRef(0), nativeReady = useRef(isDemo), loadGeneration = useRef(0)
+  const savedObjects = useRef(new Map<string, Chat>())
+  const queuedChats = useRef<Array<SetStateAction<Chat[]>>>([])
+  const queuedCurrent = useRef<Array<SetStateAction<string>>>([])
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const writes = useRef<Promise<void>>(Promise.resolve()), writeEpoch = useRef(0)
+  const storageAction = useRef(false)
+  const gate = useRef<ReadyGate | null>(null)
+  if (!gate.current) gate.current = readyGate()
+  if (isDemo) gate.current.resolve()
+  const warn = useRef(onWarning), lastWarning = useRef('')
+  warn.current = onWarning
+  const report = useCallback((message: string) => {
+    if (!message || lastWarning.current === message) return
+    lastWarning.current = message
+    warn.current?.(message)
+  }, [])
+
+  const persist = useCallback((nextChats: Chat[], nextCurrent: string): Promise<boolean> => {
+    if (isDemo) {
+      try {
+        writeStored(chatsKey, normalizeChats(nextChats))
+        writeStored(currentKey, typeof nextCurrent === 'string' ? nextCurrent : '')
+        return Promise.resolve(true)
+      } catch {
+        report('The conversation could not be saved. Original browser storage was not replaced; keep this window open and export important text.')
+        return Promise.resolve(false)
+      }
+    }
+    let outcome = false
+    const epoch = writeEpoch.current
+    const operation = writes.current.then(async () => {
+      // A conflict invalidates every already-queued stale full ordering. Only an
+      // explicit retry built from the merged refs may write after that point.
+      if (epoch !== writeEpoch.current) return
+      updateStorage({ state: 'saving', message: 'Saving conversation…' })
+      try {
+        const answer = await bridge.chats.write({
+          order: nextChats.map(chat => chat.id),
+          upserts: nextChats.filter(chat => savedObjects.current.get(chat.id) !== chat),
+          currentChat: nextCurrent,
+          expectedRevision: revision.current,
+        })
+        if (!answer.ok) {
+          let conflictNote = ''
+          if (answer.snapshot) {
+            writeEpoch.current += 1
+            const merged = mergeChatConflict(answer.snapshot, nextChats, nextCurrent)
+            revision.current = answer.snapshot.revision
+            savedObjects.current = new Map(answer.snapshot.chats.map(chat => [chat.id, chat]))
+            chatsRef.current = merged.chats; currentRef.current = merged.currentChat
+            setChatValue(merged.chats); setCurrentValue(merged.currentChat)
+            conflictNote = merged.copies
+              ? ` ${merged.copies} divergent local chat version(s) are preserved as conflict copies; the newer stored versions kept their original IDs.`
+              : ' Local-only chats remain visible and no stored chat was overwritten.'
+          }
+          const message = `${answer.error}${conflictNote} Retry to save the merged library, or export recovery data.`
+          updateStorage({ state: 'attention', message }); report(message)
+          return
+        }
+        revision.current = answer.receipt.revision
+        savedObjects.current = new Map(nextChats.map(chat => [chat.id, chat]))
+        if (answer.receipt.notice) { updateStorage({ state: 'attention', message: answer.receipt.notice }); report(answer.receipt.notice) }
+        else updateStorage({ state: 'ready', message: 'Conversations saved' })
+        outcome = true
+      } catch {
+        const message = 'Conversation storage could not be reached. Your visible chats are still in this window; retry or export recovery data before closing.'
+        updateStorage({ state: 'attention', message }); report(message)
+      }
+    })
+    writes.current = operation.then(() => undefined, () => undefined)
+    return operation.then(() => outcome)
+  }, [chatsKey, currentKey, report, updateStorage])
+
+  const schedule = useCallback(() => {
+    if (isDemo || !nativeReady.current || timer.current) return
+    // This is a throttle, not a trailing debounce: a long streaming answer is
+    // checkpointed every interval instead of waiting minutes for the final token.
+    timer.current = setTimeout(() => {
+      timer.current = null
+      void persist(chatsRef.current, currentRef.current)
+    }, streamingWriteInterval(chatsRef.current, currentRef.current))
+  }, [persist])
+
+  const setChats = useCallback((update: SetStateAction<Chat[]>) => {
+    const next = typeof update === 'function' ? update(chatsRef.current) : update
+    chatsRef.current = next
+    setChatValue(next)
+    if (!isDemo && !nativeReady.current) queuedChats.current.push(update)
+    if (isDemo) void persist(next, currentRef.current)
+    else schedule()
+  }, [persist, schedule])
+
+  const setCurrentChat = useCallback((update: SetStateAction<string>) => {
+    const next = typeof update === 'function' ? update(currentRef.current) : update
+    currentRef.current = next
+    setCurrentValue(next)
+    if (!isDemo && !nativeReady.current) queuedCurrent.current.push(update)
+    if (isDemo) void persist(chatsRef.current, next)
+    else schedule()
+  }, [persist, schedule])
+
+  const loadNative = useCallback(async (): Promise<boolean> => {
+    if (isDemo) return true
+    const own = ++loadGeneration.current
+    updateStorage({ state: 'loading', message: 'Opening conversation storage…' })
+    try {
+      let answer = await bridge.chats.read()
+      if (!answer.ok) throw Error(answer.error)
+      let snapshot = answer.snapshot
+      if (!snapshot.initialized) {
+        if (initial.current!.chats.warning || initial.current!.current.warning) {
+          throw Error('Legacy conversation storage is damaged, so it was not migrated or replaced. Export the recovery data before repairing the original browser value.')
+        }
+        answer = await bridge.chats.migrate({
+          chats: initial.current!.chats.value,
+          currentChat: initial.current!.current.value,
+          rawChats: initial.current!.rawChats,
+          rawCurrentChat: initial.current!.rawCurrent,
+        })
+        if (!answer.ok) throw Error(answer.error)
+        snapshot = answer.snapshot
+      }
+      if (own !== loadGeneration.current) return false
+      savedObjects.current = new Map(snapshot.chats.map(chat => [chat.id, chat]))
+      let loadedChats = snapshot.chats, loadedCurrent = snapshot.currentChat
+      for (const update of queuedChats.current) loadedChats = typeof update === 'function' ? update(loadedChats) : update
+      for (const update of queuedCurrent.current) loadedCurrent = typeof update === 'function' ? update(loadedCurrent) : update
+      const changedDuringLoad = queuedChats.current.length > 0 || queuedCurrent.current.length > 0
+      queuedChats.current = []; queuedCurrent.current = []
+      revision.current = snapshot.revision
+      chatsRef.current = loadedChats; currentRef.current = loadedCurrent
+      setChatValue(loadedChats); setCurrentValue(loadedCurrent)
+      nativeReady.current = true; setReady(true); gate.current!.resolve()
+      if (snapshot.notice) { updateStorage({ state: 'attention', message: snapshot.notice }); report(snapshot.notice) }
+      else updateStorage({ state: 'ready', message: 'Conversations saved' })
+      // A successful retry means unavailable-time edits are durably written, not
+      // merely put back on a timer that could be lost if the window closes.
+      if (changedDuringLoad) return persist(loadedChats, loadedCurrent)
+      return true
+    } catch (error) {
+      if (own !== loadGeneration.current) return false
+      nativeReady.current = false; setReady(true); gate.current!.resolve()
+      const message = (error as Error).message || 'Conversation storage could not be opened. Original data was not replaced.'
+      updateStorage({ state: 'attention', message }); report(message)
+      return false
+    }
+  }, [persist, report, updateStorage])
+
+  useEffect(() => {
+    if (initial.current?.chats.warning) report(initial.current.chats.warning)
+    if (initial.current?.current.warning) report(initial.current.current.warning)
+    if (isDemo) return
+    const stopProgress = bridge.chats.onLoadProgress?.(({ done, total }) => {
+      if (Number.isInteger(done) && Number.isInteger(total) && total > 0 && done >= 0 && done <= total) {
+        updateStorage({ state: 'loading', message: `Opening conversation storage… ${done.toLocaleString()} / ${total.toLocaleString()}` })
+      }
+    })
+    void loadNative()
+    return () => { loadGeneration.current++; stopProgress?.() }
+  }, [loadNative, report, updateStorage])
+
+  useEffect(() => () => {
+    if (timer.current) clearTimeout(timer.current)
+    // Final native turns already have an append-only transcript. This best-effort
+    // flush covers sidebar edits and local-model chats without blocking teardown.
+    if (!isDemo && nativeReady.current) void persist(chatsRef.current, currentRef.current)
+  }, [persist])
+
+  const open = useCallback((chatId: string) => setCurrentChat(chatId), [setCurrentChat])
+
+  /** A chat comes into being on its first message, not on an abandoned New click. */
+  const create = useCallback(() => { setCurrentChat(''); return '' }, [setCurrentChat])
+
+  const remove = useCallback((chatId: string) => {
+    setChats(previous => previous.map(chat => chat.id === chatId ? { ...chat, lifecycle: 'trash', trash: { at: new Date().toISOString(), by: 'owner', reason: 'Moved from app chats', previous: chat.lifecycle === 'archived' ? 'archived' : 'active' } } : chat))
+    if (currentRef.current === chatId) setCurrentChat('')
+  }, [setChats, setCurrentChat])
+
+  const restore = useCallback((chatId: string) => {
+    setChats(previous => previous.map(chat => chat.id === chatId && chat.lifecycle === 'trash' ? { ...chat, lifecycle: chat.trash?.previous || 'active', trash: undefined } : chat))
+  }, [setChats])
+
+  const pin = useCallback((chatId: string, pinned: boolean) => {
+    setChats(previous => previous.map(chat => chat.id === chatId ? { ...chat, pinned } : chat))
+  }, [setChats])
+
+  const setProject = useCallback((chatId: string, projectId: string | null) => {
+    setChats(previous => previous.map(chat => chat.id === chatId ? { ...chat, projectId } : chat))
+  }, [setChats])
+
+  const rename = useCallback((chatId: string, title: string) => {
+    const clean = String(title || '').trim().slice(0, 80)
+    if (!clean) return
+    setChats(previous => previous.map(chat => chat.id === chatId ? { ...chat, title: clean } : chat))
+  }, [setChats])
+
+  const commit = useCallback(async (change: (previous: Chat[]) => Chat[]): Promise<boolean> => {
+    await gate.current!.promise
+    let next: Chat[]
+    try { next = normalizeChats(change(chatsRef.current)) }
+    catch {
+      report('The conversation change was invalid and was not saved. Original storage was not replaced.')
+      return false
+    }
+    chatsRef.current = next; setChatValue(next)
+    if (!isDemo && !nativeReady.current) { queuedChats.current.push(change); return false }
+    if (timer.current) { clearTimeout(timer.current); timer.current = null }
+    return persist(next, currentRef.current)
+  }, [persist, report])
+
+  const retryStorage = useCallback(async (): Promise<boolean> => {
+    if (isDemo) return true
+    if (nativeReady.current) return persist(chatsRef.current, currentRef.current)
+    return loadNative()
+  }, [loadNative, persist])
+  const exportRecovery = useCallback(async (): Promise<{ ok: boolean; answer: string }> => {
+    try {
+      return await bridge.chats.exportRecovery({ chats: chatsRef.current, currentChat: currentRef.current, rawChats: initial.current!.rawChats, rawCurrentChat: initial.current!.rawCurrent })
+    } catch { return { ok: false, answer: 'Chat recovery data could not be exported. The live store was not changed.' } }
+  }, [])
+  const importRecovery = useCallback(async (): Promise<{ ok: boolean; answer: string }> => {
+    if (isDemo) return { ok: false, answer: 'Chat recovery import requires the installed app.' }
+    if (storageAction.current) return { ok: false, answer: 'Another conversation-storage action is still open.' }
+    storageAction.current = true
+    const actionAttention = storageRef.current.state === 'attention' ? storageRef.current : null
+    try {
+      if (timer.current) { clearTimeout(timer.current); timer.current = null }
+      await writes.current
+      if (nativeReady.current && !await persist(chatsRef.current, currentRef.current)) {
+        return { ok: false, answer: 'Current visible chats could not be saved, so recovery import did not start. Retry storage or export recovery data first.' }
+      }
+      // While the native chooser/confirmation is open, retain any incoming
+      // stream edits and replay them over the imported snapshot before success.
+      const priorAttention = actionAttention
+      nativeReady.current = false
+      updateStorage({ state: 'loading', message: 'Reviewing chat recovery import…' })
+      let answer: Awaited<ReturnType<typeof bridge.chats.importRecovery>>
+      try { answer = await bridge.chats.importRecovery() }
+      catch { answer = { ok: false, answer: 'Chat recovery data could not be imported. Current visible chats remain in this window.' } }
+
+      if (answer.ok && answer.snapshot) {
+        const snapshot = answer.snapshot
+        savedObjects.current = new Map(snapshot.chats.map(chat => [chat.id, chat]))
+        let loadedChats = snapshot.chats, loadedCurrent = snapshot.currentChat
+        for (const update of queuedChats.current) loadedChats = typeof update === 'function' ? update(loadedChats) : update
+        for (const update of queuedCurrent.current) loadedCurrent = typeof update === 'function' ? update(loadedCurrent) : update
+        const changedDuringImport = queuedChats.current.length > 0 || queuedCurrent.current.length > 0
+        queuedChats.current = []; queuedCurrent.current = []
+        revision.current = snapshot.revision
+        chatsRef.current = loadedChats; currentRef.current = loadedCurrent
+        setChatValue(loadedChats); setCurrentValue(loadedCurrent)
+        nativeReady.current = true
+        if (snapshot.notice) { updateStorage({ state: 'attention', message: snapshot.notice }); report(snapshot.notice) }
+        else updateStorage({ state: 'ready', message: 'Conversations saved' })
+        if (changedDuringImport && !await persist(loadedChats, loadedCurrent)) {
+          return { ok: false, answer: `${answer.answer} Edits made while the import dialog was open remain visible but still need a storage retry.` }
+        }
+        return answer
+      }
+
+      if (answer.ok) {
+        const loaded = await loadNative()
+        if (!loaded) return { ok: false, answer: `${answer.answer} The imported store could not be reopened; use the persistent recovery controls before closing.` }
+        return answer
+      }
+
+      // Cancelled/failed import did not alter the store. Keep queued visible edits,
+      // save them against the existing revision, and restore any prior actionable
+      // fault instead of replacing it with a transient dialog result.
+      const changedDuringDialog = queuedChats.current.length > 0 || queuedCurrent.current.length > 0
+      queuedChats.current = []; queuedCurrent.current = []
+      nativeReady.current = true
+      if (changedDuringDialog) await persist(chatsRef.current, currentRef.current)
+      if (priorAttention) updateStorage(priorAttention)
+      else if (storageRef.current.state !== 'attention') updateStorage({ state: 'ready', message: 'Conversations saved' })
+      return answer
+    } finally { storageAction.current = false }
+  }, [loadNative, persist, report, updateStorage])
+  const openStorageLocation = useCallback(async (): Promise<{ ok: boolean; answer: string }> => {
+    try { return await bridge.chats.openLocation() }
+    catch { return { ok: false, answer: 'The private chat storage folder could not be opened.' } }
+  }, [])
+
+  return useMemo<ChatState>(
+    () => ({ commit, chats, setChats, currentChat, ready, storage, retryStorage, exportRecovery, importRecovery, openStorageLocation, open, create, remove, restore, rename, pin, setProject }),
+    [commit, chats, setChats, currentChat, ready, storage, retryStorage, exportRecovery, importRecovery, openStorageLocation, open, create, remove, restore, rename, pin, setProject]
+  )
+}
+
+/** Group chats exactly as the sidebar labels them. */
 export function groupChats(chats: Chat[]): Array<{ label: string; chats: Chat[] }> {
-  const pinned: Chat[] = []
-  const today: Chat[] = []
-  const earlier: Chat[] = []
+  const pinned: Chat[] = [], today: Chat[] = [], earlier: Chat[] = []
   for (const chat of chats) {
+    if (chat.lifecycle === 'trash' || chat.lifecycle === 'archived') continue
     if (chat.pinned) pinned.push(chat)
     else (chat.date === 'Today' ? today : earlier).push(chat)
   }

@@ -167,3 +167,11 @@ export function useCompact(): CompactState {
   )
   return state
 }
+
+/** Consume only after the actual work order was accepted/queued. A refusal
+ * must not silently lose context, nor consume a newer replacement brief. */
+export function consumeSeed(expected: string | null): boolean {
+  if (!expected || seed !== expected) return false
+  takeSeed(); return true
+}
+export const discardSeed = (): void => { seed = null; patch({ phase: 'idle', notice: 'The brief was left out. The saved receipt and original conversation were not deleted.' }) }

@@ -1,13 +1,18 @@
 import { useEffect, useState } from 'react'
-import { Volume2, Square as StopSquare } from 'lucide-react'
+import ReadAloudButton from '../ui/ReadAloudButton'
 import type { Artifact, Message } from '@shared/types'
 import type { ElementPick } from '@shared/lib/artifacts'
-import { ttsSupported } from '@shared/lib/media'
 import { THINKING_OPEN_EVENT, setThinkingOpen, thinkingOpenNow } from '@shared/lib/thinkingOpen'
 import { parseCloudModel } from '@shared/lib/providers'
 import type { ArtifactView } from '@/state/artifactView'
 import ArtifactCard from './ArtifactCard'
 import BrainMark from './BrainMark'
+import CopyText from '../ui/CopyText'
+import { useLook } from '../ui/LookContext'
+import InlineCharts from './InlineCharts'
+import { extractCitations } from '@shared/lib/citations'
+import { pickGerund } from '@shared/lib/gerunds'
+import { GitBranch } from 'lucide-react'
 
 /**
  * One turn in the conversation.
@@ -18,40 +23,6 @@ import BrainMark from './BrainMark'
  * away rather than mixed into the answer.
  */
 
-/**
- * Read one reply aloud, with the window's own voice. Its own component so the
- * speaking state is a hook that never depends on which branch rendered.
- */
-function SpeakButton({ text }: { text: string }) {
-  const [speaking, setSpeaking] = useState(false)
-  if (!ttsSupported()) return null
-  const toggle = (): void => {
-    if (speaking) {
-      window.speechSynthesis.cancel()
-      setSpeaking(false)
-      return
-    }
-    const voice = new SpeechSynthesisUtterance(text)
-    voice.onend = () => setSpeaking(false)
-    voice.onerror = () => setSpeaking(false)
-    window.speechSynthesis.cancel()
-    window.speechSynthesis.speak(voice)
-    setSpeaking(true)
-  }
-  return (
-    <button
-      type="button"
-      onClick={toggle}
-      aria-label={speaking ? 'Stop reading aloud' : 'Read aloud'}
-      title={speaking ? 'Stop reading aloud' : 'Read this reply aloud'}
-      className="mt-2 flex items-center gap-1 rounded-lg border border-line px-1.5 py-0.5 text-[10.5px] text-muted hover:text-ink"
-    >
-      {speaking ? <StopSquare size={10} /> : <Volume2 size={10} />}
-      {speaking ? 'Stop' : 'Listen'}
-    </button>
-  )
-}
-
 export default function MessageRow({
   message,
   artifacts = [],
@@ -59,6 +30,7 @@ export default function MessageRow({
   highlightId = '',
   onRewrite,
   onRestore,
+  onBranch,
   busyArtifactId = '',
   rewriteStage = '',
   rewriteError = '',
@@ -77,17 +49,22 @@ export default function MessageRow({
     comment: string
   }) => Promise<boolean>
   onRestore: (artifact: Artifact, index: number) => void
+  onBranch?: (messageId: string) => void
   busyArtifactId?: string
   rewriteStage?: string
   rewriteError?: string
   /** The artifact the error belongs to, so it is not printed on every card. */
   rewriteErrorFor?: string
 }) {
+  const look = useLook()
   if (message.role === 'user') {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[80%] whitespace-pre-wrap break-words rounded-2xl bg-card px-4 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
+      <div className="flex justify-end" data-message-id={message.id}>
+        <div className="max-w-[78%] whitespace-pre-wrap break-words rounded-[14px_14px_4px_14px] bg-card px-3.5 py-2.5 text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
           {message.content}
+          <div className="ob-message-actions"><CopyText text={message.content} label="Copy message" /></div>
+          {!!message.nativeRecord?.pictures && (message.nativeRecord.images === undefined ? <p className="mt-1 text-[11px] text-muted">{message.nativeRecord.pictures} image(s) accompanied this request. This older record did not retain their bytes.</p> : <p className="mt-1 text-[11px] text-muted">{message.nativeRecord.images.length} image(s) are retained separately in the original transcript. <button type="button" className="ob-text-button" onClick={() => window.dispatchEvent(new CustomEvent('app:show-transcript', { detail: message.nativeRecord?.transcriptId }))}>Review or download originals</button></p>)}
+          {!!message.nativeRecord?.attachments?.length && <p className="mt-1 text-[11px] text-muted">{message.nativeRecord.attachments.length} original source file(s) are retained separately. <button type="button" className="ob-text-button" onClick={() => window.dispatchEvent(new CustomEvent('app:show-transcript', { detail: message.nativeRecord?.transcriptId }))}>Review or download originals</button></p>}
           {message.editedAt && <span className="mt-1 block text-[11px] text-muted">edited</span>}
           {(message.attachments || []).length > 0 && (
             <ul className="mt-1.5 flex flex-wrap gap-1.5">
@@ -107,6 +84,13 @@ export default function MessageRow({
   }
 
   const streaming = message.status === 'streaming'
+  const displayContent = message.content.replace(/```chart\s*\r?\n[\s\S]*?```/gi, '').trim()
+  const citations = message.citations?.length ? message.citations : extractCitations(message.content)
+  const workingWord = pickGerund(() => {
+    let value = 0
+    for (const character of message.id) value = (value * 31 + character.charCodeAt(0)) >>> 0
+    return value / 0x1_0000_0000
+  })
   // The owner's rule: collapsed unless he opened one — and then ALWAYS open.
   const [thinkingOpen, setThinkingOpenState] = useState(thinkingOpenNow())
   useEffect(() => {
@@ -115,16 +99,16 @@ export default function MessageRow({
     return () => window.removeEventListener(THINKING_OPEN_EVENT, follow)
   }, [])
   return (
-    <div className="flex gap-3.5">
+    <div className="flex gap-3" data-message-id={message.id}>
       <span className="mt-0.5 shrink-0">
-        <BrainMark size={26} />
+        <BrainMark size={18} />
       </span>
       <div className="min-w-0 flex-1">
         {message.thinking ? (
           <details
             open={thinkingOpen || undefined}
             onToggle={(event) => setThinkingOpen((event.target as HTMLDetailsElement).open)}
-            className="mb-2 rounded-lg border border-line bg-panel/60 px-3 py-2"
+            className="mb-2 py-2"
           >
             <summary className="cursor-pointer text-[12px] text-muted">
               Thinking{streaming ? ' (still going)' : ''}
@@ -139,17 +123,19 @@ export default function MessageRow({
           <p className="mb-2 text-[12px] text-muted">{message.stage}</p>
         ) : null}
 
-        {message.content ? (
+        {displayContent && (look.streamReplies || !streaming) ? (
           <div className="whitespace-pre-wrap break-words text-[length:var(--transcript-size,14.5px)] leading-relaxed [font-family:var(--transcript-font)]">
-            {message.content}
+            {displayContent}
           </div>
         ) : null}
-        {message.content && message.status !== 'streaming' ? <SpeakButton text={message.content} /> : null}
+        {message.content ? <InlineCharts text={message.content} /> : null}
+        {message.status === 'complete' ? <div className="ob-message-actions">{message.content ? <CopyText text={message.content} label="Copy complete answer" /> : null}{onBranch ? <button type="button" onClick={() => onBranch(message.id)} title="Start an isolated chat with everything OddBrain stored through this reply. Hidden provider state cannot be copied." className="inline-flex items-center gap-1"><GitBranch size={13}/>Branch</button> : null}</div> : null}
+        {message.content && message.status !== 'streaming' ? <ReadAloudButton text={message.content} /> : null}
 
         {streaming && !message.content && !message.stage ? (
-          <p className="text-[13px] text-muted">Thinking…</p>
+          <p className="text-[13px] text-muted">{workingWord}…</p>
         ) : null}
-        {streaming && message.content ? (
+        {streaming && message.content && look.streamReplies ? (
           <span className="caret ml-0.5 inline-block h-4 w-[2px] translate-y-0.5 bg-accent" />
         ) : null}
 
@@ -171,12 +157,13 @@ export default function MessageRow({
           </ul>
         ) : null}
 
-        {message.citations && message.citations.length > 0 ? (
-          <ul className="mt-3 flex flex-wrap gap-1.5">
-            {message.citations.map(citation => (
+        {citations.length > 0 ? (
+          <ul className="mt-3 flex flex-wrap gap-1.5" aria-label="Sources linked in this answer">
+            {citations.map(citation => (
               <li key={citation.id}>
                 <a
                   href={citation.url}
+                  rel="noreferrer"
                   className="rounded-md border border-line px-2 py-1 text-[11px] text-muted hover:border-accent/50 hover:text-ink"
                 >
                   {citation.label}
@@ -186,6 +173,8 @@ export default function MessageRow({
           </ul>
         ) : null}
 
+        {!!message.nativeRecord?.artifacts?.length && <section aria-label="Observed artifact files"><p className="text-[12px] text-muted">These standalone files changed during the turn. File observation is not a test result or proof of authorship.</p>{message.nativeRecord.artifacts.map(item => <button type="button" key={item.id} className="ob-text-button" onClick={() => window.dispatchEvent(new CustomEvent('app:open-artifact', { detail: { id: item.id, version: item.version } }))}>Open {item.title} · v{item.version}</button>)}</section>}
+        {message.status === 'stopped' && <p role="status" className="mt-2 text-[12px] text-muted">Interrupted. The recorded text may be incomplete; no successful finish was confirmed.</p>}
         {message.error ? <p className="mt-2 text-[12px] text-warn">{message.error}</p> : null}
 
         {message.status === 'complete' && typeof message.ms === 'number' ? (

@@ -13,6 +13,8 @@
  *   500 — something genuinely failed; the vault says so rather than reporting a
  *         save that did not happen
  */
+import { searchVault } from './recall'
+import { researchSavedSources } from './research'
 import { InputError, VaultMissingError } from './errors'
 import { createSourceMap } from './sources'
 import type { VaultService } from './service'
@@ -22,13 +24,16 @@ export type VaultRouteRequest = {
   route: string
   method: string
   query: URLSearchParams
-  body: unknown
+  body?: unknown
+  captureSource?: 'browser-extension' | 'oddbrain-app'
 }
 
 export type VaultRouteReply = { status: number; body: Record<string, any> }
 
 /** The whole surface, so a wrong method is answered as one instead of as a 404. */
-const ROUTES: Record<string, string[]> = {
+export const VAULT_ROUTES: Record<string, string[]> = {
+  // `/api/vault` and `/api/vault/` are the same address to a caller.
+  '/': ['GET'],
   '/health': ['GET'],
   '/status': ['GET'],
   '/today': ['GET'],
@@ -39,9 +44,17 @@ const ROUTES: Record<string, string[]> = {
   '/files': ['GET'],
   '/file': ['GET'],
   '/grep': ['GET'],
+  '/recall': ['GET'],
+  '/research': ['GET'],
   '/onui': ['GET'],
   '/links': ['GET'],
+  '/review-center': ['GET'],
+  '/review-packet': ['GET'],
+  '/review-scan': ['POST'],
+  '/review-action': ['POST'],
+  '/review-import': ['POST'],
   '/capture': ['POST'],
+  '/conversation-sync': ['POST'],
   '/export-zip': ['POST'],
 }
 
@@ -71,6 +84,8 @@ export function handleVaultRequest(service: VaultService, request: VaultRouteReq
       if (route === '/capsules') return { status: 200, body: { capsules: service.capsules(query) } }
       if (route === '/onui') return { status: 200, body: service.onui() }
       if (route === '/links') return { status: 200, body: service.links() }
+      if (route === '/review-center') return { status: 200, body: { ok: true, ...service.interpretationReviewState() } }
+      if (route === '/review-packet') return { status: 200, body: { ok: true, ...service.interpretationReviewPacket() } }
       if (route === '/context') return { status: 200, body: service.context(query) }
       if (route === '/files') {
         // The tree the vault really has: every markdown file, relative paths,
@@ -84,9 +99,14 @@ export function handleVaultRequest(service: VaultService, request: VaultRouteReq
         // capped — a preview is a reading, not a download.
         const relative = String(request.query.get('path') || '')
         if (!relative || relative.includes('\\')) return { status: 400, body: { ok: false, error: 'A file path is required.' } }
+        if (!service.files().exists(relative)) {
+          return { status: 404, body: { ok: false, error: `There is no file at ${relative} in the vault. The preview was not shown.` } }
+        }
         const content = service.files().read(relative)
         return { status: 200, body: { ok: true, path: relative, content: content.slice(0, 200_000), truncated: content.length > 200_000 } }
       }
+      if (route === '/recall') return { status: 200, body: searchVault(service.files(), query) }
+      if (route === '/research') { const packet = researchSavedSources(service.files(), query); return { status: packet.ok ? 200 : 400, body: packet } }
       if (route === '/grep') {
         // Content search: which files mention this, with the matching line.
         const needle = query.trim().toLowerCase()
@@ -134,8 +154,24 @@ export function handleVaultRequest(service: VaultService, request: VaultRouteReq
       return fallback(route, request.method)
     }
     if (request.method === 'POST') {
-      if (route === '/capture') return { status: 200, body: service.capture(request.body as Record<string, any>) }
+      if (route === '/conversation-sync') return { status: 200, body: service.conversationSync(request.body as Record<string, any>, request.captureSource || 'unknown') }
+      if (route === '/capture') return { status: 200, body: service.capture(request.body as Record<string, any>, request.captureSource || 'unknown') }
       if (route === '/blacklist') return { status: 200, body: service.updateBlacklist(request.body as Record<string, any>) }
+      if (route === '/review-scan') {
+        const value = request.body as Record<string, unknown>, days = value?.days === null ? null : Number(value?.days ?? 60)
+        if (days !== null && (!Number.isInteger(days) || days < 1 || days > 3650)) throw new InputError('Choose a review range from 1 to 3,650 days, or All history.')
+        return { status: 200, body: { ok: true, ...service.interpretationReview(days) } }
+      }
+      if (route === '/review-action') {
+        const value = request.body as Record<string, unknown>, action = String(value?.action || '')
+        if (typeof value?.id !== 'string' || !['answer', 'keep', 'forget-candidate', 'dismiss', 'reopen'].includes(action)) throw new InputError('Choose a valid review item and action.')
+        return { status: 200, body: { ok: true, ...service.interpretationReviewAction(value.id, action as 'answer' | 'keep' | 'forget-candidate' | 'dismiss' | 'reopen', typeof value.answer === 'string' ? value.answer : '') } }
+      }
+      if (route === '/review-import') {
+        const value = request.body as Record<string, unknown>
+        if (typeof value?.provider !== 'string' || typeof value.response !== 'string' || typeof value.packetSha256 !== 'string') throw new InputError('Provider, response, and source packet hash are required.')
+        return { status: 200, body: { ok: true, ...service.interpretationReviewImport({ provider: value.provider, response: value.response, packetSha256: value.packetSha256 }) } }
+      }
       if (route === '/export-zip') return { status: 200, body: service.exportZip(request.body as Record<string, any>) }
       return fallback(route, request.method)
     }
@@ -166,7 +202,7 @@ const unknownRoute = (route: string): VaultRouteReply => ({
  * left guessing whether they used the wrong verb or the wrong address.
  */
 function fallback(route: string, method: string): VaultRouteReply {
-  const allowed = ROUTES[route]
+  const allowed = VAULT_ROUTES[route]
   if (!allowed) return unknownRoute(route)
   return {
     status: 405,
