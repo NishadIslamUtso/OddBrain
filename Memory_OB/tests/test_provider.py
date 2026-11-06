@@ -249,18 +249,24 @@ class TestTools(ProviderTestCase):
 class TestRegistration(ProviderTestCase):
     def test_register_hands_hermes_the_provider(self) -> None:
         seen: dict[str, object] = {}
-        skills: list[str] = []
+        skills: list[tuple[str, Path]] = []
 
         class Ctx:
             def register_memory_provider(self, provider) -> None:
                 seen["provider"] = provider
 
-            def register_skill(self, *args, **kwargs) -> None:
-                skills.append(str(args[0]))
+            def register_skill(self, name, path, description="", **kw) -> None:
+                skills.append((name, Path(path)))
 
         self.mod.register(Ctx())
         self.assertIsInstance(seen["provider"], self.mod.MemoryOBProvider)
-        self.assertIn("memory-full-recall", skills)
+        names = [n for n, _ in skills]
+        for expected in ("brain", "memory-full-recall", "anonymous-mode"):
+            self.assertIn(expected, names)
+            # every registered skill must point at a real SKILL.md
+            path = dict(skills)[expected]
+            self.assertTrue(path.is_file(), f"{expected} → {path}")
+            self.assertEqual(path.name, "SKILL.md")
 
 
 if __name__ == "__main__":

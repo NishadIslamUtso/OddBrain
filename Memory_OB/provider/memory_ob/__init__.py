@@ -200,6 +200,12 @@ class MemoryOBProvider(MemoryProvider):
             return None
         return memory_ob
 
+    def _db_path(self) -> Path:
+        """The database this provider writes to, bound at call time."""
+        from memory_ob.config import Settings
+
+        return Settings.resolve().db
+
     def _anonymous(self) -> bool:
         """True while the owner's anonymous-mode toggle is on (§7)."""
         try:
@@ -313,7 +319,7 @@ class MemoryOBProvider(MemoryProvider):
         if self._sync_thread and self._sync_thread.is_alive():
             self._sync_thread.join(timeout=5.0)
         self._sync_thread = spawn_context_thread(
-            self._capture(parts), name="memory-ob-sync"
+            self._capture(parts, self._db_path()), name="memory-ob-sync"
         )
         self._sync_thread.start()
 
@@ -332,7 +338,7 @@ class MemoryOBProvider(MemoryProvider):
         ]
         if not parts:
             return ""
-        thread = spawn_context_thread(self._capture(parts), name="memory-ob-precompress")
+        thread = spawn_context_thread(self._capture(parts, self._db_path()), name="memory-ob-precompress")
         thread.start()
         joined = " ".join(text for _, text in parts[-4:])
         return f"[Memory_OB pre-compression capture: {len(parts)} messages] {joined[:400]}"
@@ -340,8 +346,13 @@ class MemoryOBProvider(MemoryProvider):
     def on_session_end(self, messages: list[dict[str, Any]]) -> None:
         self.on_pre_compress(messages)
 
-    def _capture(self, parts: list[tuple[str, str]]) -> Any:
-        """Background work: extract candidates from each speaker's part."""
+    def _capture(self, parts: list[tuple[str, str]], db_path: Path) -> Any:
+        """Background work: extract candidates from each speaker's part.
+
+        *db_path* is bound now, not looked up inside the thread: a thread
+        that outlives the turn must not land in whatever database a later
+        turn happens to point at.
+        """
 
         def work() -> None:
             try:
@@ -350,6 +361,7 @@ class MemoryOBProvider(MemoryProvider):
                     return
                 from memory_ob.extract import extract_claims  # noqa: PLC0415
                 from memory_ob.models import ModelConfig, model_call  # noqa: PLC0415
+                from memory_ob.store import Store  # noqa: PLC0415
 
                 call = None
                 try:
@@ -367,7 +379,7 @@ class MemoryOBProvider(MemoryProvider):
                 except Exception:
                     call = None
 
-                store = self._store()
+                store = Store(db_path)
                 added = 0
                 try:
                     for speaker, text in parts:
@@ -424,7 +436,7 @@ class MemoryOBProvider(MemoryProvider):
                 if not text:
                     return tool_error("text is required")
                 thread = spawn_context_thread(
-                    self._capture([("user", text)]), name="memory-ob-tool"
+                    self._capture([("user", text)], self._db_path()), name="memory-ob-tool"
                 )
                 thread.start()
                 return json.dumps({"ok": True, "queued": True})
@@ -534,23 +546,45 @@ class MemoryOBProvider(MemoryProvider):
             self._sync_thread.join(timeout=10.0)
 
 
+_SKILL_DESCRIPTIONS = {
+    "brain": (
+        "Recall the owner's memory, search the vault, capture a record, or work the "
+        "Review panel. The AI proposes; the owner signs."
+    ),
+    "memory-full-recall": (
+        "Load the whole Memory_OB vault before answering — every confirmed record and "
+        "candidate fact, not just the top matches."
+    ),
+    "anonymous-mode": (
+        "Run a session with no recall injected and nothing captured as personal memory."
+    ),
+}
+
+
+def _skill_path(name: str) -> Optional[Path]:
+    """Find an installed SKILL.md for *name*.
+
+    The provider lives at ``plugins/memory_ob/`` when installed and at
+    ``provider/memory_ob/`` in the source tree, so the skills sit a different
+    number of levels up. Try both.
+    """
+    here = Path(__file__).resolve()
+    for parent in (here.parent, *here.parents):
+        candidate = parent / "skills" / name / "SKILL.md"
+        if candidate.is_file():
+            return candidate
+    return None
+
+
 def register(ctx) -> None:
     """Plugin entry point: hand Hermes the provider and register the skills."""
     ctx.register_memory_provider(MemoryOBProvider())
     try:
-        ctx.register_skill(
-            "brain",
-            "Recall the owner's memory, search the vault, capture a record, or work the "
-            "Review panel. The AI proposes; the owner signs.",
-        )
-        ctx.register_skill(
-            "memory-full-recall",
-            "Load the whole Memory_OB vault before answering — every confirmed record and "
-            "candidate fact, not just the top matches.",
-        )
-        ctx.register_skill(
-            "anonymous-mode",
-            "Run a session with no recall injected and nothing captured as personal memory.",
-        )
+        for name, description in _SKILL_DESCRIPTIONS.items():
+            path = _skill_path(name)
+            if path is None:
+                logger.debug("skill %s not found on disk; skipping", name)
+                continue
+            ctx.register_skill(name, path, description)
     except Exception as exc:  # skills are a bonus; the provider must still load
         logger.debug("Memory_OB skill registration failed: %s", exc)
