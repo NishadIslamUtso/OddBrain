@@ -31,16 +31,41 @@ class TestHermesBridge(unittest.TestCase):
     def test_available_matches_install(self):
         self.assertEqual(hermes.available(), hermes.HERMES_EXE.exists())
 
+    def test_available_honours_the_env_override(self):
+        """A portable install can point at a Hermes outside the default path."""
+        import importlib
+
+        with mock.patch.dict("os.environ", {"HERMES_HOME": "/tmp/hermes-elsewhere"}):
+            reloaded = importlib.reload(hermes)
+            try:
+                self.assertEqual(reloaded.HERMES_HOME, Path("/tmp/hermes-elsewhere"))
+            finally:
+                importlib.reload(hermes)
+
     def test_config_get_returns_value(self):
-        with mock.patch("subprocess.run", return_value=_completed("some-model\n")):
+        with mock.patch.object(hermes, "available", return_value=True), mock.patch(
+            "subprocess.run", return_value=_completed("some-model\n")
+        ):
             self.assertEqual(hermes.config_get("model.default"), "some-model")
 
     def test_config_get_none_when_unset(self):
-        with mock.patch("subprocess.run", return_value=_completed("", returncode=1)):
+        with mock.patch.object(hermes, "available", return_value=True), mock.patch(
+            "subprocess.run", return_value=_completed("", returncode=1)
+        ):
             self.assertIsNone(hermes.config_get("model.provider"))
 
+    def test_config_get_none_when_hermes_is_absent(self):
+        """No Hermes install means no config — and no subprocess call."""
+        with mock.patch.object(hermes, "available", return_value=False), mock.patch(
+            "subprocess.run"
+        ) as run:
+            self.assertIsNone(hermes.config_get("model.provider"))
+        run.assert_not_called()
+
     def test_config_get_caches(self):
-        with mock.patch("subprocess.run", return_value=_completed("m\n")) as run:
+        with mock.patch.object(hermes, "available", return_value=True), mock.patch(
+            "subprocess.run", return_value=_completed("m\n")
+        ) as run:
             hermes.config_get("model.default")
             hermes.config_get("model.default")
             self.assertEqual(run.call_count, 1)

@@ -3,10 +3,12 @@
 Memory_OB is a memory module for Hermes Desktop. It replaces Hermes's built-in
 memory system with a vault-based, user-controlled, evidence-first memory store.
 
-- **Vault**: `~/Documents/Hermes/Memory_OB/` — plain markdown files in 12 folders
-- **Backend**: Python FastAPI plugin at `plugins/brain/dashboard/plugin_api.py`
-- **UI**: Desktop plugin at `desktop-plugins/brain/plugin.js` — theme-synced, scrollable
-- **Skills**: Agent skills for full recall, anonymous mode, and propose/search/review
+- **Vault** (your data): `~/Documents/Hermes/Memory_OB/` — plain markdown in
+  12 folders. Not part of this repo.
+- **Engine**: `Memory_OB/memory_ob/` — Python library (SQLite + FTS5 + local
+  embeddings)
+- **Host plugin**: `Memory_OB/host/` — FastAPI dashboard + Hermes desktop shell
+- **Skills**: `Memory_OB/skills/` — full recall, anonymous mode, propose/search
 
 ## What it does
 
@@ -19,35 +21,38 @@ memory system with a vault-based, user-controlled, evidence-first memory store.
 
 ## Quick start
 
-1. Install dependencies: `pip install fastapi uvicorn pyyaml`
-2. Enable the plugin in `config.yaml`: add `brain` to `plugins.enabled`
-3. Turn off Hermes built-in memory: `memory_enabled: false`, `user_profile_enabled: false`
-4. Restart Hermes
-5. Open Brain via sidebar or `/brain` route
+```bash
+cd Memory_OB
+pip install -e .                    # or: pip install -r requirements.txt
+python -m memory_ob.cli doctor      # is this set up right?
+python -m memory_ob.cli serve       # run the dashboard
+python run_tests.py                 # the whole suite
+```
+
+See [Memory_OB/README.md](Memory_OB/README.md) for full install and config.
 
 ## Repo structure
 
 ```
-brain-repo/
-├── desktop-plugins/brain/plugin.js   # React UI (sidebar, /brain route, Vault + Review tabs)
-├── plugins/brain/dashboard/
-│   ├── manifest.json                 # Plugin manifest
-│   └── plugin_api.py                 # FastAPI backend (records, proposals, write routes)
-├── skills/brain/
-│   ├── SKILL.md                      # Core Brain skill (propose/search/review/write)
-│   ├── memory-full-recall/SKILL.md   # Full vault search before answering
-│   └── anonymous-mode/SKILL.md       # Toggle anonymous/private sessions
-├── vault/                            # Memory vault (12 folders, .obsidian, index)
-├── scripts/                          # Setup, import, install helpers
-└── docs/                             # Architecture, conflicts, dependencies, setup
+Workspace/
+├── Memory_OB/                 # the project
+│   ├── memory_ob/             # engine: store, extract, review, search, graph
+│   ├── host/                  # FastAPI dashboard + Hermes desktop shell
+│   ├── provider/memory_ob/    # Hermes memory provider bridge
+│   ├── skills/                # agent skills
+│   ├── tests/                 # the suite (python run_tests.py)
+│   └── docs/                  # architecture, dependencies, conflicts
+├── LICENSE
+└── README.md                  # this file
 ```
+
+Your vault is not in this repo — it lives at `~/Documents/Hermes/Memory_OB/`.
 
 ## Documentation
 
-- [SETUP.md](docs/SETUP.md) — Installation and configuration
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) — System design and data flow
-- [CONFLICTS.md](docs/CONFLICTS.md) — Conflicts with Hermes built-in systems and resolutions
-- [DEPENDENCIES.md](docs/DEPENDENCIES.md) — Required packages, files, and checks
+- [Memory_OB/README.md](Memory_OB/README.md) — setup, config, Hermes integration
+- [Memory_OB/DESIGN.md](Memory_OB/DESIGN.md) — the design record
+- [Memory_OB/docs/](Memory_OB/docs/) — architecture, dependencies, conflicts
 
 ## License
 

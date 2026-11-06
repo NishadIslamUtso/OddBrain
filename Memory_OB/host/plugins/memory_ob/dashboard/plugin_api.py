@@ -10,6 +10,7 @@ Nothing here reimplements Memory_OB. The plugin is a door, not a second brain.
 from __future__ import annotations
 
 import os
+import re
 import sys
 from pathlib import Path
 from typing import Any
@@ -80,19 +81,51 @@ def ui_html(request: Request) -> dict[str, Any]:
     ``/ui`` directly; the host fetches the markup through its authenticated
     bridge instead and mounts it with ``srcDoc``. The theme values arrive as
     query parameters and are inlined, since ``srcdoc`` has no query string.
+
+    The query string is INPUT. It is allow-listed by name and pattern-checked
+    by value before anything reaches the ``<style>`` block — otherwise a
+    crafted URL could close the style element and inject markup.
     """
-    theme = {
-        name.replace("/^--ui-", ""): value
-        for name, value in request.query_params.items()
-        if name.startswith("--ui-") or name in _THEME_NAMES
+    theme = _clean_theme(request.query_params)
+    return {
+        "ok": True,
+        "base": _API_BASE,
+        "theme": theme,
+        "html": _render_html(theme),
     }
-    return {"ok": True, "base": _API_BASE, "theme": theme, "html": _render_html(theme)}
 
 
+# Every theme name the shell sends (see THEME_VARS in plugin.js). Anything
+# else is dropped — the query string is input, so it is allow-listed, not
+# trusted.
 _THEME_NAMES = {
-    "accent", "background", "background-secondary", "stroke-secondary",
+    "accent", "background", "background-sidebar", "background-secondary",
+    "background-elevated", "stroke-secondary", "stroke-tertiary",
     "text-primary", "text-secondary", "text-tertiary", "text-quaternary",
 }
+
+# A CSS colour: letters, digits and the separators that appear in #hex,
+# rgb(…), oklch(…), color-mix(…). Deliberately no ';' '{' '}' '<' '>' quotes
+# '\\' ':' or '@' — nothing that could close the declaration, close the
+# <style> element, or pull in a URL.
+_SAFE_CSS_VALUE = re.compile(r"^[#%(),./\w\s+-]{1,120}$")
+_BANNED_CSS = ("url(", "expression", "@import", "javascript")
+
+
+def _clean_theme(params: Any) -> dict[str, str]:
+    """Theme query parameters, reduced to known names with safe values."""
+    theme: dict[str, str] = {}
+    for raw_name, raw_value in params.items():
+        name = raw_name[5:] if raw_name.startswith("--ui-") else raw_name
+        value = str(raw_value).strip()
+        if name not in _THEME_NAMES:
+            continue
+        if not _SAFE_CSS_VALUE.match(value):
+            continue
+        if any(bad in value.lower() for bad in _BANNED_CSS):
+            continue
+        theme[name] = value
+    return theme
 
 
 def _render_html(theme: dict[str, str]) -> str:

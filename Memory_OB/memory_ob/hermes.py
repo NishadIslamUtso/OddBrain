@@ -21,10 +21,34 @@ from __future__ import annotations
 
 import os
 import subprocess
+import sys
 from pathlib import Path
 
-HERMES_HOME = Path(os.environ.get("LOCALAPPDATA", str(Path.home() / "AppData/Local"))) / "hermes"
-HERMES_EXE = HERMES_HOME / "bin" / "hermes.exe"
+def _hermes_home() -> Path:
+    """Where Hermes keeps its config and binaries.
+
+    Overridable so a test (or a portable install) can point at a Hermes that
+    is not in the platform default location.
+    """
+    override = os.environ.get("HERMES_HOME")
+    if override:
+        return Path(override)
+    if sys.platform == "win32":
+        local = os.environ.get("LOCALAPPDATA")
+        if local:
+            return Path(local) / "hermes"
+    elif sys.platform == "darwin":
+        return Path.home() / "Library" / "Application Support" / "hermes"
+    return Path.home() / ".hermes"
+
+
+HERMES_HOME = _hermes_home()
+if os.environ.get("HERMES_EXE"):
+    HERMES_EXE = Path(os.environ["HERMES_EXE"])
+elif sys.platform == "win32":
+    HERMES_EXE = HERMES_HOME / "bin" / "hermes.exe"
+else:
+    HERMES_EXE = HERMES_HOME / "bin" / "hermes"
 PROXY_HOST = "127.0.0.1"
 PROXY_PORT = 8645
 PROXY_BASE = f"http://{PROXY_HOST}:{PROXY_PORT}/v1"

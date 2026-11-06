@@ -15,6 +15,7 @@ import argparse
 import os
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -34,7 +35,14 @@ def test_modules() -> list[str]:
 
 
 def run_suite(pattern: str, verbosity: int) -> int:
-    cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern]
+    # ``-t .`` makes ``tests`` a package, so ``tests/__init__.py`` is imported
+    # before any test module. That matters: it installs the Hermes stub on
+    # sys.path, and without it the provider tests fail on any machine that is
+    # not itself a Hermes install.
+    cmd = [
+        sys.executable, "-m", "unittest", "discover",
+        "-s", "tests", "-t", ".", "-p", pattern,
+    ]
     if verbosity > 1:
         cmd.append("-v")
     print(f"\n=== {pattern} ===")
@@ -63,6 +71,17 @@ def main() -> int:
     args = ap.parse_args()
 
     os.chdir(ROOT)
+
+    # Point the settings layer at a throwaway vault and database for the whole
+    # run. Individual tests set their own, but this is the belt to their braces:
+    # a test that forgets to isolate can never reach the owner's real memory.
+    scratch = Path(os.environ.get("MEMORY_OB_TEST_HOME", "")) or (
+        Path(tempfile.gettempdir()) / "memory-ob-tests"
+    )
+    scratch.mkdir(parents=True, exist_ok=True)
+    os.environ["MEMORY_OB_VAULT"] = str(scratch / "vault")
+    os.environ["MEMORY_OB_DB"] = str(scratch / "mob.db")
+
     modules = test_modules()
     if not modules:
         print("no test modules found under tests/")
