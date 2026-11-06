@@ -47,12 +47,20 @@ class ProviderTestCase(unittest.TestCase):
             warnings.simplefilter("ignore", ResourceWarning)
             shutil.rmtree(self._tmp.name, ignore_errors=True)
 
-    def _seed(self, **kwargs) -> None:
+    def _seed(self, *, sign_it: bool = True, **kwargs) -> None:
         from memory_ob.records import Record
+
+        from tests.helpers import sign
 
         store = self.provider._store()
         try:
-            store.add_record(Record(**kwargs))
+            rec = Record(**kwargs)
+            # A retracted or otherwise non-active record is not truth, and
+            # signing would wrongly revive it.
+            if sign_it and rec.status == "active":
+                sign(store, rec)
+            else:
+                store.add_record(rec)
         finally:
             store.close()
 

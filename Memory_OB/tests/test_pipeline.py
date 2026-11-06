@@ -16,6 +16,7 @@ from memory_ob.consistency import monthly_audit, sweep  # noqa: E402
 from memory_ob.dream import dream  # noqa: E402
 from memory_ob.records import Record  # noqa: E402
 from memory_ob.store import Store  # noqa: E402
+from tests.helpers import sign  # noqa: E402
 from tests.test_laws import make_record  # noqa: E402
 
 
@@ -108,7 +109,7 @@ class TestReview(unittest.TestCase):
 
     def test_diff_take_new_updates(self):
         r = make_record(kind="profile", title="old", trust=0.9)
-        self.store.add_record(r)
+        sign(self.store, r)
         card = self.cs.propose_diff(
             record_id=r.id,
             old={"title": "old"},
@@ -121,7 +122,7 @@ class TestReview(unittest.TestCase):
 
     def test_diff_take_old_keeps(self):
         r = make_record(kind="profile", title="old", trust=0.9)
-        self.store.add_record(r)
+        sign(self.store, r)
         card = self.cs.propose_diff(record_id=r.id, old={"title": "old"}, new={"title": "new"})
         self.cs.resolve(card.id, "take_old", by="owner")
         got = self.store.get_record(r.id)
@@ -130,7 +131,7 @@ class TestReview(unittest.TestCase):
 
     def test_diff_keep_both_adds_second(self):
         r = make_record(kind="profile", title="old", trust=0.9)
-        self.store.add_record(r)
+        sign(self.store, r)
         card = self.cs.propose_diff(
             record_id=r.id,
             old={"title": "old"},
@@ -162,7 +163,7 @@ class TestReview(unittest.TestCase):
         a = make_record(kind="profile", title="Alice", trust=0.9)
         b = make_record(kind="profile", title="Alice A", trust=0.9)
         self.store.add_record(a)
-        self.store.add_record(b)
+        sign(self.store, b)
         card = self.cs.propose_merge(record_id=a.id, other_id=b.id)
         self.cs.resolve(card.id, "merge", by="owner")
         got_b = self.store.get_record(b.id)
@@ -250,7 +251,7 @@ class TestConsistency(unittest.TestCase):
 
     def test_monthly_audit(self):
         r = make_record(trust=0.9)
-        self.store.add_record(r)
+        sign(self.store, r)
         audit = monthly_audit(self.store)
         self.assertEqual(audit["records"], 1)
         self.assertEqual(audit["confirmed"], 1)
@@ -329,6 +330,9 @@ class TestJournal(unittest.TestCase):
         low = make_record(kind="journal", speaker="user", trust=0.4)
         for r in (owner, ai, low):
             self.store.add_record(r)
+        # Only the owner's record is signed truth; the AI's and the low-trust
+        # one stay below the line.
+        sign(self.store, owner)
         elig = journal.eligible_for_chapter(self.store)
         self.assertIn(owner.id, [r.id for r in elig])
         self.assertNotIn(ai.id, [r.id for r in elig])
@@ -339,7 +343,7 @@ class TestJournal(unittest.TestCase):
             kind="journal", speaker="user", trust=0.9,
             title="First day", body="I started the job.", event_time="2026-01-01",
         )
-        self.store.add_record(r)
+        sign(self.store, r)
         ch = journal.draft_chapter(self.store)
         assert ch is not None
         self.assertIn(r.id, ch.cited_ids)
@@ -356,7 +360,7 @@ class TestJournal(unittest.TestCase):
             event_time="2026-01-02",
             source=extract.make_quote("I love this work", src),
         )
-        self.store.add_record(r)
+        sign(self.store, r)
         ch = journal.draft_chapter(self.store)
         assert ch is not None
         self.assertEqual(ch.quotation, "I love this work")
@@ -408,7 +412,7 @@ class TestDream(unittest.TestCase):
 
     def test_dream_finds_conflicts(self):
         r = make_record(kind="profile", title="prefers light mode", body="I prefer light mode", trust=0.9)
-        self.store.add_record(r)
+        sign(self.store, r)
         self.store.add_fact("I never prefer light mode", trust=0.5)
         rep = dream(self.store, open_cards=False)
         self.assertGreaterEqual(rep["conflicts"], 1)

@@ -23,10 +23,14 @@ from typing import Any, Iterable, Iterator
 from . import ids as idgen
 from .records import (
     ACTIVE,
+    CANDIDATE_MAX,
+    CONFIRMED_MIN,
     RETRACTED,
     SUPERSEDED,
     TRASH,
     Record,
+    is_confirmed,
+    sign_truth,
 )
 
 # The typed edges an owner may curate between records (§6). ``shares_tag``
@@ -225,31 +229,96 @@ class Store:
     # -- records -----------------------------------------------------------
 
     def add_record(self, rec: Record, changed_by: str | None = None) -> Record:
+        """Write a record through the ordinary path.
+
+        This path can NEVER create truth: the claimed signature is stripped
+        and the trust is pulled back below the line, so a caller cannot mint
+        truth by putting ``confirmed_by`` and a high score in a payload.
+        Use :meth:`sign_record` — the Review panel's path — for that.
+        """
+        rec.confirmed_by = None
+        if rec.trust >= CONFIRMED_MIN:
+            rec.trust = CANDIDATE_MAX
+        return self._persist(rec, changed_by=changed_by, reason="create")
+
+    def update_record(
+        self, rec: Record, changed_by: str | None = None, reason: str | None = None
+    ) -> Record:
+        """Update a record through the ordinary path (never creates truth)."""
+        rec.confirmed_by = None
+        if rec.trust >= CONFIRMED_MIN:
+            rec.trust = CANDIDATE_MAX
+        return self._persist(rec, changed_by=changed_by, reason=reason or "update")
+
+    def sign_record(
+        self,
+        rec: Record,
+        *,
+        card_id: str,
+        at: str | None = None,
+        changed_by: str | None = None,
+        reason: str | None = None,
+    ) -> Record:
+        """The Review panel's write: sign truth, then persist.
+
+        This is the only method that may leave ``confirmed_by`` set, and it
+        stamps the card and the time itself — a caller cannot supply them.
+        """
+        sign_truth(rec, card_id=card_id, at=at)
+        return self._persist(
+            rec, changed_by=changed_by, reason=reason or f"card:{card_id}"
+        )
+
+    def _persist(
+        self,
+        rec: Record,
+        *,
+        changed_by: str | None,
+        reason: str,
+    ) -> Record:
         now = _now()
         if not rec.created:
             rec.created = now
         rec.modified = now
-        self.conn.execute(
-            "INSERT OR REPLACE INTO records"
-            "(id, kind, subject, speaker, status, trust, title, body, tags,"
-            " source, event_time, capture_time, confirmed_by, never_send,"
-            " demo, links, created, modified)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-            (
-                rec.id, rec.kind, rec.subject, rec.speaker, rec.status,
-                rec.trust, rec.title, rec.body, _json(rec.tags),
-                _json(rec.source), rec.event_time, rec.capture_time,
-                rec.confirmed_by, int(rec.never_send), int(rec.demo),
-                _json(rec.links),
-                rec.created, rec.modified,
-            ),
-        )
+        exists = self.conn.execute(
+            "SELECT 1 FROM records WHERE id = ?", (rec.id,)
+        ).fetchone()
+        if exists:
+            self.conn.execute(
+                "UPDATE records SET kind=?, subject=?, speaker=?, status=?, trust=?,"
+                " title=?, body=?, tags=?, source=?, event_time=?, capture_time=?,"
+                " confirmed_by=?, never_send=?, demo=?, links=?, created=?,"
+                " modified=? WHERE id=?",
+                (
+                    rec.kind, rec.subject, rec.speaker, rec.status, rec.trust,
+                    rec.title, rec.body, _json(rec.tags), _json(rec.source),
+                    rec.event_time, rec.capture_time, rec.confirmed_by,
+                    int(rec.never_send), int(rec.demo), _json(rec.links),
+                    rec.created, rec.modified, rec.id,
+                ),
+            )
+        else:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO records"
+                "(id, kind, subject, speaker, status, trust, title, body, tags,"
+                " source, event_time, capture_time, confirmed_by, never_send,"
+                " demo, links, created, modified)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    rec.id, rec.kind, rec.subject, rec.speaker, rec.status,
+                    rec.trust, rec.title, rec.body, _json(rec.tags),
+                    _json(rec.source), rec.event_time, rec.capture_time,
+                    rec.confirmed_by, int(rec.never_send), int(rec.demo),
+                    _json(rec.links),
+                    rec.created, rec.modified,
+                ),
+            )
         self.conn.execute(
             "INSERT OR REPLACE INTO records_fts(id, title, body, tags)"
             " VALUES(?,?,?,?)",
             (rec.id, rec.title, rec.body, " ".join(rec.tags)),
         )
-        self._append_history(rec, changed_by=changed_by, reason="create")
+        self._append_history(rec, changed_by=changed_by, reason=reason)
         self.conn.commit()
         return rec
 
@@ -291,30 +360,6 @@ class Store:
         params.append(limit)
         rows = self.conn.execute(sql, params).fetchall()
         return [self._row_to_record(r) for r in rows]
-
-    def update_record(
-        self, rec: Record, changed_by: str | None = None, reason: str | None = None
-    ) -> Record:
-        rec.modified = _now()
-        self.conn.execute(
-            "UPDATE records SET kind=?, subject=?, speaker=?, status=?, trust=?,"
-            " title=?, body=?, tags=?, source=?, event_time=?, capture_time=?,"
-            " confirmed_by=?, never_send=?, links=?, modified=? WHERE id=?",
-            (
-                rec.kind, rec.subject, rec.speaker, rec.status, rec.trust,
-                rec.title, rec.body, _json(rec.tags), _json(rec.source),
-                rec.event_time, rec.capture_time, rec.confirmed_by,
-                int(rec.never_send), _json(rec.links), rec.modified, rec.id,
-            ),
-        )
-        self.conn.execute(
-            "INSERT OR REPLACE INTO records_fts(id, title, body, tags)"
-            " VALUES(?,?,?,?)",
-            (rec.id, rec.title, rec.body, " ".join(rec.tags)),
-        )
-        self._append_history(rec, changed_by=changed_by, reason=reason or "update")
-        self.conn.commit()
-        return rec
 
     def _row_to_record(self, row: sqlite3.Row) -> Record:
         return Record(

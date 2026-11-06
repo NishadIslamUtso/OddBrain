@@ -88,6 +88,38 @@ class CliCase(unittest.TestCase):
         recs = st.list_records()
         self.assertEqual(len(recs), 1)
         self.assertEqual(recs[0].title, "Prefers dark mode")
+        # The whole point: approval SIGNED it. Truth is a signature, and the
+        # card that signed it is recorded.
+        self.assertTrue(recs[0].is_truth, "approve did not sign truth")
+        self.assertGreaterEqual(recs[0].trust, 0.9)
+        self.assertIsNotNone(recs[0].confirmed_by)
+        self.assertIn(card.id, recs[0].confirmed_by)
+        st.close()
+
+    def test_a_direct_write_cannot_mint_truth(self) -> None:
+        """A payload is not a signature — no card, no truth (§2, law 4)."""
+        run_cli(["init"], env=self.env)
+        st = Store(self.db)
+        from memory_ob.records import Record
+
+        # A caller claims confirmed truth by hand.
+        st.add_record(
+            Record(
+                id="forged",
+                kind="profile",
+                subject="self",
+                speaker="user",
+                trust=0.95,
+                title="I am secretly rich",
+                body="claimed out of thin air",
+                status="active",
+                confirmed_by="not-the-review-panel@2026-01-01T00:00:00Z",
+            )
+        )
+        rec = st.get_record("forged")
+        self.assertFalse(rec.is_truth)
+        self.assertIsNone(rec.confirmed_by)
+        self.assertLessEqual(rec.trust, 0.6)
         st.close()
 
     def test_deny_archives_without_creating(self) -> None:

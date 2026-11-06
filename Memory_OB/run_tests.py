@@ -20,6 +20,19 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent
 
 
+def test_modules() -> list[str]:
+    """Every ``test_*.py`` under tests/, sorted for a stable order.
+
+    A test file that exists but is not listed is a test file that does not
+    run — that is how the provider, anonymous, exit, graph, integrity, demo,
+    sync and model-slot suites went unnoticed for a whole round.
+    """
+    tests = ROOT / "tests"
+    if not tests.is_dir():
+        return []
+    return sorted(p.name for p in tests.glob("test_*.py"))
+
+
 def run_suite(pattern: str, verbosity: int) -> int:
     cmd = [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", pattern]
     if verbosity > 1:
@@ -32,7 +45,10 @@ def run_suite(pattern: str, verbosity: int) -> int:
 def lint() -> int:
     """Compile-check every module (no third-party linter needed)."""
     print("\n=== compile check ===")
-    cmd = [sys.executable, "-m", "compileall", "-q", "memory_ob", "tests"]
+    cmd = [
+        sys.executable, "-m", "compileall", "-q",
+        "memory_ob", "provider", "host", "tests",
+    ]
     proc = subprocess.run(cmd, cwd=str(ROOT))
     if proc.returncode != 0:
         print("compile check FAILED")
@@ -47,15 +63,18 @@ def main() -> int:
     args = ap.parse_args()
 
     os.chdir(ROOT)
+    modules = test_modules()
+    if not modules:
+        print("no test modules found under tests/")
+        return 1
+
     failures = 0
     failures += lint()
-    failures += run_suite("test_laws.py", args.verbose)
-    failures += run_suite("test_pipeline.py", args.verbose)
-    failures += run_suite("test_hermes_bridge.py", args.verbose)
-    failures += run_suite("test_search_and_wiring.py", args.verbose)
-    failures += run_suite("test_end_to_end.py", args.verbose)
+    for name in modules:
+        failures += run_suite(name, args.verbose)
 
     print()
+    print(f"{len(modules)} suite(s) run")
     if failures:
         print(f"FAILED ({failures} suite(s) failed)")
         return 1

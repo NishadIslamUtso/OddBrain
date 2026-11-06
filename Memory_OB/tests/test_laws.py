@@ -22,6 +22,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from memory_ob import hazards, ids, paths, quotes, records, store  # noqa: E402
 from memory_ob.records import Record  # noqa: E402
 from memory_ob.store import Store  # noqa: E402
+from tests.helpers import sign  # noqa: E402
 
 
 def make_record(**kw) -> Record:
@@ -178,10 +179,14 @@ class TestRecords(unittest.TestCase):
         self.assertEqual(records.trust_tier(0.5), "candidate")
         self.assertEqual(records.trust_tier(0.9), "confirmed")
 
-    def test_is_truth_requires_confirmed_and_active(self):
-        self.assertTrue(make_record(trust=0.9, status="active").is_truth)
+    def test_is_truth_requires_a_signature(self):
+        """Trust is a score; truth is a signature (§2)."""
+        self.assertFalse(make_record(trust=0.9, status="active").is_truth)
         self.assertFalse(make_record(trust=0.5, status="active").is_truth)
         self.assertFalse(make_record(trust=0.9, status="retracted").is_truth)
+        signed = make_record(trust=0.9, status="active")
+        records.sign_truth(signed, card_id="card-1")
+        self.assertTrue(signed.is_truth)
 
     def test_law9_ai_words_capsule_only(self):
         self.assertTrue(records.ai_may_become("capsule"))
@@ -324,7 +329,7 @@ class TestStore(unittest.TestCase):
 
     def test_stats(self):
         r = make_record(trust=0.9)
-        self.store.add_record(r)
+        sign(self.store, r)
         s = self.store.stats()
         self.assertEqual(s["records"], 1)
         self.assertEqual(s["active"], 1)

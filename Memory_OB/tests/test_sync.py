@@ -33,20 +33,27 @@ class SyncCase(unittest.TestCase):
 
     def _add(self, rid: str, *, trust: float, status: str = "active",
              never_send: bool = False, tags: list[str] | None = None) -> None:
-        self.store.add_record(
-            Record(
-                id=rid,
-                kind="profile",
-                subject="self",
-                speaker="user",
-                trust=trust,
-                title=f"title {rid}",
-                body=f"body of {rid}",
-                status=status,
-                never_send=never_send,
-                tags=tags or [],
-            )
+        from tests.helpers import sign
+
+        rec = Record(
+            id=rid,
+            kind="profile",
+            subject="self",
+            speaker="user",
+            trust=trust,
+            title=f"title {rid}",
+            body=f"body of {rid}",
+            status=status,
+            never_send=never_send,
+            tags=tags or [],
         )
+        # Only active, confirmed-tier records are signed; a retracted or
+        # low-trust one stays below the line so the quarantine tests mean
+        # something.
+        if trust >= 0.9 and status == "active":
+            sign(self.store, rec)
+        else:
+            self.store.add_record(rec)
 
 
 class TestConfirmedOnly(SyncCase):

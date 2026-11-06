@@ -44,6 +44,22 @@ def get_store() -> Iterator[Store]:
         st.close()
 
 
+def _caller(request: Request | None) -> str:
+    """Who actually made this call.
+
+    The activity log must not blame the owner for a machine. An explicit
+    ``X-Memory-OB-Actor`` header wins (the pages send ``owner``, the agent
+    tools send ``agent``); otherwise the peer address is recorded.
+    """
+    if request is None:
+        return "owner"
+    named = request.headers.get("x-memory-ob-actor")
+    if named:
+        return named.strip()
+    host = getattr(request.client, "host", None)
+    return f"api:{host}" if host else "api"
+
+
 def _receipt(
     store: Store,
     recipient: str,
@@ -150,19 +166,22 @@ def create_app() -> FastAPI:
 
     @app.post("/api/records")
     def create_record(
-        payload: dict[str, Any], st: Store = Depends(get_store)
+        payload: dict[str, Any],
+        request: Request,
+        st: Store = Depends(get_store),
     ) -> dict[str, Any]:
         rec = Record.from_payload(payload)
-        st.add_record(rec, changed_by="owner")
+        st.add_record(rec, changed_by=_caller(request))
         return rec.to_dict()
 
     @app.delete("/api/records/{record_id}")
     def trash_record(
         record_id: str,
         reason: str = "deleted via api",
+        request: Request = None,
         st: Store = Depends(get_store),
     ) -> dict[str, Any]:
-        r = st.trash(record_id, reason=reason, by="owner")
+        r = st.trash(record_id, reason=reason, by=_caller(request))
         if r is None:
             raise HTTPException(status_code=404, detail="record not found")
         return {"ok": True, "status": r.status}
@@ -225,10 +244,11 @@ def create_app() -> FastAPI:
         card_id: str,
         action: str,
         note: str | None = None,
+        request: Request = None,
         st: Store = Depends(get_store),
     ) -> dict[str, Any]:
         cs = CardStore(st)
-        card = cs.resolve(card_id, action, by="owner", note=note)
+        card = cs.resolve(card_id, action, by=_caller(request), note=note)
         if card is None:
             raise HTTPException(status_code=404, detail="card not found")
         return card.to_dict()
@@ -281,10 +301,12 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     @app.post("/api/graph/rebuild")
-    def rebuild_graph(st: Store = Depends(get_store)) -> dict[str, Any]:
+    def rebuild_graph(
+        request: Request = None, st: Store = Depends(get_store)
+    ) -> dict[str, Any]:
         """Rebuild the disposable shared-tag edges (§1 living layer)."""
         n = st.rebuild_shared_edges()
-        st.log_activity("graph_rebuild", f"{n} shared-tag edge(s)", actor="owner")
+        st.log_activity("graph_rebuild", f"{n} shared-tag edge(s)", actor=_caller(request))
         return {"rebuilt": n}
 
     # -- consistency -------------------------------------------------------
@@ -456,7 +478,11 @@ def create_app() -> FastAPI:
         }
 
     @app.post("/api/sync")
-    def run_sync(payload: dict[str, Any] | None = None, st: Store = Depends(get_store)) -> dict[str, Any]:
+    def run_sync(
+        payload: dict[str, Any] | None = None,
+        request: Request = None,
+        st: Store = Depends(get_store),
+    ) -> dict[str, Any]:
         """Sync confirmed truth into Hermes's MEMORY.md / USER.md (§7)."""
         from . import sync
         from .hermes import hermes_memory_paths
@@ -479,7 +505,7 @@ def create_app() -> FastAPI:
         st.log_activity(
             "sync",
             f"{result['synced']} confirmed record(s) → Hermes memory",
-            actor="owner",
+            actor=_caller(request),
         )
         return result
 
@@ -532,7 +558,9 @@ def create_app() -> FastAPI:
 
     @app.post("/api/intake")
     async def intake_upload(
-        file: UploadFile = File(...), st: Store = Depends(get_store)
+        file: UploadFile = File(...),
+        request: Request = None,
+        st: Store = Depends(get_store),
     ) -> dict[str, Any]:
         """Byte-preserving intake: the raw file is copied unchanged (§10)."""
         from .intake import intake_bytes
@@ -547,7 +575,7 @@ def create_app() -> FastAPI:
         st.log_activity(
             "intake",
             f"{result['bytes']} bytes → {result['name']}",
-            actor="owner",
+            actor=_caller(request),
         )
         return result
 
@@ -632,16 +660,18 @@ def create_app() -> FastAPI:
         return {"ids": [r["id"] for r in rows]}
 
     @app.post("/api/neversend/{record_id}")
-    def clear_neversend(record_id: str) -> dict[str, Any]:
+    def clear_neversend(record_id: str, request: Request = None) -> dict[str, Any]:
         """Clear the neverSend flag on a record (owner decision, logged)."""
         with Store(settings.db) as st:
             rec = st.get_record(record_id)
             if rec is None:
                 raise HTTPException(404, "record not found")
             rec.never_send = False
-            st.add_record(rec, changed_by="owner")
+            st.add_record(rec, changed_by=_caller(request))
             st.log_activity(
-                "neversend_cleared", f"flag cleared on {record_id}", actor="owner"
+                "neversend_cleared",
+                f"flag cleared on {record_id}",
+                actor=_caller(request),
             )
         return {"ok": True}
 

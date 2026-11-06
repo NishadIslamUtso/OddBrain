@@ -332,16 +332,29 @@ class CardStore:
             return
         if action == TAKE_NEW and card.new:
             updated = Record.from_dict({**rec.to_dict(), **card.new})
-            self.store.update_record(updated, changed_by=card.resolved_by, reason="card:take_new")
+            # Taking the new side CHANGES truth, so it is signed again.
+            self.store.sign_record(
+                updated, card_id=card.id, changed_by=card.resolved_by,
+                reason="card:take_new",
+            )
         elif action == KEEP_BOTH and card.new:
             new_rec = _record_from_payload(card.new, fallback_speaker=rec.speaker)
-            self.store.add_record(new_rec, changed_by=card.resolved_by)
+            self.store.sign_record(
+                new_rec, card_id=card.id, changed_by=card.resolved_by,
+                reason="card:keep_both",
+            )
         elif action == EDIT and edit:
             updated = Record.from_dict({**rec.to_dict(), **edit})
-            self.store.update_record(updated, changed_by=card.resolved_by, reason="card:edit")
+            self.store.sign_record(
+                updated, card_id=card.id, changed_by=card.resolved_by,
+                reason="card:edit",
+            )
         elif action == APPROVE and card.new:
             updated = Record.from_dict({**rec.to_dict(), **card.new})
-            self.store.update_record(updated, changed_by=card.resolved_by, reason="card:approve")
+            self.store.sign_record(
+                updated, card_id=card.id, changed_by=card.resolved_by,
+                reason="card:approve",
+            )
         # TAKE_OLD / DENY leave the record untouched.
 
     def _resolve_proposal(
@@ -354,7 +367,11 @@ class CardStore:
             return
         rec = _record_from_payload(data)
         rec.status = ACTIVE
-        self.store.add_record(rec, changed_by=card.resolved_by)
+        # This is the signature: the card that approved it, and when.
+        self.store.sign_record(
+            rec, card_id=card.id, changed_by=card.resolved_by,
+            reason="card:approve",
+        )
 
     def _resolve_ask(self, card: Card, action: str) -> None:
         # Confirm/dismiss both just resolve the question. A confirmed ask may

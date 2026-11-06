@@ -206,9 +206,11 @@ async function api(path, opts) {
   /* The payload stays an OBJECT: the host bridge serializes it, so handing it
      a string here would double-encode and FastAPI would reject the body. */
   const payload = opts && opts.body ? opts.body : undefined;
-  /* Writes echo the injected token; reads stay open. */
+  /* Writes echo the injected token; reads stay open. The actor header tells
+     the log WHO clicked — the owner through these pages, the agent through
+     its own tools. */
   const headers = Object.assign(
-    { 'Content-Type': 'application/json' },
+    { 'Content-Type': 'application/json', 'X-Memory-OB-Actor': 'owner' },
     method === 'GET' ? {} : { [TOKEN_HEADER]: TOKEN }
   );
 

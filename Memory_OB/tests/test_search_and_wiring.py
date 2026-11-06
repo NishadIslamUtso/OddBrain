@@ -250,7 +250,9 @@ class CliCase(unittest.TestCase):
             kind="journal", speaker="user", trust=0.9,
             title="First day", body="I started the job.", event_time="2026-01-01",
         )
-        st.add_record(r)
+        from tests.helpers import sign
+
+        sign(st, r)
         st.close()
 
         out = self.run_cli(["chapter", "--no-model"])
@@ -298,12 +300,15 @@ class ApiCase(unittest.TestCase):
         self.assertIn("candidates", r.json())
 
     def test_chapter_endpoint(self):
+        from tests.helpers import sign
+
         st = Store(self.db)
-        st.add_record(
+        sign(
+            st,
             make_record(
                 kind="journal", speaker="user", trust=0.9,
                 title="First day", body="I started.", event_time="2026-01-01",
-            )
+            ),
         )
         st.close()
 

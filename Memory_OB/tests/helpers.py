@@ -12,6 +12,18 @@ def token_for(vault: str | Path) -> str:
     return load_or_create(Path(vault) / ".brain" / "token")
 
 
+CARD = "card-test"
+
+
+def sign(store, rec, card_id: str = CARD):
+    """Persist a record the way the Review panel would — signed truth.
+
+    Only ``Store.sign_record`` may create truth, so a test that needs a
+    confirmed record goes through here rather than ``add_record``.
+    """
+    return store.sign_record(rec, card_id=card_id)
+
+
 class AuthedClient:
     """A TestClient that echoes the write token on writes, exactly as the
     pages do (§15 rule 5). Reads stay open.

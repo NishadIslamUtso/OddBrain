@@ -8,11 +8,25 @@ are handled as strings until resolved.
 
 from __future__ import annotations
 
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 
 
 class UnsafePath(ValueError):
     """Raised when a path escapes the allowed base."""
+
+
+def _is_absolute(rel: str) -> bool:
+    """Absolute on ANY platform, not just this one.
+
+    ``Path`` is host-flavoured: on Linux, ``C:/Windows/...`` is an ordinary
+    relative name and slips through. Windows is the target, so a Windows
+    drive path must be refused everywhere (§15 rule 11).
+    """
+    return (
+        Path(rel).is_absolute()
+        or PureWindowsPath(rel).is_absolute()
+        or PurePosixPath(rel).is_absolute()
+    )
 
 
 def safe_path(base: str | Path, rel: str | Path) -> Path:
@@ -26,7 +40,7 @@ def safe_path(base: str | Path, rel: str | Path) -> Path:
     if not rel_s:
         raise UnsafePath("empty path")
     rel_p = Path(rel_s)
-    if rel_p.is_absolute():
+    if _is_absolute(rel_s):
         raise UnsafePath(f"absolute path not allowed: {rel_s}")
     target = (base_p / rel_p).resolve()
     try:

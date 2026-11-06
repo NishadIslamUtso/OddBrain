@@ -46,7 +46,40 @@ SPEAKER_ASSISTANT = "assistant"
 RAW_MAX = 0.2
 CANDIDATE_MIN = 0.3
 CANDIDATE_MAX = 0.6
-CONFIRMED_MIN = 0.8
+# §2: confirmed is 0.9. Only a Review card gets a record here.
+CONFIRMED_MIN = 0.9
+
+
+def _timestamp() -> str:
+    from datetime import datetime, timezone
+
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+def sign_truth(rec: "Record", *, card_id: str, at: str | None = None) -> "Record":
+    """The ONLY way a record becomes truth (§2, law 4).
+
+    Trust is a score; truth is a signature. This raises the trust to the
+    confirmed tier and stamps ``confirmed_by`` with the card that signed it
+    and when. Nothing outside the Review panel may call it — every other
+    write path strips ``confirmed_by`` and caps trust below this line.
+    """
+    rec.trust = CONFIRMED_MIN
+    rec.status = ACTIVE
+    rec.confirmed_by = f"{card_id}@{(at or _timestamp())}"
+    return rec
+
+
+def unsigned(rec: "Record") -> "Record":
+    """Strip a claimed signature and pull the trust back below the line.
+
+    Used by every write path that is NOT the Review panel, so a caller
+    cannot mint truth by putting ``confirmed_by`` in a payload.
+    """
+    rec.confirmed_by = None
+    if rec.trust >= CONFIRMED_MIN:
+        rec.trust = CANDIDATE_MAX
+    return rec
 
 
 def trust_tier(trust: float) -> str:
@@ -122,8 +155,18 @@ class Record:
 
     @property
     def is_truth(self) -> bool:
-        """True when this record sits above the truth line."""
-        return is_confirmed(self.trust) and self.status == ACTIVE
+        """True only for SIGNED truth (§2): confirmed tier, active, signed.
+
+        Trust is a score; truth is a signature. A record can sit at the
+        confirmed tier without a card — the store refuses to write one there
+        through any ordinary path — but it is not *truth* until the Review
+        panel signs it.
+        """
+        return (
+            is_confirmed(self.trust)
+            and self.status == ACTIVE
+            and bool(self.confirmed_by)
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -156,4 +199,8 @@ class Record:
         d.setdefault("links", {})
         d.setdefault("never_send", False)
         d.setdefault("demo", False)
-        return cls.from_dict(d)
+        rec = cls.from_dict(d)
+        # A payload is not a signature. Only the Review panel signs truth
+        # (§2); anything arriving this way has its claim stripped and its
+        # trust pulled back below the line.
+        return unsigned(rec)

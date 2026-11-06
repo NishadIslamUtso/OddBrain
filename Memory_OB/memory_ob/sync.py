@@ -86,13 +86,18 @@ def _write_if_changed(path: Path, content: str) -> str:
 
 
 def confirmed_records(store: Any) -> list[Any]:
-    """Confirmed, non-private records — the only ones that may sync."""
+    """Signed truth only — the only thing that may sync (§15 rule 6).
+
+    "Confirmed" means a Review card signed the record: confirmed tier, active,
+    and a ``confirmed_by``. Anything less is a candidate, and candidates never
+    reach standing memory.
+    """
     from .exit import keep
 
     return [
         r
         for r in store.list_records(include_private=False, limit=10000)
-        if r.trust >= CONFIRMED_TRUST and r.status == "active" and keep(r)
+        if r.is_truth and keep(r)
     ]
 
 
@@ -125,9 +130,9 @@ def sync_all(
     *,
     memory_path: Path,
     user_path: Path,
-    enabled: bool = True,
+    enabled: bool = False,
 ) -> dict[str, Any]:
-    """Sync both Hermes memory files. Opt-in and idempotent."""
+    """Sync both Hermes memory files. Opt-in (§15 rule 6) and idempotent."""
     return {
         "enabled": enabled,
         "memory": sync_file(store, memory_path, heading="# Memory (confirmed)", enabled=enabled),

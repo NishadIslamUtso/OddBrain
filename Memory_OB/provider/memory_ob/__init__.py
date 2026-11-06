@@ -402,7 +402,7 @@ class MemoryOBProvider(MemoryProvider):
                         store.log_activity(
                             "capture",
                             f"{added} candidate(s) from Hermes turn",
-                            actor="hermes",
+                            actor="agent",
                         )
                 finally:
                     store.close()
