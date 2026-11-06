@@ -1,0 +1,725 @@
+[
+  {
+    "id": "atacama",
+    "name": "Atacama Desert",
+    "country": "Chile",
+    "lat": -23.85,
+    "lon": -69.15,
+    "values": {
+      "temperature": 10.49,
+      "tempRange": 35.65,
+      "radiation": 3.44,
+      "slope": 9.22,
+      "soil": 67.1,
+      "pressure": 72.53,
+      "daylight": 13.47,
+      "precipitation": 11.0,
+      "humidity": 27.02,
+      "dust": 0.04,
+      "isolation": 128.9,
+      "elevation": 2853.0,
+      "aqueous": 35.0
+    },
+    "completeness": 0.9,
+    "resolutionTier": 0.9,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "MODIS/MERRA-2",
+      "USGS Landsat/ASTER"
+    ]
+  },
+  {
+    "id": "rio-tinto",
+    "name": "Rio Tinto",
+    "country": "Spain",
+    "lat": 37.7,
+    "lon": -6.55,
+    "values": {
+      "temperature": 16.99,
+      "tempRange": 50.87,
+      "radiation": 1.63,
+      "slope": 2.02,
+      "soil": 42.7,
+      "pressure": 97.67,
+      "daylight": 14.61,
+      "precipitation": 467.5,
+      "humidity": 62.53,
+      "dust": 0.16,
+      "isolation": 48.5,
+      "elevation": 345.0,
+      "aqueous": 95.0
+    },
+    "completeness": 0.9,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "MRO CRISM",
+      "USGS Landsat/ASTER"
+    ]
+  },
+  {
+    "id": "dry-valleys",
+    "name": "McMurdo Dry Valleys",
+    "country": "Antarctica",
+    "lat": -77.5,
+    "lon": 161.0,
+    "values": {
+      "temperature": -30.53,
+      "tempRange": 50.54,
+      "radiation": 3.37,
+      "slope": 6.63,
+      "soil": 62.0,
+      "pressure": 80.85,
+      "daylight": 24.0,
+      "precipitation": 91.3,
+      "humidity": 67.49,
+      "dust": 0.0,
+      "isolation": 3473.3,
+      "elevation": 1519.0,
+      "aqueous": 30.0
+    },
+    "completeness": 0.85,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "ASTER 30 m",
+      "NASADEM",
+      "SEDAC GPW"
+    ]
+  },
+  {
+    "id": "devon-island",
+    "name": "Devon Island",
+    "country": "Canada",
+    "lat": 75.55,
+    "lon": -89.25,
+    "values": {
+      "temperature": -14.87,
+      "tempRange": 65.36,
+      "radiation": 1.87,
+      "slope": 3.02,
+      "soil": 28.9,
+      "pressure": 98.24,
+      "daylight": 24.0,
+      "precipitation": 310.5,
+      "humidity": 94.36,
+      "dust": 0.07,
+      "isolation": 1736.7,
+      "elevation": 243.0,
+      "aqueous": 40.0
+    },
+    "completeness": 0.85,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "ASTER 30 m",
+      "NASADEM",
+      "SEDAC GPW"
+    ]
+  },
+  {
+    "id": "craters-of-the-moon",
+    "name": "Craters of the Moon",
+    "country": "United States",
+    "lat": 43.42,
+    "lon": -113.52,
+    "values": {
+      "temperature": 6.67,
+      "tempRange": 69.53,
+      "radiation": 3.42,
+      "slope": 5.1,
+      "soil": 40.0,
+      "pressure": 82.43,
+      "daylight": 15.23,
+      "precipitation": 416.4,
+      "humidity": 59.83,
+      "dust": 0.09,
+      "isolation": 106.4,
+      "elevation": 1741.0,
+      "aqueous": 25.0
+    },
+    "completeness": 0.85,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "NASADEM",
+      "USGS Landsat/ASTER",
+      "LRO Diviner"
+    ]
+  },
+  {
+    "id": "kilauea",
+    "name": "Kilauea",
+    "country": "United States",
+    "lat": 19.42,
+    "lon": -155.29,
+    "values": {
+      "temperature": 16.4,
+      "tempRange": 13.71,
+      "radiation": 1.79,
+      "slope": 4.23,
+      "soil": 37.2,
+      "pressure": 88.11,
+      "daylight": 13.17,
+      "precipitation": 2301.1,
+      "humidity": 83.25,
+      "dust": 0.1,
+      "isolation": 40.3,
+      "elevation": 1236.0,
+      "aqueous": 45.0
+    },
+    "completeness": 0.85,
+    "resolutionTier": 0.9,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "NASADEM",
+      "USGS Landsat/ASTER"
+    ]
+  },
+  {
+    "id": "mauna-kea",
+    "name": "Mauna Kea",
+    "country": "United States",
+    "lat": 19.82,
+    "lon": -155.47,
+    "values": {
+      "temperature": -1.92,
+      "tempRange": 15.92,
+      "radiation": 6.91,
+      "slope": 11.03,
+      "soil": 48.5,
+      "pressure": 62.23,
+      "daylight": 13.2,
+      "precipitation": 1610.8,
+      "humidity": 82.05,
+      "dust": 0.1,
+      "isolation": 40.9,
+      "elevation": 4147.0,
+      "aqueous": 20.0
+    },
+    "completeness": 0.8,
+    "resolutionTier": 0.7,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "NASADEM",
+      "MODIS/MERRA-2"
+    ]
+  },
+  {
+    "id": "mojave",
+    "name": "Mojave Desert",
+    "country": "United States",
+    "lat": 35.05,
+    "lon": -115.5,
+    "values": {
+      "temperature": 15.62,
+      "tempRange": 50.6,
+      "radiation": 2.58,
+      "slope": 6.35,
+      "soil": 60.4,
+      "pressure": 86.83,
+      "daylight": 14.36,
+      "precipitation": 153.4,
+      "humidity": 35.13,
+      "dust": 0.08,
+      "isolation": 85.5,
+      "elevation": 1318.0,
+      "aqueous": 25.0
+    },
+    "completeness": 0.9,
+    "resolutionTier": 0.9,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "MODIS/MERRA-2",
+      "NASADEM"
+    ]
+  },
+  {
+    "id": "sonoran",
+    "name": "Sonoran Desert",
+    "country": "United States",
+    "lat": 32.25,
+    "lon": -112.5,
+    "values": {
+      "temperature": 21.34,
+      "tempRange": 53.13,
+      "radiation": 1.83,
+      "slope": 5.83,
+      "soil": 55.0,
+      "pressure": 94.08,
+      "daylight": 14.12,
+      "precipitation": 197.2,
+      "humidity": 34.96,
+      "dust": 0.09,
+      "isolation": 98.7,
+      "elevation": 633.0,
+      "aqueous": 30.0
+    },
+    "completeness": 0.8,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "MODIS/MERRA-2",
+      "NASADEM"
+    ]
+  },
+  {
+    "id": "namib",
+    "name": "Namib Desert",
+    "country": "Namibia",
+    "lat": -24.5,
+    "lon": 15.3,
+    "values": {
+      "temperature": 18.68,
+      "tempRange": 40.67,
+      "radiation": 1.51,
+      "slope": 6.31,
+      "soil": 79.9,
+      "pressure": 93.0,
+      "daylight": 13.52,
+      "precipitation": 54.8,
+      "humidity": 45.31,
+      "dust": 0.14,
+      "isolation": 189.6,
+      "elevation": 736.0,
+      "aqueous": 30.0
+    },
+    "completeness": 0.75,
+    "resolutionTier": 0.9,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "MODIS/MERRA-2",
+      "USGS Landsat/ASTER"
+    ]
+  },
+  {
+    "id": "danakil",
+    "name": "Danakil Depression",
+    "country": "Ethiopia",
+    "lat": 14.24,
+    "lon": 40.3,
+    "values": {
+      "temperature": 33.46,
+      "tempRange": 29.01,
+      "radiation": 0.84,
+      "slope": 0.69,
+      "soil": 39.6,
+      "pressure": 102.72,
+      "daylight": 12.84,
+      "precipitation": 449.3,
+      "humidity": 46.84,
+      "dust": 0.4,
+      "isolation": 51.0,
+      "elevation": -91.0,
+      "aqueous": 70.0
+    },
+    "completeness": 0.69,
+    "resolutionTier": 0.8,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "MRO CRISM",
+      "NASADEM"
+    ]
+  },
+  {
+    "id": "erta-ale",
+    "name": "Erta Ale",
+    "country": "Ethiopia",
+    "lat": 13.6,
+    "lon": 40.67,
+    "values": {
+      "temperature": 30.79,
+      "tempRange": 30.55,
+      "radiation": 1.1,
+      "slope": 2.38,
+      "soil": 44.9,
+      "pressure": 94.65,
+      "daylight": 12.8,
+      "precipitation": 295.9,
+      "humidity": 37.88,
+      "dust": 0.4,
+      "isolation": 38.9,
+      "elevation": 530.0,
+      "aqueous": 40.0
+    },
+    "completeness": 0.7,
+    "resolutionTier": 0.9,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "NASADEM",
+      "LRO Diviner"
+    ]
+  },
+  {
+    "id": "pilbara",
+    "name": "Pilbara",
+    "country": "Australia",
+    "lat": -22.0,
+    "lon": 118.2,
+    "values": {
+      "temperature": 25.8,
+      "tempRange": 43.29,
+      "radiation": 1.5,
+      "slope": 0.97,
+      "soil": 61.9,
+      "pressure": 96.05,
+      "daylight": 13.35,
+      "precipitation": 431.0,
+      "humidity": 37.11,
+      "dust": 0.06,
+      "isolation": 192.4,
+      "elevation": 454.0,
+      "aqueous": 55.0
+    },
+    "completeness": 0.8,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "USGS Landsat/ASTER",
+      "MRO CRISM"
+    ]
+  },
+  {
+    "id": "wadi-rum",
+    "name": "Wadi Rum",
+    "country": "Jordan",
+    "lat": 29.6,
+    "lon": 35.42,
+    "values": {
+      "temperature": 18.49,
+      "tempRange": 48.92,
+      "radiation": 1.79,
+      "slope": 12.02,
+      "soil": 18.2,
+      "pressure": 89.95,
+      "daylight": 13.9,
+      "precipitation": 40.2,
+      "humidity": 41.77,
+      "dust": 0.25,
+      "isolation": 40.7,
+      "elevation": 1019.0,
+      "aqueous": 30.0
+    },
+    "completeness": 0.85,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "USGS Landsat/ASTER",
+      "NASADEM"
+    ]
+  },
+  {
+    "id": "negev",
+    "name": "Negev Desert",
+    "country": "Israel",
+    "lat": 30.5,
+    "lon": 34.9,
+    "values": {
+      "temperature": 18.78,
+      "tempRange": 48.32,
+      "radiation": 1.54,
+      "slope": 2.75,
+      "soil": 29.4,
+      "pressure": 93.9,
+      "daylight": 13.97,
+      "precipitation": 135.1,
+      "humidity": 51.84,
+      "dust": 0.31,
+      "isolation": 64.7,
+      "elevation": 648.0,
+      "aqueous": 35.0
+    },
+    "completeness": 0.85,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "MODIS/MERRA-2",
+      "NASADEM"
+    ]
+  },
+  {
+    "id": "ladakh",
+    "name": "Ladakh",
+    "country": "India",
+    "lat": 34.1,
+    "lon": 77.6,
+    "values": {
+      "temperature": 5.7,
+      "tempRange": 64.07,
+      "radiation": 4.95,
+      "slope": 1.59,
+      "soil": 47.1,
+      "pressure": 68.37,
+      "daylight": 14.28,
+      "precipitation": 259.3,
+      "humidity": 52.19,
+      "dust": 0.15,
+      "isolation": 7.4,
+      "elevation": 3233.0,
+      "aqueous": 40.0
+    },
+    "completeness": 0.75,
+    "resolutionTier": 0.8,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "NASADEM",
+      "SEDAC GPW"
+    ]
+  },
+  {
+    "id": "deception",
+    "name": "Deception Island",
+    "country": "Antarctica",
+    "lat": -62.95,
+    "lon": -60.63,
+    "values": {
+      "temperature": -1.86,
+      "tempRange": 25.01,
+      "radiation": 1.57,
+      "slope": 0.0,
+      "soil": 70.0,
+      "pressure": 98.95,
+      "daylight": 19.75,
+      "precipitation": 1106.7,
+      "humidity": 89.58,
+      "dust": 0.08,
+      "isolation": 1005.5,
+      "elevation": 0.0,
+      "aqueous": 50.0
+    },
+    "completeness": 0.69,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "ASTER 30 m",
+      "NASADEM",
+      "SEDAC GPW"
+    ]
+  },
+  {
+    "id": "dome-c",
+    "name": "East Antarctic Plateau",
+    "country": "Antarctica",
+    "lat": -75.1,
+    "lon": 123.35,
+    "values": {
+      "temperature": -51.46,
+      "tempRange": 64.54,
+      "radiation": 7.56,
+      "slope": 0.57,
+      "soil": 50.0,
+      "pressure": 64.48,
+      "daylight": 24.0,
+      "precipitation": 29.2,
+      "humidity": 89.76,
+      "dust": 0.0,
+      "isolation": 3727.3,
+      "elevation": 3264.0,
+      "aqueous": 15.0
+    },
+    "completeness": 0.8,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "ASTER 30 m",
+      "NASADEM",
+      "LRO Diviner"
+    ]
+  },
+  {
+    "id": "svalbard",
+    "name": "Svalbard",
+    "country": "Norway",
+    "lat": 78.22,
+    "lon": 15.65,
+    "values": {
+      "temperature": -4.27,
+      "tempRange": 50.32,
+      "radiation": 1.67,
+      "slope": 3.26,
+      "soil": 42.8,
+      "pressure": 100.73,
+      "daylight": 24.0,
+      "precipitation": 683.0,
+      "humidity": 93.11,
+      "dust": 0.05,
+      "isolation": 0.4,
+      "elevation": 0.0,
+      "aqueous": 45.0
+    },
+    "completeness": 0.8,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "ASTER 30 m",
+      "NASADEM",
+      "SEDAC GPW"
+    ]
+  },
+  {
+    "id": "etna",
+    "name": "Mount Etna",
+    "country": "Italy",
+    "lat": 37.75,
+    "lon": 14.99,
+    "values": {
+      "temperature": -1.29,
+      "tempRange": 40.09,
+      "radiation": 5.85,
+      "slope": 12.48,
+      "soil": 47.7,
+      "pressure": 69.5,
+      "daylight": 14.62,
+      "precipitation": 628.2,
+      "humidity": 72.5,
+      "dust": 0.25,
+      "isolation": 14.4,
+      "elevation": 3199.0,
+      "aqueous": 35.0
+    },
+    "completeness": 0.85,
+    "resolutionTier": 0.7,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "NASADEM",
+      "USGS Landsat/ASTER",
+      "LRO Diviner"
+    ]
+  },
+  {
+    "id": "lanzarote",
+    "name": "Lanzarote",
+    "country": "Spain",
+    "lat": 29.05,
+    "lon": -13.65,
+    "values": {
+      "temperature": 18.71,
+      "tempRange": 15.47,
+      "radiation": 1.41,
+      "slope": 1.36,
+      "soil": 44.4,
+      "pressure": 98.89,
+      "daylight": 13.86,
+      "precipitation": 109.6,
+      "humidity": 78.06,
+      "dust": 0.22,
+      "isolation": 6.5,
+      "elevation": 244.0,
+      "aqueous": 35.0
+    },
+    "completeness": 0.85,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "USGS Landsat/ASTER",
+      "NASADEM"
+    ]
+  },
+  {
+    "id": "teide",
+    "name": "Teide",
+    "country": "Spain",
+    "lat": 28.27,
+    "lon": -16.64,
+    "values": {
+      "temperature": -2.04,
+      "tempRange": 15.72,
+      "radiation": 6.47,
+      "slope": 15.41,
+      "soil": 45.5,
+      "pressure": 66.77,
+      "daylight": 13.8,
+      "precipitation": 248.4,
+      "humidity": 77.2,
+      "dust": 0.2,
+      "isolation": 13.0,
+      "elevation": 3554.0,
+      "aqueous": 30.0
+    },
+    "completeness": 0.8,
+    "resolutionTier": 0.7,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "NASADEM",
+      "USGS Landsat/ASTER",
+      "LRO Diviner"
+    ]
+  },
+  {
+    "id": "death-valley",
+    "name": "Death Valley",
+    "country": "United States",
+    "lat": 36.25,
+    "lon": -116.82,
+    "values": {
+      "temperature": 25.13,
+      "tempRange": 52.38,
+      "radiation": 1.37,
+      "slope": 0.37,
+      "soil": 38.1,
+      "pressure": 102.44,
+      "daylight": 14.47,
+      "precipitation": 124.2,
+      "humidity": 29.33,
+      "dust": 0.09,
+      "isolation": 75.1,
+      "elevation": -82.0,
+      "aqueous": 55.0
+    },
+    "completeness": 0.9,
+    "resolutionTier": 0.9,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "MODIS/MERRA-2",
+      "NASADEM"
+    ]
+  },
+  {
+    "id": "mono-lake",
+    "name": "Mono Lake",
+    "country": "United States",
+    "lat": 38.0,
+    "lon": -119.0,
+    "values": {
+      "temperature": 9.8,
+      "tempRange": 60.39,
+      "radiation": 3.55,
+      "slope": 0.0,
+      "soil": 60.7,
+      "pressure": 80.52,
+      "daylight": 14.64,
+      "precipitation": 412.7,
+      "humidity": 48.61,
+      "dust": 0.08,
+      "isolation": 134.6,
+      "elevation": 1948.0,
+      "aqueous": 90.0
+    },
+    "completeness": 0.85,
+    "resolutionTier": 1.0,
+    "sources": [
+      "NASA POWER",
+      "SRTM 30 m",
+      "MRO CRISM",
+      "USGS Landsat/ASTER"
+    ]
+  }
+]

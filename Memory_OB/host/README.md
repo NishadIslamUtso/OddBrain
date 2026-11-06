@@ -76,6 +76,69 @@ The host names its surfaces `--ui-bg-*`, not `--ui-background`, so
 A host variable that resolves empty is skipped, so the UI keeps its own
 fallback when the app exposes nothing.
 
+## Delivery (Windows, one paste)
+
+From a downloaded release:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File install.ps1
+```
+
+The script locates the engine, runs `host/install.py` (which copies the
+plugin halves and skills into the Hermes home and enables the plugin through
+the official CLI), asks you to **type** the ALLOW token — which *is* the
+write token, stored in the vault's private `.brain/token`, never committed —
+registers the nightly run with Task Scheduler, and takes a first backup.
+
+## The nightly run
+
+`host/nightly.py` does the dream, the consistency sweep, the vault export,
+the manifest refresh and the opt-in standing-layer sync. Each step is
+independent: one failing does not stop the rest.
+
+```bash
+python host/nightly.py            # everything
+python host/nightly.py --dry-run  # report what would run
+python host/schedule.py           # register it with Task Scheduler
+python host/schedule.py --status
+```
+
+## Backup and restore
+
+```bash
+python host/backup.py            # timestamped archive
+python host/backup.py --list
+python host/backup.py --restore memory-ob-20261106-040000.zip
+```
+
+## The integrity surface
+
+| Endpoint | Purpose |
+|---|---|
+| `GET /api/manifest` | verify every vault file against its fingerprint |
+| `POST /api/manifest` | rebuild the manifest |
+| `GET /api/receipts` | sharing receipts — who got what, when, on what basis |
+| `GET/POST /api/intake` | the byte-preserving intake door |
+
+The manifest never fingerprints `.brain/` (the token, the anonymous flag,
+the model config live there), and a changed, missing or extra file is
+reported rather than absorbed.
+
+## Host files
+
+| Path | Role |
+|---|---|
+| `plugins/memory_ob/__init__.py` | the memory provider — recall, capture, agent tools |
+| `plugins/memory_ob/plugin.yaml` | provider manifest |
+| `plugins/memory_ob/dashboard/*` | the dashboard backend and screens |
+| `desktop-plugins/memory-ob/plugin.js` | the React shell |
+| `../skills/*/SKILL.md` | brain, memory-full-recall, anonymous-mode |
+| `install.py` | copies everything into the Hermes home |
+| `install.ps1` | the one-paste Windows installer |
+| `nightly.py` | dream + sweep + export + manifest + sync |
+| `schedule.py` | Windows Task Scheduler registration |
+| `backup.py` | archive and restore |
+
 ## Why an iframe with `srcDoc`
 
 An iframe cannot carry the dashboard session token, so it may not load the

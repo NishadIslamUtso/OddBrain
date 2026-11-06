@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html {
+  -webkit-text-size-adjust: 100%;
+}
+
+body {
+  min-height: 100vh;
+}
+
+/* Leaflet needs an explicit height, and its panes sit above our sticky header
+   unless we tell them otherwise. */
+.leaflet-container {
+  height: 100%;
+  width: 100%;
+  background: #e8eef5;
+  font-family: inherit;
+}
+
+.leaflet-pane {
+  z-index: 1;
+}
+
+.leaflet-top,
+.leaflet-bottom {
+  z-index: 2;
+}
+
+/* Switched off. This was the "3D peek" tilt: a pure-CSS effect that tilted the
+   map container so the terrain read as a surface. It did not hold up in use,
+   so the toggle is gone from the interface. The rule stays here, unused, in
+   case we come back to it. */
+.map-peek {
+  transform: perspective(1400px) rotateX(38deg) scale(0.94);
+  transform-origin: center bottom;
+  transition: transform 300ms ease;
+}
+
+/* Keep focus rings visible for keyboard users. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid #2563eb;
+  outline-offset: 2px;
+}
