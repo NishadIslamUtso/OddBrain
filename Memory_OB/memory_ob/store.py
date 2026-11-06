@@ -29,6 +29,13 @@ from .records import (
     Record,
 )
 
+# The typed edges an owner may curate between records (§6). ``shares_tag``
+# is the machine's disposable layer and is never owner-selectable.
+GRAPH_LABELS: frozenset[str] = frozenset(
+    {"supports", "contradicts", "supersedes", "cites", "related"}
+)
+AUTO_EDGE_LABEL = "shares_tag"
+
 SCHEMA_VERSION = 1
 
 _SCHEMA = """
@@ -433,6 +440,77 @@ class Store:
             (src, dst, label),
         )
         self.conn.commit()
+
+    # -- graph -------------------------------------------------------------
+
+    def rebuild_shared_edges(self) -> int:
+        """Regenerate the shared-tag edges from the current records.
+
+        These are LIVING-layer connections (§1): disposable, delete-and-
+        rebuild any time. Owner-curated links are never touched here.
+        """
+        self.conn.execute("DELETE FROM edges WHERE label = 'shares_tag'")
+        by_tag: dict[str, list[str]] = {}
+        for r in self.list_records(include_private=False, limit=10000):
+            for tag in set(r.tags):
+                by_tag.setdefault(tag, []).append(r.id)
+        n = 0
+        for ids in by_tag.values():
+            for i in range(len(ids)):
+                for j in range(i + 1, len(ids)):
+                    self.add_edge(ids[i], ids[j], "shares_tag")
+                    n += 1
+        return n
+
+    def link(self, src: str, dst: str, label: str, *, by: str = "owner") -> None:
+        """Store an owner-curated link between two records.
+
+        The owner's word outranks the machine's: any previous curated edge
+        between the pair is replaced, and ``shares_tag`` edges are left
+        alone so the automatic layer stays rebuildable.
+        """
+        self.conn.execute(
+            "DELETE FROM edges WHERE src = ? AND dst = ? AND label != 'shares_tag'",
+            (src, dst),
+        )
+        self.add_edge(src, dst, label)
+        self.log_activity(
+            "link", f"{src} --{label}--> {dst}", actor=by
+        )
+
+    def unlink(self, src: str, dst: str, *, by: str = "owner") -> None:
+        """Remove the curated link between two records (shared-tag kept)."""
+        self.conn.execute(
+            "DELETE FROM edges WHERE src = ? AND dst = ? AND label != 'shares_tag'",
+            (src, dst),
+        )
+        self.conn.commit()
+        self.log_activity("unlink", f"{src} -/-> {dst}", actor=by)
+
+    def graph(self, *, record_id: str | None = None) -> dict[str, Any]:
+        """Nodes and typed edges for the Graph screen.
+
+        Nodes carry enough to filter by person, tag, kind and trust (§6).
+        """
+        edges = self.edges(record_id)
+        wanted = set()
+        for s, d, _ in edges:
+            wanted.add(s)
+            wanted.add(d)
+        if record_id:
+            wanted.add(record_id)
+        nodes = [
+            r.to_dict()
+            for r in self.list_records(include_private=False, limit=10000)
+            if r.id in wanted
+        ]
+        return {
+            "nodes": nodes,
+            "edges": [
+                {"src": s, "dst": d, "label": l} for s, d, l in edges
+            ],
+            "count": len(edges),
+        }
 
     def edges(self, record_id: str | None = None) -> list[tuple[str, str, str]]:
         if record_id is None:

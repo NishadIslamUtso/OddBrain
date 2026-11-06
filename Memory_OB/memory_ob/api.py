@@ -21,7 +21,7 @@ from .auth import TOKEN_HEADER, load_or_create, verify
 from .config import Settings
 from .records import Record
 from .review import CardStore
-from .store import Store
+from .store import GRAPH_LABELS, Store
 
 logger = logging.getLogger(__name__)
 
@@ -200,18 +200,53 @@ def create_app() -> FastAPI:
     def graph(
         record_id: str | None = None, st: Store = Depends(get_store)
     ) -> dict[str, Any]:
-        edges = st.edges(record_id)
+        data = st.graph(record_id=record_id)
         # The exit gate: an edge to a withheld record would reveal that it
-        # exists (law 2). Edges are dropped when either end is withheld.
-        out = []
-        for s, d, l in edges:
-            src, dst = st.get_record(s), st.get_record(d)
-            if src is None or dst is None:
-                continue
-            if not exit.keep(src) or not exit.keep(dst):
-                continue
-            out.append({"src": s, "dst": d, "label": l})
-        return {"edges": out, "count": len(out)}
+        # exists (law 2), so edges are dropped when either end is withheld.
+        visible = {n["id"] for n in data["nodes"]}
+        edges = [
+            e for e in data["edges"] if e["src"] in visible and e["dst"] in visible
+        ]
+        return {
+            "nodes": exit.dicts_out(data["nodes"]),
+            "edges": edges,
+            "count": len(edges),
+        }
+
+    @app.post("/api/graph/link")
+    def link_records(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
+        """Owner-curated link between two records (§6)."""
+        src = str(payload.get("src") or "")
+        dst = str(payload.get("dst") or "")
+        label = str(payload.get("label") or "supports")
+        if not src or not dst:
+            raise HTTPException(status_code=400, detail="src and dst are required")
+        if label not in GRAPH_LABELS:
+            raise HTTPException(
+                status_code=400, detail=f"label must be one of {sorted(GRAPH_LABELS)}"
+            )
+        if st.get_record(src) is None or st.get_record(dst) is None:
+            raise HTTPException(status_code=404, detail="record not found")
+        st.link(src, dst, label)
+        return {"ok": True, "src": src, "dst": dst, "label": label}
+
+    @app.post("/api/graph/unlink")
+    def unlink_records(
+        payload: dict[str, Any], st: Store = Depends(get_store)
+    ) -> dict[str, Any]:
+        src = str(payload.get("src") or "")
+        dst = str(payload.get("dst") or "")
+        if not src or not dst:
+            raise HTTPException(status_code=400, detail="src and dst are required")
+        st.unlink(src, dst)
+        return {"ok": True}
+
+    @app.post("/api/graph/rebuild")
+    def rebuild_graph(st: Store = Depends(get_store)) -> dict[str, Any]:
+        """Rebuild the disposable shared-tag edges (§1 living layer)."""
+        n = st.rebuild_shared_edges()
+        st.log_activity("graph_rebuild", f"{n} shared-tag edge(s)", actor="owner")
+        return {"rebuilt": n}
 
     # -- consistency -------------------------------------------------------
 
