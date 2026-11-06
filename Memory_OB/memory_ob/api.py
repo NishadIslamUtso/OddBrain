@@ -27,6 +27,17 @@ logger = logging.getLogger(__name__)
 
 settings = Settings.resolve()
 
+
+def configure(s: Settings) -> None:
+    """Point the app at a specific vault/db.
+
+    ``create_app`` reads the module-level ``settings`` at request time, so
+    rebinding it here is enough — this is what lets the CLI's ``--vault`` /
+    ``--db`` flags apply to a served app.
+    """
+    global settings
+    settings = s
+
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
 # Every method that can change the store. Reads stay open — the owner browses
@@ -163,6 +174,19 @@ def create_app() -> FastAPI:
         if r is None or not exit.keep(r):
             raise HTTPException(status_code=404, detail="record not found")
         return r.to_dict()
+
+    @app.get("/api/records/{record_id}/history")
+    def record_history(record_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
+        """Every version of a record, oldest first.
+
+        The store has always kept the history; nothing exposed it. This is
+        how the owner sees WHAT changed, WHO changed it and WHY — the audit
+        trail behind a record.
+        """
+        r = st.get_record(record_id)
+        if r is None or not exit.keep(r):
+            raise HTTPException(status_code=404, detail="record not found")
+        return {"id": record_id, "versions": st.get_history(record_id)}
 
     @app.post("/api/records")
     def create_record(
@@ -322,6 +346,13 @@ def create_app() -> FastAPI:
         from .consistency import monthly_audit
 
         return monthly_audit(st)
+
+    @app.get("/api/doctor")
+    def doctor() -> dict[str, Any]:
+        """Every health check in one call — the same ones the CLI runs."""
+        from .doctor import doctor as run_doctor
+
+        return run_doctor(settings)
 
     # -- nightly dream -----------------------------------------------------
 
@@ -642,9 +673,41 @@ def create_app() -> FastAPI:
         allowed = {
             "brain_path", "semantic", "sweep_schedule",
             "checkpoint_required", "backup_dir", "demo_visible",
+            # Appearance — validated inside update() before they are stored.
+            "theme", "accent", "font_family", "font_size", "density",
         }
         saved = update(settings.vault, **{k: v for k, v in (payload or {}).items() if k in allowed})
         return saved.to_dict()
+
+    @app.get("/api/appearance")
+    def appearance() -> dict[str, Any]:
+        """The appearance settings plus the CSS they resolve to.
+
+        ``css`` is what the UI sets on its root element. Only validated values
+        appear there, so the page can apply it without checking again.
+        """
+        from .appearance import Appearance
+        from .settings import load
+
+        app = load(settings.vault)
+        current = Appearance.from_dict(app.to_dict())
+        current.validate()
+        return {**current.to_dict(), "errors": current.errors, "css": current.css()}
+
+    @app.post("/api/appearance")
+    def save_appearance(payload: dict[str, Any]) -> dict[str, Any]:
+        """Set the appearance. Bad values are clamped, never stored raw."""
+        from .appearance import Appearance
+        from .settings import load, update
+
+        payload = payload or {}
+        app = load(settings.vault)
+        merged = {**app.to_dict(), **payload}
+        cleaned = Appearance.clean(merged)
+        saved = update(settings.vault, **cleaned.to_dict())
+        out = Appearance.from_dict(saved.to_dict())
+        out.validate()
+        return {**out.to_dict(), "errors": out.errors, "css": out.css()}
 
     @app.get("/api/neversend")
     def list_neversend() -> dict[str, Any]:

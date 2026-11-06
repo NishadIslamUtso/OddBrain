@@ -14,6 +14,8 @@
     memory-ob activity
     memory-ob models
     memory-ob export
+    memory-ob doctor                  # is this set up right?
+    memory-ob serve                   # run the dashboard
 
 The CLI is the owner's surface. Everything the agent does goes through the
 same library calls — there is no back door.
@@ -306,6 +308,44 @@ def cmd_export(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_doctor(args: argparse.Namespace) -> int:
+    """Every health check, in one pass."""
+    from .doctor import run_checks
+
+    s = _settings(args)
+    report = run_checks(s)
+    for c in report.checks:
+        mark = "OK  " if c.ok else "FAIL"
+        print(f"  [{mark}] {c.name:12s} {c.detail}")
+        if not c.ok and c.fix:
+            print(f"         fix: {c.fix}")
+    print()
+    if report.ok:
+        print(f"All {len(report.checks)} checks passed.")
+        return 0
+    print(f"{len(report.failures)} of {len(report.checks)} checks failed.")
+    return 1
+
+
+def cmd_serve(args: argparse.Namespace) -> int:
+    """Run the dashboard."""
+    import uvicorn
+
+    from .api import configure, create_app
+
+    configure(_settings(args))
+    app = create_app()
+    host = args.host
+    port = args.port
+    print(f"Memory_OB dashboard on http://{host}:{port}/ui")
+    print("Press Ctrl+C to stop.")
+    try:
+        uvicorn.run(app, host=host, port=port, log_level=args.log_level)
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="memory-ob",
@@ -394,6 +434,15 @@ def build_parser() -> argparse.ArgumentParser:
 
     e = sub.add_parser("export", help="export records to the vault")
     e.set_defaults(fn=cmd_export)
+
+    doc = sub.add_parser("doctor", help="check that the setup is healthy")
+    doc.set_defaults(fn=cmd_doctor)
+
+    sv = sub.add_parser("serve", help="run the dashboard")
+    sv.add_argument("--host", default="127.0.0.1")
+    sv.add_argument("--port", type=int, default=8770)
+    sv.add_argument("--log-level", default="info")
+    sv.set_defaults(fn=cmd_serve)
 
     return p
 

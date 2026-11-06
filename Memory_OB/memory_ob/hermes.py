@@ -142,14 +142,14 @@ def aux_slot(task: str) -> dict[str, str]:
 # --- Proxy -----------------------------------------------------------------
 
 
-def proxy_available() -> bool:
+def proxy_available(timeout: float = 2.0) -> bool:
     """True when the Hermes proxy is accepting connections."""
     import urllib.error
     import urllib.request
 
     try:
         req = urllib.request.Request(f"http://{PROXY_HOST}:{PROXY_PORT}/health")
-        with urllib.request.urlopen(req, timeout=2.0):
+        with urllib.request.urlopen(req, timeout=timeout):
             return True
     except urllib.error.URLError:
         return False

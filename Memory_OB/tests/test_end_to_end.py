@@ -219,10 +219,19 @@ class ApiCase(unittest.TestCase):
 
         from memory_ob import api
 
-        api.settings = api.Settings.resolve(vault=self.vault, db=self.db)
+        # configure() rebinds the module-level settings the routes read.
+        # The previous value is restored in tearDown so this suite cannot
+        # leak its scratch vault into any other.
+        self._prev = api.settings
+        api.configure(api.Settings.resolve(vault=self.vault, db=self.db))
         from tests.helpers import AuthedClient
 
         self.client = AuthedClient.create(api.create_app(), self.vault)
+
+    def tearDown(self) -> None:
+        from memory_ob import api
+
+        api.configure(self._prev)
 
     def test_health(self) -> None:
         r = self.client.get("/api/health")

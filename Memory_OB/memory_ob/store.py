@@ -172,13 +172,20 @@ class Store:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(str(self.path), timeout=10.0)
         self.conn.row_factory = sqlite3.Row
-        # Several connections may be open at once (a request store beside the
-        # caller's). WAL lets readers and a writer coexist; busy_timeout
-        # covers the rest.
-        self.conn.execute("PRAGMA journal_mode = WAL")
-        self.conn.execute("PRAGMA busy_timeout = 10000")
-        self.conn.executescript(_SCHEMA)
-        self._migrate()
+        try:
+            # Several connections may be open at once (a request store beside
+            # the caller's). WAL lets readers and a writer coexist;
+            # busy_timeout covers the rest.
+            self.conn.execute("PRAGMA journal_mode = WAL")
+            self.conn.execute("PRAGMA busy_timeout = 10000")
+            self.conn.executescript(_SCHEMA)
+            self._migrate()
+        except Exception:
+            # If initialisation fails the connection would otherwise outlive
+            # the object and be closed by the garbage collector — a leak that
+            # shows up as a ResourceWarning and holds the file open.
+            self.conn.close()
+            raise
         self._meta_setdefault("schema_version", str(SCHEMA_VERSION))
         self._meta_setdefault("created_at", _now())
 

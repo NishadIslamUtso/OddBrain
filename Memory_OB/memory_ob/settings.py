@@ -26,6 +26,13 @@ DEFAULTS: dict[str, Any] = {
     "checkpoint_required": True,
     "backup_dir": "",
     "demo_visible": False,
+    # Appearance. Validated by memory_ob.appearance before they are stored,
+    # because they reach the UI as CSS custom properties.
+    "theme": "auto",
+    "accent": "#d4a74a",
+    "font_family": "",
+    "font_size": 14,
+    "density": "comfortable",
 }
 
 
@@ -37,7 +44,18 @@ class AppSettings:
     checkpoint_required: bool = True
     backup_dir: str = ""
     demo_visible: bool = False
+    theme: str = "auto"
+    accent: str = "#d4a74a"
+    font_family: str = ""
+    font_size: int = 14
+    density: str = "comfortable"
     extra: dict[str, Any] = field(default_factory=dict)
+
+    def appearance(self):
+        """The appearance subset, as a validated object."""
+        from .appearance import Appearance
+
+        return Appearance.from_dict(self.to_dict())
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "AppSettings":
@@ -73,9 +91,21 @@ def save(vault: Path, settings: AppSettings) -> Path:
 
 
 def update(vault: Path, **changes: Any) -> AppSettings:
-    """Apply *changes* to the stored settings and return the result."""
+    """Apply *changes* to the stored settings and return the result.
+
+    Appearance values are validated before they are stored — they reach the UI
+    as CSS, so a bad value is clamped to the default rather than saved.
+    """
     current = load(vault)
     data = current.to_dict()
+    appearance_keys = {"theme", "accent", "font_family", "font_size", "density"}
+    incoming = {k: v for k, v in changes.items() if k in appearance_keys}
+    if incoming:
+        from .appearance import Appearance
+
+        cleaned = Appearance.clean({**data, **incoming})
+        data.update(cleaned.to_dict())
+        changes = {k: v for k, v in changes.items() if k not in appearance_keys}
     for key, value in changes.items():
         if key in DEFAULTS:
             data[key] = value
