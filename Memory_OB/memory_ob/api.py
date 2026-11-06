@@ -9,20 +9,28 @@ Run:
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any, Iterator
 
-from fastapi import Depends, FastAPI, HTTPException, Query
+from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 
+from .auth import TOKEN_HEADER, load_or_create, verify
 from .config import Settings
 from .records import Record
 from .review import CardStore
 from .store import Store
 
+logger = logging.getLogger(__name__)
+
 settings = Settings.resolve()
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
+
+# Every method that can change the store. Reads stay open — the owner browses
+# freely, and recall has nothing to do with writes.
+WRITE_METHODS = frozenset({"POST", "PUT", "PATCH", "DELETE"})
 
 
 def get_store() -> Iterator[Store]:
@@ -38,6 +46,28 @@ def get_store() -> Iterator[Store]:
 def create_app() -> FastAPI:
     app = FastAPI(title="Memory_OB", version="0.1.0")
 
+    @app.middleware("http")
+    async def gate_writes(request: Request, call_next):
+        """Write routes demand the install-generated token.
+
+        The pages receive the token in their markup and echo it back, so the
+        screens authenticate by shape. A curl with a hand-typed header works
+        too, but nothing ships with a default token to type.
+        """
+        if request.method in WRITE_METHODS:
+            settings.ensure_dirs()
+            presented = request.headers.get(TOKEN_HEADER) or request.query_params.get(
+                "token", ""
+            )
+            if not verify(settings.token_path, presented):
+                # Create the token on first sight so an install that predates
+                # the gate can still boot; the first page load then works.
+                load_or_create(settings.token_path)
+                raise HTTPException(
+                    status_code=401, detail="a valid write token is required"
+                )
+        return await call_next(request)
+
     # -- the screens --------------------------------------------------------
 
     @app.get("/ui")
@@ -45,7 +75,13 @@ def create_app() -> FastAPI:
         index = WEB_DIR / "index.html"
         if not index.exists():
             raise HTTPException(status_code=404, detail="ui not built")
-        return HTMLResponse(index.read_text(encoding="utf-8"))
+        token = load_or_create(settings.token_path)
+        html = index.read_text(encoding="utf-8")
+        html = html.replace(
+            'window.__MEMORY_OB_TOKEN__ = "";',
+            f'window.__MEMORY_OB_TOKEN__ = "{token}";',
+        )
+        return HTMLResponse(html)
 
     @app.get("/")
     def root() -> HTMLResponse:

@@ -58,6 +58,13 @@ def default_models_path(vault: Path | None = None) -> Path:
     return (vault or default_vault()) / ".brain" / "models.json"
 
 
+def default_token_path(vault: Path | None = None) -> Path:
+    env = os.environ.get("MEMORY_OB_TOKEN")
+    if env:
+        return Path(env).expanduser()
+    return (vault or default_vault()) / ".brain" / "token"
+
+
 @dataclass(slots=True)
 class Settings:
     """Resolved settings for one run."""
@@ -65,6 +72,7 @@ class Settings:
     vault: Path
     db: Path
     models_path: Path
+    token_path: Path
 
     @classmethod
     def resolve(
@@ -73,6 +81,7 @@ class Settings:
         vault: str | Path | None = None,
         db: str | Path | None = None,
         models_path: str | Path | None = None,
+        token_path: str | Path | None = None,
     ) -> "Settings":
         v = Path(vault).expanduser() if vault else default_vault()
         return cls(
@@ -82,6 +91,11 @@ class Settings:
                 Path(models_path).expanduser()
                 if models_path
                 else default_models_path(v)
+            ),
+            token_path=(
+                Path(token_path).expanduser()
+                if token_path
+                else default_token_path(v)
             ),
         )
 

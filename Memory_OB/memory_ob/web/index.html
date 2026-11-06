@@ -137,13 +137,31 @@
   /* The host injects the API base here when this page is served from a
      plugin backend. Standalone, it stays empty (same origin). */
   window.__MEMORY_OB_BASE__ = "";
+  /* The write token. The backend injects it here, and every write echoes it
+     back — the pages authenticate by shape, not by a hand-typed header. */
+  window.__MEMORY_OB_TOKEN__ = "";
   /* Theme: follow the host's appearance live. Inside Hermes this document
      lives in a same-origin srcdoc iframe, so it can read the app's --ui-*
      values off the parent and re-apply them whenever the theme changes.
-     Standalone there is no parent to read, so the CSS fallbacks apply. */
+     Standalone there is no parent to read, so the CSS fallbacks apply.
+
+     The host names its surfaces --ui-bg-* (chrome / sidebar / primary),
+     not --ui-background, so each entry maps a host variable onto the name
+     this stylesheet reads. A host variable that resolves empty is skipped. */
   (function () {
-    var names = ['accent', 'background', 'background-secondary', 'stroke-secondary',
-                 'text-primary', 'text-secondary', 'text-tertiary', 'text-quaternary'];
+    var MAP = [
+      ['--ui-bg-chrome', '--ui-background'],
+      ['--ui-bg-sidebar', '--ui-background-sidebar'],
+      ['--ui-bg-secondary', '--ui-background-secondary'],
+      ['--ui-bg-elevated', '--ui-background-elevated'],
+      ['--ui-stroke-secondary', '--ui-stroke-secondary'],
+      ['--ui-stroke-tertiary', '--ui-stroke-tertiary'],
+      ['--ui-text-primary', '--ui-text-primary'],
+      ['--ui-text-secondary', '--ui-text-secondary'],
+      ['--ui-text-tertiary', '--ui-text-tertiary'],
+      ['--ui-text-quaternary', '--ui-text-quaternary'],
+      ['--ui-accent', '--ui-accent']
+    ];
     var host = window.parent;
     var root = document.documentElement;
 
@@ -151,9 +169,9 @@
       if (!host || host === window || !host.document) return;
       try {
         var cs = host.getComputedStyle(host.document.documentElement);
-        for (var i = 0; i < names.length; i++) {
-          var value = cs.getPropertyValue('--ui-' + names[i]).trim();
-          if (value) root.style.setProperty('--ui-' + names[i], value);
+        for (var i = 0; i < MAP.length; i++) {
+          var value = cs.getPropertyValue(MAP[i][0]).trim();
+          if (value) root.style.setProperty(MAP[i][1], value);
         }
       } catch (e) {
         /* Cross-origin parent — keep whatever theme we already have. */
@@ -166,6 +184,8 @@
 </script>
 <script>
 const API = window.__MEMORY_OB_BASE__ || '';
+const TOKEN = window.__MEMORY_OB_TOKEN__ || '';
+const TOKEN_HEADER = 'X-Memory-OB-Token';
 const state = { tab: 'review', data: {}, loading: false, error: '' };
 
 const TABS = [
@@ -185,6 +205,11 @@ async function api(path, opts) {
   /* The payload stays an OBJECT: the host bridge serializes it, so handing it
      a string here would double-encode and FastAPI would reject the body. */
   const payload = opts && opts.body ? opts.body : undefined;
+  /* Writes echo the injected token; reads stay open. */
+  const headers = Object.assign(
+    { 'Content-Type': 'application/json' },
+    method === 'GET' ? {} : { [TOKEN_HEADER]: TOKEN }
+  );
 
   /* Inside the Hermes host shell a plain fetch carries no dashboard session
      token, so the app's authenticated bridge does the calling instead. The
@@ -194,7 +219,7 @@ async function api(path, opts) {
   const bridge = window.parent && window.parent.hermesDesktop && window.parent.hermesDesktop.api;
   if (typeof bridge === 'function') {
     try {
-      return await bridge({ path: API + path, method, body: payload });
+      return await bridge({ path: API + path, method, body: payload, headers });
     } catch (e) {
       throw new Error((e && e.message) || 'request failed');
     }
@@ -202,7 +227,7 @@ async function api(path, opts) {
 
   const res = await fetch(API + path, opts ? {
     method: method,
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: payload === undefined ? undefined : JSON.stringify(payload),
   } : undefined);
   if (!res.ok) {
