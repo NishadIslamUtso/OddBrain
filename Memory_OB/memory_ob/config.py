@@ -74,6 +74,7 @@ class Settings:
     models_path: Path
     token_path: Path
     sync_enabled: bool = False
+    rerank_enabled: bool = False
 
     @classmethod
     def resolve(
@@ -84,11 +85,15 @@ class Settings:
         models_path: str | Path | None = None,
         token_path: str | Path | None = None,
         sync_enabled: bool | None = None,
+        rerank_enabled: bool | None = None,
     ) -> "Settings":
         v = Path(vault).expanduser() if vault else default_vault()
         if sync_enabled is None:
             raw = os.environ.get("MEMORY_OB_SYNC", "")
             sync_enabled = raw.strip().lower() in {"1", "true", "yes", "on"}
+        if rerank_enabled is None:
+            raw = os.environ.get("MEMORY_OB_RERANK", "")
+            rerank_enabled = raw.strip().lower() in {"1", "true", "yes", "on"}
         return cls(
             vault=v,
             db=Path(db).expanduser() if db else default_db(v),
@@ -103,6 +108,7 @@ class Settings:
                 else default_token_path(v)
             ),
             sync_enabled=bool(sync_enabled),
+            rerank_enabled=bool(rerank_enabled),
         )
 
     def ensure_dirs(self) -> None:

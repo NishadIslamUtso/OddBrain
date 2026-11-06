@@ -436,16 +436,24 @@ class Store:
         limit: int = 20,
         backend: Any = None,
         slot: Any = None,
+        rerank_call: Any = None,
     ) -> list[Record]:
         """Three-leg search: words + meaning + entities.
 
         Falls back to words + entities when no embeddings are cached or the
         embedding model is unreachable — it never claims to be semantic when
-        it is not.
+        it is not. An optional rerank model may reorder the result.
         """
         from .embedder import combined_search
 
-        return combined_search(self, query, limit=limit, backend=backend, slot=slot)
+        return combined_search(
+            self,
+            query,
+            limit=limit,
+            backend=backend,
+            slot=slot,
+            rerank_call=rerank_call,
+        )
 
     def search(self, query: str, *, limit: int = 20) -> list[Record]:
         """Full-text search over non-private, non-trashed records.

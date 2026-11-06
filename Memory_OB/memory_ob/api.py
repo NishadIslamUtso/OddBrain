@@ -175,11 +175,17 @@ def create_app() -> FastAPI:
         limit: int = 20,
         st: Store = Depends(get_store),
     ) -> dict[str, Any]:
-        from .models import ModelConfig, resolve_backend
+        from .models import ModelConfig, model_call, resolve_backend
 
         cfg = ModelConfig.load(settings.models_path)
+        # §8: rerank is an optional slot; off unless the owner turns it on.
+        rerank = model_call("rerank", cfg) if settings.rerank_enabled else None
         hits = st.search_all(
-            q, limit=limit, backend=resolve_backend(cfg), slot=cfg.slot("embed")
+            q,
+            limit=limit,
+            backend=resolve_backend(cfg),
+            slot=cfg.slot("embed"),
+            rerank_call=rerank,
         )
         facts = st.search_facts(q, limit=limit)
         results = exit.dicts_out(r.to_dict() for r in hits)
@@ -298,10 +304,18 @@ def create_app() -> FastAPI:
     # -- nightly dream -----------------------------------------------------
 
     @app.post("/api/dream")
-    def run_dream(st: Store = Depends(get_store)) -> dict[str, Any]:
+    def run_dream(
+        payload: dict[str, Any] | None = None, st: Store = Depends(get_store)
+    ) -> dict[str, Any]:
+        """The nightly consolidation. Uses the ``dream`` slot when configured."""
         from .dream import dream
+        from .models import ModelConfig, model_call
 
-        return dream(st)
+        payload = payload or {}
+        call = None
+        if not payload.get("no_model"):
+            call = model_call("dream", ModelConfig.load(settings.models_path))
+        return dream(st, model_call=call)
 
     # -- life story --------------------------------------------------------
 

@@ -108,6 +108,7 @@ def combined_search(
     limit: int = 20,
     backend: models.ModelBackend | None = None,
     slot: models.ModelSlot | None = None,
+    rerank_call: Any = None,
 ) -> list[Any]:
     """Three-leg search: words + meaning + entities, merged and ranked."""
     if not query.strip():
@@ -149,7 +150,48 @@ def combined_search(
         if r is None or r.never_send or r.status == "trash":
             continue
         out.append(r)
-    return out
+    return rerank_results(query, out, rerank_call, limit=limit)
+
+
+def rerank_results(
+    query: str,
+    records: list[Any],
+    rerank_call: Any,
+    *,
+    limit: int = 20,
+) -> list[Any]:
+    """Ask the configured rerank model to order the results (§8).
+
+    The model only reorders — it cannot add or remove a record, so the exit
+    gate's decisions stand. A missing or malformed answer returns the input
+    order unchanged.
+    """
+    if not records or rerank_call is None or len(records) < 2:
+        return records
+    try:
+        listing = "\n".join(
+            f"{i + 1}. {r.title} — {r.body}" for i, r in enumerate(records[:20])
+        )
+        prompt = (
+            "Rank these memory records by how relevant they are to the "
+            "question. Reply with the numbers in order, best first.\n\n"
+            f"Question: {query}\n\n{listing}\n\n"
+            'Reply as JSON: {"order": [1, 3, 2]}'
+        )
+        import json
+
+        raw = rerank_call(prompt)
+        start, end = raw.find("{"), raw.rfind("}")
+        if start == -1 or end == -1:
+            return records
+        order = json.loads(raw[start : end + 1]).get("order", [])
+        by_index = {i + 1: r for i, r in enumerate(records[:20])}
+        reordered = [by_index[n] for n in order if n in by_index]
+        seen = {id(r) for r in reordered}
+        reordered += [r for r in records if id(r) not in seen]
+        return reordered[:limit]
+    except Exception:
+        return records
 
 
 def semantic_available(store: Any, *, backend: models.ModelBackend | None = None) -> bool:
