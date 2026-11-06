@@ -16,6 +16,7 @@ from typing import Any, Iterator
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 
+from . import exit, hazards
 from .auth import TOKEN_HEADER, load_or_create, verify
 from .config import Settings
 from .records import Record
@@ -100,20 +101,22 @@ def create_app() -> FastAPI:
         kind: str | None = None,
         status: str | None = None,
         limit: int = 200,
-        include_private: bool = False,
         st: Store = Depends(get_store),
     ) -> list[dict[str, Any]]:
-        return [
+        # The exit gate: neverSend and hazardous records never leave (§7).
+        # The list length is the SHOWN count — it never reveals how many
+        # were withheld (law 2).
+        return exit.dicts_out(
             r.to_dict()
-            for r in st.list_records(
-                kind=kind, status=status, include_private=include_private, limit=limit
-            )
-        ]
+            for r in st.list_records(kind=kind, status=status, limit=limit)
+        )
 
     @app.get("/api/records/{record_id}")
     def get_record(record_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
         r = st.get_record(record_id)
-        if r is None:
+        # A withheld record is indistinguishable from a missing one — the
+        # owner cannot probe for its existence (law 2: never leaks counts).
+        if r is None or not exit.keep(r):
             raise HTTPException(status_code=404, detail="record not found")
         return r.to_dict()
 
@@ -151,13 +154,17 @@ def create_app() -> FastAPI:
             q, limit=limit, backend=resolve_backend(cfg), slot=cfg.slot("embed")
         )
         facts = st.search_facts(q, limit=limit)
+        results = exit.dicts_out(r.to_dict() for r in hits)
+        candidates = [
+            {"text": f["text"], "trust": f["trust"]}
+            for f in facts
+            if not hazards.is_hazardous(str(f.get("text") or ""))
+        ]
         return {
             "query": q,
-            "count": len(hits),
-            "results": [r.to_dict() for r in hits],
-            "candidates": [
-                {"text": f["text"], "trust": f["trust"]} for f in facts
-            ],
+            "count": len(results),
+            "results": results,
+            "candidates": candidates,
         }
 
     # -- review ------------------------------------------------------------
@@ -170,7 +177,9 @@ def create_app() -> FastAPI:
         st: Store = Depends(get_store),
     ) -> list[dict[str, Any]]:
         cs = CardStore(st)
-        return [c.to_dict() for c in cs.list(type=type, status=status, limit=limit)]
+        return exit.cards_out(
+            c.to_dict() for c in cs.list(type=type, status=status, limit=limit)
+        )
 
     @app.post("/api/cards/{card_id}/{action}")
     def resolve_card(
@@ -192,10 +201,17 @@ def create_app() -> FastAPI:
         record_id: str | None = None, st: Store = Depends(get_store)
     ) -> dict[str, Any]:
         edges = st.edges(record_id)
-        return {
-            "edges": [{"src": s, "dst": d, "label": l} for s, d, l in edges],
-            "count": len(edges),
-        }
+        # The exit gate: an edge to a withheld record would reveal that it
+        # exists (law 2). Edges are dropped when either end is withheld.
+        out = []
+        for s, d, l in edges:
+            src, dst = st.get_record(s), st.get_record(d)
+            if src is None or dst is None:
+                continue
+            if not exit.keep(src) or not exit.keep(dst):
+                continue
+            out.append({"src": s, "dst": d, "label": l})
+        return {"edges": out, "count": len(out)}
 
     # -- consistency -------------------------------------------------------
 
@@ -311,7 +327,7 @@ def create_app() -> FastAPI:
     ) -> list[dict[str, Any]]:
         from .journal import journal_entries
 
-        return [r.to_dict() for r in journal_entries(st, limit=limit)]
+        return exit.dicts_out(r.to_dict() for r in journal_entries(st, limit=limit))
 
     # -- models ------------------------------------------------------------
 

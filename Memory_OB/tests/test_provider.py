@@ -46,7 +46,6 @@ class ProviderTestCase(unittest.TestCase):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ResourceWarning)
             shutil.rmtree(self._tmp.name, ignore_errors=True)
-            self._tmp.cleanup()
 
     def _seed(self, **kwargs) -> None:
         from memory_ob.records import Record

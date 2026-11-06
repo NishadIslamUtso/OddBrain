@@ -556,14 +556,24 @@ class Store:
         def one(sql: str) -> int:
             return int(self.conn.execute(sql).fetchone()[0])
 
+        # neverSend records are excluded from every count: a total that
+        # included them would leak how many the owner has (law 2).
+        not_private = "never_send = 0"
         return {
-            "records": one("SELECT COUNT(*) FROM records"),
-            "active": one("SELECT COUNT(*) FROM records WHERE status='active'"),
-            "confirmed": one(
-                "SELECT COUNT(*) FROM records WHERE trust >= 0.8 AND status='active'"
+            "records": one(f"SELECT COUNT(*) FROM records WHERE {not_private}"),
+            "active": one(
+                f"SELECT COUNT(*) FROM records WHERE status='active' AND {not_private}"
             ),
-            "trash": one("SELECT COUNT(*) FROM records WHERE status='trash'"),
-            "retracted": one("SELECT COUNT(*) FROM records WHERE status='retracted'"),
+            "confirmed": one(
+                "SELECT COUNT(*) FROM records WHERE trust >= 0.8 AND status='active' "
+                f"AND {not_private}"
+            ),
+            "trash": one(
+                f"SELECT COUNT(*) FROM records WHERE status='trash' AND {not_private}"
+            ),
+            "retracted": one(
+                f"SELECT COUNT(*) FROM records WHERE status='retracted' AND {not_private}"
+            ),
             "facts": one("SELECT COUNT(*) FROM facts"),
             "edges": one("SELECT COUNT(*) FROM edges"),
             "history": one("SELECT COUNT(*) FROM history"),
