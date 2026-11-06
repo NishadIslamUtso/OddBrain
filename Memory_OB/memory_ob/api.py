@@ -13,7 +13,7 @@ import logging
 from pathlib import Path
 from typing import Any, Iterator
 
-from fastapi import Depends, FastAPI, HTTPException, Query, Request
+from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import exit, hazards
@@ -42,6 +42,30 @@ def get_store() -> Iterator[Store]:
         yield st
     finally:
         st.close()
+
+
+def _receipt(
+    store: Store,
+    recipient: str,
+    records: list[Any],
+    *,
+    basis: str = "allowed",
+    purpose: str = "",
+) -> None:
+    """Write a sharing receipt. Never blocks and never fails the request."""
+    try:
+        from .receipts import ReceiptLog
+
+        ReceiptLog(settings.vault).record(
+            recipient, records, basis=basis, purpose=purpose
+        )
+        store.log_activity(
+            "receipt",
+            f"{len(records)} record(s) → {recipient}",
+            actor="memory_ob",
+        )
+    except Exception as exc:  # a receipt must never break a recall
+        logger.debug("receipt failed: %s", exc)
 
 
 def create_app() -> FastAPI:
@@ -164,6 +188,11 @@ def create_app() -> FastAPI:
             for f in facts
             if not hazards.is_hazardous(str(f.get("text") or ""))
         ]
+        # §7 sharing receipts: every time memory leaves, a receipt lands in
+        # folder 07 — who, what (ids + hashes), when, and the basis.
+        records = [h for h in hits if exit.keep(h)]
+        if records:
+            _receipt(st, "ai:recall", records, purpose=f"search: {q[:80]}")
         return {
             "query": q,
             "count": len(results),
@@ -471,7 +500,72 @@ def create_app() -> FastAPI:
 
         with Store(settings.db) as st:
             n = export_all(st, settings.vault)
-        return {"exported": n, "vault": str(settings.vault)}
+        # Re-exporting changes the vault, so refresh the manifest too.
+        from .manifest import write_manifest
+
+        manifest = write_manifest(settings.vault)
+        return {"exported": n, "vault": str(settings.vault), "manifest": manifest}
+
+    # -- intake door ---------------------------------------------------------
+
+    @app.get("/api/intake")
+    def intake_list() -> dict[str, Any]:
+        """What is sitting in the inbox, with its fingerprint."""
+        from .intake import describe
+
+        files = describe(settings.vault)
+        return {"count": len(files), "files": files}
+
+    @app.post("/api/intake")
+    async def intake_upload(
+        file: UploadFile = File(...), st: Store = Depends(get_store)
+    ) -> dict[str, Any]:
+        """Byte-preserving intake: the raw file is copied unchanged (§10)."""
+        from .intake import intake_bytes
+
+        data = await file.read()
+        result = intake_bytes(
+            data,
+            vault=settings.vault,
+            name=file.filename or "upload",
+            source={"origin": file.filename or "upload"},
+        )
+        st.log_activity(
+            "intake",
+            f"{result['bytes']} bytes → {result['name']}",
+            actor="owner",
+        )
+        return result
+
+    # -- integrity ----------------------------------------------------------
+
+    @app.get("/api/manifest")
+    def manifest_status() -> dict[str, Any]:
+        """Verify every vault file against its recorded fingerprint."""
+        from .manifest import verify_manifest
+
+        return verify_manifest(settings.vault)
+
+    @app.post("/api/manifest")
+    def manifest_rebuild() -> dict[str, Any]:
+        """Rebuild the manifest from the files currently on disk."""
+        from .manifest import write_manifest
+
+        return write_manifest(settings.vault)
+
+    @app.get("/api/receipts")
+    def list_receipts(limit: int = 50) -> dict[str, Any]:
+        """Sharing receipts — who received what, when, and on what basis."""
+        from .receipts import ReceiptLog
+
+        paths = ReceiptLog(settings.vault).list(limit=limit)
+        return {
+            "count": len(paths),
+            "receipts": [
+                {"file": p.name, "text": p.read_text(encoding="utf-8")}
+                for p in paths
+            ],
+        }
 
     return app
 

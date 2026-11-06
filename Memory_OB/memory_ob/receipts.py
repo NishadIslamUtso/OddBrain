@@ -57,6 +57,7 @@ class Receipt:
             f"recipient: {self.recipient}",
             f"basis: {self.basis}",
             f"purpose: {self.purpose}",
+            "algorithm: sha256",
             "record_ids: [" + ", ".join(self.record_ids) + "]",
             "record_hashes: [" + ", ".join(self.record_hashes) + "]",
             "---",
