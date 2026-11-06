@@ -198,6 +198,7 @@ const TABS = [
   ['health', 'Health'],
   ['settings', 'Settings'],
   ['intake', 'Intake'],
+  ['recall', 'Recall'],
 ];
 
 async function api(path, opts) {
@@ -603,6 +604,10 @@ async function viewHealth() {
 async function viewSettings() {
   const data = await api('/api/models');
   const cfg = data.config;
+  let settings = {};
+  let neverSend = [];
+  try { settings = await api('/api/app-settings'); } catch (e) {}
+  try { neverSend = (await api('/api/neversend')).ids || []; } catch (e) {}
   const slotRows = ['extract', 'dream', 'embed', 'rerank', 'chapter'].map(name => {
     const s = (cfg.auxiliary || {})[name] || {};
     return `<tr>
@@ -640,8 +645,29 @@ async function viewSettings() {
       <div class="toolbar" style="margin-top:10px">
         <button class="act" id="doExport">Export vault</button>
         <button class="act" id="doEmbed">Compute embeddings</button>
+        <button class="act" id="doBackup">Back up</button>
       </div>
       <div id="vaultMsg"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Brain settings</h3>
+      <div class="kv"><span>brain path</span><span>${esc(settings.brain_path || '(default vault)')}</span></div>
+      <div class="kv"><span>semantic search</span><span>${settings.semantic ? 'on' : 'off'}</span></div>
+      <div class="kv"><span>sweep schedule</span><span>${esc(settings.sweep_schedule)}</span></div>
+      <div class="kv"><span>checkpoint before compress</span><span>${settings.checkpoint_required ? 'on' : 'off'}</span></div>
+      <div class="kv"><span>show demo records</span><span>${settings.demo_visible ? 'on' : 'off'}</span></div>
+      <div class="toolbar" style="margin-top:10px">
+        <button class="act" id="toggleSemantic">${settings.semantic ? 'Turn semantic off' : 'Turn semantic on'}</button>
+        <button class="act" id="toggleCheckpoint">${settings.checkpoint_required ? 'Turn checkpoint off' : 'Turn checkpoint on'}</button>
+        <button class="act" id="toggleDemo">${settings.demo_visible ? 'Hide demo records' : 'Show demo records'}</button>
+      </div>
+      <div id="appSettingsMsg"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Private records</h3>
+      <div class="kv"><span>neverSend records</span><span>${neverSend.length}</span></div>
+      <div class="sub">Ids only — the contents never leave the store (law 2). Clearing the flag is your decision and is logged.</div>
+      <div id="neverSendList">${neverSend.map(id => `<div class="kv"><span>${esc(id)}</span><button class="act" data-clear-ns="${esc(id)}">clear flag</button></div>`).join('')}</div>
     </div>`;
 }
 
@@ -657,6 +683,15 @@ async function viewIntake() {
         <button class="act" id="doChapter">Draft a Life Story chapter</button>
       </div>
       <div id="capOut"></div>
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Bring a file in</h3>
+      <div class="sub">The raw bytes are copied unchanged into <code>01 Inbox</code> and fingerprinted. Memory_OB never rewrites the original.</div>
+      <div class="toolbar">
+        <input type="file" id="intakeFile">
+        <button class="act" id="doIntake">Copy in</button>
+      </div>
+      <div id="intakeOut"></div>
     </div>
     <div class="card">
       <div class="kv">
@@ -675,7 +710,24 @@ const VIEWS = {
   health: viewHealth,
   settings: viewSettings,
   intake: viewIntake,
+  recall: viewRecall,
 };
+
+async function viewRecall() {
+  const activity = await api('/api/activity?limit=100');
+  const rec = (await api('/api/receipts?limit=50')).receipts || [];
+  const rows = activity.filter(a => ['receipt', 'sync', 'capture', 'search'].includes(a.action));
+  const line = a => `<div class="kv"><span>${esc(a.action)}</span><span>${esc(a.detail || '')}</span><span class="dim">${esc((a.at || '').replace('T', ' ').slice(0, 19))}</span></div>`;
+  return `<h2>Recall feed</h2><div class="sub">What memory has been doing — captures, recalls, receipts and syncs. Receipts are audit records, never blockers.</div>
+    <div class="card">
+      <h3 style="margin-top:0">Sharing receipts (${rec.length})</h3>
+      ${rec.length ? rec.map(r => `<div class="kv"><span>${esc(r.file)}</span></div>`).join('') : '<div class="empty">No memory has left the store yet.</div>'}
+    </div>
+    <div class="card">
+      <h3 style="margin-top:0">Recent activity</h3>
+      ${rows.length ? rows.slice(0, 30).map(line).join('') : '<div class="empty">Nothing yet.</div>'}
+    </div>`;
+}
 
 /* deferred bindings for views that render buttons after innerHTML */
 async function bindLate() {
@@ -748,8 +800,44 @@ async function bindLate() {
       try { const r = await api('/api/embed', { method: 'POST', body: {} }); document.getElementById('vaultMsg').innerHTML = `<span class="ok">${r.computed} computed, ${r.cached} cached.</span>`; }
       catch (e) { document.getElementById('vaultMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     };
+    const backup = document.getElementById('doBackup');
+    if (backup) backup.onclick = async () => {
+      try { const r = await api('/api/backup', { method: 'POST', body: {} }); document.getElementById('vaultMsg').innerHTML = `<span class="ok">Backed up: ${esc(r.backup)}</span>`; }
+      catch (e) { document.getElementById('vaultMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+    };
+    const flip = async (key, label) => {
+      try {
+        await api('/api/app-settings', { method: 'POST', body: { [key]: !(settings[key]) } });
+        document.getElementById('appSettingsMsg').innerHTML = '<span class="ok">Saved.</span>';
+        render();
+      } catch (e) { document.getElementById('appSettingsMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+    };
+    for (const [id, key] of [['toggleSemantic', 'semantic'], ['toggleCheckpoint', 'checkpoint_required'], ['toggleDemo', 'demo_visible']]) {
+      const b = document.getElementById(id);
+      if (b) b.onclick = () => flip(key, id);
+    }
+    document.querySelectorAll('[data-clear-ns]').forEach(b => {
+      b.onclick = async () => {
+        try {
+          await api('/api/neversend/' + encodeURIComponent(b.getAttribute('data-clear-ns')), { method: 'POST' });
+          render();
+        } catch (e) { alert(e.message); }
+      };
+    });
   }
   if (state.tab === 'intake') {
+    const up = document.getElementById('doIntake');
+    if (up) up.onclick = async () => {
+      const file = document.getElementById('intakeFile').files[0];
+      const out = document.getElementById('intakeOut');
+      if (!file) { out.innerHTML = '<span class="err">Choose a file first.</span>'; return; }
+      const data = await file.arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(data)));
+      try {
+        const r = await api('/api/intake/data', { method: 'POST', body: { name: file.name, data_b64: b64 } });
+        out.innerHTML = `<span class="ok">${r.bytes} bytes copied — sha256 ${esc(r.sha256.slice(0, 16))}…</span>`;
+      } catch (e) { out.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
+    };
     const cap = document.getElementById('doCapture');
     if (cap) cap.onclick = async () => {
       const text = document.getElementById('capText').value.trim();

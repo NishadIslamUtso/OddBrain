@@ -551,6 +551,23 @@ def create_app() -> FastAPI:
         )
         return result
 
+    @app.post("/api/intake/data")
+    async def intake_data(payload: dict[str, Any]) -> dict[str, Any]:
+        """Base64 intake for the host bridge, which cannot send multipart."""
+        import base64
+
+        from .intake import intake_bytes
+
+        raw = payload.get("data_b64") or ""
+        name = str(payload.get("name") or "upload")
+        try:
+            data = base64.b64decode(raw)
+        except Exception:
+            raise HTTPException(400, "data_b64 is not valid base64")
+        return intake_bytes(
+            data, vault=settings.vault, name=name, source={"origin": name}
+        )
+
     # -- integrity ----------------------------------------------------------
 
     @app.get("/api/manifest")
@@ -580,6 +597,69 @@ def create_app() -> FastAPI:
                 for p in paths
             ],
         }
+
+    # -- app settings + neverSend management --------------------------------
+
+    @app.get("/api/app-settings")
+    def app_settings() -> dict[str, Any]:
+        """Everything the Settings page holds besides the model selector."""
+        from .settings import load
+
+        return load(settings.vault).to_dict()
+
+    @app.post("/api/app-settings")
+    def save_app_settings(payload: dict[str, Any]) -> dict[str, Any]:
+        from .settings import update
+
+        allowed = {
+            "brain_path", "semantic", "sweep_schedule",
+            "checkpoint_required", "backup_dir", "demo_visible",
+        }
+        saved = update(settings.vault, **{k: v for k, v in (payload or {}).items() if k in allowed})
+        return saved.to_dict()
+
+    @app.get("/api/neversend")
+    def list_neversend() -> dict[str, Any]:
+        """The ids of neverSend records — ids only, never text or counts.
+
+        Law 2: the management surface proves the flag exists without
+        revealing what it protects.
+        """
+        with Store(settings.db) as st:
+            rows = st.conn.execute(
+                "SELECT id FROM records WHERE never_send = 1 ORDER BY created DESC"
+            ).fetchall()
+        return {"ids": [r["id"] for r in rows]}
+
+    @app.post("/api/neversend/{record_id}")
+    def clear_neversend(record_id: str) -> dict[str, Any]:
+        """Clear the neverSend flag on a record (owner decision, logged)."""
+        with Store(settings.db) as st:
+            rec = st.get_record(record_id)
+            if rec is None:
+                raise HTTPException(404, "record not found")
+            rec.never_send = False
+            st.add_record(rec, changed_by="owner")
+            st.log_activity(
+                "neversend_cleared", f"flag cleared on {record_id}", actor="owner"
+            )
+        return {"ok": True}
+
+    @app.post("/api/backup")
+    def run_backup() -> dict[str, Any]:
+        """Write a timestamped archive of the ledger and the export."""
+        import sys
+        from pathlib import Path as _Path
+
+        host_dir = _Path(__file__).resolve().parent.parent / "host"
+        if str(host_dir) not in sys.path:
+            sys.path.insert(0, str(host_dir))
+        try:
+            from backup import create_backup
+        except Exception as exc:
+            raise HTTPException(500, f"backup unavailable: {exc}")
+        path = create_backup(settings.vault)
+        return {"backup": str(path)}
 
     return app
 
