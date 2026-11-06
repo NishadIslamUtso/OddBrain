@@ -188,9 +188,9 @@ class ApiCase(unittest.TestCase):
         from memory_ob import api
 
         api.settings = api.Settings.resolve(vault=self.vault, db=self.db)
-        from fastapi.testclient import TestClient
+        from tests.helpers import AuthedClient
 
-        self.client = TestClient(api.create_app())
+        self.client = AuthedClient.create(api.create_app(), self.vault)
 
     def test_health(self) -> None:
         r = self.client.get("/api/health")

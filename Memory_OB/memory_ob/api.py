@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any, Iterator
 
 from fastapi import Depends, FastAPI, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from .auth import TOKEN_HEADER, load_or_create, verify
 from .config import Settings
@@ -63,8 +63,9 @@ def create_app() -> FastAPI:
                 # Create the token on first sight so an install that predates
                 # the gate can still boot; the first page load then works.
                 load_or_create(settings.token_path)
-                raise HTTPException(
-                    status_code=401, detail="a valid write token is required"
+                return JSONResponse(
+                    status_code=401,
+                    content={"detail": "a valid write token is required"},
                 )
         return await call_next(request)
 

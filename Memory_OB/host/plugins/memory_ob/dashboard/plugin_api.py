@@ -96,13 +96,26 @@ _THEME_NAMES = {
 
 
 def _render_html(theme: dict[str, str]) -> str:
-    """The UI markup with the API base (and optional theme) injected."""
+    """The UI markup with the API base, theme and write token injected."""
     if _INDEX is None:
         return f"<!doctype html><h2>Memory_OB is not installed</h2><p>{_ERROR or 'web/index.html not found'}</p>"
     html = _INDEX.read_text(encoding="utf-8")
     html = html.replace(
         'window.__MEMORY_OB_BASE__ = "";',
         f'window.__MEMORY_OB_BASE__ = "{_API_BASE}";',
+    )
+    # The write token is injected so the pages can echo it back on every write
+    # (§15 rule 5) — no default token is ever shipped.
+    try:
+        from memory_ob.auth import load_or_create
+        from memory_ob.config import Settings
+
+        token = load_or_create(Settings.resolve().token_path)
+    except Exception:
+        token = ""
+    html = html.replace(
+        'window.__MEMORY_OB_TOKEN__ = "";',
+        f'window.__MEMORY_OB_TOKEN__ = "{token}";',
     )
     if theme:
         rules = " ".join(f"--ui-{name}: {value};" for name, value in theme.items())

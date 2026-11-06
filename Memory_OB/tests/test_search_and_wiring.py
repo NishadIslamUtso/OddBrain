@@ -287,10 +287,10 @@ class ApiCase(unittest.TestCase):
         os.environ["MEMORY_OB_DB"] = self.db
 
         from memory_ob import api
-        from fastapi.testclient import TestClient
+        from tests.helpers import AuthedClient
 
         api.settings = api.Settings.resolve(vault=self.vault, db=self.db)
-        self.client = TestClient(api.create_app())
+        self.client = AuthedClient.create(api.create_app(), self.vault)
 
     def test_dream_endpoint(self):
         r = self.client.post("/api/dream")
