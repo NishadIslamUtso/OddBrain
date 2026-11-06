@@ -41,7 +41,9 @@ _MIN_OUTPUT_LEN = 20     # below this the block is not worth a prompt slot
 _MAX_RECORDS = 6
 _MAX_FACTS = 4
 _MAX_SNIPPET = 320
-_MAX_CAPTURE_CHARS = 12_000
+# §7: prefetch has a hard five-second deadline. A slow recall is a missed
+# recall, not a late one — the turn must not be held up.
+_MAX_SECONDS = 5.0
 
 # The Review card actions the agent may take. `confirm`/`deny` are the owner's
 # signature — the agent may PROPOSE, never sign; `later` defers.
@@ -237,11 +239,26 @@ class MemoryOBProvider(MemoryProvider):
         if self._anonymous():
             # §7: anonymous mode injects nothing at all.
             return ""
-        try:
-            block, count = self._recall(query)
-        except Exception as exc:
-            logger.warning("Memory_OB prefetch failed: %s", exc)
+        # §7: a hard deadline. The recall runs on a thread so a slow search
+        # (embeddings, a cold index) cannot hold the turn open.
+        outcome: dict[str, Any] = {}
+
+        def work() -> None:
+            try:
+                outcome["value"] = self._recall(query)
+            except Exception as exc:
+                outcome["error"] = exc
+
+        thread = threading.Thread(target=work, name="memory-ob-recall", daemon=True)
+        thread.start()
+        thread.join(_MAX_SECONDS)
+        if thread.is_alive():
+            logger.warning("Memory_OB recall exceeded the %.0fs deadline", _MAX_SECONDS)
             return ""
+        if "error" in outcome:
+            logger.warning("Memory_OB prefetch failed: %s", outcome["error"])
+            return ""
+        block, count = outcome["value"]
         self._last_recall = RecallStatus(
             provider_label=PROVIDER_NAME, count=count, glyph="Memory_OB"
         )
@@ -251,26 +268,44 @@ class MemoryOBProvider(MemoryProvider):
         return self._last_recall
 
     def _recall(self, query: str) -> tuple[str, int]:
+        """Recall, passed through the engine's exit gate (§7).
+
+        The gate is the same one the screens use: neverSend records never
+        leave (text, title or counts) and hazardous text never reaches the
+        model. Every share also leaves a receipt in folder 07.
+        """
+        from memory_ob.exit import keep
+        from memory_ob.records import CANDIDATE_MIN, CONFIRMED_MIN
+
         store = self._store()
         try:
             search = getattr(store, "search_all", None) or store.search
-            records = [
+            hits = [
                 r for r in search(query, limit=_MAX_RECORDS * 2)
-                if r.status == "active" and not r.never_send
+                if r.status == "active" and keep(r)
             ]
             facts = store.search_facts(query, limit=_MAX_FACTS)
         finally:
             store.close()
 
-        records.sort(key=lambda r: r.trust, reverse=True)
-        records = records[:_MAX_RECORDS]
+        # §7: every time memory leaves, a receipt lands in 07.
+        if hits:
+            self._receipt("ai:recall", hits[:_MAX_RECORDS],
+                          purpose=f"prefetch: {query[:80]}")
+
+        hits.sort(key=lambda r: r.trust, reverse=True)
+        records = hits[:_MAX_RECORDS]
 
         if not records and not facts:
             return "", 0
 
         lines = ["## Memory_OB recall", ""]
         for r in records:
-            tier = "confirmed" if r.trust >= 0.8 else ("candidate" if r.trust >= 0.3 else "raw")
+            tier = (
+                "confirmed" if r.trust >= CONFIRMED_MIN
+                else "candidate" if r.trust >= CANDIDATE_MIN
+                else "raw"
+            )
             snippet = (r.body or r.title or "").strip().replace("\n", " ")
             if len(snippet) > _MAX_SNIPPET:
                 snippet = snippet[: _MAX_SNIPPET - 1] + "…"
@@ -288,6 +323,18 @@ class MemoryOBProvider(MemoryProvider):
                     lines.append(f"- {text}")
 
         return "\n".join(lines), len(records)
+
+    def _receipt(self, recipient: str, records: list, *, purpose: str = "") -> None:
+        """A sharing receipt. Never blocks and never fails the recall."""
+        try:
+            from memory_ob.receipts import ReceiptLog
+            from memory_ob.config import Settings
+
+            ReceiptLog(Settings.resolve().vault).record(
+                recipient, records, purpose=purpose
+            )
+        except Exception as exc:
+            logger.debug("recall receipt failed: %s", exc)
 
     def queue_prefetch(self, query: str, *, session_id: str = "") -> None:
         """No-op: ``prefetch`` is synchronous, so there is nothing to queue."""
@@ -387,7 +434,7 @@ class MemoryOBProvider(MemoryProvider):
                         if len(text) < _MIN_QUERY_LEN:
                             continue
                         candidates = extract_claims(
-                            text[:_MAX_CAPTURE_CHARS],
+                            text,
                             source={
                                 "origin": "hermes",
                                 "session": self._session_id,
