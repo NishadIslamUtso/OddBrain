@@ -74,6 +74,7 @@ class TestDiscovery(ProviderTestCase):
                 "memory_ob_capture",
                 "memory_ob_review",
                 "memory_ob_stats",
+                "memory_ob_anonymous",
             },
         )
 

@@ -45,6 +45,22 @@ def config_path() -> Path | None:
     return p if p.exists() else None
 
 
+def hermes_memory_paths() -> tuple[Path | None, Path | None]:
+    """Where Hermes keeps its standing memory files, if it is installed.
+
+    ``MEMORY.md`` and ``USER.md`` live at the Hermes home. Both are returned
+    even when absent — the sync writes them only when the owner opts in.
+    """
+    memory = HERMES_HOME / "MEMORY.md"
+    user = HERMES_HOME / "USER.md"
+    return (memory if memory.exists() else None, user if user.exists() else None)
+
+
+def hermes_memory_dir() -> Path | None:
+    """The Hermes home when it is installed (for the sync's backups)."""
+    return HERMES_HOME if HERMES_HOME.is_dir() else None
+
+
 def config_get(key: str) -> str | None:
     """Resolve a Hermes config value. Returns None when unset/unavailable."""
     if key in _cache:

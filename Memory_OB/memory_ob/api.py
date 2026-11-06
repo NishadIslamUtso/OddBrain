@@ -389,6 +389,53 @@ def create_app() -> FastAPI:
             "state": anonymous.describe(settings.vault),
         }
 
+    # -- standing-layer sync ----------------------------------------------
+
+    @app.get("/api/sync")
+    def sync_status() -> dict[str, Any]:
+        """Is standing-layer sync on, and where would it write?"""
+        from .hermes import hermes_memory_paths
+
+        memory_path, user_path = hermes_memory_paths()
+        return {
+            "enabled": settings.sync_enabled,
+            "memory_path": str(memory_path),
+            "user_path": str(user_path),
+            "confirmed": 0,
+            "note": (
+                "OFF by default. Confirmed records only; hand-written text "
+                "outside the marked block never moves."
+            ),
+        }
+
+    @app.post("/api/sync")
+    def run_sync(payload: dict[str, Any] | None = None, st: Store = Depends(get_store)) -> dict[str, Any]:
+        """Sync confirmed truth into Hermes's MEMORY.md / USER.md (§7)."""
+        from . import sync
+        from .hermes import hermes_memory_paths
+
+        payload = payload or {}
+        enabled = (
+            settings.sync_enabled
+            if payload.get("anonymous") is None and "enabled" not in payload
+            else bool(payload.get("enabled"))
+        )
+        memory_path, user_path = hermes_memory_paths()
+        if not memory_path or not user_path:
+            raise HTTPException(400, "Hermes memory files not found")
+        result = sync.sync_all(
+            st,
+            memory_path=memory_path,
+            user_path=user_path,
+            enabled=enabled,
+        )
+        st.log_activity(
+            "sync",
+            f"{result['synced']} confirmed record(s) → Hermes memory",
+            actor="owner",
+        )
+        return result
+
     # -- models ------------------------------------------------------------
 
     @app.get("/api/models")

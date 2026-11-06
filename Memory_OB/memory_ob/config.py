@@ -73,6 +73,7 @@ class Settings:
     db: Path
     models_path: Path
     token_path: Path
+    sync_enabled: bool = False
 
     @classmethod
     def resolve(
@@ -82,8 +83,12 @@ class Settings:
         db: str | Path | None = None,
         models_path: str | Path | None = None,
         token_path: str | Path | None = None,
+        sync_enabled: bool | None = None,
     ) -> "Settings":
         v = Path(vault).expanduser() if vault else default_vault()
+        if sync_enabled is None:
+            raw = os.environ.get("MEMORY_OB_SYNC", "")
+            sync_enabled = raw.strip().lower() in {"1", "true", "yes", "on"}
         return cls(
             vault=v,
             db=Path(db).expanduser() if db else default_db(v),
@@ -97,6 +102,7 @@ class Settings:
                 if token_path
                 else default_token_path(v)
             ),
+            sync_enabled=bool(sync_enabled),
         )
 
     def ensure_dirs(self) -> None:
