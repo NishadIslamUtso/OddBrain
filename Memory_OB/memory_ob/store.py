@@ -59,6 +59,7 @@ CREATE TABLE IF NOT EXISTS records (
     capture_time TEXT,
     confirmed_by TEXT,
     never_send INTEGER NOT NULL DEFAULT 0,
+    demo INTEGER NOT NULL DEFAULT 0,
     links TEXT NOT NULL DEFAULT '{}',
     created TEXT NOT NULL,
     modified TEXT NOT NULL
@@ -80,6 +81,7 @@ CREATE TABLE IF NOT EXISTS facts (
     trust REAL NOT NULL DEFAULT 0.3,
     status TEXT NOT NULL DEFAULT 'candidate',
     source TEXT NOT NULL DEFAULT '{}',
+    demo INTEGER NOT NULL DEFAULT 0,
     created TEXT NOT NULL
 );
 
@@ -164,11 +166,42 @@ class Store:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.path))
+        self.conn = sqlite3.connect(str(self.path), timeout=10.0)
         self.conn.row_factory = sqlite3.Row
+        # Several connections may be open at once (a request store beside the
+        # caller's). WAL lets readers and a writer coexist; busy_timeout
+        # covers the rest.
+        self.conn.execute("PRAGMA journal_mode = WAL")
+        self.conn.execute("PRAGMA busy_timeout = 10000")
         self.conn.executescript(_SCHEMA)
+        self._migrate()
         self._meta_setdefault("schema_version", str(SCHEMA_VERSION))
         self._meta_setdefault("created_at", _now())
+
+    def _migrate(self) -> None:
+        """Add columns that older databases predate.
+
+        ``CREATE TABLE IF NOT EXISTS`` cannot change an existing table, so
+        each new column gets a guarded ``ALTER TABLE``. The vault is the
+        owner's; a failed migration must never lose it.
+        """
+        have = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(records)").fetchall()
+        }
+        if "demo" not in have:
+            self.conn.execute(
+                "ALTER TABLE records ADD COLUMN demo INTEGER NOT NULL DEFAULT 0"
+            )
+        facts_have = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(facts)").fetchall()
+        }
+        if "demo" not in facts_have:
+            self.conn.execute(
+                "ALTER TABLE facts ADD COLUMN demo INTEGER NOT NULL DEFAULT 0"
+            )
+        self.conn.commit()
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -200,13 +233,14 @@ class Store:
             "INSERT OR REPLACE INTO records"
             "(id, kind, subject, speaker, status, trust, title, body, tags,"
             " source, event_time, capture_time, confirmed_by, never_send,"
-            " links, created, modified)"
-            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+            " demo, links, created, modified)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
             (
                 rec.id, rec.kind, rec.subject, rec.speaker, rec.status,
                 rec.trust, rec.title, rec.body, _json(rec.tags),
                 _json(rec.source), rec.event_time, rec.capture_time,
-                rec.confirmed_by, int(rec.never_send), _json(rec.links),
+                rec.confirmed_by, int(rec.never_send), int(rec.demo),
+                _json(rec.links),
                 rec.created, rec.modified,
             ),
         )
@@ -232,6 +266,7 @@ class Store:
         status: str | None = None,
         speaker: str | None = None,
         include_private: bool = False,
+        include_demo: bool = False,
         limit: int = 200,
     ) -> list[Record]:
         sql = "SELECT * FROM records WHERE 1=1"
@@ -249,6 +284,9 @@ class Store:
         # export. Only an explicit owner-facing call may include them.
         if not include_private:
             sql += " AND never_send = 0"
+        # §15 rule 7: shipped sample records are quarantined by default.
+        if not include_demo:
+            sql += " AND demo = 0"
         sql += " ORDER BY created DESC LIMIT ?"
         params.append(limit)
         rows = self.conn.execute(sql, params).fetchall()
@@ -294,6 +332,7 @@ class Store:
             capture_time=row["capture_time"],
             confirmed_by=row["confirmed_by"],
             never_send=bool(row["never_send"]),
+            demo=bool(row["demo"]),
             links=json.loads(row["links"]),
             created=row["created"],
             modified=row["modified"],
@@ -383,7 +422,7 @@ class Store:
         parts = [p for p in _FTS_TOKEN_RE.findall(query or "") if p]
         if not parts:
             return []
-        sql = "SELECT * FROM facts WHERE status = 'candidate' AND ("
+        sql = "SELECT * FROM facts WHERE status = 'candidate' AND demo = 0 AND ("
         sql += " OR ".join(["text LIKE ?"] * len(parts))
         sql += ") ORDER BY trust DESC LIMIT ?"
         params: list[Any] = [f"%{p}%" for p in parts] + [limit]
@@ -427,7 +466,7 @@ class Store:
     def _search_rows(self, match: str, limit: int) -> list[Any]:
         return self.conn.execute(
             "SELECT r.* FROM records_fts f JOIN records r ON r.id = f.id"
-            " WHERE records_fts MATCH ? AND r.never_send = 0"
+            " WHERE records_fts MATCH ? AND r.never_send = 0 AND r.demo = 0"
             " AND r.status != 'trash' ORDER BY rank LIMIT ?",
             (match, limit),
         ).fetchall()
@@ -527,12 +566,19 @@ class Store:
 
     # -- facts (living index) ----------------------------------------------
 
-    def add_fact(self, text: str, *, trust: float = 0.3, source: dict | None = None) -> str:
+    def add_fact(
+        self,
+        text: str,
+        *,
+        trust: float = 0.3,
+        source: dict | None = None,
+        demo: bool = False,
+    ) -> str:
         fid = idgen.new_id()
         self.conn.execute(
-            "INSERT INTO facts(id, text, trust, status, source, created)"
-            " VALUES(?,?,?,?,?,?)",
-            (fid, text, trust, "candidate", _json(source or {}), _now()),
+            "INSERT INTO facts(id, text, trust, status, source, demo, created)"
+            " VALUES(?,?,?,?,?,?,?)",
+            (fid, text, trust, "candidate", _json(source or {}), int(demo), _now()),
         )
         self.conn.commit()
         return fid
@@ -637,22 +683,23 @@ class Store:
         # neverSend records are excluded from every count: a total that
         # included them would leak how many the owner has (law 2).
         not_private = "never_send = 0"
+        not_demo = "demo = 0"
         return {
-            "records": one(f"SELECT COUNT(*) FROM records WHERE {not_private}"),
+            "records": one(f"SELECT COUNT(*) FROM records WHERE {not_private} AND {not_demo}"),
             "active": one(
-                f"SELECT COUNT(*) FROM records WHERE status='active' AND {not_private}"
+                f"SELECT COUNT(*) FROM records WHERE status='active' AND {not_private} AND {not_demo}"
             ),
             "confirmed": one(
                 "SELECT COUNT(*) FROM records WHERE trust >= 0.8 AND status='active' "
-                f"AND {not_private}"
+                f"AND {not_private} AND {not_demo}"
             ),
             "trash": one(
-                f"SELECT COUNT(*) FROM records WHERE status='trash' AND {not_private}"
+                f"SELECT COUNT(*) FROM records WHERE status='trash' AND {not_private} AND {not_demo}"
             ),
             "retracted": one(
-                f"SELECT COUNT(*) FROM records WHERE status='retracted' AND {not_private}"
+                f"SELECT COUNT(*) FROM records WHERE status='retracted' AND {not_private} AND {not_demo}"
             ),
-            "facts": one("SELECT COUNT(*) FROM facts"),
+            "facts": one("SELECT COUNT(*) FROM facts WHERE demo = 0"),
             "edges": one("SELECT COUNT(*) FROM edges"),
             "history": one("SELECT COUNT(*) FROM history"),
         }

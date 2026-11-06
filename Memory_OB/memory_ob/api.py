@@ -101,14 +101,18 @@ def create_app() -> FastAPI:
         kind: str | None = None,
         status: str | None = None,
         limit: int = 200,
+        include_demo: bool = False,
         st: Store = Depends(get_store),
     ) -> list[dict[str, Any]]:
         # The exit gate: neverSend and hazardous records never leave (§7).
         # The list length is the SHOWN count — it never reveals how many
-        # were withheld (law 2).
+        # were withheld (law 2). Demo records stay quarantined unless the
+        # owner asks for them explicitly (§15 rule 7).
         return exit.dicts_out(
             r.to_dict()
-            for r in st.list_records(kind=kind, status=status, limit=limit)
+            for r in st.list_records(
+                kind=kind, status=status, include_demo=include_demo, limit=limit
+            )
         )
 
     @app.get("/api/records/{record_id}")

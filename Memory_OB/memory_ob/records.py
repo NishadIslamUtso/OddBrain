@@ -101,6 +101,7 @@ class Record:
     capture_time: str | None = None
     confirmed_by: str | None = None
     never_send: bool = False
+    demo: bool = False
     links: dict[str, list[str]] = field(default_factory=dict)
     created: str = ""
     modified: str = ""
@@ -154,4 +155,5 @@ class Record:
         d.setdefault("source", {})
         d.setdefault("links", {})
         d.setdefault("never_send", False)
+        d.setdefault("demo", False)
         return cls.from_dict(d)
