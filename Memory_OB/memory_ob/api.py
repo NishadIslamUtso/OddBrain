@@ -364,6 +364,31 @@ def create_app() -> FastAPI:
 
         return exit.dicts_out(r.to_dict() for r in journal_entries(st, limit=limit))
 
+    # -- anonymous mode ----------------------------------------------------
+
+    @app.get("/api/anonymous")
+    def anonymous_status() -> dict[str, Any]:
+        from . import anonymous
+
+        return {
+            "anonymous": anonymous.is_anonymous(settings.vault),
+            "state": anonymous.describe(settings.vault),
+        }
+
+    @app.post("/api/anonymous")
+    def anonymous_set(payload: dict[str, Any]) -> dict[str, Any]:
+        """Turn anonymous mode on or off (§7). Owner-run only."""
+        from . import anonymous
+
+        want = payload.get("anonymous")
+        if want is None:
+            return {"anonymous": anonymous.toggle(settings.vault)}
+        anonymous.set_anonymous(settings.vault, bool(want))
+        return {
+            "anonymous": anonymous.is_anonymous(settings.vault),
+            "state": anonymous.describe(settings.vault),
+        }
+
     # -- models ------------------------------------------------------------
 
     @app.get("/api/models")

@@ -83,28 +83,37 @@ def install(*, enable: bool = True) -> int:
 
     # The memory_ob plugin directory holds two halves: the dashboard backend
     # (screens) and the memory provider (the Hermes memory pipe). They share
-    # one directory, so they merge rather than overwrite.
-    groups: list[tuple[str, list[Path], Path]] = [
+    # one directory, so they merge rather than overwrite. The skills copy is
+    # additive only — Hermes ships its own skills beside ours.
+    groups: list[tuple[str, list[Path], Path, bool]] = [
         (
             "memory_ob",
             [SRC / "plugins" / "memory_ob", SRC.parent / "provider" / "memory_ob"],
             home / "plugins" / "memory_ob",
+            True,
         ),
         (
             "memory-ob",
             [SRC / "desktop-plugins" / "memory-ob"],
             home / "desktop-plugins" / "memory-ob",
+            True,
+        ),
+        (
+            "skills",
+            [SRC.parent / "skills"],
+            home / "skills",
+            False,
         ),
     ]
 
     print(f"Hermes home: {home}")
-    for label, srcs, dst in groups:
+    for label, srcs, dst, prune in groups:
         for src in srcs:
             if not src.is_dir():
                 print(f"  missing source: {src}")
                 return 1
         if len(srcs) == 1:
-            copied, removed = _copy_tree(srcs[0], dst)
+            copied, removed = _copy_tree(srcs[0], dst, remove_stale=prune)
         else:
             copied, removed = _merge_into(srcs, dst)
         print(f"  {label:12s} -> {dst}  ({copied} updated, {removed} removed)")

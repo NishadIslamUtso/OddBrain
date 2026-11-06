@@ -140,6 +140,13 @@ STATS_SCHEMA = _schema(
     "memory_ob_stats",
     "Memory_OB health: record counts by status, trust distribution, pending cards.",
 )
+ANONYMOUS_SCHEMA = _schema(
+    "memory_ob_anonymous",
+    "Anonymous mode: no recall is injected and nothing is saved as personal "
+    "memory. Check the state, turn it on, or turn it off. Off restores normal "
+    "memory immediately.",
+    ("action", "'status', 'on' or 'off'."),
+)
 
 
 # --------------------------------------------------------------------------
@@ -193,6 +200,16 @@ class MemoryOBProvider(MemoryProvider):
             return None
         return memory_ob
 
+    def _anonymous(self) -> bool:
+        """True while the owner's anonymous-mode toggle is on (§7)."""
+        try:
+            from memory_ob import anonymous
+            from memory_ob.config import Settings
+
+            return anonymous.is_anonymous(Settings.resolve().vault)
+        except Exception:
+            return False
+
     def _store(self) -> Any:
         """A fresh store bound to the configured vault (one per call)."""
         memory_ob = self._import_engine()
@@ -210,6 +227,9 @@ class MemoryOBProvider(MemoryProvider):
     def prefetch(self, query: str, *, session_id: str = "") -> str:
         """Recall context for the upcoming turn. Fast, bounded, never blocking."""
         if not self._auto_extract or not query or len(query.strip()) < _MIN_QUERY_LEN:
+            return ""
+        if self._anonymous():
+            # §7: anonymous mode injects nothing at all.
             return ""
         try:
             block, count = self._recall(query)
@@ -280,6 +300,9 @@ class MemoryOBProvider(MemoryProvider):
         """Extract candidate facts from a finished turn, in the background."""
         if not self._auto_extract:
             return
+        if self._anonymous():
+            # §7: anonymous mode saves nothing as personal memory.
+            return
         parts: list[tuple[str, str]] = []
         if user_content and user_content.strip():
             parts.append(("user", user_content.strip()))
@@ -297,6 +320,8 @@ class MemoryOBProvider(MemoryProvider):
     def on_pre_compress(self, messages: list[dict[str, Any]]) -> str:
         """Capture what compression is about to discard, and digest it."""
         if not self._auto_extract or not messages:
+            return ""
+        if self._anonymous():
             return ""
         parts: list[tuple[str, str]] = [
             (str(m.get("role", "user")), str(m.get("content", "")).strip())
@@ -377,7 +402,13 @@ class MemoryOBProvider(MemoryProvider):
     # -- agent tools ----------------------------------------------------
 
     def get_tool_schemas(self) -> list[dict[str, Any]]:
-        return [SEARCH_SCHEMA, CAPTURE_SCHEMA, REVIEW_SCHEMA, STATS_SCHEMA]
+        return [
+            SEARCH_SCHEMA,
+            CAPTURE_SCHEMA,
+            REVIEW_SCHEMA,
+            STATS_SCHEMA,
+            ANONYMOUS_SCHEMA,
+        ]
 
     def handle_tool_call(self, tool_name: str, args: dict[str, Any], **kwargs) -> str:
         try:
@@ -403,6 +434,9 @@ class MemoryOBProvider(MemoryProvider):
 
             if tool_name == "memory_ob_stats":
                 return self._stats()
+
+            if tool_name == "memory_ob_anonymous":
+                return self._anonymous_tool(args)
 
             return tool_error(f"Unknown tool: {tool_name}")
         except Exception as exc:
@@ -443,10 +477,26 @@ class MemoryOBProvider(MemoryProvider):
             )
         store = self._store()
         try:
-            CardStore(store).resolve(card_id, action, actor="agent")
+            CardStore(store).resolve(card_id, action, by="agent")
         finally:
             store.close()
         return json.dumps({"ok": True, "card": card_id, "action": action})
+
+    def _anonymous_tool(self, args: dict[str, Any]) -> str:
+        from memory_ob import anonymous
+        from memory_ob.config import Settings
+
+        vault = Settings.resolve().vault
+        action = str(args.get("action") or "status").strip().lower()
+        if action in {"on", "enable", "true"}:
+            anonymous.set_anonymous(vault, True)
+        elif action in {"off", "disable", "false"}:
+            anonymous.set_anonymous(vault, False)
+        elif action != "status":
+            return tool_error("action must be 'status', 'on' or 'off'")
+        return json.dumps(
+            {"anonymous": anonymous.is_anonymous(vault), "state": anonymous.describe(vault)}
+        )
 
     def _stats(self) -> str:
         store = self._store()
@@ -462,7 +512,7 @@ class MemoryOBProvider(MemoryProvider):
     # -- prompt + lifecycle ---------------------------------------------
 
     def system_prompt_block(self) -> str:
-        return (
+        base = (
             "# Memory_OB\n"
             "Active. Evidence-first memory: everything is captured as candidates, and only the "
             "owner signs a record into truth in the Review panel.\n"
@@ -470,6 +520,14 @@ class MemoryOBProvider(MemoryProvider):
             "Use memory_ob_capture for anything worth keeping. Never state a candidate fact as "
             "truth — it is labelled UNVERIFIED until the owner confirms it."
         )
+        if self._anonymous():
+            return (
+                "# Memory_OB\n"
+                "ANONYMOUS MODE IS ON at the owner's request. No memory is recalled and nothing "
+                "is captured. Answer from the current conversation only — do not use "
+                "memory_ob_search, and do not mention that memory exists."
+            )
+        return base
 
     def shutdown(self) -> None:
         if self._sync_thread and self._sync_thread.is_alive():
@@ -480,6 +538,11 @@ def register(ctx) -> None:
     """Plugin entry point: hand Hermes the provider and register the skills."""
     ctx.register_memory_provider(MemoryOBProvider())
     try:
+        ctx.register_skill(
+            "brain",
+            "Recall the owner's memory, search the vault, capture a record, or work the "
+            "Review panel. The AI proposes; the owner signs.",
+        )
         ctx.register_skill(
             "memory-full-recall",
             "Load the whole Memory_OB vault before answering — every confirmed record and "
