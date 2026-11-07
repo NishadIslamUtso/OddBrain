@@ -128,6 +128,19 @@ python -m memory_ob.cli doctor    # checks all of the above for you
 A clean machine that skips the install can still use every CLI command; only
 `serve`, the HTTP API and the tests will fail to import.
 
+### After changing the code
+
+The Hermes plugin is a **copy**, not a link. When the repo changes, copy it
+across and restart:
+
+```bash
+python host/install.py            # copies the plugin, shell and skills
+# then restart Hermes Desktop
+```
+
+The screens are read from disk on every request, so a stale app process shows
+new tabs against an old backend. The screens will tell you when that happens.
+
 Defaults:
 
 | | |

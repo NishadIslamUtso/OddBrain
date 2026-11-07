@@ -411,6 +411,18 @@ function empty(title, body) {
   return `<div class="empty"><b>${esc(title)}</b>${esc(body || '')}</div>`;
 }
 
+/* A 404 on a screen's own data usually means the app process is holding an
+   older copy of the engine than the page it just loaded — the page is read
+   from disk every time, the routes are not. Say so, instead of leaving the
+   owner with a bare "something went wrong". */
+function errText(e) {
+  const msg = (e && e.message) || 'unknown error';
+  if (/^404\b/.test(msg)) {
+    return msg + ' — the running app is older than this page. Restart Hermes and reload.';
+  }
+  return msg;
+}
+
 /* ---- toasts -------------------------------------------------------------
    Every failure used to be an alert(), which blocks the page. Toasts report
    and get out of the way. */
@@ -535,7 +547,7 @@ async function render() {
     await bindLate();
   } catch (e) {
     if (state.tab !== tab) return;
-    main.innerHTML = `<div class="empty"><b>Something went wrong</b><div class="err">${esc(e.message)}</div></div>`;
+    main.innerHTML = `<div class="empty"><b>Something went wrong</b><div class="err">${esc(errText(e))}</div></div>`;
   }
 }
 
