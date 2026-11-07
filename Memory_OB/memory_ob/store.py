@@ -97,6 +97,8 @@ CREATE TABLE IF NOT EXISTS conversations (
     speaker TEXT NOT NULL DEFAULT '',
     text TEXT NOT NULL,
     parts TEXT NOT NULL DEFAULT '[]',
+    people TEXT NOT NULL DEFAULT '[]',
+    topics TEXT NOT NULL DEFAULT '[]',
     created TEXT NOT NULL
 );
 
@@ -272,6 +274,22 @@ class Store:
         if "demo" not in facts_have:
             self.conn.execute(
                 "ALTER TABLE facts ADD COLUMN demo INTEGER NOT NULL DEFAULT 0"
+            )
+        if "meta" not in facts_have:
+            self.conn.execute(
+                "ALTER TABLE facts ADD COLUMN meta TEXT NOT NULL DEFAULT '{}'"
+            )
+        conv_have = {
+            row["name"]
+            for row in self.conn.execute("PRAGMA table_info(conversations)").fetchall()
+        }
+        if "people" not in conv_have:
+            self.conn.execute(
+                "ALTER TABLE conversations ADD COLUMN people TEXT NOT NULL DEFAULT '[]'"
+            )
+        if "topics" not in conv_have:
+            self.conn.execute(
+                "ALTER TABLE conversations ADD COLUMN topics TEXT NOT NULL DEFAULT '[]'"
             )
         self._migrate_fts_tokenizer()
         self.conn.commit()
@@ -801,6 +819,8 @@ class Store:
         session: str = "",
         speaker: str = "",
         parts: list | None = None,
+        people: list | None = None,
+        topics: list | None = None,
     ) -> str:
         """Store a full conversation verbatim. Returns its id."""
         import json as _json
@@ -809,8 +829,8 @@ class Store:
 
         cid = ids.new_id()
         self.conn.execute(
-            "INSERT INTO conversations(id, origin, session, speaker, text, parts, created) "
-            "VALUES(?,?,?,?,?,?,?)",
+            "INSERT INTO conversations(id, origin, session, speaker, text, parts, people, topics, created) "
+            "VALUES(?,?,?,?,?,?,?,?,?)",
             (
                 cid,
                 origin,
@@ -818,11 +838,49 @@ class Store:
                 speaker,
                 text,
                 _json.dumps(parts or []),
+                _json.dumps(people or []),
+                _json.dumps(topics or []),
                 _now(),
             ),
         )
         self.conn.commit()
         return cid
+
+    def link_conversation(self, conv_id: str) -> int:
+        """Connect a conversation to others sharing people or topics."""
+        import json as _json
+
+        row = self.conn.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conv_id,)
+        ).fetchone()
+        if row is None:
+            return 0
+        people = set(_json.loads(row["people"]))
+        topics = set(_json.loads(row["topics"]))
+        if not (people or topics):
+            return 0
+        linked = 0
+        for other in self.conn.execute(
+            "SELECT id, people, topics FROM conversations WHERE id != ?", (conv_id,)
+        ).fetchall():
+            op = set(_json.loads(other["people"]))
+            ot = set(_json.loads(other["topics"]))
+            shared = (people & op) | (topics & ot)
+            if not shared:
+                continue
+            self.conn.execute(
+                "INSERT OR IGNORE INTO edges(src, dst, label) VALUES(?,?,?)",
+                (conv_id, other["id"], "session:related"),
+            )
+            linked += 1
+        if linked:
+            self.conn.commit()
+            self.log_activity(
+                "session-link",
+                f"{conv_id} ~ {linked} conversation(s)",
+                actor="memory_ob",
+            )
+        return linked
 
     def get_conversation(self, conv_id: str) -> dict | None:
         """Read a stored conversation back, verbatim."""

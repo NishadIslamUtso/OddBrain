@@ -861,14 +861,23 @@ function bindCardKeys() {
 
 async function viewReview() {
   const cards = await api('/api/cards?status=pending');
-  state.cards = cards;
-  state.data.reviewCount = cards.length;
-  if (!cards.length) {
-    return '<h2>Review</h2><div class="sub">The AI proposes; you sign.</div>'
-      + empty('Nothing waiting', 'New proposals will appear here.');
+  let autonomous = false;
+  try { autonomous = !!(await api('/api/app-settings')).autonomous; } catch (e) {}
+  // In autonomous mode the AI handles the clear cases itself; this screen is
+  // only for the doubts it flags (ask cards) — not a review queue.
+  const visible = autonomous ? cards.filter(c => c.type === 'ask') : cards;
+  state.cards = visible;
+  state.data.reviewCount = visible.length;
+  const title = autonomous ? 'Doubts' : 'Review';
+  const sub = autonomous
+    ? 'The AI handles the clear cases. Only the things it is genuinely unsure about land here.'
+    : 'The AI proposes; you sign.';
+  if (!visible.length) {
+    return `<h2>${title}</h2><div class="sub">${sub}</div>`
+      + empty('Nothing waiting', autonomous ? 'The AI is handling memory on its own.' : 'New proposals will appear here.');
   }
-  let html = `<h2>Review</h2><div class="sub">${cards.length} card(s) waiting. The AI proposes; you sign.</div>`;
-  for (const c of cards) {
+  let html = `<h2>${title}</h2><div class="sub">${visible.length} item(s). ${sub}</div>`;
+  for (const c of visible) {
     html += `<div class="card" data-card="${c.id}">
       <div class="row">
         ${pill(c.type, c.type)}

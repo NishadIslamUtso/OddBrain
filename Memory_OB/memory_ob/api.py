@@ -563,8 +563,10 @@ def create_app() -> FastAPI:
         # which speaker is the owner, so the other person's words stay context.
         parts = payload.get("parts")
         conv_id = None
+        all_people: list[str] = []
+        all_topics: list[str] = []
         if parts:
-            conv_text = "\n".join(str(p.get("content", "")) for p in parts)
+            conv_text = "\\n".join(str(p.get("content", "")) for p in parts)
             conv_id = st.add_conversation(
                 conv_text,
                 origin=str(source.get("origin", "")),
@@ -591,6 +593,20 @@ def create_app() -> FastAPI:
             )
             for person in c.people:
                 st.upsert_person(person)
+                if person not in all_people:
+                    all_people.append(person)
+            if c.kind_hint and c.kind_hint not in all_topics:
+                all_topics.append(c.kind_hint)
+        # Auto-link this conversation to others sharing people or topics.
+        if conv_id and (all_people or all_topics):
+            import json as _json
+
+            st.conn.execute(
+                "UPDATE conversations SET people=?, topics=? WHERE id=?",
+                (_json.dumps(all_people), _json.dumps(all_topics), conv_id),
+            )
+            st.conn.commit()
+            st.link_conversation(conv_id)
         # Autonomous mode: the AI may sign high-confidence facts directly.
         # It still logs every change with a before/after diff, and it asks
         # (leaves a card) when the fact is not clearly the owner's.
@@ -630,6 +646,71 @@ def create_app() -> FastAPI:
             ],
             "autonomous_signed": signed if _autonomous(settings) else 0,
         }
+
+    @app.post("/api/memory/apply")
+    def memory_apply(
+        payload: dict[str, Any] | None = None,
+        request: Request = None,
+        st: Store = Depends(get_store),
+    ) -> dict[str, Any]:
+        """The AI proposes a memory change. Applied when autonomous, else a card.
+
+        Payload: {"operations": [{"action": "create|update|retire",
+                                   "record": {...}, "reason": "..."}]}
+        Every applied change is logged with a before/after diff.
+        """
+        from .records import RETRACTED  # noqa: F401 - re-exported for callers
+
+        payload = payload or {}
+        ops = payload.get("operations") or []
+        actor = _caller(request)
+        autonomous = _autonomous(settings)
+        applied: list[dict[str, Any]] = []
+        cards: list[str] = []
+        for op in ops:
+            action = str(op.get("action") or "create")
+            data = dict(op.get("record") or {})
+            reason = str(op.get("reason") or "ai edit")
+            before = None
+            rid = str(data.get("id") or "")
+            if rid:
+                existing = st.get_record(rid)
+                before = existing.to_dict() if existing else None
+            if not autonomous:
+                # Not allowed to write directly — open a card instead.
+                card = CardStore(st).propose_record(
+                    new=data, title=str(data.get("title") or "AI proposed change"),
+                    body=str(data.get("body") or ""), speakers=["assistant"],
+                )
+                cards.append(card.id)
+                continue
+            if action == "retire":
+                if before is None:
+                    continue
+                st.retract(rid, reason=reason, by=actor)
+                after = st.get_record(rid)
+                st.log_change(entity="record", entity_id=rid, action="retire",
+                              before=before, after=after.to_dict() if after else None,
+                              actor=actor, reason=reason)
+                applied.append({"id": rid, "action": "retire"})
+                continue
+            if action == "update" and before is not None:
+                merged = {**before, **{k: v for k, v in data.items() if k != "id"}}
+                rec = Record.from_dict(merged)
+                st.update_record(rec, changed_by=actor, reason=reason)
+                after = st.get_record(rid)
+                st.log_change(entity="record", entity_id=rid, action="update",
+                              before=before, after=after.to_dict() if after else None,
+                              actor=actor, reason=reason)
+                applied.append({"id": rid, "action": "update"})
+                continue
+            # create
+            rec = Record.from_payload({**data, "speaker": data.get("speaker") or "assistant"})
+            st.sign_record(rec, card_id="autonomous", changed_by=actor, reason=reason)
+            st.log_change(entity="record", entity_id=rec.id, action="create",
+                          before=None, after=rec.to_dict(), actor=actor, reason=reason)
+            applied.append({"id": rec.id, "action": "create"})
+        return {"applied": applied, "cards": cards, "autonomous": autonomous}
 
     @app.get("/api/people")
     def list_people(st: Store = Depends(get_store)) -> dict[str, Any]:

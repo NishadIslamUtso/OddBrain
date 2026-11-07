@@ -116,6 +116,29 @@ def score_claim(claim: str) -> float:
     return max(CANDIDATE_MIN, min(CANDIDATE_MAX, round(score, 2)))
 
 
+def _heuristic_meta(claim: str, text: str) -> tuple[str, str, list[str]]:
+    """Offline fallback: guess context, sentiment and people from the words.
+
+    Used when no model is available. Deliberately conservative — a wrong guess
+    is worse than an empty field, so anything uncertain is left blank.
+    """
+    low = claim.lower()
+    sentiment = ""
+    if re.search(r"\b(love|like|enjoy|happy|excited|grateful|glad|proud)\b", low):
+        sentiment = "positive"
+    elif re.search(r"\b(hate|dislike|angry|upset|frustrated|sad|annoyed|anxious)\b", low):
+        sentiment = "negative"
+    # People: capitalised words that are not the start of the sentence.
+    people = [
+        w for w in re.findall(r"\b([A-Z][a-z]{2,})\b", claim)
+        if w not in {"The", "This", "That", "They", "There", "What", "When", "It"}
+    ]
+    context = ""
+    if len(text) > len(claim) + 20:
+        context = text.strip().replace("\n", " ")[:200]
+    return context, sentiment, people
+
+
 def kind_hint_for(claim: str) -> str:
     """Best-effort kind hint. Never authoritative — a card decides."""
     low = claim.lower()
@@ -146,6 +169,7 @@ def extract_claims(
     for claim in split_claims(text):
         if _META_RE.search(claim):
             continue
+        context, sentiment, people = _heuristic_meta(claim, text)
         out.append(
             Candidate(
                 id=ids.new_id(),
@@ -154,6 +178,9 @@ def extract_claims(
                 kind_hint=kind_hint_for(claim),
                 source=source or {},
                 created=_now(),
+                context=context,
+                sentiment=sentiment,
+                people=people,
             )
         )
     return out
