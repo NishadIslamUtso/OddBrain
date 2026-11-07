@@ -1194,6 +1194,28 @@ async function viewSettings() {
         <button class="act primary" id="saveAppearance">Apply</button>
       </div>
       <div id="appearanceMsg"></div>` : '';
+  const proxyBlock = `
+    <div class="card">
+      <h3 style="margin-top:0">Memory proxy</h3>
+      <div class="sub">The memory judge needs the Hermes proxy to think. Without it, everything is captured unfiltered.</div>
+      <div class="kv">
+        <span>status</span><span id="proxyState" class="accent">checking…</span>
+        <span>address</span><span id="proxyUrl"></span>
+        <span>ask at logon</span>
+        <span>
+          <input type="checkbox" id="proxyAsk" checked> ask each time
+          <label for="proxyRemember" style="margin-left:10px">
+            <input type="checkbox" id="proxyRemember"> remember my choice
+          </label>
+        </span>
+      </div>
+      <div class="toolbar" style="margin-top:10px">
+        <button class="act primary" id="proxyStart">Start</button>
+        <button class="act" id="proxyStop">Stop</button>
+      </div>
+      <div id="proxyMsg"></div>
+    </div>`;
+
   return `<h2>Settings</h2><div class="sub">Model selector — the app's aux-model pattern. <code>auto</code> follows main (Hermes when hosted).</div>
     <div class="card">
       <div class="kv" style="margin-bottom:12px">
@@ -1219,6 +1241,7 @@ async function viewSettings() {
       <div class="sub">Applied on top of the Hermes theme, so the app still follows the host's colours.</div>
       ${appearanceBlock}
     </div>
+    ${proxyBlock}
     <div class="card">
       <h3 style="margin-top:0">Vault</h3>
       <div class="kv">
@@ -1392,6 +1415,54 @@ async function bindLate() {
         msg.innerHTML = '<span class="ok">Applied.</span>';
       } catch (e) { msg.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     };
+
+    /* --- memory proxy --- */
+    const drawProxy = (st) => {
+      const stateEl = document.getElementById('proxyState');
+      if (!stateEl) return;
+      stateEl.textContent = st.running ? 'running' : 'stopped';
+      stateEl.className = st.running ? 'ok' : 'accent';
+      document.getElementById('proxyUrl').textContent = st.url;
+      const ask = document.getElementById('proxyAsk');
+      const rem = document.getElementById('proxyRemember');
+      if (ask) ask.checked = !!st.ask_at_startup;
+      if (rem) rem.checked = !!st.remember;
+      const msg = document.getElementById('proxyMsg');
+      if (msg) msg.innerHTML = st.running
+        ? '<span class="ok">The memory judge is awake.</span>'
+        : '<span class="err">The judge is asleep — everything will be captured unfiltered.</span>';
+    };
+    const proxyGet = async () => {
+      try { drawProxy(await api('/api/proxy')); }
+      catch (e) { const m = document.getElementById('proxyMsg'); if (m) m.innerHTML = `<span class="err">${esc(errText(e))}</span>`; }
+    };
+    document.getElementById('proxyStart')?.addEventListener('click', async () => {
+      try { drawProxy(await api('/api/proxy/start', { method: 'POST' })); }
+      catch (e) { toast(e.message, 'err'); }
+    });
+    document.getElementById('proxyStop')?.addEventListener('click', async () => {
+      try { drawProxy(await api('/api/proxy/stop', { method: 'POST' })); }
+      catch (e) { toast(e.message, 'err'); }
+    });
+    document.getElementById('proxyAsk')?.addEventListener('change', async (e) => {
+      try {
+        drawProxy(await api('/api/proxy/pref', {
+          method: 'POST',
+          body: { ask_at_startup: e.target.checked,
+                  remember: (document.getElementById('proxyRemember') || {}).checked },
+        }));
+      } catch (err) { toast(err.message, 'err'); }
+    });
+    document.getElementById('proxyRemember')?.addEventListener('change', async (e) => {
+      try {
+        drawProxy(await api('/api/proxy/pref', {
+          method: 'POST',
+          body: { remember: e.target.checked,
+                  ask_at_startup: (document.getElementById('proxyAsk') || {}).checked },
+        }));
+      } catch (err) { toast(err.message, 'err'); }
+    });
+    proxyGet();
     const exp = document.getElementById('doExport');
     if (exp) exp.onclick = async () => {
       try { await api('/api/export', { method: 'POST' }); document.getElementById('vaultMsg').innerHTML = '<span class="ok">Vault exported.</span>'; }

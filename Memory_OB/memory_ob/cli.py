@@ -329,6 +329,40 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     return 1
 
 
+def cmd_proxy(args: argparse.Namespace) -> int:
+    """The Hermes proxy — the difference between a judge and a keyword matcher."""
+    from . import proxy as px
+
+    s = _settings(args)
+    vault = s.vault
+
+    if args.action == "status":
+        st = px.status(vault)
+        print(f"  proxy:      {'running' if st['running'] else 'stopped'}  ({st['url']})")
+        print(f"  ask at logon: {'yes' if st['ask_at_startup'] else 'no'}"
+              + (f", remembered: {st['last_choice']}" if st["remember"] else ""))
+        if not st["proxy_available"]:
+            print("  hermes:     not found — set HERMES_HOME or HERMES_EXE")
+        return 0
+
+    if args.action == "start":
+        ok = px.start()
+        print("proxy started." if ok else "could not start the proxy.")
+        return 0 if ok else 1
+
+    if args.action == "stop":
+        ok = px.stop()
+        print("proxy stopped." if ok else "could not stop the proxy.")
+        return 0 if ok else 1
+
+    if args.action == "prompt":
+        choice = px.prompt_and_start(vault)
+        print(f"choice: {choice}")
+        return 0
+
+    return 0
+
+
 def cmd_serve(args: argparse.Namespace) -> int:
     """Run the dashboard."""
     import uvicorn
@@ -445,6 +479,15 @@ def build_parser() -> argparse.ArgumentParser:
     sv.add_argument("--port", type=int, default=8770)
     sv.add_argument("--log-level", default="info")
     sv.set_defaults(fn=cmd_serve)
+
+    px = sub.add_parser("proxy", help="the Hermes proxy the memory judge needs")
+    px.add_argument(
+        "action",
+        choices=("status", "start", "stop", "prompt"),
+        default="status",
+        nargs="?",
+    )
+    px.set_defaults(fn=cmd_proxy)
 
     return p
 

@@ -75,7 +75,8 @@ def _merge_into(srcs: list[Path], dst: Path) -> tuple[int, int]:
     return total, removed
 
 
-def install(*, enable: bool = True) -> int:
+def install(*, enable: bool = True, startup: bool = True,
+            remove_startup: bool = False) -> int:
     home = hermes_home()
     if not home.is_dir():
         print(f"Hermes home not found: {home}")
@@ -139,15 +140,72 @@ def install(*, enable: bool = True) -> int:
 
     print()
     print("Restart Hermes Desktop (or reload the window) to load the shell.")
+
+    note = _register_startup(
+        SRC.parent, enable=startup and not remove_startup
+    )
+    print(f"  logon prompt: {note}")
     return 0
+
+
+def _register_startup(project: Path, *, enable: bool = True) -> str:
+    """Put the logon prompt in the Startup folder.
+
+    A shortcut to pythonw.exe means no console window flashes at logon. The
+    prompt itself is what the owner answers; the preference is stored in the
+    vault, so unchecking "ask" here only removes the shortcut.
+    """
+    startup = (
+        Path(os.environ.get("APPDATA", ""))
+        / "Microsoft" / "Windows" / "Start Menu" / "Programs" / "Startup"
+    )
+    link = startup / "Memory_OB proxy.lnk"
+    if not enable:
+        try:
+            link.unlink()
+            return "removed the logon prompt"
+        except FileNotFoundError:
+            return "no logon prompt to remove"
+    startup.mkdir(parents=True, exist_ok=True)
+
+    # pythonw.exe runs with no console window
+    candidates = [
+        Path(sys.executable).with_name("pythonw.exe"),
+        Path(sys.prefix) / "pythonw.exe",
+    ]
+    pythonw = next((c for c in candidates if c.is_file()), None)
+    if pythonw is None:
+        return "pythonw.exe not found — logon prompt not registered"
+
+    ps = (
+        "$s = New-Object -ComObject WScript.Shell; "
+        f"$l = $s.CreateShortcut('{link}'); "
+        f"$l.TargetPath = '{pythonw}'; "
+        f"$l.Arguments = '\"{project / 'host' / 'proxy_autostart.py'}\"'; "
+        f"$l.WorkingDirectory = '{project}'; "
+        "$l.Description = 'Ask whether to start the Hermes memory proxy'; "
+        "$l.Save()"
+    )
+    proc = subprocess.run(
+        ["powershell", "-NoProfile", "-NonInteractive", "-Command", ps],
+        capture_output=True, text=True, timeout=30,
+    )
+    if proc.returncode != 0 or not link.exists():
+        return f"could not create the logon prompt: {(proc.stderr or '').strip()[:200]}"
+    return f"registered the logon prompt -> {link}"
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--no-enable", action="store_true",
                     help="copy files but do not enable the plugin")
+    ap.add_argument("--no-startup", action="store_true",
+                    help="do not put the logon prompt in the Startup folder")
+    ap.add_argument("--remove-startup", action="store_true",
+                    help="remove the logon prompt from the Startup folder")
     args = ap.parse_args()
-    return install(enable=not args.no_enable)
+    return install(enable=not args.no_enable, startup=not args.no_startup,
+                   remove_startup=args.remove_startup)
 
 
 if __name__ == "__main__":

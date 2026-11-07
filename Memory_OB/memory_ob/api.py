@@ -742,6 +742,52 @@ def create_app() -> FastAPI:
         out.validate()
         return {**out.to_dict(), "errors": out.errors, "css": out.css()}
 
+    # -- the Hermes proxy -----------------------------------------------------
+    #
+    # Without the proxy the model calls fall back to keyword matching and the
+    # memory system stops judging. These routes let the owner see and control
+    # that state.
+
+    @app.get("/api/proxy")
+    def proxy_status() -> dict[str, Any]:
+        from . import proxy as px
+
+        return px.status(settings.vault)
+
+    @app.post("/api/proxy/start")
+    def proxy_start() -> dict[str, Any]:
+        from . import proxy as px
+
+        ok = px.start()
+        out = px.status(settings.vault)
+        out["ok"] = ok
+        return out
+
+    @app.post("/api/proxy/stop")
+    def proxy_stop() -> dict[str, Any]:
+        from . import proxy as px
+
+        ok = px.stop()
+        out = px.status(settings.vault)
+        out["ok"] = ok
+        return out
+
+    @app.post("/api/proxy/pref")
+    def proxy_pref(payload: dict[str, Any]) -> dict[str, Any]:
+        """Set the logon preference: ask, remember, or neither."""
+        from . import proxy as px
+
+        current = px.load_pref(settings.vault)
+        ask = payload.get("ask_at_startup", current.ask_at_startup)
+        remember = payload.get("remember", current.remember)
+        new = px.ProxyPref(
+            ask_at_startup=bool(ask),
+            remember=bool(remember),
+            last_choice=current.last_choice if remember else None,
+        )
+        px.save_pref(settings.vault, new)
+        return px.status(settings.vault)
+
     @app.get("/api/neversend")
     def list_neversend() -> dict[str, Any]:
         """The ids of neverSend records — ids only, never text or counts.
