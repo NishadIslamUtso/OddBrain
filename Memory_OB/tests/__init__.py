@@ -11,8 +11,16 @@ imports any test module, so the stub is in place in time.
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 from pathlib import Path
+
+_CHECKOUT = Path(__file__).resolve().parent.parent
+
+# The provider finds the engine through MEMORY_OB_HOME, then a short list of
+# guessed locations. Without this default the suite only ever passed on the
+# machine the code was written on, because only that machine matched a guess.
+os.environ.setdefault("MEMORY_OB_HOME", str(_CHECKOUT))
 
 _STUB = Path(__file__).resolve().parent / "_hermes_stub"
 

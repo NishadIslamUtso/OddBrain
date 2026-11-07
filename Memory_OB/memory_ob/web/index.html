@@ -619,6 +619,7 @@ function route() {
 }
 
 function go(tab) {
+  if (tab !== 'inbox') inboxShown = 200;
   if (location.hash === '#/' + tab) render();
   else location.hash = '#/' + tab;
 }
@@ -1025,13 +1026,22 @@ function bindCardButtons() {
 }
 
 async function viewInbox() {
-  const data = await api('/api/candidates');
+  const data = await api(`/api/candidates?limit=${inboxShown}`);
   const cands = data.candidates || [];
-  if (!cands.length) {
+  const total = data.total ?? cands.length;
+  if (!cands.length && !total) {
     return '<h2>Inbox</h2><div class="sub">Everything the assistant captured, waiting for you.</div>'
       + empty('Nothing waiting', 'Capture something and it lands here. Nothing becomes true until you say so.');
   }
-  let html = `<h2>Inbox</h2><div class="sub">${cands.length} captured thing(s). None of it is true yet — you decide.</div>`;
+  // The list is a page; the total is the truth. Saying one as the other is
+  // what made a thousand captured things look like two hundred.
+  const shown = cands.length;
+  const hidden = Math.max(0, total - (data.offset || 0) - shown);
+  let html = `<h2>Inbox</h2><div class="sub">${total} captured thing(s) waiting. `
+    + (hidden > 0
+        ? `Showing ${shown} of them — <b>${hidden} more</b> are further down the list. `
+        : `Showing all of them. `)
+    + `None of it is true yet — you decide.</div>`;
   for (const c of cands) {
     const origin = (c.source && c.source.origin) || 'capture';
     html += `<div class="card" data-card="${c.id}">
@@ -1046,6 +1056,11 @@ async function viewInbox() {
       </div>
     </div>`;
   }
+  if (hidden > 0) {
+    html += `<div class="toolbar" style="justify-content:center;margin-top:12px">
+      <button class="act" data-inbox-more>show more (${hidden} left)</button>
+    </div>`;
+  }
   html += `<div class="hint-bar">
       <span><kbd>j</kbd>/<kbd>k</kbd> move</span>
       <span><kbd>a</kbd> remember</span>
@@ -1054,8 +1069,25 @@ async function viewInbox() {
     </div>`;
   setTimeout(bindInboxButtons, 0);
   setTimeout(bindCardKeys, 0);
+  setTimeout(bindInboxMore, 0);
   return html;
 }
+
+/* "Show more" grows the page in place rather than making the owner lose
+   their place on a second screen. */
+let inboxShown = 200;
+function bindInboxMore() {
+  const btn = document.querySelector('[data-inbox-more]');
+  if (!btn) return;
+  btn.onclick = async () => {
+    btn.disabled = true;
+    inboxShown += 200;
+    await go('inbox');
+  };
+}
+
+/* Reset the page size whenever the owner leaves the Inbox, so a later visit
+   does not silently start from wherever the last one stopped. */
 
 function bindInboxButtons() {
   document.querySelectorAll('[data-card]').forEach(cardEl => {

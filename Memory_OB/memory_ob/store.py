@@ -118,7 +118,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS records_fts USING fts5(
     id UNINDEXED,
     title,
     body,
-    tags
+    tags,
+    tokenize='porter'
 );
 
 CREATE INDEX IF NOT EXISTS idx_records_status ON records(status);
@@ -140,11 +141,17 @@ _FTS_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
 def _fts_query(query: str) -> str:
-    """Turn arbitrary user text into a safe FTS5 MATCH expression."""
+    """Turn arbitrary user text into a safe FTS5 MATCH expression.
+
+    Every token is a prefix query: the owner types "peanut" and should find
+    "peanuts", "allergy" should find "allergic". Exact-token matching made the
+    vault answer no to the owner's own words, and an empty result reads as
+    "the memory is empty" rather than "the search is too strict".
+    """
     parts = _FTS_TOKEN_RE.findall(query or "")
     if not parts:
         return ""
-    return " AND ".join(f'"{p}"' for p in parts)
+    return " AND ".join(f'"{p}"*' for p in parts)
 
 
 def _fts_query_or(query: str) -> str:
@@ -157,7 +164,7 @@ def _fts_query_or(query: str) -> str:
     parts = _FTS_TOKEN_RE.findall(query or "")
     if not parts:
         return ""
-    return " OR ".join(f'"{p}"' for p in parts)
+    return " OR ".join(f'"{p}"*' for p in parts)
 
 
 def _json(value: Any) -> str:
@@ -220,7 +227,37 @@ class Store:
             self.conn.execute(
                 "ALTER TABLE facts ADD COLUMN demo INTEGER NOT NULL DEFAULT 0"
             )
+        self._migrate_fts_tokenizer()
         self.conn.commit()
+
+    def _migrate_fts_tokenizer(self) -> None:
+        """Rebuild the search index when its tokenizer is out of date.
+
+        ``CREATE VIRTUAL TABLE IF NOT EXISTS`` cannot change a tokenizer, so
+        a database indexed before stemming existed would keep answering "no"
+        to "allergy" for a record titled "allergic". The index is disposable —
+        it is rebuilt from the ledger, never the other way round.
+        """
+        row = self.conn.execute(
+            "SELECT sql FROM sqlite_master WHERE name = 'records_fts'"
+        ).fetchone()
+        if row is None:
+            return
+        ddl = str(row[0] or "").lower()
+        if "porter" in ddl:
+            return
+        self.conn.execute("DROP TABLE records_fts")
+        self.conn.execute(
+            "CREATE VIRTUAL TABLE records_fts USING fts5("
+            "id UNINDEXED, title, body, tags, tokenize='porter')"
+        )
+        for rec_row in self.conn.execute("SELECT * FROM records").fetchall():
+            rec = self._row_to_record(rec_row)
+            self.conn.execute(
+                "INSERT OR REPLACE INTO records_fts(id, title, body, tags)"
+                " VALUES(?,?,?,?)",
+                (rec.id, rec.title, rec.body, " ".join(rec.tags)),
+            )
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -264,6 +301,36 @@ class Store:
         if rec.trust >= CONFIRMED_MIN:
             rec.trust = CANDIDATE_MAX
         return self._persist(rec, changed_by=changed_by, reason=reason or "update")
+
+    def set_never_send(
+        self,
+        record_id: str,
+        *,
+        value: bool,
+        changed_by: str | None = None,
+        reason: str = "owner decision",
+    ) -> Record | None:
+        """Change only the neverSend flag, leaving truth untouched.
+
+        The ordinary paths (add_record/update_record) deliberately strip the
+        signature and pull trust below the line, so a caller cannot mint
+        truth. Going through one of them to flip a single flag would therefore
+        silently demote a confirmed memory to a candidate — which is exactly
+        what the "allow sharing" button did. This writes the one column and
+        nothing else.
+        """
+        rec = self.get_record(record_id)
+        if rec is None:
+            return None
+        rec.never_send = bool(value)
+        rec.modified = _now()
+        self.conn.execute(
+            "UPDATE records SET never_send=?, modified=? WHERE id=?",
+            (int(rec.never_send), rec.modified, record_id),
+        )
+        self._append_history(rec, changed_by=changed_by, reason=reason)
+        self.conn.commit()
+        return rec
 
     def sign_record(
         self,
@@ -651,12 +718,26 @@ class Store:
         self.conn.commit()
         return fid
 
-    def list_facts(self, *, status: str = "candidate", limit: int = 200) -> list[dict]:
+    def list_facts(
+        self, *, status: str = "candidate", limit: int = 200, offset: int = 0
+    ) -> list[dict]:
         rows = self.conn.execute(
-            "SELECT * FROM facts WHERE status = ? ORDER BY trust DESC LIMIT ?",
-            (status, limit),
+            "SELECT * FROM facts WHERE status = ? ORDER BY trust DESC"
+            " LIMIT ? OFFSET ?",
+            (status, limit, offset),
         ).fetchall()
         return [self._fact_dict(r) for r in rows]
+
+    def count_facts(self, *, status: str = "candidate") -> int:
+        """How many candidate facts exist in total.
+
+        The list is capped, the total is not: a screen showing only the list
+        would otherwise report the cap as if it were the truth.
+        """
+        row = self.conn.execute(
+            "SELECT COUNT(*) FROM facts WHERE status = ?", (status,)
+        ).fetchone()
+        return int(row[0]) if row else 0
 
     def get_fact(self, fact_id: str) -> dict | None:
         """One candidate fact, or None."""

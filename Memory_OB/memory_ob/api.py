@@ -191,11 +191,24 @@ def create_app() -> FastAPI:
     # "remember" button a signature rather than a shortcut.
 
     @app.get("/api/candidates")
-    def list_candidates(st: Store = Depends(get_store)) -> dict[str, Any]:
-        """Everything the assistant captured that is still waiting."""
-        from .owner import candidates
+    def list_candidates(
+        limit: int = 200,
+        offset: int = 0,
+        st: Store = Depends(get_store),
+    ) -> dict[str, Any]:
+        """A page of what the assistant captured, plus the real total.
 
-        return {"candidates": candidates(st)}
+        Without the total, a cap of 200 read as "200 captured things" and the
+        other thousand were invisible.
+        """
+        from .owner import candidates, candidate_count
+
+        return {
+            "candidates": candidates(st, limit=limit, offset=offset),
+            "total": candidate_count(st),
+            "limit": limit,
+            "offset": offset,
+        }
 
     @app.post("/api/candidates/{fact_id}/remember")
     def remember_candidate(fact_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -819,11 +832,12 @@ def create_app() -> FastAPI:
     def clear_neversend(record_id: str, request: Request = None) -> dict[str, Any]:
         """Clear the neverSend flag on a record (owner decision, logged)."""
         with Store(settings.db) as st:
-            rec = st.get_record(record_id)
+            rec = st.set_never_send(
+                record_id, value=False, changed_by=_caller(request),
+                reason="neversend_cleared",
+            )
             if rec is None:
                 raise HTTPException(404, "record not found")
-            rec.never_send = False
-            st.add_record(rec, changed_by=_caller(request))
             st.log_activity(
                 "neversend_cleared",
                 f"flag cleared on {record_id}",

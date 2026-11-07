@@ -119,6 +119,16 @@ def install(*, enable: bool = True, startup: bool = True,
             copied, removed = _merge_into(srcs, dst)
         print(f"  {label:12s} -> {dst}  ({copied} updated, {removed} removed)")
 
+    # Where the engine actually lives, recorded so the installed plugin never
+    # has to guess a folder layout on someone else's machine.
+    project = SRC.parent
+    pointer = home / "plugins" / "memory_ob" / ".memory_ob_home"
+    try:
+        pointer.write_text(str(project), encoding="utf-8")
+        print(f"  engine path -> {pointer}")
+    except OSError as exc:
+        print(f"  could not record the engine path: {exc}")
+
     exe = home / "bin" / "hermes.exe"
     if enable:
         if not exe.exists():

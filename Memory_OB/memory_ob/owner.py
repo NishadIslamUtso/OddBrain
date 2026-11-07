@@ -86,6 +86,13 @@ def dismiss_fact(store, fact_id: str, *, by: str = "owner") -> None:
     store.log_activity("dismiss", fact_id, actor=by)
 
 
-def candidates(store, *, limit: int = 200) -> list[dict[str, Any]]:
-    """Every candidate fact still waiting, strongest first."""
-    return store.list_facts(status="candidate", limit=limit)
+def candidates(
+    store, *, limit: int = 200, offset: int = 0
+) -> list[dict[str, Any]]:
+    """Candidate facts still waiting, strongest first, one page at a time."""
+    return store.list_facts(status="candidate", limit=limit, offset=offset)
+
+
+def candidate_count(store) -> int:
+    """The real number waiting, including everything past the page."""
+    return store.count_facts(status="candidate")

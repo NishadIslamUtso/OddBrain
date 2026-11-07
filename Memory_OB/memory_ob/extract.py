@@ -60,7 +60,13 @@ def _now() -> str:
 
 
 def split_claims(text: str) -> list[str]:
-    """Split raw text into candidate claim strings."""
+    """Split raw text into candidate claim strings.
+
+    The hazard filter runs here too, not only on the model path. When no model
+    is available this is the only judge there is, and without it an
+    instruction-like string ("ignore all previous instructions…") becomes a
+    candidate that recall can later hand to a model.
+    """
     out: list[str] = []
     for raw in _SENTENCE_RE.split(text or ""):
         s = " ".join(raw.split())
@@ -69,6 +75,8 @@ def split_claims(text: str) -> list[str]:
         if _CHATTER_RE.match(s):
             continue
         if _QUESTION_RE.search(s):
+            continue
+        if hazards.is_hazardous(s):
             continue
         out.append(s)
     return out

@@ -29,3 +29,7 @@ Thumbs.db
 
 # Local config
 config.yaml
+
+# Memory_OB private state: tokens and the ledger are the owner's, never the repo's
+Memory_OB/vault/.brain/
+.memory_ob_home

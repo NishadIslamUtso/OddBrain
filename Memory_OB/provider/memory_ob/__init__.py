@@ -56,10 +56,43 @@ _CARD_ACTIONS = ("later",)
 
 
 def _candidate_roots() -> list[Path]:
+    """Places to look for the engine, most trustworthy first.
+
+    Nothing here may assume a particular user's folder layout. The only
+    guesses are last, and they are guesses — the installer writes a pointer
+    file so an installed copy never has to guess at all.
+    """
     roots: list[Path] = []
+
     env = os.environ.get("MEMORY_OB_HOME")
     if env:
-        roots.append(Path(env))
+        roots.append(Path(env).expanduser())
+
+    # Where the installer recorded the checkout, when there is one.
+    here = Path(__file__).resolve()
+    for parent in (here.parent, *here.parents):
+        pointer = parent / ".memory_ob_home"
+        try:
+            if pointer.is_file():
+                recorded = pointer.read_text(encoding="utf-8").strip()
+                if recorded:
+                    roots.append(Path(recorded).expanduser())
+                break
+        except OSError:
+            continue
+
+    # The engine may sit beside the plugin — a source checkout or a copy made
+    # by hand — in which case the plugin's own location is the truth.
+    for parent in (here.parent, *here.parents):
+        try:
+            if (parent / "memory_ob" / "__init__.py").is_file():
+                roots.append(parent)
+                break
+        except OSError:
+            continue
+
+    # Last resort only: the two layouts this project has actually used. A
+    # machine that matches neither must set MEMORY_OB_HOME.
     home = Path.home()
     roots.append(home / "Documents" / "Hermes" / "Workspace" / "Memory_OB")
     roots.append(home / "Documents" / "Hermes" / "Memory_OB")
@@ -68,7 +101,15 @@ def _candidate_roots() -> list[Path]:
 
 def find_engine() -> Optional[Path]:
     """The Memory_OB project directory, or None when it is not installed."""
+    seen: set[Path] = set()
     for root in _candidate_roots():
+        try:
+            key = root.resolve()
+        except OSError:
+            key = root
+        if key in seen:
+            continue
+        seen.add(key)
         try:
             if (root / "memory_ob" / "__init__.py").is_file():
                 return root

@@ -26,18 +26,39 @@ _API_BASE = "/api/plugins/memory_ob"
 def _find_memory_ob() -> Path | None:
     """Locate the Memory_OB project directory.
 
-    Order: ``MEMORY_OB_HOME`` env var, then the owner's usual workspace, then
-    a sibling of the plugin tree. Returns None when it isn't installed.
+    Order: ``MEMORY_OB_HOME`` env var, the pointer the installer writes, a
+    sibling of the plugin tree, and only then the layouts this project has
+    happened to use. Returns None when it isn't installed.
     """
     candidates: list[Path] = []
     env = os.environ.get("MEMORY_OB_HOME")
     if env:
-        candidates.append(Path(env))
-    candidates.append(Path.home() / "Documents" / "Hermes" / "Workspace" / "Memory_OB")
-    try:
-        candidates.append(Path(__file__).resolve().parents[5] / "Memory_OB")
-    except (IndexError, OSError):
-        pass
+        candidates.append(Path(env).expanduser())
+
+    here = Path(__file__).resolve()
+    for parent in (here.parent, *here.parents):
+        pointer = parent / ".memory_ob_home"
+        try:
+            if pointer.is_file():
+                recorded = pointer.read_text(encoding="utf-8").strip()
+                if recorded:
+                    candidates.append(Path(recorded).expanduser())
+                break
+        except OSError:
+            continue
+
+    for parent in (here.parent, *here.parents):
+        try:
+            if (parent / "memory_ob" / "__init__.py").is_file():
+                candidates.append(parent)
+                break
+        except OSError:
+            continue
+
+    # Last resort: layouts this project has used, not a fact about any machine.
+    candidates.append(
+        Path.home() / "Documents" / "Hermes" / "Workspace" / "Memory_OB"
+    )
     for c in candidates:
         try:
             if (c / "memory_ob" / "__init__.py").is_file():
