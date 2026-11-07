@@ -184,6 +184,43 @@ def create_app() -> FastAPI:
             raise HTTPException(status_code=404, detail="record not found")
         return {"id": record_id, "versions": st.get_history(record_id)}
 
+    # -- the owner's signature ------------------------------------------------
+    #
+    # The agent's tools import the library directly and never see these routes,
+    # so only the owner's own screens can call them. That is what makes a
+    # "remember" button a signature rather than a shortcut.
+
+    @app.get("/api/candidates")
+    def list_candidates(st: Store = Depends(get_store)) -> dict[str, Any]:
+        """Everything the assistant captured that is still waiting."""
+        from .owner import candidates
+
+        return {"candidates": candidates(st)}
+
+    @app.post("/api/candidates/{fact_id}/remember")
+    def remember_candidate(fact_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
+        """The owner signs a candidate into confirmed truth."""
+        from .owner import remember_fact
+
+        try:
+            card = remember_fact(st, fact_id)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="candidate not found")
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc))
+        return {"ok": True, "card": card.id, "title": card.title}
+
+    @app.post("/api/candidates/{fact_id}/dismiss")
+    def dismiss_candidate(fact_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
+        """The owner says a candidate is not true. The text is kept."""
+        from .owner import dismiss_fact
+
+        try:
+            dismiss_fact(st, fact_id)
+        except LookupError:
+            raise HTTPException(status_code=404, detail="candidate not found")
+        return {"ok": True}
+
     @app.post("/api/records")
     def create_record(
         payload: dict[str, Any],

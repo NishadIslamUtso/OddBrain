@@ -24,6 +24,8 @@ DIFF = "diff"
 PROPOSAL = "proposal"
 ASK = "ask"
 MERGE = "merge"
+# A fact that lost a duplicate contest. Kept, out of the pool.
+MERGED = "merged"
 
 CARD_TYPES: tuple[str, ...] = (DIFF, PROPOSAL, ASK, MERGE)
 
@@ -388,6 +390,16 @@ class CardStore:
         primary = self.store.get_record(card.record_id)
         secondary = self.store.get_record(other_id)
         if primary is None or secondary is None:
+            # The dream's dedup scan works on candidate FACTS, not records, so a
+            # card it opens carries fact ids. Without this branch the card
+            # resolved, logged "done", and changed nothing.
+            a = self.store.get_fact(card.record_id)
+            b = self.store.get_fact(other_id)
+            if a is not None and b is not None:
+                self.store.set_fact_status(other_id, MERGED)
+                self.store.log_activity(
+                    "merge", f"{other_id} → {card.record_id}", actor=card.resolved_by
+                )
             return
         # Law 10: people are never merged by the AI. This path is only
         # reachable through an explicit owner action on a merge card.

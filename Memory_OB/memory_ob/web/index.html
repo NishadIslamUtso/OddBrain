@@ -314,6 +314,7 @@ const ICONS = {
 
 const TABS = [
   ['review', 'Review', 'review'],
+  ['inbox', 'Inbox', 'intake'],
   ['vault', 'Vault', 'vault'],
   ['search', 'Search', 'search'],
   ['graph', 'Graph', 'graph'],
@@ -631,10 +632,23 @@ function openPalette() {
 }
 
 /* ---- keyboard triage ----------------------------------------------------
-   j/k move between cards, then a number key runs the matching action. The
-   review queue is the most-used screen and the mouse is the slow way
-   through it. */
-const ACT_KEYS = { 1: 'approve', 2: 'deny', 3: 'later', 4: 'keep_both', 5: 'take_old', 6: 'merge' };
+   j/k move between cards, then a LETTER runs an action by NAME.
+   Letters, not digits: a digit would mean "whatever button is first", which
+   on a diff card is "take the new wording" — a single keypress silently
+   rewriting confirmed truth. A letter means the action the label says. */
+const KEYS = {
+  a: ['approve', 'remember', 'confirm'],
+  d: ['deny', 'dismiss'],
+  x: ['dismiss'],
+  l: ['later'],
+  k: ['keep_both'],
+  o: ['take_old'],
+  m: ['merge'],
+};
+
+const KEY_HINTS = [
+  ['a', 'remember / approve'], ['d', 'not true / deny'], ['l', 'later'],
+];
 
 function bindCardKeys() {
   const cards = Array.from(document.querySelectorAll('[data-card]'));
@@ -648,14 +662,18 @@ function bindCardKeys() {
   };
   select(0);
   document.addEventListener('keydown', (e) => {
-    if (state.tab !== 'review') return;
+    if (state.tab !== 'review' && state.tab !== 'inbox') return;
     const tag = (document.activeElement || {}).tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
     if (e.key === 'j') { e.preventDefault(); select(idx + 1); }
     else if (e.key === 'k') { e.preventDefault(); select(idx - 1); }
-    else if (ACT_KEYS[e.key]) {
-      const btn = cards[idx] && cards[idx].querySelector(`[data-act="${ACT_KEYS[e.key]}"]`);
-      if (btn) { e.preventDefault(); btn.click(); }
+    else if (KEYS[e.key]) {
+      const card = cards[idx];
+      if (!card) return;
+      for (const act of KEYS[e.key]) {
+        const btn = card.querySelector(`[data-act="${act}"]`);
+        if (btn) { e.preventDefault(); btn.click(); return; }
+      }
     }
   });
 }
@@ -704,9 +722,9 @@ async function viewReview() {
   }
   html += `<div class="hint-bar">
       <span><kbd>j</kbd>/<kbd>k</kbd> move</span>
-      <span><kbd>1</kbd> approve</span>
-      <span><kbd>2</kbd> deny</span>
-      <span><kbd>3</kbd> later</span>
+      <span><kbd>a</kbd> approve</span>
+      <span><kbd>d</kbd> deny</span>
+      <span><kbd>l</kbd> later</span>
     </div>`;
   setTimeout(bindCardButtons, 0);
   setTimeout(bindCardKeys, 0);
@@ -729,6 +747,62 @@ function bindCardButtons() {
         }
       };
     });
+  });
+}
+
+async function viewInbox() {
+  const data = await api('/api/candidates');
+  const cands = data.candidates || [];
+  if (!cands.length) {
+    return '<h2>Inbox</h2><div class="sub">Everything the assistant captured, waiting for you.</div>'
+      + empty('Nothing waiting', 'Capture something and it lands here. Nothing becomes true until you say so.');
+  }
+  let html = `<h2>Inbox</h2><div class="sub">${cands.length} captured thing(s). None of it is true yet — you decide.</div>`;
+  for (const c of cands) {
+    const origin = (c.source && c.source.origin) || 'capture';
+    html += `<div class="card" data-card="${c.id}">
+      <div class="muted">${esc(c.text)}</div>
+      <div class="dim" style="font-size:12px;margin:4px 0 8px">
+        score ${Number(c.trust).toFixed(2)} · ${esc(origin)}
+      </div>
+      <div class="toolbar">
+        <button class="act primary" data-act="remember">remember</button>
+        <button class="act danger" data-act="dismiss">not true</button>
+        <button class="act" data-act="later">later</button>
+      </div>
+    </div>`;
+  }
+  html += `<div class="hint-bar">
+      <span><kbd>j</kbd>/<kbd>k</kbd> move</span>
+      <span><kbd>a</kbd> remember</span>
+      <span><kbd>d</kbd> not true</span>
+      <span><kbd>l</kbd> later</span>
+    </div>`;
+  setTimeout(bindInboxButtons, 0);
+  setTimeout(bindCardKeys, 0);
+  return html;
+}
+
+function bindInboxButtons() {
+  document.querySelectorAll('[data-card]').forEach(cardEl => {
+    const id = cardEl.getAttribute('data-card');
+    const act = async (action) => {
+      try {
+        if (action === 'remember') {
+          await api(`/api/candidates/${id}/remember`, { method: 'POST' });
+          toast('Remembered. It is true now.', 'ok');
+        } else if (action === 'dismiss') {
+          await api(`/api/candidates/${id}/dismiss`, { method: 'POST' });
+          toast('Noted as not true.', 'ok');
+        } else {
+          return;
+        }
+        render();
+      } catch (e) { toast(e.message, 'err'); }
+    };
+    for (const btn of cardEl.querySelectorAll('button.act')) {
+      btn.onclick = () => { btn.disabled = true; act(btn.getAttribute('data-act')); };
+    }
   });
 }
 
@@ -1118,6 +1192,7 @@ async function viewRecall() {
 
 const VIEWS = {
   review: viewReview,
+  inbox: viewInbox,
   vault: viewVault,
   search: viewSearch,
   graph: viewGraph,

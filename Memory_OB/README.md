@@ -171,7 +171,8 @@ memory-ob serve                  # same as: python -m uvicorn memory_ob.api:app
 Then open **http://127.0.0.1:8770/ui** — ten screens, themed with the
 `--ui-*` variables so it can be embedded in Hermes Desktop later:
 
-`Review` (diff / proposal / ask / merge cards) · `Vault` (all records) ·
+`Review` (diff / proposal / ask / merge cards) · `Inbox` (everything captured,
+waiting for you) · `Vault` (all records) ·
 `Search` (three legs) · `Graph` (typed edges) · `Journal` · `Notes` ·
 `Health` (stats + monthly audit) · `Settings` (model selector + appearance) ·
 `Intake` (capture, dream, chapter) · `Recall` (activity + sharing receipts).

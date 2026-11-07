@@ -648,7 +648,27 @@ class Store:
             "SELECT * FROM facts WHERE status = ? ORDER BY trust DESC LIMIT ?",
             (status, limit),
         ).fetchall()
-        return [dict(r) for r in rows]
+        return [self._fact_dict(r) for r in rows]
+
+    def get_fact(self, fact_id: str) -> dict | None:
+        """One candidate fact, or None."""
+        row = self.conn.execute("SELECT * FROM facts WHERE id = ?", (fact_id,)).fetchone()
+        return self._fact_dict(row) if row is not None else None
+
+    def set_fact_status(self, fact_id: str, status: str) -> None:
+        """Move a fact out of the candidate pool.
+
+        ``promoted`` means the owner signed it into a record; ``rejected`` means
+        they said it is not true. Both keep the text — nothing is deleted.
+        """
+        self.conn.execute("UPDATE facts SET status = ? WHERE id = ?", (status, fact_id))
+        self.conn.commit()
+
+    @staticmethod
+    def _fact_dict(row) -> dict:
+        out = dict(row)
+        out["source"] = json.loads(out.get("source") or "{}")
+        return out
 
     def rebuild_index(self) -> None:
         """Drop and rebuild the disposable index. Never touches the ledger."""
