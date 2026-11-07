@@ -75,8 +75,11 @@ class TestValidation(unittest.TestCase):
 
     def test_css_output_is_safe(self) -> None:
         css = Appearance.clean({"accent": "#123456", "font_size": 15}).css()
-        self.assertEqual(css["--ui-accent"], "#123456")
-        self.assertEqual(css["--ui-font-size"], "15px")
+        self.assertEqual(css["--accent"], "#123456")
+        self.assertEqual(css["--font-size"], "15px")
+        # The names are the stylesheet's own tokens, so the page can apply
+        # them without a second mapping.
+        self.assertNotIn("--ui-accent", css)
         for value in css.values():
             self.assertNotIn(";", value)
             self.assertNotIn("<", value)
@@ -148,13 +151,13 @@ class TestAppearanceEndpoints(unittest.TestCase):
         body = r.json()
         self.assertEqual(body["theme"], "auto")
         self.assertEqual(body["errors"], [])
-        self.assertIn("--ui-accent", body["css"])
+        self.assertIn("--accent", body["css"])
 
     def test_post_saves_a_valid_value(self) -> None:
         r = self.client.post("/api/appearance", json={"theme": "dark", "accent": "#123456"})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["theme"], "dark")
-        self.assertEqual(r.json()["css"]["--ui-accent"], "#123456")
+        self.assertEqual(r.json()["css"]["--accent"], "#123456")
 
     def test_post_never_stores_a_hostile_value(self) -> None:
         payload = {"accent": "red;}</style><script>alert(1)</script>"}
@@ -162,13 +165,25 @@ class TestAppearanceEndpoints(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         body = r.json()
         self.assertNotIn("alert", body["accent"])
-        self.assertNotIn("<", body["css"]["--ui-accent"])
-        self.assertNotIn("</style>", body["css"]["--ui-accent"])
+        self.assertNotIn("<", body["css"]["--accent"])
+        self.assertNotIn("</style>", body["css"]["--accent"])
 
     def test_app_settings_accepts_appearance_too(self) -> None:
         r = self.client.post("/api/app-settings", json={"density": "compact"})
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["density"], "compact")
+
+    def test_the_ui_page_carries_the_appearance(self) -> None:
+        """The engine's /ui route must inject it, not just the plugin's."""
+        r = self.client.get("/ui")
+        self.assertEqual(r.status_code, 200)
+        self.assertIn("__MEMORY_OB_APPEARANCE__ = {", r.text)
+        self.assertIn('"accent": "#d4a74a"', r.text)
+
+    def test_the_ui_page_carries_the_token(self) -> None:
+        r = self.client.get("/ui")
+        self.assertIn("__MEMORY_OB_TOKEN__ = ", r.text)
+        self.assertNotIn('__MEMORY_OB_TOKEN__ = "";', r.text)
 
 
 if __name__ == "__main__":

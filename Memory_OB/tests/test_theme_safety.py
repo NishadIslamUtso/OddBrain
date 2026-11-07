@@ -100,6 +100,21 @@ class TestThemeSanitizer(unittest.TestCase):
             cleaned = self.mod._clean_theme({f"--ui-{name}": "#abcdef"})
             self.assertEqual(cleaned, {name: "#abcdef"})
 
+    def test_render_html_injects_the_appearance(self) -> None:
+        """The page must carry the validated appearance, not a raw value."""
+        html = self.mod._render_html({})
+        self.assertIn("__MEMORY_OB_APPEARANCE__ = {", html)
+        self.assertIn('"accent": "#d4a74a"', html)
+        # The injection is JSON, so a quote in a value cannot break out.
+        self.assertIn("window.__MEMORY_OB_APPEARANCE__ = {", html)
+
+    def test_render_html_maps_the_shell_theme_onto_our_tokens(self) -> None:
+        """The stylesheet reads --bg; the shell sends --ui-background."""
+        html = self.mod._render_html({"background": "#101010", "accent": "#d4a74a"})
+        self.assertIn("--bg: #101010", html)
+        self.assertIn("--accent: #d4a74a", html)
+        self.assertNotIn("<style>:root { --ui-accent", html)
+
 
 if __name__ == "__main__":
     unittest.main()

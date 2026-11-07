@@ -129,31 +129,28 @@ def _clean_theme(params: Any) -> dict[str, str]:
 
 
 def _render_html(theme: dict[str, str]) -> str:
-    """The UI markup with the API base, theme and write token injected."""
+    """The UI markup with the API base, theme, token and appearance injected.
+
+    Delegates to memory_ob.webui so the engine's /ui route and this plugin's
+    /ui-html route cannot drift apart.
+    """
     if _INDEX is None:
         return f"<!doctype html><h2>Memory_OB is not installed</h2><p>{_ERROR or 'web/index.html not found'}</p>"
-    html = _INDEX.read_text(encoding="utf-8")
-    html = html.replace(
-        'window.__MEMORY_OB_BASE__ = "";',
-        f'window.__MEMORY_OB_BASE__ = "{_API_BASE}";',
-    )
-    # The write token is injected so the pages can echo it back on every write
-    # (§15 rule 5) — no default token is ever shipped.
     try:
         from memory_ob.auth import load_or_create
         from memory_ob.config import Settings
+        from memory_ob.webui import render
 
-        token = load_or_create(Settings.resolve().token_path)
+        s = Settings.resolve()
+        return render(
+            _INDEX, s,
+            base=_API_BASE,
+            theme=theme,
+            token=load_or_create(s.token_path),
+        )
     except Exception:
-        token = ""
-    html = html.replace(
-        'window.__MEMORY_OB_TOKEN__ = "";',
-        f'window.__MEMORY_OB_TOKEN__ = "{token}";',
-    )
-    if theme:
-        rules = " ".join(f"--ui-{name}: {value};" for name, value in theme.items())
-        html = html.replace("</head>", f"<style>:root {{ {rules} }}</style></head>", 1)
-    return html
+        # Last resort: serve the file untouched rather than a broken page.
+        return _INDEX.read_text(encoding="utf-8")
 
 
 # Mount the library's own routes under this namespace. Registered AFTER /ui so

@@ -112,14 +112,15 @@ class Appearance:
     def css(self) -> dict[str, str]:
         """The custom properties the UI should set on its root element.
 
-        Only validated values leave this function.
+        The names are the STYLESHEET's own tokens (--accent, --font-size), not
+        the host's --ui-* names — the page applies these directly, and the host
+        names mean nothing to our CSS.
         """
         out: dict[str, str] = {}
         if self.accent:
-            out["--ui-accent"] = self.accent
+            out["--accent"] = self.accent
         if self.font_family:
-            out["--ui-font"] = self.font_family
+            out["--font"] = self.font_family
         if self.font_size:
-            out["--ui-font-size"] = f"{int(self.font_size)}px"
-        out["--ui-density"] = self.density
+            out["--font-size"] = f"{int(self.font_size)}px"
         return out

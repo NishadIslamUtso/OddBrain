@@ -128,13 +128,9 @@ def create_app() -> FastAPI:
         index = WEB_DIR / "index.html"
         if not index.exists():
             raise HTTPException(status_code=404, detail="ui not built")
-        token = load_or_create(settings.token_path)
-        html = index.read_text(encoding="utf-8")
-        html = html.replace(
-            'window.__MEMORY_OB_TOKEN__ = "";',
-            f'window.__MEMORY_OB_TOKEN__ = "{token}";',
-        )
-        return HTMLResponse(html)
+        from .webui import render
+
+        return HTMLResponse(render(index, settings, token=load_or_create(settings.token_path)))
 
     @app.get("/")
     def root() -> HTMLResponse:
