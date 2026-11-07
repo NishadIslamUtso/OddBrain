@@ -35,6 +35,19 @@ _NO_FACTS_RE = re.compile(
     r"none|n/?a)\s*\)?[.!]?\s*$"
 )
 
+# Session noise: talk ABOUT the conversation, the tool, or the review UI —
+# "the speaker reports…", "the repo is at…", "score 0.45 · hermes". This is
+# working memory about the session, not a fact about the owner's life, and it
+# must never become a candidate.
+_META_RE = re.compile(
+    r"\b(?:the speaker|the assistant|the user|the owner|the agent|the model|"
+    r"the repo|the repository|github|pull request|"
+    r"the review|the memory|the candidate|the inbox|the vault|"
+    r"the session|this conversation|the conversation|the tool|the ui|"
+    r"the dashboard|the screen|the tab|score\s*\d|not true)\b",
+    re.IGNORECASE,
+)
+
 
 @dataclass(slots=True)
 class Candidate:
@@ -128,6 +141,8 @@ def extract_claims(
         return extract_with_model(text, model_call=model_call, source=source)
     out: list[Candidate] = []
     for claim in split_claims(text):
+        if _META_RE.search(claim):
+            continue
         out.append(
             Candidate(
                 id=ids.new_id(),
@@ -171,7 +186,7 @@ def extract_with_model(
         s = line.strip().lstrip("-*• ").strip()
         if _NO_FACTS_RE.match(s):
             return []
-        if len(s) < 12 or _CHATTER_RE.match(s):
+        if len(s) < 12 or _CHATTER_RE.match(s) or _META_RE.search(s):
             continue
         if hazards.is_hazardous(s):
             continue
@@ -237,7 +252,7 @@ def extract_session(
         s = line.strip().lstrip("-*• ").strip()
         if _NO_FACTS_RE.match(s):
             return []
-        if len(s) < 12 or _CHATTER_RE.match(s):
+        if len(s) < 12 or _CHATTER_RE.match(s) or _META_RE.search(s):
             continue
         if hazards.is_hazardous(s):
             continue
