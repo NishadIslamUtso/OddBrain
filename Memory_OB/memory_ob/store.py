@@ -170,7 +170,15 @@ class Store:
     def __init__(self, path: str | Path) -> None:
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(str(self.path), timeout=10.0)
+        # Each request opens its own Store and uses it start to finish, so the
+        # connection is never shared between requests. But FastAPI closes a
+        # generator dependency in a *different* worker thread than the one that
+        # ran __enter__, so close() would otherwise raise "SQLite objects
+        # created in a thread can only be used in that same thread" — which is
+        # what 500s a page load under any concurrency.
+        self.conn = sqlite3.connect(
+            str(self.path), timeout=10.0, check_same_thread=False
+        )
         self.conn.row_factory = sqlite3.Row
         try:
             # Several connections may be open at once (a request store beside

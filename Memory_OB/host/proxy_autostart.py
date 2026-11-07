@@ -16,7 +16,25 @@ import sys
 from pathlib import Path
 
 HERE = Path(__file__).resolve()
-PROJECT = HERE.parent.parent / "Memory_OB"
+def _project() -> Path | None:
+    """Find the Memory_OB checkout, wherever this file was copied to.
+
+    The logon prompt runs both from the repo and from the installed plugin
+    copy, so the layout cannot be assumed. Walk up until a directory holding
+    ``memory_ob/`` is found; the env var wins if it points at one.
+    """
+    env = os.environ.get("MEMORY_OB_HOME")
+    if env:
+        cand = Path(env).expanduser()
+        if (cand / "memory_ob" / "__init__.py").is_file():
+            return cand
+    for cand in (HERE, *HERE.parents):
+        if (cand / "memory_ob" / "__init__.py").is_file():
+            return cand
+    return None
+
+
+PROJECT = _project()
 
 
 def _vault() -> Path:
@@ -29,6 +47,10 @@ def _vault() -> Path:
 
 
 def main() -> int:
+    if PROJECT is None:
+        print("memory proxy prompt: cannot locate the Memory_OB checkout",
+              file=sys.stderr)
+        return 0
     if str(PROJECT) not in sys.path:
         sys.path.insert(0, str(PROJECT))
     try:
