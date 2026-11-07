@@ -151,26 +151,34 @@ memory-ob stats
 memory-ob activity
 memory-ob export                 # render the vault
 memory-ob models                 # the model selector
+memory-ob doctor                 # is this set up right? (vault, store, token, backend)
+memory-ob serve                  # run the dashboard (--host/--port)
 ```
 
 HTTP API and the screens:
 
 ```bash
-python -m uvicorn memory_ob.api:app --host 127.0.0.1 --port 8770
+memory-ob serve                  # same as: python -m uvicorn memory_ob.api:app
 ```
 
-Then open **http://127.0.0.1:8770/ui** — nine screens, themed with the
+Then open **http://127.0.0.1:8770/ui** — ten screens, themed with the
 `--ui-*` variables so it can be embedded in Hermes Desktop later:
 
 `Review` (diff / proposal / ask / merge cards) · `Vault` (all records) ·
 `Search` (three legs) · `Graph` (typed edges) · `Journal` · `Notes` ·
-`Health` (stats + monthly audit) · `Settings` (model selector) · `Intake`
-(capture, dream, chapter).
+`Health` (stats + monthly audit) · `Settings` (model selector + appearance) ·
+`Intake` (capture, dream, chapter) · `Recall` (activity + sharing receipts).
 
-Endpoints: `/api/health`, `/api/records`, `/api/search`, `/api/cards`,
-`/api/graph`, `/api/sweep`, `/api/audit`, `/api/dream`, `/api/chapter`,
-`/api/embed`, `/api/capture`, `/api/activity`, `/api/journal`, `/api/models`,
-`/api/settings`, `/api/export`.
+The screens follow the host's `--ui-*` values live, so a change in the Hermes
+Appearance settings lands without a reload. `Ctrl/Cmd+K` opens a command
+palette over the screens and recent records; in `Review`, `j`/`k` move between
+cards and `1`–`6` run the matching action.
+
+Endpoints: `/api/health`, `/api/records`, `/api/records/{id}/history`,
+`/api/search`, `/api/cards`, `/api/graph`, `/api/sweep`, `/api/audit`,
+`/api/doctor`, `/api/dream`, `/api/chapter`, `/api/embed`, `/api/capture`,
+`/api/activity`, `/api/journal`, `/api/models`, `/api/settings`,
+`/api/appearance`, `/api/app-settings`, `/api/neversend`, `/api/export`.
 
 ### Search is three legs
 
@@ -216,13 +224,20 @@ memory_ob/
   embedder.py     the meaning leg (embeddings + 3-leg search)
   cli.py          the command line
   api.py          the HTTP API
-  web/index.html  the nine screens (vanilla JS, --ui-* theme vars)
+  webui.py        the dashboard renderer (token/appearance injection)
+  appearance.py   theme/accent/font/density, validated before storage
+  doctor.py       health checks (backs `memory-ob doctor` and /api/doctor)
+  settings.py     extended settings (.brain/settings.json)
+  web/index.html  the ten screens (vanilla JS, token-based theme)
 tests/
   test_laws.py         the trap suite
   test_pipeline.py     the layers
   test_hermes_bridge.py the Hermes bridge and backends
   test_search_and_wiring.py embeddings, 3-leg search, wired commands
   test_end_to_end.py   the whole-car acceptance suite
+  test_appearance.py   appearance validation + endpoints
+  test_doctor.py       doctor, record history, the serve command
+  test_theme_safety.py the theme query string cannot inject markup
 ```
 
 ## Design
