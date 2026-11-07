@@ -283,7 +283,67 @@
   :root[data-density="compact"] main { padding: 12px 16px; }
   :root[data-density="compact"] .card { padding: 8px 12px; margin-bottom: 6px; }
   :root[data-density="compact"] .sub { margin-bottom: 10px; }
+/* ---- diff + edit ------------------------------------------------------ */
+.diffbox {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.diffline { margin: 2px 0; }
+.diffline .tag {
+  display: inline-block;
+  min-width: 58px;
+  margin-right: 8px;
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted-foreground);
+}
+.diffbox :is(.del, .ins) {
+  border-radius: 3px;
+  padding: 1px 3px;
+}
+.diffbox .del {
+  background: color-mix(in srgb, #e5484d 18%, transparent);
+  color: #e5484d;
+  text-decoration: line-through;
+}
+.diffbox .ins {
+  background: color-mix(in srgb, #30a46c 18%, transparent);
+  color: #30a46c;
+}
+.editbox {
+  margin: 8px 0;
+  padding: 10px 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+}
+.editbox textarea {
+  width: 100%;
+  box-sizing: border-box;
+  background: transparent;
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px;
+  font: inherit;
+  resize: vertical;
+}
+.editbox select {
+  background: transparent;
+  color: var(--foreground);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 3px 6px;
+  font: inherit;
+}
+.toastbtns { margin-top: 8px; }
 </style>
+
 </head>
 <body>
 <div id="app">
@@ -461,12 +521,39 @@ function errText(e) {
 /* ---- toasts -------------------------------------------------------------
    Every failure used to be an alert(), which blocks the page. Toasts report
    and get out of the way. */
-function toast(message, kind, ms) {
+function toast(message, kind, ms, buttons) {
   const box = document.getElementById('toasts');
   if (!box) { alert(message); return; }
   const el = document.createElement('div');
   el.className = 'toast' + (kind ? ' ' + kind : '');
   el.textContent = message;
+  // Some toasts carry an action — the Undo after a truth change. They stay
+  // until the owner decides rather than vanishing on a timer.
+  if (buttons && buttons.length) {
+    const row = document.createElement('div');
+    row.className = 'toastbtns';
+    buttons.forEach((b) => {
+      const btn = document.createElement('button');
+      btn.className = 'act';
+      btn.textContent = b.label;
+      btn.onclick = () => {
+        const keep = b.run && b.run();
+        if (!keep) {
+          el.classList.add('leaving');
+          setTimeout(() => el.remove(), 200);
+        }
+      };
+      row.appendChild(btn);
+    });
+    el.appendChild(row);
+    box.appendChild(el);
+    setTimeout(() => {
+      if (!el.isConnected) return;
+      el.classList.add('leaving');
+      setTimeout(() => el.remove(), 200);
+    }, ms || 8000);
+    return;
+  }
   box.appendChild(el);
   setTimeout(() => {
     el.classList.add('leaving');
@@ -697,8 +784,16 @@ const KEY_HINTS = [
   ['a', 'remember / approve'], ['d', 'not true / deny'], ['l', 'later'],
 ];
 
+let _cardKeyHandler = null;
+
 function bindCardKeys() {
   const cards = Array.from(document.querySelectorAll('[data-card]'));
+  // Each render used to add another listener without removing the old one, so
+  // a single keypress eventually fired the action several times.
+  if (_cardKeyHandler) {
+    document.removeEventListener('keydown', _cardKeyHandler);
+    _cardKeyHandler = null;
+  }
   if (!cards.length) return;
   let idx = 0;
   const select = (i) => {
@@ -708,7 +803,7 @@ function bindCardKeys() {
     state.selectedCard = cards[idx].getAttribute('data-card');
   };
   select(0);
-  document.addEventListener('keydown', (e) => {
+  _cardKeyHandler = (e) => {
     if (state.tab !== 'review' && state.tab !== 'inbox') return;
     const tag = (document.activeElement || {}).tagName;
     if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
@@ -719,16 +814,20 @@ function bindCardKeys() {
       if (!card) return;
       for (const act of KEYS[e.key]) {
         const btn = card.querySelector(`[data-act="${act}"]`);
+        // Truth-changing actions go through the editor now, so a keypress
+        // opens it rather than signing outright.
         if (btn) { e.preventDefault(); btn.click(); return; }
       }
     }
-  });
+  };
+  document.addEventListener('keydown', _cardKeyHandler);
 }
 
 /* ---- views -------------------------------------------------------------- */
 
 async function viewReview() {
   const cards = await api('/api/cards?status=pending');
+  state.cards = cards;
   state.data.reviewCount = cards.length;
   if (!cards.length) {
     return '<h2>Review</h2><div class="sub">The AI proposes; you sign.</div>'
@@ -745,7 +844,7 @@ async function viewReview() {
       </div>`;
     if (c.body) html += `<div class="muted" style="margin:6px 0">${esc(c.body)}</div>`;
     if (c.type === 'diff' && c.old && c.new) {
-      html += `<pre>${esc(JSON.stringify(c.old, null, 2))} → ${esc(JSON.stringify(c.new, null, 2))}</pre>`;
+      html += renderDiff(c);
     }
     if (c.speakers && c.speakers.length) {
       html += `<div class="dim" style="font-size:12px">speakers: ${c.speakers.map(esc).join(', ')}</div>`;
@@ -778,14 +877,142 @@ async function viewReview() {
   return html;
 }
 
+/* A word-level diff. Raw JSON told the owner nothing about what would
+   actually change; this shows the removed words and the added ones. */
+function wordDiff(before, after) {
+  const a = String(before || '').split(/\s+/).filter(Boolean);
+  const b = String(after || '').split(/\s+/).filter(Boolean);
+  const n = a.length, m = b.length;
+  const dp = Array.from({ length: n + 1 }, () => new Array(m + 1).fill(0));
+  for (let i = n - 1; i >= 0; i--) {
+    for (let j = m - 1; j >= 0; j--) {
+      dp[i][j] = a[i] === b[j] ? dp[i + 1][j + 1] + 1
+                                 : Math.max(dp[i + 1][j], dp[i][j + 1]);
+    }
+  }
+  const out = [];
+  let i = 0, j = 0;
+  const flush = (kind, items) => {
+    if (!items.length) return;
+    out.push(`<span class="${kind}">${esc(items.join(' '))}</span>`);
+  };
+  while (i < n && j < m) {
+    if (a[i] === b[j]) { flush('same', [a[i]]); i++; j++; }
+    else {
+      const del = [], ins = [];
+      while (i < n && j < m && a[i] !== b[j]) {
+        if (dp[i + 1][j] >= dp[i][j + 1]) { del.push(a[i]); i++; }
+        else { ins.push(b[j]); j++; }
+      }
+      flush('del', del); flush('ins', ins);
+    }
+  }
+  flush('del', a.slice(i)); flush('ins', b.slice(j));
+  return out.join(' ');
+}
+
+/* The field a diff card actually changes. */
+function diffField(card) {
+  if (!card.old || !card.new) return 'value';
+  const keys = Object.keys(card.new);
+  const pick = ['title', 'body', 'text', 'value', 'statement', 'fact', 'summary'].find(
+    (k) => k in card.new && k in card.old && card.new[k] !== card.old[k]
+  );
+  return pick || keys[0] || 'value';
+}
+
+/* Actions that overwrite or create confirmed truth. They get a second click:
+   one keypress must never rewrite what the owner already signed. */
+const TRUTH_CHANGES = new Set(['approve', 'take_new', 'keep_both', 'remember']);
+
+function renderDiff(card) {
+  if (card.type !== 'diff' || !card.old || !card.new) return '';
+  const f = diffField(card);
+  const before = card.old[f] ?? JSON.stringify(card.old);
+  const after = card.new[f] ?? JSON.stringify(card.new);
+  return `<div class="diffbox">
+    <div class="diffline"><span class="tag del">was</span> ${wordDiff(before, after).replace(/<span class="ins">.*?<\/span>/g, '')}</div>
+    <div class="diffline"><span class="tag ins">becomes</span> ${wordDiff(before, after).replace(/<span class="del">.*?<\/span>/g, '')}</div>
+    <div class="dim" style="font-size:12px;margin-top:6px">field: ${esc(f)}</div>
+  </div>`;
+}
+
+/* Inline editor: the owner fixes the wording and the kind before signing. */
+function editPanel(card, action) {
+  const f = card.type === 'diff' ? diffField(card) : 'title';
+  const current = card.type === 'diff'
+    ? (card.new?.[f] ?? card.new?.title ?? card.new?.body ?? card.title)
+    : (card.new?.title ?? card.new?.body ?? card.title ?? card.body);
+  const kind = card.new?.kind || 'note';
+  return `<div class="editbox">
+    <textarea id="editText" rows="3">${esc(current)}</textarea>
+    <div class="toolbar" style="margin-top:6px">
+      <label class="dim">kind
+        <select id="editKind">
+          ${['profile', 'journal', 'story', 'capsule', 'learning', 'note'].map(
+            (k) => `<option value="${k}"${k === kind ? ' selected' : ''}>${k}</option>`
+          ).join('')}
+        </select>
+      </label>
+    </div>
+    <div class="toolbar" style="margin-top:8px">
+      <button class="act primary" data-edit-save="${action}" data-field="${esc(f)}">sign this</button>
+      <button class="act" data-edit-cancel>cancel</button>
+    </div>
+  </div>`;
+}
+
 function bindCardButtons() {
   document.querySelectorAll('[data-card]').forEach(cardEl => {
     const id = cardEl.getAttribute('data-card');
+    const card = (state.cards || []).find((c) => c.id === id);
     cardEl.querySelectorAll('button.act').forEach(btn => {
       btn.onclick = async () => {
+        const act = btn.getAttribute('data-act');
+        if (!act) return;
+        // Truth-changing actions go through the editor: the owner reads the
+        // wording, fixes it if needed, picks the kind, and only then signs.
+        // One click, or one keypress, never rewrites a confirmed memory.
+        if (TRUTH_CHANGES.has(act) && card) {
+          const existing = cardEl.querySelector('.editbox');
+          if (existing) { existing.remove(); return; }
+          const box = document.createElement('div');
+          box.innerHTML = editPanel(card, act);
+          cardEl.appendChild(box.firstChild);
+          const save = box.querySelector('[data-edit-save]');
+          const cancel = box.querySelector('[data-edit-cancel]');
+          if (cancel) cancel.onclick = () => box.remove();
+          if (save) save.onclick = async () => {
+            save.disabled = true;
+            try {
+              await api(`/api/cards/${id}/${act}`, {
+                method: 'POST',
+                body: JSON.stringify({
+                  edit: {
+                    field: save.getAttribute('data-field') || 'title',
+                    text: box.querySelector('#editText').value,
+                    kind: box.querySelector('#editKind').value,
+                  },
+                }),
+              });
+              toast('Signed. Press Undo if that was wrong.', 'ok', 8000, [
+                { label: 'Undo', run: async () => {
+                    await api(`/api/cards/${id}/undo`, { method: 'POST' });
+                    toast('Restored the previous version.', 'ok', 3200);
+                    render();
+                } },
+              ]);
+              render();
+            } catch (e) {
+              toast(e.message, 'err');
+              save.disabled = false;
+            }
+          };
+          return;
+        }
         btn.disabled = true;
         try {
-          await api(`/api/cards/${id}/${btn.getAttribute('data-act')}`, { method: 'POST' });
+          await api(`/api/cards/${id}/${act}`, { method: 'POST' });
           toast('Done.', 'ok', 1800);
           render();
         } catch (e) {

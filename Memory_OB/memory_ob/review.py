@@ -43,6 +43,7 @@ LATER = "later"
 CONFIRM = "confirm"
 DISMISS = "dismiss"
 MERGE_IT = "merge"
+UNDO = "undo"
 
 ACTIONS: tuple[str, ...] = (
     APPROVE,
@@ -55,6 +56,7 @@ ACTIONS: tuple[str, ...] = (
     CONFIRM,
     DISMISS,
     MERGE_IT,
+    UNDO,
 )
 
 _CARD_SCHEMA = """
@@ -113,6 +115,21 @@ class Card:
         from dataclasses import asdict
 
         return asdict(self)
+
+
+def _edit_fields(edit: dict[str, Any] | None) -> dict[str, Any]:
+    """Turn the editor's payload into record fields.
+
+    The editor names the field it is editing (title, body, ...) rather than
+    always writing ``text``, so the owner's wording lands where it belongs.
+    """
+    if not edit:
+        return {}
+    out = dict(edit)
+    field = str(out.pop("field", "") or "")
+    if field and "text" in out:
+        out[field] = out.pop("text")
+    return out
 
 
 def _record_from_payload(data: dict[str, Any], *, fallback_speaker: str = "user") -> Record:
@@ -298,6 +315,8 @@ class CardStore:
         card = self.get(card_id)
         if card is None:
             return None
+        if action == UNDO:
+            return self._undo(card, by=by)
         if card.status == RESOLVED:
             return card
         if action == LATER:
@@ -325,6 +344,33 @@ class CardStore:
         )
         return card
 
+    def _undo(self, card: Card, *, by: str | None = None) -> Card:
+        """Put back what a truth-changing resolution replaced.
+
+        The card keeps the record as it was before the change, so a mistaken
+        'take new' is reversible rather than a silent overwrite. The card goes
+        back to pending so the owner decides again.
+        """
+        if card.type != DIFF or not card.old or not card.record_id:
+            return card
+        rec = self.store.get_record(card.record_id)
+        if rec is None:
+            return card
+        restored = Record.from_dict({**rec.to_dict(), **card.old})
+        self.store.sign_record(
+            restored, card_id=card.id, changed_by=by, reason="card:undo"
+        )
+        card.status = PENDING
+        card.resolution = None
+        card.resolved_at = None
+        self._save(card)
+        self.store.log_activity(
+            f"card:{UNDO}",
+            f"restored {card.record_id} from {card.id}",
+            actor=by,
+        )
+        return card
+
     def _resolve_diff(
         self, card: Card, action: str, *, edit: dict[str, Any] | None = None
     ) -> None:
@@ -333,7 +379,10 @@ class CardStore:
         if rec is None:
             return
         if action == TAKE_NEW and card.new:
-            updated = Record.from_dict({**rec.to_dict(), **card.new})
+            # The owner's edit wins over the proposal's wording.
+            updated = Record.from_dict(
+                {**rec.to_dict(), **card.new, **_edit_fields(edit)}
+            )
             # Taking the new side CHANGES truth, so it is signed again.
             self.store.sign_record(
                 updated, card_id=card.id, changed_by=card.resolved_by,
@@ -346,13 +395,15 @@ class CardStore:
                 reason="card:keep_both",
             )
         elif action == EDIT and edit:
-            updated = Record.from_dict({**rec.to_dict(), **edit})
+            updated = Record.from_dict({**rec.to_dict(), **_edit_fields(edit)})
             self.store.sign_record(
                 updated, card_id=card.id, changed_by=card.resolved_by,
                 reason="card:edit",
             )
         elif action == APPROVE and card.new:
-            updated = Record.from_dict({**rec.to_dict(), **card.new})
+            updated = Record.from_dict(
+                {**rec.to_dict(), **card.new, **_edit_fields(edit)}
+            )
             self.store.sign_record(
                 updated, card_id=card.id, changed_by=card.resolved_by,
                 reason="card:approve",
@@ -364,7 +415,7 @@ class CardStore:
     ) -> None:
         if action != APPROVE:
             return
-        data = card.new or edit
+        data = {**(card.new or {}), **_edit_fields(edit)}
         if not data:
             return
         rec = _record_from_payload(data)

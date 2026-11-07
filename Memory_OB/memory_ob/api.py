@@ -301,11 +301,12 @@ def create_app() -> FastAPI:
         card_id: str,
         action: str,
         note: str | None = None,
+        edit: dict[str, Any] | None = None,
         request: Request = None,
         st: Store = Depends(get_store),
     ) -> dict[str, Any]:
         cs = CardStore(st)
-        card = cs.resolve(card_id, action, by=_caller(request), note=note)
+        card = cs.resolve(card_id, action, by=_caller(request), note=note, edit=edit)
         if card is None:
             raise HTTPException(status_code=404, detail="card not found")
         return card.to_dict()
