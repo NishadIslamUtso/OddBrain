@@ -88,7 +88,7 @@ def _check_vault(settings: Settings) -> Check:
             "vault",
             False,
             f"missing: {vault}",
-            fix=f"memory-ob init   (or set --vault to the real folder)",
+            fix="memory-ob init   (or set --vault to the real folder)",
             severity="warn",
         )
     missing = [n for n in VAULT_FOLDER_NAMES if not (vault / n).is_dir()]
@@ -173,7 +173,7 @@ def _check_models(settings: Settings) -> Check:
             severity="warn",
         )
     try:
-        cfg = ModelConfig.load(path)
+        ModelConfig.load(path)
     except Exception as exc:  # noqa: BLE001
         return Check("models", False, f"{path} will not parse: {exc}", fix="check the JSON")
     # Deliberately does NOT call resolve_backend(): that would shell out to

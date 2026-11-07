@@ -25,8 +25,7 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
-from typing import Sequence
+from collections.abc import Sequence
 
 from . import __version__
 from .config import Settings
@@ -50,7 +49,7 @@ def cmd_init(args: argparse.Namespace) -> int:
     st = Store(s.db)
     st.log_activity("init", f"vault={s.vault}", actor="owner")
     st.close()
-    print(f"Memory_OB initialised")
+    print("Memory_OB initialised")
     print(f"  vault: {s.vault}")
     print(f"  store: {s.db}")
     return 0
@@ -278,7 +277,7 @@ def cmd_activity(args: argparse.Namespace) -> int:
 
 
 def cmd_models(args: argparse.Namespace) -> int:
-    from .models import ModelConfig, backend_name, is_available, resolve_backend
+    from .models import ModelConfig, is_available, resolve_backend
 
     s = _settings(args)
     cfg = ModelConfig.load(s.models_path)

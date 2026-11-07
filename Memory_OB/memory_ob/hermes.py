@@ -24,6 +24,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+
 def _hermes_home() -> Path:
     """Where Hermes keeps its config and binaries.
 
@@ -98,6 +99,7 @@ def config_get(key: str) -> str | None:
             capture_output=True,
             text=True,
             timeout=_TIMEOUT,
+            check=False,
         )
     except (OSError, subprocess.TimeoutExpired):
         _cache[key] = None

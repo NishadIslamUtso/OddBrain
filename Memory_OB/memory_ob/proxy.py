@@ -42,7 +42,7 @@ class ProxyPref:
     last_choice: str | None = None
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "ProxyPref":
+    def from_dict(cls, data: dict[str, Any]) -> ProxyPref:
         return cls(
             ask_at_startup=bool(data.get("ask_at_startup", True)),
             remember=bool(data.get("remember", False)),
@@ -80,9 +80,7 @@ def should_ask(vault: Path) -> bool:
     pref = load_pref(vault)
     if not pref.ask_at_startup:
         return False
-    if pref.remember and pref.last_choice in (YES, NO):
-        return False
-    return True
+    return not (pref.remember and pref.last_choice in (YES, NO))
 
 
 def running() -> bool:
@@ -125,7 +123,7 @@ def stop() -> bool:
     killed = False
     try:
         out = subprocess.run(
-            ["netstat", "-ano"], capture_output=True, text=True, timeout=15
+            ["netstat", "-ano"], capture_output=True, text=True, timeout=15, check=False
         ).stdout
     except (OSError, subprocess.TimeoutExpired):
         return False
@@ -140,7 +138,7 @@ def stop() -> bool:
         try:
             subprocess.run(
                 ["taskkill", "-F", "-PID", pid],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=15, check=False,
             )
             killed = True
         except (OSError, subprocess.TimeoutExpired):
@@ -184,7 +182,7 @@ def prompt_and_start(vault: Path) -> str:
     root.attributes("-topmost", True)
     try:
         root.tk.call("tk", "scaling", 1.5)
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     pref = load_pref(vault)

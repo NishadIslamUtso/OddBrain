@@ -7,7 +7,7 @@ a trust ladder where ``confirmed`` is reachable only through a Review card.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field, asdict
+from dataclasses import asdict, dataclass, field
 from typing import Any
 
 # --- Kinds -----------------------------------------------------------------
@@ -56,7 +56,7 @@ def _timestamp() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def sign_truth(rec: "Record", *, card_id: str, at: str | None = None) -> "Record":
+def sign_truth(rec: Record, *, card_id: str, at: str | None = None) -> Record:
     """The ONLY way a record becomes truth (§2, law 4).
 
     Trust is a score; truth is a signature. This raises the trust to the
@@ -70,7 +70,7 @@ def sign_truth(rec: "Record", *, card_id: str, at: str | None = None) -> "Record
     return rec
 
 
-def unsigned(rec: "Record") -> "Record":
+def unsigned(rec: Record) -> Record:
     """Strip a claimed signature and pull the trust back below the line.
 
     Used by every write path that is NOT the Review panel, so a caller
@@ -172,12 +172,12 @@ class Record:
         return asdict(self)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Record":
+    def from_dict(cls, data: dict[str, Any]) -> Record:
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         return cls(**{k: v for k, v in data.items() if k in known})
 
     @classmethod
-    def from_payload(cls, data: dict[str, Any]) -> "Record":
+    def from_payload(cls, data: dict[str, Any]) -> Record:
         """Build a record from a partial payload, filling safe defaults.
 
         Used by the API and the review pipeline, where a proposal may carry

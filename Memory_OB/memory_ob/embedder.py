@@ -15,7 +15,8 @@ from __future__ import annotations
 
 import math
 import re
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from . import models
 
@@ -109,6 +110,7 @@ def combined_search(
     backend: models.ModelBackend | None = None,
     slot: models.ModelSlot | None = None,
     rerank_call: Any = None,
+    semantic: bool = True,
 ) -> list[Any]:
     """Three-leg search: words + meaning + entities, merged and ranked."""
     if not query.strip():
@@ -120,11 +122,11 @@ def combined_search(
     try:
         for r in store.search(query, limit=limit * 4):
             scores[r.id] = scores.get(r.id, 0.0) + 1.0
-    except Exception:
+    except Exception:  # noqa: BLE001, S110
         pass
 
     # Leg 2 — meaning (embeddings)
-    if store.count_embeddings() > 0:
+    if semantic and store.count_embeddings() > 0:
         qv = _query_vector(query, backend, slot)
         if qv is not None:
             for rid, vec in _all_embeddings(store):

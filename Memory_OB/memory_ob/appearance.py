@@ -42,7 +42,7 @@ class Appearance:
     errors: list[str] = field(default_factory=list)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "Appearance":
+    def from_dict(cls, data: dict[str, Any]) -> Appearance:
         return cls(
             theme=str(data.get("theme") or "auto"),
             accent=str(data.get("accent") or DEFAULT_ACCENT),
@@ -84,7 +84,7 @@ class Appearance:
         return errors
 
     @classmethod
-    def clean(cls, data: dict[str, Any]) -> "Appearance":
+    def clean(cls, data: dict[str, Any]) -> Appearance:
         """Coerce and clamp raw input into a valid Appearance.
 
         Used on the way in: a bad value becomes the default rather than an

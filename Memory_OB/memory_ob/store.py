@@ -18,18 +18,18 @@ import re
 import sqlite3
 import time
 from pathlib import Path
-from typing import Any, Iterable, Iterator
+from typing import Any
+
+from typing_extensions import Self
 
 from . import ids as idgen
 from .records import (
-    ACTIVE,
     CANDIDATE_MAX,
     CONFIRMED_MIN,
     RETRACTED,
     SUPERSEDED,
     TRASH,
     Record,
-    is_confirmed,
     sign_truth,
 )
 
@@ -86,6 +86,16 @@ CREATE TABLE IF NOT EXISTS facts (
     status TEXT NOT NULL DEFAULT 'candidate',
     source TEXT NOT NULL DEFAULT '{}',
     demo INTEGER NOT NULL DEFAULT 0,
+    created TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS conversations (
+    id TEXT PRIMARY KEY,
+    origin TEXT NOT NULL DEFAULT '',
+    session TEXT NOT NULL DEFAULT '',
+    speaker TEXT NOT NULL DEFAULT '',
+    text TEXT NOT NULL,
+    parts TEXT NOT NULL DEFAULT '[]',
     created TEXT NOT NULL
 );
 
@@ -264,7 +274,7 @@ class Store:
     def close(self) -> None:
         self.conn.close()
 
-    def __enter__(self) -> "Store":
+    def __enter__(self) -> Self:
         return self
 
     def __exit__(self, *exc: object) -> None:
@@ -564,6 +574,7 @@ class Store:
         backend: Any = None,
         slot: Any = None,
         rerank_call: Any = None,
+        semantic: bool = True,
     ) -> list[Record]:
         """Three-leg search: words + meaning + entities.
 
@@ -580,6 +591,7 @@ class Store:
             backend=backend,
             slot=slot,
             rerank_call=rerank_call,
+            semantic=semantic,
         )
 
     def search(self, query: str, *, limit: int = 20) -> list[Record]:
@@ -744,6 +756,79 @@ class Store:
         row = self.conn.execute("SELECT * FROM facts WHERE id = ?", (fact_id,)).fetchone()
         return self._fact_dict(row) if row is not None else None
 
+    def add_conversation(
+        self,
+        text: str,
+        *,
+        origin: str = "",
+        session: str = "",
+        speaker: str = "",
+        parts: list | None = None,
+    ) -> str:
+        """Store a full conversation verbatim. Returns its id."""
+        import json as _json
+
+        from . import ids
+
+        cid = ids.new_id()
+        self.conn.execute(
+            "INSERT INTO conversations(id, origin, session, speaker, text, parts, created) "
+            "VALUES(?,?,?,?,?,?,?)",
+            (
+                cid,
+                origin,
+                session,
+                speaker,
+                text,
+                _json.dumps(parts or []),
+                _now(),
+            ),
+        )
+        self.conn.commit()
+        return cid
+
+    def get_conversation(self, conv_id: str) -> dict | None:
+        """Read a stored conversation back, verbatim."""
+        import json as _json
+
+        row = self.conn.execute(
+            "SELECT * FROM conversations WHERE id = ?", (conv_id,)
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "origin": row["origin"],
+            "session": row["session"],
+            "speaker": row["speaker"],
+            "text": row["text"],
+            "parts": _json.loads(row["parts"]),
+            "created": row["created"],
+        }
+
+    def list_conversations(self, *, limit: int = 200, offset: int = 0) -> list[dict]:
+        """Stored conversations, newest first — the recovery index."""
+        rows = self.conn.execute(
+            "SELECT id, origin, session, speaker, text, created FROM conversations "
+            "ORDER BY created DESC LIMIT ? OFFSET ?",
+            (limit, offset),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "origin": r["origin"],
+                "session": r["session"],
+                "speaker": r["speaker"],
+                "text": r["text"],
+                "created": r["created"],
+            }
+            for r in rows
+        ]
+
+    def count_conversations(self) -> int:
+        row = self.conn.execute("SELECT COUNT(*) FROM conversations").fetchone()
+        return int(row[0]) if row else 0
+
     def set_fact_status(self, fact_id: str, status: str) -> None:
         """Move a fact out of the candidate pool.
 
@@ -752,6 +837,30 @@ class Store:
         """
         self.conn.execute("UPDATE facts SET status = ? WHERE id = ?", (status, fact_id))
         self.conn.commit()
+
+    def dismiss_facts(self, *, origin: str | None = None, status: str = "rejected") -> int:
+        """Bulk-move candidate facts out of the pool.
+
+        Returns how many were moved. Nothing is deleted — the text is kept.
+        """
+        if origin:
+            rows = self.conn.execute(
+                "SELECT id FROM facts WHERE status = 'candidate' AND json_extract(source, '$.origin') = ?",
+                (origin,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT id FROM facts WHERE status = 'candidate'"
+            ).fetchall()
+        ids = [r[0] for r in rows]
+        if ids:
+            placeholders = ",".join("?" * len(ids))
+            self.conn.execute(
+                f"UPDATE facts SET status = ? WHERE id IN ({placeholders})",
+                [status, *ids],
+            )
+            self.conn.commit()
+        return len(ids)
 
     @staticmethod
     def _fact_dict(row) -> dict:

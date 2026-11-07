@@ -77,6 +77,16 @@ def remember_fact(
     return card
 
 
+def dismiss_facts_bulk(store, *, origin: str | None = None, by: str = "owner") -> int:
+    """Dismiss every candidate (optionally only those from one origin).
+
+    Returns how many were moved. Nothing is deleted.
+    """
+    n = store.dismiss_facts(origin=origin)
+    store.log_activity("dismiss-all", f"{n} candidate(s)" + (f" from {origin}" if origin else ""), actor=by)
+    return n
+
+
 def dismiss_fact(store, fact_id: str, *, by: str = "owner") -> None:
     """The owner says this is not true. The text is kept, out of the pool."""
     fact = store.get_fact(fact_id)

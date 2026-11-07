@@ -75,6 +75,14 @@ def render(index: Path, settings: Settings, *, base: str = "", theme: dict[str, 
         # The shell sends the host's --ui-* names; the stylesheet reads its own
         # tokens, so map one onto the other. This is the fallback for when the
         # parent cannot be read (a standalone tab, or a cross-origin frame).
+        # --bg-3 derives from --ui-bg-elevated, which not every host defines;
+        # fall back to --ui-bg-secondary so button rows never keep a stale
+        # dark surface in a light theme.
+        theme = dict(theme)
+        if "background-elevated" not in theme and "background-secondary" in theme:
+            theme["background-elevated"] = theme["background-secondary"]
+        elif "background-elevated" not in theme and "background" in theme:
+            theme["background-elevated"] = theme["background"]
         rules = " ".join(
             f"{THEME_TO_TOKEN.get(name, '--ui-' + name)}: {value};"
             for name, value in theme.items()

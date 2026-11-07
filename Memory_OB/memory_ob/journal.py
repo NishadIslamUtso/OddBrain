@@ -10,10 +10,10 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass, field
-from typing import Any, Iterable
+from typing import Any
 
 from . import quotes
-from .records import ACTIVE, JOURNAL, PROFILE, STORY, CONFIRMED_MIN, Record
+from .records import ACTIVE, CONFIRMED_MIN, JOURNAL, PROFILE, STORY, Record
 
 
 def _now() -> str:

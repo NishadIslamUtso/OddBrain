@@ -89,21 +89,31 @@ def sweep(store: Any, *, open_cards: bool = True) -> dict[str, Any]:
 
     if cards is not None:
         for d in dead_links:
+            src_rec = by_id.get(d["src"])
+            speakers = [src_rec.speaker] if src_rec is not None else []
             cards.propose_ask(
                 title="Dead link",
                 body=(
                     f"An edge points at a missing record "
                     f"({d['missing']}): {d['src']} --{d['label']}--> {d['dst']}"
                 ),
-                speakers=["memory_ob"],
+                speakers=speakers or ["memory_ob"],
             )
         for c in contradictions:
+            a_rec = by_id.get(c["a"])
+            b_rec = by_id.get(c["b"])
+            speakers = []
+            if a_rec is not None:
+                speakers.append(a_rec.speaker)
+            if b_rec is not None and b_rec.speaker not in speakers:
+                speakers.append(b_rec.speaker)
             cards.propose_ask(
                 title="Contradiction",
                 body=(
-                    f"Two records disagree: {c['a_title']!r} vs {c['b_title']!r}"
+                    f"Two records disagree: {c['a_title']!r} (id {c['a']}) "
+                    f"vs {c['b_title']!r} (id {c['b']})"
                 ),
-                speakers=["memory_ob"],
+                speakers=speakers or ["memory_ob"],
             )
         for m in merge_candidates:
             cards.propose_merge(

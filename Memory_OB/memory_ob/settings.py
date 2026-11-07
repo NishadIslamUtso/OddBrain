@@ -26,6 +26,7 @@ DEFAULTS: dict[str, Any] = {
     "checkpoint_required": True,
     "backup_dir": "",
     "demo_visible": False,
+    "local_only": False,
     # Appearance. Validated by memory_ob.appearance before they are stored,
     # because they reach the UI as CSS custom properties.
     "theme": "auto",
@@ -44,6 +45,7 @@ class AppSettings:
     checkpoint_required: bool = True
     backup_dir: str = ""
     demo_visible: bool = False
+    local_only: bool = False
     theme: str = "auto"
     accent: str = "#d4a74a"
     font_family: str = ""
@@ -58,7 +60,7 @@ class AppSettings:
         return Appearance.from_dict(self.to_dict())
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any]) -> "AppSettings":
+    def from_dict(cls, data: dict[str, Any]) -> AppSettings:
         known = {f for f in cls.__dataclass_fields__}  # type: ignore[attr-defined]
         return cls(**{k: v for k, v in data.items() if k in known})
 

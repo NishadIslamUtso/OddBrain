@@ -15,7 +15,8 @@ the way IN. This is the way OUT — the boundary the model actually crosses.
 
 from __future__ import annotations
 
-from typing import Any, Iterable
+from collections.abc import Iterable
+from typing import Any
 
 from . import hazards
 

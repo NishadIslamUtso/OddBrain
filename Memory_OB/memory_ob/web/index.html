@@ -47,8 +47,12 @@
     --text: #1c1c1c;
     --text-2: #4a4a4a;
     --text-3: #6b6b6b;
-    --text-4: #8f8f8f;
+    --text-4: #5a5a5a;
     --accent-soft: #d4a74a18;
+    --ok: #2e8b47;
+    --warn: #a86a1a;
+    --bad: #b83333;
+    --info: #1f6fb2;
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
@@ -133,6 +137,8 @@
   .pill.merge { color: #b98fff; border-color: #b98fff55; }
   .pill.confirmed { color: var(--ok); border-color: #7fd98f55; }
   .pill.unverified { color: #e0c060; border-color: #e0c06055; }
+  :root[data-theme="light"] .pill.merge { color: #7a4fd6; }
+  :root[data-theme="light"] .pill.unverified { color: #8a6a00; }
 
   /* ---- buttons ---- */
   button.act {
@@ -143,8 +149,8 @@
   }
   button.act:hover { border-color: var(--accent); color: var(--accent); }
   button.act:disabled { opacity: .5; cursor: default; }
-  button.act.primary { background: var(--accent); color: #000; border-color: var(--accent); font-weight: 600; }
-  button.act.primary:hover { color: #000; filter: brightness(1.08); }
+  button.act.primary { background: var(--accent); color: var(--accent-text, #000); border-color: var(--accent); font-weight: 600; }
+  button.act.primary:hover { color: var(--accent-text, #000); filter: brightness(1.08); }
   button.act.danger:hover { border-color: var(--bad); color: var(--bad); }
 
   /* ---- forms ---- */
@@ -403,6 +409,7 @@ const TABS = [
   ['settings', 'Settings', 'settings'],
   ['intake', 'Intake', 'intake'],
   ['recall', 'Recall', 'recall'],
+  ['conversations', 'Conversations', 'vault'],
 ];
 
 const state = {
@@ -591,6 +598,15 @@ function applyTheme() {
         const value = cs.getPropertyValue(from).trim();
         if (value) root.style.setProperty(to, value);
       }
+      // --ui-bg-elevated is not defined by every host theme. When it is
+      // missing, --bg-3 keeps its dark standalone fallback even in a light
+      // theme, which makes the button rows unreadable. Derive it from the
+      // nearest available surface colour instead.
+      if (!root.style.getPropertyValue('--bg-3')) {
+        const fb = cs.getPropertyValue('--ui-bg-secondary').trim()
+                || cs.getPropertyValue('--ui-bg-chrome').trim();
+        if (fb) root.style.setProperty('--bg-3', fb);
+      }
     } catch (e) { /* cross-origin parent — keep our own theme */ }
   }
 
@@ -607,6 +623,21 @@ function applyTheme() {
     }
     if (a.density) root.setAttribute('data-density', a.density);
     if (a.font_size) root.style.setProperty('--font-size', Number(a.font_size) + 'px');
+  }
+  // Accent text colour: keep primary buttons readable on any accent the host
+  // or the owner picks, instead of forcing #000.
+  const accent = getComputedStyle(root).getPropertyValue('--accent').trim();
+  if (accent) {
+    const m = accent.match(/#([0-9a-f]{3,8})/i);
+    if (m) {
+      let hex = m[1];
+      if (hex.length === 3) hex = hex.split('').map((c) => c + c).join('');
+      const r = parseInt(hex.slice(0, 2), 16);
+      const g = parseInt(hex.slice(2, 4), 16);
+      const b = parseInt(hex.slice(4, 6), 16);
+      const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+      root.style.setProperty('--accent-text', lum > 0.55 ? '#000' : '#fff');
+    }
   }
 }
 
@@ -979,10 +1010,11 @@ function bindCardButtons() {
           if (existing) { existing.remove(); return; }
           const box = document.createElement('div');
           box.innerHTML = editPanel(card, act);
-          cardEl.appendChild(box.firstChild);
-          const save = box.querySelector('[data-edit-save]');
-          const cancel = box.querySelector('[data-edit-cancel]');
-          if (cancel) cancel.onclick = () => box.remove();
+          const panel = box.firstChild;
+          cardEl.appendChild(panel);
+          const save = panel.querySelector('[data-edit-save]');
+          const cancel = panel.querySelector('[data-edit-cancel]');
+          if (cancel) cancel.onclick = () => panel.remove();
           if (save) save.onclick = async () => {
             save.disabled = true;
             try {
@@ -991,8 +1023,8 @@ function bindCardButtons() {
                 body: JSON.stringify({
                   edit: {
                     field: save.getAttribute('data-field') || 'title',
-                    text: box.querySelector('#editText').value,
-                    kind: box.querySelector('#editKind').value,
+                    text: panel.querySelector('#editText').value,
+                    kind: panel.querySelector('#editKind').value,
                   },
                 }),
               });
@@ -1037,15 +1069,31 @@ async function viewInbox() {
   // what made a thousand captured things look like two hundred.
   const shown = cands.length;
   const hidden = Math.max(0, total - (data.offset || 0) - shown);
+  const origins = [...new Set(cands.map(c => (c.source && c.source.origin) || 'capture'))];
   let html = `<h2>Inbox</h2><div class="sub">${total} captured thing(s) waiting. `
     + (hidden > 0
         ? `Showing ${shown} of them — <b>${hidden} more</b> are further down the list. `
         : `Showing all of them. `)
     + `None of it is true yet — you decide.</div>`;
+  if (total > 0) {
+    html += `<div class="toolbar" style="margin-bottom:12px">`;
+    for (const o of origins) {
+      html += `<button class="act danger" data-dismiss-origin="${esc(o)}">Dismiss all from ${esc(o)}</button>`;
+    }
+    html += `<button class="act danger" data-dismiss-all>Dismiss everything</button>`;
+    html += `<span class="spacer"></span>`;
+    html += `<button class="act" data-bulk-select-all>select all</button>`;
+    html += `<button class="act danger" data-bulk-dismiss disabled>not true (0)</button>`;
+    html += `<button class="act primary" data-bulk-remember disabled>remember (0)</button>`;
+    html += `</div>`;
+  }
   for (const c of cands) {
     const origin = (c.source && c.source.origin) || 'capture';
     html += `<div class="card" data-card="${c.id}">
-      <div class="muted">${esc(c.text)}</div>
+      <div class="row" style="align-items:flex-start">
+        <input type="checkbox" data-bulk-check="${c.id}" style="margin-top:3px">
+        <div class="muted">${esc(c.text)}</div>
+      </div>
       <div class="dim" style="font-size:12px;margin:4px 0 8px">
         score ${Number(c.trust).toFixed(2)} · ${esc(origin)}
       </div>
@@ -1081,8 +1129,10 @@ function bindInboxMore() {
   if (!btn) return;
   btn.onclick = async () => {
     btn.disabled = true;
+    const savedScroll = window.scrollY;
     inboxShown += 200;
     await go('inbox');
+    window.scrollTo(0, savedScroll);
   };
 }
 
@@ -1110,6 +1160,55 @@ function bindInboxButtons() {
       btn.onclick = () => { btn.disabled = true; act(btn.getAttribute('data-act')); };
     }
   });
+  document.querySelectorAll('[data-dismiss-origin]').forEach(btn => {
+    btn.onclick = async () => {
+      btn.disabled = true;
+      try {
+        const r = await api(`/api/candidates/dismiss-all?origin=${encodeURIComponent(btn.getAttribute('data-dismiss-origin'))}`, { method: 'POST' });
+        toast(`Dismissed ${r.dismissed} candidate(s).`, 'ok');
+        render();
+      } catch (e) { toast(e.message, 'err'); btn.disabled = false; }
+    };
+  });
+  const all = document.querySelector('[data-dismiss-all]');
+  if (all) all.onclick = async () => {
+    all.disabled = true;
+    try {
+      const r = await api('/api/candidates/dismiss-all', { method: 'POST' });
+      toast(`Dismissed ${r.dismissed} candidate(s).`, 'ok');
+      render();
+    } catch (e) { toast(e.message, 'err'); all.disabled = false; }
+  };
+  const updateBulk = () => {
+    const n = document.querySelectorAll('[data-bulk-check]:checked').length;
+    const d = document.querySelector('[data-bulk-dismiss]');
+    const r = document.querySelector('[data-bulk-remember]');
+    if (d) { d.disabled = n === 0; d.textContent = `not true (${n})`; }
+    if (r) { r.disabled = n === 0; r.textContent = `remember (${n})`; }
+  };
+  document.querySelectorAll('[data-bulk-check]').forEach(cb => {
+    cb.onchange = updateBulk;
+  });
+  const selAll = document.querySelector('[data-bulk-select-all]');
+  if (selAll) selAll.onclick = () => {
+    const cbs = document.querySelectorAll('[data-bulk-check]');
+    const anyUnchecked = [...cbs].some(c => !c.checked);
+    cbs.forEach(c => { c.checked = anyUnchecked; });
+    updateBulk();
+  };
+  const runBulk = async (action) => {
+    const ids = [...document.querySelectorAll('[data-bulk-check]:checked')].map(c => c.getAttribute('data-bulk-check'));
+    if (!ids.length) return;
+    try {
+      const r = await api('/api/candidates/bulk', { method: 'POST', body: JSON.stringify({ ids, action }) });
+      toast(`${r.done} resolved${r.errors && r.errors.length ? ` — ${r.errors.length} error(s)` : ''}.`, 'ok');
+      render();
+    } catch (e) { toast(e.message, 'err'); }
+  };
+  const bd = document.querySelector('[data-bulk-dismiss]');
+  if (bd) bd.onclick = () => runBulk('dismiss');
+  const br = document.querySelector('[data-bulk-remember]');
+  if (br) br.onclick = () => runBulk('remember');
 }
 
 async function openRecord(id) {
@@ -1520,10 +1619,12 @@ async function viewSettings() {
       <div class="kv"><span>sweep schedule</span><span>${esc(settings.sweep_schedule)}</span></div>
       <div class="kv"><span>checkpoint before compress</span><span>${settings.checkpoint_required ? 'on' : 'off'}</span></div>
       <div class="kv"><span>show demo records</span><span>${settings.demo_visible ? 'on' : 'off'}</span></div>
+      <div class="kv"><span>local/offline AI only</span><span>${settings.local_only ? 'on' : 'off'}</span></div>
       <div class="toolbar" style="margin-top:10px">
         <button class="act" id="toggleSemantic">${settings.semantic ? 'Turn semantic off' : 'Turn semantic on'}</button>
         <button class="act" id="toggleCheckpoint">${settings.checkpoint_required ? 'Turn checkpoint off' : 'Turn checkpoint on'}</button>
         <button class="act" id="toggleDemo">${settings.demo_visible ? 'Hide demo records' : 'Show demo records'}</button>
+        <button class="act" id="toggleLocalOnly">${settings.local_only ? 'Allow online AI' : 'Local AI only'}</button>
       </div>
       <div id="appSettingsMsg"></div>
     </div>
@@ -1567,7 +1668,7 @@ async function viewIntake() {
 async function viewRecall() {
   const activity = await api('/api/activity?limit=100');
   const rec = (await api('/api/receipts?limit=50')).receipts || [];
-  const rows = activity.filter(a => ['receipt', 'sync', 'capture', 'search'].includes(a.action));
+  const rows = activity.filter(a => ['receipt', 'sync', 'capture', 'search'].includes(a.action) || String(a.action || '').startsWith('card:') || a.action === 'merge');
   const line = a => `<div class="kv"><span>${esc(a.action)}</span><span>${esc(a.detail || '')}</span><span class="dim">${fmtDate(a.at)}</span></div>`;
   return `<h2>Recall feed</h2><div class="sub">What memory has been doing — captures, recalls, receipts and syncs. Receipts are audit records, never blockers.</div>
     <div class="card">
@@ -1578,6 +1679,28 @@ async function viewRecall() {
       <h3 style="margin-top:0">Recent activity</h3>
       ${rows.length ? rows.slice(0, 30).map(line).join('') : empty('Nothing yet', '')}
     </div>`;
+}
+
+async function viewConversations() {
+  const data = await api('/api/conversations?limit=200');
+  const convs = data.conversations || [];
+  const total = data.total ?? convs.length;
+  if (!convs.length && !total) {
+    return '<h2>Conversations</h2><div class="sub">Full conversations kept verbatim, so nothing is lost when the model shortens them.</div>'
+      + empty('Nothing stored yet', 'Capture a conversation (Intake or the browser addon) and the full text is kept here.');
+  }
+  let html = `<h2>Conversations</h2><div class="sub">${total} stored. The full text is kept — click one to read it back.</div>`;
+  for (const c of convs) {
+    const preview = String(c.text || '').slice(0, 160).replace(/\s+/g, ' ');
+    html += `<div class="card" data-conv="${esc(c.id)}">
+      <div class="muted">${esc(preview)}${String(c.text || '').length > 160 ? '…' : ''}</div>
+      <div class="dim" style="font-size:12px;margin:4px 0 8px">
+        ${esc(c.origin || 'capture')} · ${esc(c.speaker || 'user')} · ${fmtDate(c.created)}
+      </div>
+      <div class="toolbar"><button class="act" data-conv-open="${esc(c.id)}">read full</button></div>
+    </div>`;
+  }
+  return html;
 }
 
 const VIEWS = {
@@ -1592,6 +1715,7 @@ const VIEWS = {
   settings: viewSettings,
   intake: viewIntake,
   recall: viewRecall,
+  conversations: viewConversations,
 };
 
 /* ---- late bindings ------------------------------------------------------
@@ -1642,6 +1766,30 @@ async function bindLate() {
         render();
       } catch (e) { out.innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     };
+  }
+  if (state.tab === 'conversations') {
+    document.querySelectorAll('[data-conv-open]').forEach(btn => {
+      btn.onclick = async () => {
+        const id = btn.getAttribute('data-conv-open');
+        try {
+          const c = await api('/api/conversations/' + encodeURIComponent(id));
+          const overlay = document.getElementById('overlay');
+          overlay.innerHTML = `
+            <div class="scrim" id="convScrim" role="dialog" aria-modal="true" aria-label="Conversation">
+              <div class="drawer">
+                <h3 style="margin-top:0">${esc(c.origin || 'capture')} · ${esc(c.speaker || 'user')}</h3>
+                <div class="dim" style="margin-bottom:8px">${fmtDate(c.created)}</div>
+                <pre style="white-space:pre-wrap;font-family:inherit">${esc(c.text)}</pre>
+                <div class="toolbar"><button class="act" id="convClose">close</button></div>
+              </div>
+            </div>`;
+          const close = () => { overlay.innerHTML = ''; };
+          overlay.querySelector('#convScrim').onclick = (e) => { if (e.target.id === 'convScrim') close(); };
+          document.getElementById('convClose').onclick = close;
+          document.addEventListener('keydown', (e) => { if (e.key === 'Escape') close(); });
+        } catch (e) { toast(e.message, 'err'); }
+      };
+    });
   }
   if (state.tab === 'settings') {
     const save = document.getElementById('saveModels');
@@ -1739,12 +1887,13 @@ async function bindLate() {
     };
     const flip = async (key) => {
       try {
-        await api('/api/app-settings', { method: 'POST', body: { [key]: !(settings[key]) } });
+        const cur = await api('/api/app-settings');
+        await api('/api/app-settings', { method: 'POST', body: { [key]: !(cur[key]) } });
         document.getElementById('appSettingsMsg').innerHTML = '<span class="ok">Saved.</span>';
         render();
       } catch (e) { document.getElementById('appSettingsMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     };
-    for (const [id, key] of [['toggleSemantic', 'semantic'], ['toggleCheckpoint', 'checkpoint_required'], ['toggleDemo', 'demo_visible']]) {
+    for (const [id, key] of [['toggleSemantic', 'semantic'], ['toggleCheckpoint', 'checkpoint_required'], ['toggleDemo', 'demo_visible'], ['toggleLocalOnly', 'local_only']]) {
       const b = document.getElementById(id);
       if (b) b.onclick = () => flip(key);
     }

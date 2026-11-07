@@ -43,7 +43,7 @@ class ModelSlot:
     base_url: str = ""
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> "ModelSlot":
+    def from_dict(cls, data: dict[str, Any] | None) -> ModelSlot:
         data = data or {}
         return cls(
             provider=str(data.get("provider", "auto")),
@@ -58,7 +58,7 @@ class ModelSlot:
             "base_url": self.base_url,
         }
 
-    def resolves_to(self, main: "ModelSlot") -> "ModelSlot":
+    def resolves_to(self, main: ModelSlot) -> ModelSlot:
         """Resolve ``auto`` against the main slot."""
         if self.provider != "auto":
             return self
@@ -81,7 +81,7 @@ class ModelConfig:
     auxiliary: dict[str, ModelSlot] = field(default_factory=dict)
 
     @classmethod
-    def from_dict(cls, data: dict[str, Any] | None) -> "ModelConfig":
+    def from_dict(cls, data: dict[str, Any] | None) -> ModelConfig:
         data = data or {}
         aux_in = data.get("auxiliary", {}) or {}
         aux = {name: ModelSlot.from_dict(aux_in.get(name)) for name in SLOTS}
@@ -91,7 +91,7 @@ class ModelConfig:
         )
 
     @classmethod
-    def load(cls, path: str | os.PathLike[str]) -> "ModelConfig":
+    def load(cls, path: str | os.PathLike[str]) -> ModelConfig:
         """Load from a JSON file; missing file means all-auto defaults."""
         try:
             with open(path, encoding="utf-8") as fh:
@@ -273,10 +273,39 @@ class LocalBackend:
         return _ollama_embed(self._ollama(slot), self._model(slot, "nomic-embed-text"), text)
 
 
+_LOCAL_ONLY = False
+_VAULT = None
+
+
+def configure_local_only(vault) -> None:
+    global _LOCAL_ONLY, _VAULT
+    _VAULT = vault
+    try:
+        from .settings import load
+
+        _LOCAL_ONLY = bool(load(vault).local_only)
+    except Exception:
+        _LOCAL_ONLY = False
+
+
 def resolve_backend(config: ModelConfig | None = None) -> ModelBackend:
-    """Pick the backend: Hermes when it is present, otherwise local."""
+    """Pick the backend: Hermes when it is present, otherwise local.
+
+    When local-only mode is on (the owner's "offline AI only" choice),
+    Hermes is never used even if it is installed — memory text stays local.
+    """
+    import os
+
+    local_only = _LOCAL_ONLY or os.environ.get("MEMORY_OB_LOCAL_ONLY", "").lower() in ("1", "true", "yes")
+    if _VAULT is not None:
+        try:
+            from .settings import load
+
+            local_only = local_only or bool(load(_VAULT).local_only)
+        except Exception:  # noqa: BLE001, S110
+            pass
     cfg = config or ModelConfig()
-    if hermes.available() and (
+    if (not local_only) and hermes.available() and (
         hermes.proxy_available() or hermes.main_slot().get("base_url")
     ):
         return HermesBackend(cfg)

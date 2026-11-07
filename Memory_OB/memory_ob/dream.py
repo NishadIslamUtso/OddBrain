@@ -67,7 +67,7 @@ def _judged_themes(themes: Counter, model_call: Any) -> list[tuple[str, int]]:
     except Exception:
         return []
     out: list[tuple[str, int]] = []
-    counts = dict(candidates)
+    dict(candidates)
     for line in (raw or "").splitlines():
         s = line.strip().lstrip("-*• ").strip()
         if not s or s.upper() == "NONE":

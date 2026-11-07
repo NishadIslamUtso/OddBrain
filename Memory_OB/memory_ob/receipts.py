@@ -8,13 +8,12 @@ basis (allowed, or neverSend and therefore nothing).
 
 from __future__ import annotations
 
-import json
 import time
+from collections.abc import Iterable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
-from .config import VAULT_FOLDER_NAMES
 from .ids import new_id
 
 RECEIPT_FOLDER = "07 Sharing Receipts"

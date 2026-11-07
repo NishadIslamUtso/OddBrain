@@ -18,7 +18,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from . import ids
-from .records import ACTIVE, NOTE, SUPERSEDED, TRASH, Record
+from .records import ACTIVE, Record
 
 DIFF = "diff"
 PROPOSAL = "proposal"

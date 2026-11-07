@@ -86,7 +86,7 @@ class Settings:
         token_path: str | Path | None = None,
         sync_enabled: bool | None = None,
         rerank_enabled: bool | None = None,
-    ) -> "Settings":
+    ) -> Settings:
         v = Path(vault).expanduser() if vault else default_vault()
         if sync_enabled is None:
             raw = os.environ.get("MEMORY_OB_SYNC", "")

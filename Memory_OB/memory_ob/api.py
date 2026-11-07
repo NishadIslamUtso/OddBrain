@@ -10,8 +10,9 @@ Run:
 from __future__ import annotations
 
 import logging
+from collections.abc import Iterator
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any
 
 from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -28,6 +29,16 @@ logger = logging.getLogger(__name__)
 settings = Settings.resolve()
 
 
+def _app_semantic(cfg: Settings) -> bool:
+    """Whether semantic search is enabled in the app settings."""
+    try:
+        from .settings import load
+
+        return bool(load(cfg.vault).semantic)
+    except Exception:
+        return True
+
+
 def configure(s: Settings) -> None:
     """Point the app at a specific vault/db.
 
@@ -37,6 +48,9 @@ def configure(s: Settings) -> None:
     """
     global settings
     settings = s
+    from . import models
+
+    models.configure_local_only(s.vault)
 
 WEB_DIR = Path(__file__).resolve().parent / "web"
 
@@ -201,7 +215,7 @@ def create_app() -> FastAPI:
         Without the total, a cap of 200 read as "200 captured things" and the
         other thousand were invisible.
         """
-        from .owner import candidates, candidate_count
+        from .owner import candidate_count, candidates
 
         return {
             "candidates": candidates(st, limit=limit, offset=offset),
@@ -222,6 +236,41 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise HTTPException(status_code=400, detail=str(exc))
         return {"ok": True, "card": card.id, "title": card.title}
+
+    @app.post("/api/candidates/bulk")
+    def bulk_candidates(
+        payload: dict[str, Any] | None = None, st: Store = Depends(get_store)
+    ) -> dict[str, Any]:
+        """Resolve several candidates at once: dismiss or remember."""
+        from .owner import dismiss_fact, remember_fact
+
+        payload = payload or {}
+        ids = [str(x) for x in (payload.get("ids") or [])]
+        action = str(payload.get("action") or "dismiss")
+        done = 0
+        errors: list[str] = []
+        for fid in ids:
+            try:
+                if action == "remember":
+                    remember_fact(st, fid)
+                else:
+                    dismiss_fact(st, fid)
+                done += 1
+            except (LookupError, ValueError) as exc:
+                errors.append(f"{fid}: {exc}")
+        st.log_activity(
+            f"bulk-{action}", f"{done} candidate(s)", actor="owner"
+        )
+        return {"done": done, "errors": errors}
+
+    @app.post("/api/candidates/dismiss-all")
+    def dismiss_all_candidates(
+        origin: str | None = None, st: Store = Depends(get_store)
+    ) -> dict[str, Any]:
+        from .owner import dismiss_facts_bulk
+
+        n = dismiss_facts_bulk(st, origin=origin)
+        return {"dismissed": n}
 
     @app.post("/api/candidates/{fact_id}/dismiss")
     def dismiss_candidate(fact_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -275,6 +324,7 @@ def create_app() -> FastAPI:
             backend=resolve_backend(cfg),
             slot=cfg.slot("embed"),
             rerank_call=rerank,
+            semantic=_app_semantic(settings),
         )
         facts = st.search_facts(q, limit=limit)
         results = exit.dicts_out(r.to_dict() for r in hits)
@@ -283,6 +333,21 @@ def create_app() -> FastAPI:
             for f in facts
             if not hazards.is_hazardous(str(f.get("text") or ""))
         ]
+        # §7: unconfirmed notes that leave for the AI get a receipt too, so
+        # the owner can see every piece of memory that crossed the boundary.
+        if candidates:
+            from types import SimpleNamespace
+
+            fact_objs = [
+                SimpleNamespace(
+                    id=f.get("id", ""),
+                    source=f.get("source") or {},
+                    body=f.get("text", ""),
+                )
+                for f in facts
+                if not hazards.is_hazardous(str(f.get("text") or ""))
+            ]
+            _receipt(st, "ai:recall", fact_objs, purpose=f"search candidates: {q[:80]}")
         # §7 sharing receipts: every time memory leaves, a receipt lands in
         # folder 07 — who, what (ids + hashes), when, and the basis.
         records = [h for h in hits if exit.keep(h)]
@@ -486,16 +551,26 @@ def create_app() -> FastAPI:
         # grabs a DM thread or a chat on another AI site. The extractor is told
         # which speaker is the owner, so the other person's words stay context.
         parts = payload.get("parts")
+        conv_id = None
         if parts:
+            conv_text = "\n".join(str(p.get("content", "")) for p in parts)
+            conv_id = st.add_conversation(
+                conv_text,
+                origin=str(source.get("origin", "")),
+                session=str(source.get("session", "")),
+                speaker="user",
+                parts=parts,
+            )
             cands = extract_session(
                 [(str(p.get("role", "user")), str(p.get("content", "")))
                  for p in parts],
-                source={**source, "speaker": "user"},
+                source={**source, "speaker": "user", "conversation_id": conv_id},
                 model_call=call,
             )
         else:
             text = str(payload.get("text", ""))
-            cands = extract_claims(text, source=source, model_call=call)
+            conv_id = st.add_conversation(text, origin=str(source.get("origin", "")), speaker="user")
+            cands = extract_claims(text, source={**source, "conversation_id": conv_id}, model_call=call)
         for c in cands:
             st.add_fact(c.text, trust=c.trust, source=c.source)
         return {
@@ -506,7 +581,23 @@ def create_app() -> FastAPI:
             ],
         }
 
-    # -- activity ----------------------------------------------------------
+    @app.get("/api/conversations")
+    def list_conversations(
+        limit: int = 200, offset: int = 0, st: Store = Depends(get_store)
+    ) -> dict[str, Any]:
+        return {
+            "conversations": st.list_conversations(limit=limit, offset=offset),
+            "total": st.count_conversations(),
+            "limit": limit,
+            "offset": offset,
+        }
+
+    @app.get("/api/conversations/{conv_id}")
+    def get_conversation(conv_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
+        c = st.get_conversation(conv_id)
+        if c is None:
+            raise HTTPException(status_code=404, detail="conversation not found")
+        return c
 
     @app.get("/api/activity")
     def activity(
@@ -733,6 +824,7 @@ def create_app() -> FastAPI:
         allowed = {
             "brain_path", "semantic", "sweep_schedule",
             "checkpoint_required", "backup_dir", "demo_visible",
+            "local_only",
             # Appearance — validated inside update() before they are stored.
             "theme", "accent", "font_family", "font_size", "density",
         }
