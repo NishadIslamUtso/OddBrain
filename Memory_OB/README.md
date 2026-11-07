@@ -135,11 +135,13 @@ across and restart:
 
 ```bash
 python host/install.py            # copies the plugin, shell and skills
-# then restart Hermes Desktop
+# then QUIT Hermes completely and start it again
 ```
 
-The screens are read from disk on every request, so a stale app process shows
-new tabs against an old backend. The screens will tell you when that happens.
+The screens are read from disk on every request, but the plugin's routes are
+mounted **once**, when the app starts, and never re-scanned. So a stale process
+serves new tabs against an old backend, and reloading the window is not enough —
+the app itself has to come back up. The screens say so when it happens.
 
 Defaults:
 

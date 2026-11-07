@@ -447,13 +447,13 @@ function fmtDay(s) {
 }
 
 /* A 404 on a screen's own data usually means the app process is holding an
-   older copy of the engine than the page it just loaded — the page is read
-   from disk every time, the routes are not. Say so, instead of leaving the
-   owner with a bare "something went wrong". */
+   older copy of the plugin than the page it just loaded: the page is read
+   from disk every time, the routes are mounted once and never re-scanned.
+   A window reload is not enough — the app itself has to come back up. */
 function errText(e) {
   const msg = (e && e.message) || 'unknown error';
   if (/^404\b/.test(msg)) {
-    return msg + ' — the running app is older than this page. Restart Hermes and reload.';
+    return msg + ' — the app is running an older copy of Memory_OB. Quit Hermes completely and start it again.';
   }
   return msg;
 }
