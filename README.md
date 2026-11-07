@@ -23,7 +23,7 @@ memory system with a vault-based, user-controlled, evidence-first memory store.
 
 ```bash
 cd Memory_OB
-pip install -e .                    # or: pip install -r requirements.txt
+pip install -e .[test]              # the app, plus what the suite needs
 python -m memory_ob.cli doctor      # is this set up right?
 python -m memory_ob.cli serve       # run the dashboard
 python run_tests.py                 # the whole suite

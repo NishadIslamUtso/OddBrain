@@ -114,12 +114,19 @@ proxy that comes up later is picked up without restarting anything.
 
 ## Install
 
-Requires Python 3.10+ (standard library only — no pip install needed).
+Requires Python 3.10+. The **library** is standard library only — `init`,
+`capture`, `search`, `review` and the rest of the CLI run with no installs.
+The **dashboard and the test suite** need three packages:
 
 ```bash
 cd Memory_OB
+pip install -e .[test]
 python -m memory_ob.cli init
+python -m memory_ob.cli doctor    # checks all of the above for you
 ```
+
+A clean machine that skips the install can still use every CLI command; only
+`serve`, the HTTP API and the tests will fail to import.
 
 Defaults:
 
