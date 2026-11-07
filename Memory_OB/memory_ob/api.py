@@ -10,6 +10,7 @@ Run:
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -37,6 +38,16 @@ def _app_semantic(cfg: Settings) -> bool:
         return bool(load(cfg.vault).semantic)
     except Exception:
         return True
+
+
+def _autonomous(cfg: Settings) -> bool:
+    """Whether the AI may sign records without a Review card."""
+    try:
+        from .settings import load
+
+        return bool(load(cfg.vault).autonomous)
+    except Exception:
+        return False
 
 
 def configure(s: Settings) -> None:
@@ -572,14 +583,89 @@ def create_app() -> FastAPI:
             conv_id = st.add_conversation(text, origin=str(source.get("origin", "")), speaker="user")
             cands = extract_claims(text, source={**source, "conversation_id": conv_id}, model_call=call)
         for c in cands:
-            st.add_fact(c.text, trust=c.trust, source=c.source)
+            st.add_fact(
+                c.text,
+                trust=c.trust,
+                source=c.source,
+                meta={"context": c.context, "sentiment": c.sentiment, "people": c.people},
+            )
+            for person in c.people:
+                st.upsert_person(person)
+        # Autonomous mode: the AI may sign high-confidence facts directly.
+        # It still logs every change with a before/after diff, and it asks
+        # (leaves a card) when the fact is not clearly the owner's.
+        signed = 0
+        if _autonomous(settings):
+            signed = 0
+            for c in cands:
+                if c.trust < 0.5 or not re.search(r"\b(i|i'm|i've|my|me)\b", c.text.lower()):
+                    continue
+                before = None
+                rec = Record.from_payload(
+                    {
+                        "kind": c.kind_hint,
+                        "subject": "self",
+                        "speaker": "user",
+                        "title": c.text[:120],
+                        "body": c.text,
+                        "source": {**c.source, "fact_id": "", "context": c.context, "sentiment": c.sentiment},
+                    }
+                )
+                st.sign_record(rec, card_id="autonomous", changed_by="memory_ob (autonomous)", reason="autonomous capture")
+                st.log_change(
+                    entity="record", entity_id=rec.id, action="create",
+                    before=before,
+                    after={**rec.to_dict(), "context": c.context, "sentiment": c.sentiment},
+                    actor="memory_ob (autonomous)", reason="autonomous capture",
+                )
+                signed += 1
+            if signed:
+                st.log_activity("autonomous", f"{signed} record(s) signed", actor="memory_ob")
         return {
             "candidates": len(cands),
             "facts": [
-                {"text": c.text, "trust": c.trust, "kind": c.kind_hint}
+                {"text": c.text, "trust": c.trust, "kind": c.kind_hint,
+                 "context": c.context, "sentiment": c.sentiment, "people": c.people}
                 for c in cands
             ],
+            "autonomous_signed": signed if _autonomous(settings) else 0,
         }
+
+    @app.get("/api/people")
+    def list_people(st: Store = Depends(get_store)) -> dict[str, Any]:
+        return {"people": st.list_people()}
+
+    @app.post("/api/people")
+    def upsert_person(
+        payload: dict[str, Any] | None = None, st: Store = Depends(get_store)
+    ) -> dict[str, Any]:
+        payload = payload or {}
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise HTTPException(status_code=400, detail="a person needs a name")
+        before = None
+        existing = st.list_people()
+        match = next((p for p in existing if p["name"].lower() == name.lower()), None)
+        if match:
+            before = match
+        person = st.upsert_person(
+            name,
+            aliases=payload.get("aliases"),
+            relation=str(payload.get("relation") or ""),
+            notes=str(payload.get("notes") or ""),
+            tags=payload.get("tags"),
+        )
+        st.log_change(
+            entity="person", entity_id=person["id"],
+            action="update" if before else "create",
+            before=before, after=person, actor="owner",
+            reason="profile",
+        )
+        return person
+
+    @app.get("/api/changes")
+    def list_changes(limit: int = 100, st: Store = Depends(get_store)) -> dict[str, Any]:
+        return {"changes": st.list_changes(limit=limit)}
 
     @app.get("/api/conversations")
     def list_conversations(
@@ -825,6 +911,7 @@ def create_app() -> FastAPI:
             "brain_path", "semantic", "sweep_schedule",
             "checkpoint_required", "backup_dir", "demo_visible",
             "local_only",
+            "autonomous",
             # Appearance — validated inside update() before they are stored.
             "theme", "accent", "font_family", "font_size", "density",
         }

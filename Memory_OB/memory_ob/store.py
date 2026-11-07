@@ -85,6 +85,7 @@ CREATE TABLE IF NOT EXISTS facts (
     trust REAL NOT NULL DEFAULT 0.3,
     status TEXT NOT NULL DEFAULT 'candidate',
     source TEXT NOT NULL DEFAULT '{}',
+    meta TEXT NOT NULL DEFAULT '{}',
     demo INTEGER NOT NULL DEFAULT 0,
     created TEXT NOT NULL
 );
@@ -97,6 +98,41 @@ CREATE TABLE IF NOT EXISTS conversations (
     text TEXT NOT NULL,
     parts TEXT NOT NULL DEFAULT '[]',
     created TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS people (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    aliases TEXT NOT NULL DEFAULT '[]',
+    relation TEXT NOT NULL DEFAULT '',
+    notes TEXT NOT NULL DEFAULT '',
+    tags TEXT NOT NULL DEFAULT '[]',
+    trust REAL NOT NULL DEFAULT 0.5,
+    created TEXT NOT NULL,
+    modified TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS sessions (
+    id TEXT PRIMARY KEY,
+    origin TEXT NOT NULL DEFAULT '',
+    started TEXT NOT NULL,
+    ended TEXT,
+    summary TEXT NOT NULL DEFAULT '',
+    people TEXT NOT NULL DEFAULT '[]',
+    topics TEXT NOT NULL DEFAULT '[]',
+    created TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS changes (
+    seq INTEGER PRIMARY KEY AUTOINCREMENT,
+    at TEXT NOT NULL,
+    actor TEXT,
+    entity TEXT NOT NULL,
+    entity_id TEXT NOT NULL,
+    action TEXT NOT NULL,
+    before TEXT NOT NULL DEFAULT '{}',
+    after TEXT NOT NULL DEFAULT '{}',
+    reason TEXT
 );
 
 CREATE TABLE IF NOT EXISTS edges (
@@ -720,12 +756,13 @@ class Store:
         trust: float = 0.3,
         source: dict | None = None,
         demo: bool = False,
+        meta: dict | None = None,
     ) -> str:
         fid = idgen.new_id()
         self.conn.execute(
-            "INSERT INTO facts(id, text, trust, status, source, demo, created)"
-            " VALUES(?,?,?,?,?,?,?)",
-            (fid, text, trust, "candidate", _json(source or {}), int(demo), _now()),
+            "INSERT INTO facts(id, text, trust, status, source, meta, demo, created)"
+            " VALUES(?,?,?,?,?,?,?,?)",
+            (fid, text, trust, "candidate", _json(source or {}), _json(meta or {}), int(demo), _now()),
         )
         self.conn.commit()
         return fid
@@ -828,6 +865,190 @@ class Store:
     def count_conversations(self) -> int:
         row = self.conn.execute("SELECT COUNT(*) FROM conversations").fetchone()
         return int(row[0]) if row else 0
+
+    # -- people ------------------------------------------------------------
+
+    def upsert_person(
+        self,
+        name: str,
+        *,
+        aliases: list[str] | None = None,
+        relation: str = "",
+        notes: str = "",
+        tags: list[str] | None = None,
+    ) -> dict:
+        """Create or update a person profile. Returns the person."""
+        import json as _json
+
+        name = (name or "").strip()
+        if not name:
+            raise ValueError("a person needs a name")
+        row = self.conn.execute(
+            "SELECT * FROM people WHERE lower(name) = lower(?)", (name,)
+        ).fetchone()
+        now = _now()
+        if row is None:
+            pid = idgen.new_id()
+            self.conn.execute(
+                "INSERT INTO people(id, name, aliases, relation, notes, tags, trust, created, modified) "
+                "VALUES(?,?,?,?,?,?,?,?,?)",
+                (
+                    pid, name, _json.dumps(aliases or []), relation, notes,
+                    _json.dumps(tags or []), 0.5, now, now,
+                ),
+            )
+            self.conn.commit()
+            person = self.get_person(pid)
+            assert person is not None
+            return person
+        data = dict(row)
+        merged_aliases = set(_json.loads(data["aliases"])) | set(aliases or [])
+        merged_aliases.discard(data["name"])
+        merged_tags = set(_json.loads(data["tags"])) | set(tags or [])
+        self.conn.execute(
+            "UPDATE people SET aliases=?, relation=COALESCE(NULLIF(?,''),relation), "
+            "notes=?, tags=?, modified=? WHERE id=?",
+            (
+                _json.dumps(sorted(merged_aliases)), relation, notes,
+                _json.dumps(sorted(merged_tags)), now, data["id"],
+            ),
+        )
+        self.conn.commit()
+        person = self.get_person(data["id"])
+        assert person is not None
+        return person
+
+    def get_person(self, person_id: str) -> dict | None:
+        import json as _json
+
+        row = self.conn.execute("SELECT * FROM people WHERE id = ?", (person_id,)).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "aliases": _json.loads(row["aliases"]),
+            "relation": row["relation"],
+            "notes": row["notes"],
+            "tags": _json.loads(row["tags"]),
+            "trust": row["trust"],
+            "created": row["created"],
+            "modified": row["modified"],
+        }
+
+    def list_people(self, *, limit: int = 200) -> list[dict]:
+        import json as _json
+
+        rows = self.conn.execute(
+            "SELECT * FROM people ORDER BY modified DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "aliases": _json.loads(r["aliases"]),
+                "relation": r["relation"],
+                "notes": r["notes"],
+                "tags": _json.loads(r["tags"]),
+                "trust": r["trust"],
+                "modified": r["modified"],
+            }
+            for r in rows
+        ]
+
+    # -- sessions ----------------------------------------------------------
+
+    def add_session(
+        self,
+        *,
+        origin: str = "",
+        started: str = "",
+        summary: str = "",
+        people: list[str] | None = None,
+        topics: list[str] | None = None,
+    ) -> str:
+        import json as _json
+
+        sid = idgen.new_id()
+        now = started or _now()
+        self.conn.execute(
+            "INSERT INTO sessions(id, origin, started, ended, summary, people, topics, created) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (sid, origin, now, None, summary, _json.dumps(people or []), _json.dumps(topics or []), now),
+        )
+        self.conn.commit()
+        return sid
+
+    def link_session(self, session_id: str, other_id: str, *, label: str = "related") -> None:
+        """Connect two sessions that share people or topics."""
+        import json as _json
+
+        if session_id == other_id:
+            return
+        a = self.conn.execute("SELECT * FROM sessions WHERE id=?", (session_id,)).fetchone()
+        b = self.conn.execute("SELECT * FROM sessions WHERE id=?", (other_id,)).fetchone()
+        if a is None or b is None:
+            return
+        topics = set(_json.loads(a["topics"])) & set(_json.loads(b["topics"]))
+        people = set(_json.loads(a["people"])) & set(_json.loads(b["people"]))
+        if not (topics or people):
+            return
+        why = ",".join(sorted(topics | people))
+        self.conn.execute(
+            "INSERT OR IGNORE INTO edges(src, dst, label) VALUES(?,?,?)",
+            (session_id, other_id, f"session:{label}"),
+        )
+        self.log_activity(
+            "session-link",
+            f"{session_id} ~ {other_id} ({why})",
+            actor="memory_ob",
+        )
+
+    # -- change log (diffs) -------------------------------------------------
+
+    def log_change(
+        self,
+        *,
+        entity: str,
+        entity_id: str,
+        action: str,
+        before: dict | None,
+        after: dict | None,
+        actor: str = "memory_ob",
+        reason: str = "",
+    ) -> None:
+        import json as _json
+
+        self.conn.execute(
+            "INSERT INTO changes(at, actor, entity, entity_id, action, before, after, reason) "
+            "VALUES(?,?,?,?,?,?,?,?)",
+            (
+                _now(), actor, entity, entity_id, action,
+                _json.dumps(before or {}), _json.dumps(after or {}), reason,
+            ),
+        )
+        self.conn.commit()
+
+    def list_changes(self, *, limit: int = 100) -> list[dict]:
+        import json as _json
+
+        rows = self.conn.execute(
+            "SELECT * FROM changes ORDER BY seq DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [
+            {
+                "seq": r["seq"],
+                "at": r["at"],
+                "actor": r["actor"],
+                "entity": r["entity"],
+                "entity_id": r["entity_id"],
+                "action": r["action"],
+                "before": _json.loads(r["before"]),
+                "after": _json.loads(r["after"]),
+                "reason": r["reason"],
+            }
+            for r in rows
+        ]
 
     def set_fact_status(self, fact_id: str, status: str) -> None:
         """Move a fact out of the candidate pool.

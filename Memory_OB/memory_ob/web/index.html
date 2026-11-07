@@ -410,6 +410,8 @@ const TABS = [
   ['intake', 'Intake', 'intake'],
   ['recall', 'Recall', 'recall'],
   ['conversations', 'Conversations', 'vault'],
+  ['people', 'People', 'vault'],
+  ['changes', 'Changes', 'activity'],
 ];
 
 const state = {
@@ -1620,11 +1622,13 @@ async function viewSettings() {
       <div class="kv"><span>checkpoint before compress</span><span>${settings.checkpoint_required ? 'on' : 'off'}</span></div>
       <div class="kv"><span>show demo records</span><span>${settings.demo_visible ? 'on' : 'off'}</span></div>
       <div class="kv"><span>local/offline AI only</span><span>${settings.local_only ? 'on' : 'off'}</span></div>
+      <div class="kv"><span>autonomous memory (AI may add/edit)</span><span>${settings.autonomous ? 'on' : 'off'}</span></div>
       <div class="toolbar" style="margin-top:10px">
         <button class="act" id="toggleSemantic">${settings.semantic ? 'Turn semantic off' : 'Turn semantic on'}</button>
         <button class="act" id="toggleCheckpoint">${settings.checkpoint_required ? 'Turn checkpoint off' : 'Turn checkpoint on'}</button>
         <button class="act" id="toggleDemo">${settings.demo_visible ? 'Hide demo records' : 'Show demo records'}</button>
         <button class="act" id="toggleLocalOnly">${settings.local_only ? 'Allow online AI' : 'Local AI only'}</button>
+        <button class="act" id="toggleAutonomous">${settings.autonomous ? 'Turn autonomous off' : 'Turn autonomous on'}</button>
       </div>
       <div id="appSettingsMsg"></div>
     </div>
@@ -1703,6 +1707,60 @@ async function viewConversations() {
   return html;
 }
 
+async function viewPeople() {
+  const data = await api('/api/people');
+  const people = data.people || [];
+  if (!people.length) {
+    return '<h2>People</h2><div class="sub">Profiles of everyone you talk to — and yourself. Built automatically from what is captured.</div>'
+      + empty('No profiles yet', 'Capture a conversation and the people in it get a profile here.');
+  }
+  let html = `<h2>People</h2><div class="sub">${people.length} profile(s). The engine builds these from captured conversations.</div>`;
+  for (const p of people) {
+    const aliases = (p.aliases || []).join(', ');
+    html += `<div class="card">
+      <div class="row"><b>${esc(p.name)}</b> ${p.relation ? `<span class="pill">${esc(p.relation)}</span>` : ''}</div>
+      ${aliases ? `<div class="dim" style="font-size:12px;margin:4px 0">also: ${esc(aliases)}</div>` : ''}
+      ${p.notes ? `<div class="muted" style="margin:4px 0">${esc(p.notes)}</div>` : ''}
+      ${(p.tags && p.tags.length) ? `<div class="dim" style="font-size:12px">${p.tags.map(esc).join(' · ')}</div>` : ''}
+    </div>`;
+  }
+  return html;
+}
+
+async function viewChanges() {
+  const data = await api('/api/changes?limit=100');
+  const changes = data.changes || [];
+  if (!changes.length) {
+    return '<h2>Changes</h2><div class="sub">Every edit the engine makes, with the before and after.</div>'
+      + empty('No changes yet', 'When the AI adds or edits memory, the diff lands here.');
+  }
+  let html = `<h2>Changes</h2><div class="sub">${changes.length} change(s). Before → after, so you can see exactly what moved.</div>`;
+  for (const ch of changes) {
+    html += `<div class="card">
+      <div class="row"><span class="pill">${esc(ch.entity)}</span><b>${esc(ch.action)}</b>
+        <span class="dim">${esc(ch.actor || '')} · ${fmtDate(ch.at)}</span></div>
+      <div style="margin-top:6px">${renderChangeDiff(ch)}</div>
+    </div>`;
+  }
+  return html;
+}
+
+function renderChangeDiff(ch) {
+  const before = ch.before || {};
+  const after = ch.after || {};
+  const keys = [...new Set([...Object.keys(before), ...Object.keys(after)])];
+  const rows = [];
+  for (const k of keys) {
+    const b = JSON.stringify(before[k] ?? '');
+    const a = JSON.stringify(after[k] ?? '');
+    if (b === a) continue;
+    rows.push(`<div class="kv"><span>${esc(k)}</span>
+      <span class="dim">${esc(b || '(none)')}</span>→
+      <span class="ok">${esc(a || '(none)')}</span></div>`);
+  }
+  return rows.length ? rows.join('') : `<div class="dim">${esc(ch.reason || 'no field changes')}</div>`;
+}
+
 const VIEWS = {
   review: viewReview,
   inbox: viewInbox,
@@ -1716,6 +1774,8 @@ const VIEWS = {
   intake: viewIntake,
   recall: viewRecall,
   conversations: viewConversations,
+  people: viewPeople,
+  changes: viewChanges,
 };
 
 /* ---- late bindings ------------------------------------------------------
@@ -1893,7 +1953,7 @@ async function bindLate() {
         render();
       } catch (e) { document.getElementById('appSettingsMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     };
-    for (const [id, key] of [['toggleSemantic', 'semantic'], ['toggleCheckpoint', 'checkpoint_required'], ['toggleDemo', 'demo_visible'], ['toggleLocalOnly', 'local_only']]) {
+    for (const [id, key] of [['toggleSemantic', 'semantic'], ['toggleCheckpoint', 'checkpoint_required'], ['toggleDemo', 'demo_visible'], ['toggleLocalOnly', 'local_only'], ['toggleAutonomous', 'autonomous']]) {
       const b = document.getElementById(id);
       if (b) b.onclick = () => flip(key);
     }

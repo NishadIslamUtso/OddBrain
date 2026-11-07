@@ -27,6 +27,7 @@ DEFAULTS: dict[str, Any] = {
     "backup_dir": "",
     "demo_visible": False,
     "local_only": False,
+    "autonomous": False,
     # Appearance. Validated by memory_ob.appearance before they are stored,
     # because they reach the UI as CSS custom properties.
     "theme": "auto",
@@ -46,6 +47,7 @@ class AppSettings:
     backup_dir: str = ""
     demo_visible: bool = False
     local_only: bool = False
+    autonomous: bool = False
     theme: str = "auto"
     accent: str = "#d4a74a"
     font_family: str = ""

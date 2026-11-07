@@ -51,7 +51,7 @@ _META_RE = re.compile(
 
 @dataclass(slots=True)
 class Candidate:
-    """A candidate fact below the truth line."""
+    """One candidate fact below the truth line."""
 
     id: str
     text: str
@@ -59,6 +59,9 @@ class Candidate:
     kind_hint: str = NOTE
     source: dict[str, Any] = field(default_factory=dict)
     created: str = ""
+    context: str = ""
+    sentiment: str = ""
+    people: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict[str, Any]:
         from dataclasses import asdict
@@ -169,12 +172,13 @@ def extract_with_model(
     is dropped, and every claim is re-scored.
     """
     prompt = (
-        "Extract atomic facts about the person speaking. One per line.\n"
+        "Extract atomic facts about the person speaking. One JSON object per line.\n"
         "Rules:\n"
-        "- Only facts the person stated about themselves.\n"
-        "- No feelings, diagnoses, motives or identities you infer.\n"
+        "- Only facts the person stated about themselves or people they know.\n"
         "- Preserve uncertainty and reported-vs-observed wording.\n"
-        "- One short line each. No preamble.\n\n"
+        "- Include the surrounding context, the emotional tone, and any people named.\n"
+        "- One short line each. No preamble.\n"
+        'Format: {"text": "...", "context": "...", "sentiment": "...", "people": ["..."]}\n\n'
         f"Text:\n{text}"
     )
     try:
@@ -190,6 +194,21 @@ def extract_with_model(
             continue
         if hazards.is_hazardous(s):
             continue
+        context = sentiment = ""
+        people: list[str] = []
+        if s.startswith("{"):
+            try:
+                import json as _json
+
+                obj = _json.loads(s)
+                s = str(obj.get("text") or "").strip()
+                context = str(obj.get("context") or "").strip()
+                sentiment = str(obj.get("sentiment") or "").strip()
+                people = [str(p).strip() for p in (obj.get("people") or []) if str(p).strip()]
+            except Exception:
+                pass
+        if len(s) < 12 or _META_RE.search(s):
+            continue
         out.append(
             Candidate(
                 id=ids.new_id(),
@@ -198,6 +217,9 @@ def extract_with_model(
                 kind_hint=kind_hint_for(s),
                 source=source or {},
                 created=_now(),
+                context=context,
+                sentiment=sentiment,
+                people=people,
             )
         )
     return out or extract_claims(text, source=source)
