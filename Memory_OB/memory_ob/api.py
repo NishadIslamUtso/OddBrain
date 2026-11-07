@@ -460,16 +460,29 @@ def create_app() -> FastAPI:
     def capture(
         payload: dict[str, Any], st: Store = Depends(get_store)
     ) -> dict[str, Any]:
-        from .extract import extract_claims
+        from .extract import extract_claims, extract_session
         from .models import ModelConfig, model_call
 
-        text = str(payload.get("text", ""))
         source = payload.get("source") or {"origin": "api"}
         call = None
         if not payload.get("no_model"):
             cfg = ModelConfig.load(settings.models_path)
             call = model_call("extract", cfg)
-        cands = extract_claims(text, source=source, model_call=call)
+
+        # A whole labelled conversation — what a browser addon sends when it
+        # grabs a DM thread or a chat on another AI site. The extractor is told
+        # which speaker is the owner, so the other person's words stay context.
+        parts = payload.get("parts")
+        if parts:
+            cands = extract_session(
+                [(str(p.get("role", "user")), str(p.get("content", "")))
+                 for p in parts],
+                source={**source, "speaker": "user"},
+                model_call=call,
+            )
+        else:
+            text = str(payload.get("text", ""))
+            cands = extract_claims(text, source=source, model_call=call)
         for c in cands:
             st.add_fact(c.text, trust=c.trust, source=c.source)
         return {
