@@ -224,6 +224,25 @@
   .palette li .icon { color: var(--accent); flex: 0 0 auto; }
   .palette .empty { padding: 20px; }
 
+  /* ---- record drawer ---- */
+  .drawer {
+    background: var(--bg-2); border: 1px solid var(--stroke-2);
+    border-radius: var(--radius); width: min(720px, 94vw);
+    max-height: 82vh; overflow-y: auto; padding: 18px 20px;
+    box-shadow: 0 12px 40px rgba(0,0,0,.45);
+  }
+  .drawer h2 { margin-bottom: 2px; }
+  .drawer .sub { margin-bottom: 12px; }
+  .drawer .close { float: right; }
+  .drawer .body { background: var(--bg); border: 1px solid var(--stroke);
+    border-radius: var(--radius-sm); padding: 12px; margin: 12px 0; }
+  .ver { border-left: 2px solid var(--stroke); padding: 2px 0 8px 12px; margin-bottom: 8px; }
+  .ver .meta { color: var(--text-4); font-size: 12px; }
+  .ver .diff-old { color: var(--bad); }
+  .ver .diff-new { color: var(--ok); }
+  .tag { display: inline-block; background: var(--bg-3); border-radius: 4px;
+    padding: 0 6px; margin-right: 4px; font-size: 11px; color: var(--text-3); }
+
   /* ---- toasts ---- */
   #toasts {
     position: fixed; bottom: 18px; right: 18px; z-index: 60;
@@ -409,6 +428,22 @@ function trustLabel(r) {
 
 function empty(title, body) {
   return `<div class="empty"><b>${esc(title)}</b>${esc(body || '')}</div>`;
+}
+
+/* Dates the owner can read. The store keeps ISO stamps; showing them raw was
+   one of the things that made the screens feel like a database dump. */
+function fmtDate(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return String(s);
+  return d.toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' });
+}
+
+function fmtDay(s) {
+  if (!s) return '';
+  const d = new Date(s);
+  if (isNaN(d.getTime())) return String(s);
+  return d.toLocaleDateString(undefined, { dateStyle: 'medium' });
 }
 
 /* A 404 on a screen's own data usually means the app process is holding an
@@ -818,6 +853,61 @@ function bindInboxButtons() {
   });
 }
 
+async function openRecord(id) {
+  const overlay = document.getElementById('overlay');
+  overlay.innerHTML = `
+    <div class="scrim" id="drawerScrim" role="dialog" aria-modal="true" aria-label="Record">
+      <div class="drawer"><div class="loading">Loading…</div></div>
+    </div>`;
+  const lastFocus = document.activeElement;
+
+  function close() {
+    overlay.innerHTML = '';
+    document.removeEventListener('keydown', onKey, true);
+    if (lastFocus && lastFocus.focus) lastFocus.focus();
+  }
+  function onKey(e) { if (e.key === 'Escape') { e.preventDefault(); close(); } }
+  document.addEventListener('keydown', onKey, true);
+  overlay.querySelector('.scrim').onclick = (e) => { if (e.target.id === 'drawerScrim') close(); };
+
+  try {
+    const [rec, hist] = await Promise.all([
+      api('/api/records/' + encodeURIComponent(id)),
+      api('/api/records/' + encodeURIComponent(id) + '/history'),
+    ]);
+    const tags = (rec.tags || []).map(t => `<span class="tag">${esc(t)}</span>`).join('');
+    const versions = (hist.versions || []).map(v => {
+      const body = v.data && v.data.body;
+      const before = (body === undefined || body === rec.body)
+        ? ''
+        : `<div class="diff-old">was: ${esc(String(body))}</div>`;
+      return `<div class="ver">
+        <div class="meta">v${v.version} · ${fmtDate(v.changed_at)} · ${esc(v.changed_by || '—')} ${esc(v.reason || '')}</div>
+        ${before}
+      </div>`;
+    }).join('');
+    overlay.querySelector('.drawer').innerHTML = `
+      <button class="act close" id="drawerClose">close</button>
+      <h2>${esc(rec.title || '(untitled)')}</h2>
+      <div class="sub">${pill(rec.kind, '')} ${trustLabel(rec)} ${rec.never_send ? pill('neverSend', 'ask') : ''} ${esc(rec.id)}</div>
+      <div class="kv">
+        <span>status</span><span>${esc(rec.status)}</span>
+        <span>confidence</span><span>${Number(rec.trust).toFixed(2)}</span>
+        <span>who said it</span><span>${esc(rec.speaker)}</span>
+        <span>captured</span><span>${fmtDate(rec.created)}</span>
+        <span>last changed</span><span>${fmtDate(rec.modified)}</span>
+        ${tags ? `<span>tags</span><span>${tags}</span>` : ''}
+      </div>
+      ${rec.body ? `<div class="body">${md(rec.body)}</div>` : ''}
+      <h3>History</h3>
+      ${versions || '<div class="dim">One version.</div>'}
+    `;
+    overlay.querySelector('#drawerClose').onclick = close;
+  } catch (e) {
+    overlay.querySelector('.drawer').innerHTML = `<div class="err">${esc(errText(e))}</div>`;
+  }
+}
+
 async function viewVault() {
   const kind = state.data.vaultKind || '';
   const q = kind ? `?kind=${encodeURIComponent(kind)}` : '';
@@ -831,7 +921,8 @@ async function viewVault() {
     </select></div>`;
   if (!recs.length) return html + empty('No records', 'Captured facts and signed records will appear here.');
   for (const r of recs) {
-    html += `<div class="card">
+    html += `<div class="card" data-record="${r.id}" tabindex="0" role="button"
+        aria-label="Open ${esc(r.title || 'record')}">
       <div class="row">
         ${pill(r.kind, '')}
         ${trustLabel(r)}
@@ -840,13 +931,18 @@ async function viewVault() {
       </div>
       ${r.body ? `<div class="muted" style="margin-top:4px">${md(r.body.slice(0, 600))}</div>` : ''}
       <div class="dim" style="font-size:12px;margin-top:6px">
-        ${esc(r.id)} · ${esc(r.speaker)} · ${esc(r.status)}
+        ${esc(r.id)} · ${esc(r.speaker)} · ${esc(r.status)} · ${fmtDay(r.modified || r.created)}
       </div>
     </div>`;
   }
   setTimeout(() => {
     const sel = document.getElementById('kind');
     if (sel) sel.onchange = () => { state.data.vaultKind = sel.value; viewVault().then(h => { document.getElementById('main').innerHTML = h; }); };
+    document.querySelectorAll('[data-record]').forEach(el => {
+      const go = () => openRecord(el.getAttribute('data-record'));
+      el.onclick = go;
+      el.onkeydown = (e) => { if (e.key === 'Enter') { e.preventDefault(); go(); } };
+    });
   }, 0);
   return html;
 }
@@ -983,7 +1079,7 @@ async function viewJournal() {
   for (const e of entries) {
     html += `<div class="card">
       <div class="row">${pill(e.kind, 'proposal')}<b>${esc(e.title || '')}</b></div>
-      <div class="dim" style="font-size:12px">${esc(e.event_time || e.created || '')}</div>
+      <div class="dim" style="font-size:12px">${fmtDay(e.event_time || e.created)}</div>
       ${e.body ? `<div class="muted" style="margin-top:6px">${md(e.body.slice(0, 800))}</div>` : ''}
     </div>`;
   }
@@ -1004,7 +1100,7 @@ async function viewNotes() {
     html += `<div class="card">
       <div class="row"><b>${esc(r.title || '(untitled)')}</b></div>
       <div class="muted">${esc(r.body)}</div>
-      <div class="dim" style="font-size:12px;margin-top:6px">${esc(r.id)} · ${esc(r.created || '')}</div>
+      <div class="dim" style="font-size:12px;margin-top:6px">${esc(r.id)} · ${fmtDay(r.created)}</div>
     </div>`;
   }
   setTimeout(() => {
@@ -1190,7 +1286,7 @@ async function viewRecall() {
   const activity = await api('/api/activity?limit=100');
   const rec = (await api('/api/receipts?limit=50')).receipts || [];
   const rows = activity.filter(a => ['receipt', 'sync', 'capture', 'search'].includes(a.action));
-  const line = a => `<div class="kv"><span>${esc(a.action)}</span><span>${esc(a.detail || '')}</span><span class="dim">${esc((a.at || '').replace('T', ' ').slice(0, 19))}</span></div>`;
+  const line = a => `<div class="kv"><span>${esc(a.action)}</span><span>${esc(a.detail || '')}</span><span class="dim">${fmtDate(a.at)}</span></div>`;
   return `<h2>Recall feed</h2><div class="sub">What memory has been doing — captures, recalls, receipts and syncs. Receipts are audit records, never blockers.</div>
     <div class="card">
       <h3 style="margin-top:0">Sharing receipts (${rec.length})</h3>

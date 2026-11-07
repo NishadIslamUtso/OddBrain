@@ -28,14 +28,17 @@ class DoctorCase(unittest.TestCase):
         self.db = Path(self.tmp) / "mob.db"
         self.settings = _settings(self.vault, self.db)
 
-    def test_missing_vault_fails_with_a_fix(self) -> None:
+    def test_missing_vault_is_a_note_not_a_failure(self) -> None:
+        """A clean install has no folders yet; that is normal, not broken."""
         from memory_ob.doctor import run_checks
 
         report = run_checks(self.settings)
         by_name = {c.name: c for c in report.checks}
         self.assertFalse(by_name["vault"].ok)
+        self.assertEqual(by_name["vault"].severity, "warn")
         self.assertIn("memory-ob init", by_name["vault"].fix)
-        self.assertFalse(report.ok)
+        self.assertTrue(report.ok)
+        self.assertIn(by_name["vault"], report.warnings)
 
     def test_initialised_vault_passes_the_structure_checks(self) -> None:
         from memory_ob.doctor import run_checks
@@ -172,15 +175,38 @@ class HistoryCase(unittest.TestCase):
 
 
 class CliCase(unittest.TestCase):
-    def test_doctor_exits_nonzero_when_something_is_wrong(self) -> None:
+    def test_doctor_exits_nonzero_on_a_real_failure(self) -> None:
+        """A published placeholder token is a genuine fault; a missing folder is not."""
+        from memory_ob.cli import main
+
+        with tempfile.TemporaryDirectory() as tmp:
+            vault = Path(tmp) / "vault"
+            s = _settings(vault, Path(tmp) / "m.db")
+            s.ensure_dirs()
+            s.token_path.write_text("brain-local-token", encoding="utf-8")
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                main([
+                    "--vault", str(vault), "--db", str(s.db),
+                    "--models-path", str(s.models_path), "doctor",
+                ])
+            out = buf.getvalue()
+        self.assertEqual(out.count("FAIL"), 1)
+        self.assertIn("placeholder", out)
+        self.assertIn("token", out)
+
+    def test_doctor_exits_zero_on_a_clean_install(self) -> None:
+        """Nothing configured yet is a warning, not a failure."""
         from memory_ob.cli import main
 
         with tempfile.TemporaryDirectory() as tmp:
             buf = io.StringIO()
             with redirect_stdout(buf):
-                code = main(["--vault", tmp, "--db", os.path.join(tmp, "m.db"), "doctor"])
-        self.assertEqual(code, 1)
-        self.assertIn("FAIL", buf.getvalue())
+                code = main([
+                    "--vault", tmp, "--db", os.path.join(tmp, "m.db"), "doctor",
+                ])
+        self.assertEqual(code, 0)
+        self.assertIn("nothing is wrong", buf.getvalue())
 
     def test_doctor_exits_zero_on_a_healthy_install(self) -> None:
         from memory_ob.cli import main

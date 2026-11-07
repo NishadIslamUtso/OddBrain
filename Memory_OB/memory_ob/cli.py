@@ -315,13 +315,15 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     s = _settings(args)
     report = run_checks(s)
     for c in report.checks:
-        mark = "OK  " if c.ok else "FAIL"
+        mark = "OK  " if c.ok else ("WARN" if c.severity == "warn" else "FAIL")
         print(f"  [{mark}] {c.name:12s} {c.detail}")
         if not c.ok and c.fix:
             print(f"         fix: {c.fix}")
     print()
     if report.ok:
         print(f"All {len(report.checks)} checks passed.")
+        if report.warnings:
+            print(f"{len(report.warnings)} note(s) above — nothing is wrong.")
         return 0
     print(f"{len(report.failures)} of {len(report.checks)} checks failed.")
     return 1

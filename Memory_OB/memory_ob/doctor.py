@@ -23,12 +23,19 @@ from .models import ModelConfig, is_available
 
 @dataclass(slots=True)
 class Check:
-    """One health check. ``fix`` says what to do about a failure."""
+    """One health check. ``fix`` says what to do about a failure.
+
+    ``severity`` is what the check MEANS, separate from whether it passed:
+    a clean install has no folders, no settings file and no model server, and
+    every one of those is normal — reporting them as failures made a healthy
+    first run look broken.
+    """
 
     name: str
     ok: bool
     detail: str
     fix: str | None = None
+    severity: str = "fail"  # 'fail' | 'warn' | 'ok'
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -36,6 +43,7 @@ class Check:
             "ok": self.ok,
             "detail": self.detail,
             "fix": self.fix,
+            "severity": self.severity,
         }
 
 
@@ -45,17 +53,27 @@ class Report:
 
     @property
     def ok(self) -> bool:
-        return all(c.ok for c in self.checks)
+        """True when nothing is genuinely wrong.
+
+        Warnings do not fail the run — they are the app saying "this is fine,
+        but here is something you might want".
+        """
+        return all(c.ok or c.severity != "fail" for c in self.checks)
 
     @property
     def failures(self) -> list[Check]:
-        return [c for c in self.checks if not c.ok]
+        return [c for c in self.checks if not c.ok and c.severity == "fail"]
+
+    @property
+    def warnings(self) -> list[Check]:
+        return [c for c in self.checks if not c.ok and c.severity == "warn"]
 
     def to_dict(self) -> dict[str, Any]:
         return {
             "ok": self.ok,
             "passed": sum(1 for c in self.checks if c.ok),
             "failed": len(self.failures),
+            "warned": len(self.warnings),
             "checks": [c.to_dict() for c in self.checks],
         }
 
@@ -71,6 +89,7 @@ def _check_vault(settings: Settings) -> Check:
             False,
             f"missing: {vault}",
             fix=f"memory-ob init   (or set --vault to the real folder)",
+            severity="warn",
         )
     missing = [n for n in VAULT_FOLDER_NAMES if not (vault / n).is_dir()]
     if missing:
@@ -79,6 +98,7 @@ def _check_vault(settings: Settings) -> Check:
             False,
             f"{vault} is missing {len(missing)} folder(s): {', '.join(missing[:4])}",
             fix="memory-ob init",
+            severity="warn",
         )
     return Check("vault", True, f"{vault} — {len(VAULT_FOLDER_NAMES)} folders")
 
@@ -91,6 +111,7 @@ def _check_store(settings: Settings) -> Check:
             False,
             f"missing: {db}",
             fix="memory-ob init   (or run any capture)",
+            severity="warn",
         )
     try:
         from .store import Store
@@ -120,6 +141,7 @@ def _check_token(settings: Settings) -> Check:
             False,
             f"missing: {token}",
             fix="the dashboard will create one on first run",
+            severity="warn",
         )
     raw = token.read_text(encoding="utf-8").strip()
     if not raw:
@@ -148,6 +170,7 @@ def _check_models(settings: Settings) -> Check:
             False,
             f"missing: {path}",
             fix="the app falls back to its defaults until you write one",
+            severity="warn",
         )
     try:
         cfg = ModelConfig.load(path)
@@ -183,6 +206,7 @@ def _check_backend(settings: Settings) -> Check:
             f"Hermes proxy: {'up' if up else 'down'}"
             + ("" if up else " — start it with: hermes proxy start"),
             fix=None if up else "hermes proxy start",
+            severity="warn",
         )
 
     slot = cfg.slot("embed")
@@ -192,6 +216,7 @@ def _check_backend(settings: Settings) -> Check:
         up,
         f"{slot.provider} at {slot.base_url or 'default'}: {'reachable' if up else 'not reachable'}",
         fix=None if up else "start ollama, or point the slot at a reachable server",
+        severity="warn",
     )
 
 
