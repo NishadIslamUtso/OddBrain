@@ -38,16 +38,29 @@ class ProviderTestCase(unittest.TestCase):
         self.db = root / "test.db"
         sys.path.insert(0, str(PROJECT / "provider"))
         sys.path.insert(0, str(PROJECT))
+
+        # These tests exercise the provider's plumbing — queueing, source
+        # labelling, store writes — not the model. Left live, they call the
+        # Hermes proxy and become network-dependent and flaky.
+        from memory_ob import models
+
+        self._real_model_call = models.model_call
+        models.model_call = lambda purpose, config=None: None
+
         self.mod = _load_provider_module()
         self.provider = self.mod.MemoryOBProvider()
         self.provider.initialize("test-session")
 
     def tearDown(self) -> None:
+        from memory_ob import models
+
+        models.model_call = self._real_model_call
         self.provider.shutdown()
         # Windows can still hold the DB open for a moment; don't fail the test.
         with warnings.catch_warnings():
             warnings.simplefilter("ignore", ResourceWarning)
             shutil.rmtree(self._tmp.name, ignore_errors=True)
+        super().tearDown()
 
     def _seed(self, *, sign_it: bool = True, **kwargs) -> None:
         from memory_ob.records import Record

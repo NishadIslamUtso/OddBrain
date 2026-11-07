@@ -38,6 +38,49 @@ def _stem(token: str) -> str:
     return token
 
 
+def _judged_themes(themes: Counter, model_call: Any) -> list[tuple[str, int]]:
+    """Ask the model which recurring words are real subjects worth a category.
+
+    The word count only says what repeated; it cannot say what matters. A word
+    appearing eight times is often "nothing". When no model is available there
+    is no judge, so no theme cards are proposed at all — a silent guess is
+    worse than no card.
+    """
+    candidates = [(t, n) for t, n in themes.most_common(12) if n >= 3]
+    if not candidates or model_call is None:
+        return []
+    listing = "\n".join(f"- {t} (appeared {n} times)" for t, n in candidates)
+    prompt = (
+        "These words each recurred in the owner's captured memory.\n"
+        "Which are real, meaningful subjects the owner returns to — the kind "
+        "worth gathering under a category?\n"
+        "Rules:\n"
+        "- Only subjects the owner actually cares about.\n"
+        "- Ignore filler words, code terms, file names, dates and generic verbs.\n"
+        "- A category must earn its keep: it should group several real memories.\n"
+        "- Reply with one subject per line, best first, no explanation.\n"
+        "- If none qualify, reply exactly NONE.\n\n"
+        f"Counts:\n{listing}"
+    )
+    try:
+        raw = model_call(prompt)
+    except Exception:
+        return []
+    out: list[tuple[str, int]] = []
+    counts = dict(candidates)
+    for line in (raw or "").splitlines():
+        s = line.strip().lstrip("-*• ").strip()
+        if not s or s.upper() == "NONE":
+            continue
+        # match the model's wording back to a counted word
+        key = s.lower().split()[0] if s else ""
+        for t, n in candidates:
+            if t == key or t in s.lower():
+                out.append((t, n))
+                break
+    return out[:5]
+
+
 def _tokens(text: str) -> set[str]:
     return {
         _stem(t)
@@ -155,6 +198,10 @@ def dream(
                 )
 
     # --- theme drift ------------------------------------------------------
+    # A word counter cannot tell a subject from a filler word: it asked about
+    # "nothing" appearing eight times. The model judges the candidates instead,
+    # and only a theme it considers real and worth grouping becomes a card.
+    themes = Counter()
     stop = {
         "that", "this", "with", "from", "have", "been", "were", "was", "are",
         "will", "would", "could", "should", "about", "which", "when", "where",
@@ -165,6 +212,7 @@ def dream(
         for t in _tokens(f["text"]):
             if t not in stop:
                 themes[t] += 1
+    judged = _judged_themes(themes, model_call)
 
     # --- missing people ---------------------------------------------------
     known_people = {
@@ -192,8 +240,7 @@ def dream(
                 title="Candidate contradicts confirmed record",
                 body=f"Candidate: {c['fact']}",
             )
-        for theme, n in themes.most_common(5):
-            if n >= 3:
+        for theme, n in judged:
                 cards.propose_ask(
                     title=f"Recurring theme: {theme}",
                     body=f"The theme {theme!r} appeared {n} times. Make it a category?",

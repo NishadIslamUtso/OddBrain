@@ -429,22 +429,24 @@ class MemoryOBProvider(MemoryProvider):
                 store = Store(db_path)
                 added = 0
                 try:
-                    for speaker, text in parts:
-                        text = (text or "").strip()
-                        if len(text) < _MIN_QUERY_LEN:
-                            continue
-                        candidates = extract_claims(
-                            text,
-                            source={
-                                "origin": "hermes",
-                                "session": self._session_id,
-                                "speaker": speaker,
-                            },
-                            model_call=call,
-                        )
-                        for c in candidates:
-                            store.add_fact(c.text, trust=c.trust, source=c.source)
-                            added += 1
+                    # The whole session, with speaker labels, in one call. The
+                    # model is told the 'user' speaker is the owner, so the
+                    # assistant's own narration is context — not material.
+                    # Extracting per speaker instead would make the assistant
+                    # the subject on its own turns and capture its every word.
+                    from memory_ob.extract import extract_session
+
+                    session_source = {
+                        "origin": "hermes",
+                        "session": self._session_id,
+                        "speaker": "user",
+                    }
+                    candidates = extract_session(
+                        parts, source=session_source, model_call=call
+                    )
+                    for c in candidates:
+                        store.add_fact(c.text, trust=c.trust, source=c.source)
+                        added += 1
                     if added:
                         store.log_activity(
                             "capture",

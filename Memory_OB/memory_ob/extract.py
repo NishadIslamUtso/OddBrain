@@ -27,6 +27,14 @@ _CHATTER_RE = re.compile(
 
 _QUESTION_RE = re.compile(r"\?\s*$")
 
+# The model's own "nothing here" answer. Treating it as a fact is how "ok"/"ok"
+# became a candidate.
+_NO_FACTS_RE = re.compile(
+    r"(?i)^\(?\s*(no (facts?|memories?|memorable (facts|memories))"
+    r"( to extract)?|nothing (worth (keeping|remembering)|memorable)|"
+    r"none|n/?a)\s*\)?[.!]?\s*$"
+)
+
 
 @dataclass(slots=True)
 class Candidate:
@@ -153,6 +161,8 @@ def extract_with_model(
     out: list[Candidate] = []
     for line in (raw or "").splitlines():
         s = line.strip().lstrip("-*• ").strip()
+        if _NO_FACTS_RE.match(s):
+            return []
         if len(s) < 12 or _CHATTER_RE.match(s):
             continue
         if hazards.is_hazardous(s):
@@ -168,6 +178,84 @@ def extract_with_model(
             )
         )
     return out or extract_claims(text, source=source)
+
+
+def extract_session(
+    parts: list[tuple[str, str]],
+    *,
+    model_call: Any,
+    source: dict[str, Any] | None = None,
+) -> list[Candidate]:
+    """Extract the owner's durable facts from a whole labelled session.
+
+    The model sees who said what and is told the owner is the only subject, so
+    the assistant's own narration is context rather than material. Feeding the
+    session in one piece matters: extracting per speaker makes "the person
+    speaking" the assistant on its turns, and every sentence it utters becomes
+    a candidate about itself.
+
+    Falls back to the offline heuristic on the owner's turns when no model is
+    available.
+    """
+    transcript = "\n".join(
+        f"{role}: {text.strip()}"
+        for role, text in parts
+        if (text or "").strip()
+    )
+    if not transcript.strip():
+        return []
+
+    prompt = (
+        "Below is a conversation. The speaker labelled 'user' is the OWNER. "
+        "The speaker labelled 'assistant' is an assistant.\n"
+        "Extract atomic facts about the OWNER only. One per line.\n"
+        "Rules:\n"
+        "- Only what the OWNER stated about themselves: preferences, habits, "
+        "their work, their life, their plans.\n"
+        "- Nothing the assistant said, inferred, summarised or assumed.\n"
+        "- Nothing about the assistant.\n"
+        "- No feelings, diagnoses, motives or identities you infer.\n"
+        "- Preserve uncertainty and reported-vs-observed wording.\n"
+        "- One short line each. No preamble.\n\n"
+        f"Conversation:\n{transcript}"
+    )
+    try:
+        raw = model_call(prompt)
+    except Exception:
+        return _heuristic_from_owner(parts, source=source)
+
+    out: list[Candidate] = []
+    for line in (raw or "").splitlines():
+        s = line.strip().lstrip("-*• ").strip()
+        if _NO_FACTS_RE.match(s):
+            return []
+        if len(s) < 12 or _CHATTER_RE.match(s):
+            continue
+        if hazards.is_hazardous(s):
+            continue
+        out.append(
+            Candidate(
+                id=ids.new_id(),
+                text=s,
+                trust=score_claim(s),
+                kind_hint=kind_hint_for(s),
+                source=source or {},
+                created=_now(),
+            )
+        )
+    return out or _heuristic_from_owner(parts, source=source)
+
+
+def _heuristic_from_owner(
+    parts: list[tuple[str, str]], *, source: dict[str, Any] | None = None
+) -> list[Candidate]:
+    """Offline fallback: only the owner's turns, never the assistant's."""
+    owner_text = "\n".join(
+        text.strip() for role, text in parts if role == "user" and (text or "").strip()
+    )
+    if not owner_text.strip():
+        return []
+    return extract_claims(owner_text, source=source)
 
 
 def make_quote(text: str, source_text: str) -> dict[str, str]:

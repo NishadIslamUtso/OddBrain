@@ -33,6 +33,12 @@ class AnonymousCase(unittest.TestCase):
         os.environ["MEMORY_OB_DB"] = str(self.db)
         sys.path.insert(0, str(PROJECT / "provider"))
         sys.path.insert(0, str(PROJECT))
+        # Capture behaviour is what these tests assert, not the model. Stub the
+        # call so a live proxy cannot make them network-dependent.
+        from memory_ob import models
+
+        self._real_model_call = models.model_call
+        models.model_call = lambda purpose, config=None: None
         self.mod = _load_provider()
         self.provider = self.mod.MemoryOBProvider()
         self.provider.initialize("s")
@@ -56,6 +62,9 @@ class AnonymousCase(unittest.TestCase):
         )
 
     def tearDown(self) -> None:
+        from memory_ob import models
+
+        models.model_call = self._real_model_call
         self.provider.shutdown()
         self.store.close()
         with warnings.catch_warnings():
