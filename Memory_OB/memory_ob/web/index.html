@@ -770,7 +770,7 @@ async function render() {
   pal.id = 'openPalette';
   pal.innerHTML = ICONS.search + '<span>Search</span><kbd>Ctrl K</kbd>';
   pal.onclick = openPalette;
-  nav.appendChild(pal);
+  if (state.advanced) nav.appendChild(pal);
   if (state.advanced) renderConfirmations();
 
   /* Capture the tab we are loading. A slow view (Settings reads the model
@@ -1928,16 +1928,18 @@ async function viewHome() {
 
 function diffSummary(before, after) {
   const b = before || {}, a = after || {};
+  // Only the fields a human would care about. The rest (ids, timestamps,
+  // trust internals) are noise on a "recently remembered" feed.
+  const SHOW = { title: 'name', body: 'detail', context: 'context', sentiment: 'tone',
+                 people: 'people', importance: 'importance', status: 'status' };
   const bits = [];
-  for (const k of Object.keys(a)) {
-    if (k === 'id' || k === 'created' || k === 'modified' || k === 'source') continue;
+  for (const [k, label] of Object.entries(SHOW)) {
     const bv = JSON.stringify(b[k] ?? '');
     const av = JSON.stringify(a[k] ?? '');
     if (bv === av) continue;
-    const label = k === 'title' ? 'name' : k === 'body' ? 'detail' : k;
+    if (av === '""' || av === '[]' || av === '{}' || av === '0' || av === 'false') continue;
     bits.push(`<div class="diff-row"><span class="dim">${esc(label)}:</span>
-      <span class="was">${esc(bv === '""' || bv === '' ? '—' : bv)}</span>
-      <span class="arrow">→</span><span class="now">${esc(av === '""' || av === '' ? '—' : av)}</span></div>`);
+      <span class="now">${esc(av)}</span></div>`);
   }
   return bits.join('');
 }
