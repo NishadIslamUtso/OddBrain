@@ -186,6 +186,11 @@ def create_app() -> FastAPI:
             )
         )
 
+    @app.get("/api/records/at")
+    def records_at(when: str, st: Store = Depends(get_store)) -> dict[str, Any]:
+        """What was true at a point in time — the temporal query."""
+        return {"when": when, "records": [r.to_dict() for r in st.records_valid_at(when)]}
+
     @app.get("/api/records/{record_id}")
     def get_record(record_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
         r = st.get_record(record_id)

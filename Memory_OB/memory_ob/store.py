@@ -66,7 +66,9 @@ CREATE TABLE IF NOT EXISTS records (
     demo INTEGER NOT NULL DEFAULT 0,
     links TEXT NOT NULL DEFAULT '{}',
     created TEXT NOT NULL,
-    modified TEXT NOT NULL
+    modified TEXT NOT NULL,
+    valid_from TEXT,
+    valid_until TEXT
 );
 
 CREATE TABLE IF NOT EXISTS history (
@@ -278,6 +280,10 @@ class Store:
             self.conn.execute(
                 "ALTER TABLE records ADD COLUMN demo INTEGER NOT NULL DEFAULT 0"
             )
+        if "valid_from" not in have:
+            self.conn.execute("ALTER TABLE records ADD COLUMN valid_from TEXT")
+        if "valid_until" not in have:
+            self.conn.execute("ALTER TABLE records ADD COLUMN valid_until TEXT")
         facts_have = {
             row["name"]
             for row in self.conn.execute("PRAGMA table_info(facts)").fetchall()
@@ -422,6 +428,8 @@ class Store:
         stamps the card and the time itself — a caller cannot supply them.
         """
         sign_truth(rec, card_id=card_id, at=at)
+        if not rec.valid_from:
+            rec.valid_from = at or _now()
         return self._persist(
             rec, changed_by=changed_by, reason=reason or f"card:{card_id}"
         )
@@ -445,13 +453,14 @@ class Store:
                 "UPDATE records SET kind=?, subject=?, speaker=?, status=?, trust=?,"
                 " title=?, body=?, tags=?, source=?, event_time=?, capture_time=?,"
                 " confirmed_by=?, never_send=?, demo=?, links=?, created=?,"
-                " modified=? WHERE id=?",
+                " modified=?, valid_from=?, valid_until=? WHERE id=?",
                 (
                     rec.kind, rec.subject, rec.speaker, rec.status, rec.trust,
                     rec.title, rec.body, _json(rec.tags), _json(rec.source),
                     rec.event_time, rec.capture_time, rec.confirmed_by,
                     int(rec.never_send), int(rec.demo), _json(rec.links),
-                    rec.created, rec.modified, rec.id,
+                    rec.created, rec.modified, rec.valid_from, rec.valid_until,
+                    rec.id,
                 ),
             )
         else:
@@ -459,15 +468,15 @@ class Store:
                 "INSERT OR REPLACE INTO records"
                 "(id, kind, subject, speaker, status, trust, title, body, tags,"
                 " source, event_time, capture_time, confirmed_by, never_send,"
-                " demo, links, created, modified)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " demo, links, created, modified, valid_from, valid_until)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     rec.id, rec.kind, rec.subject, rec.speaker, rec.status,
                     rec.trust, rec.title, rec.body, _json(rec.tags),
                     _json(rec.source), rec.event_time, rec.capture_time,
                     rec.confirmed_by, int(rec.never_send), int(rec.demo),
                     _json(rec.links),
-                    rec.created, rec.modified,
+                    rec.created, rec.modified, rec.valid_from, rec.valid_until,
                 ),
             )
         self.conn.execute(
@@ -518,6 +527,22 @@ class Store:
         rows = self.conn.execute(sql, params).fetchall()
         return [self._row_to_record(r) for r in rows]
 
+    def records_valid_at(self, when: str, *, limit: int = 50) -> list[Record]:
+        """Records that were true at *when* — the temporal query.
+
+        A record is valid when it had become true by then and had not yet
+        stopped. Records without an explicit interval count as always-valid.
+        """
+        rows = self.conn.execute(
+            "SELECT * FROM records WHERE status = 'active' AND never_send = 0"
+            " AND demo = 0"
+            " AND (valid_from IS NULL OR valid_from <= ?)"
+            " AND (valid_until IS NULL OR valid_until > ?)"
+            " ORDER BY trust DESC LIMIT ?",
+            (when, when, limit),
+        ).fetchall()
+        return [self._row_to_record(r) for r in rows]
+
     def _row_to_record(self, row: sqlite3.Row) -> Record:
         return Record(
             id=row["id"],
@@ -538,6 +563,8 @@ class Store:
             links=json.loads(row["links"]),
             created=row["created"],
             modified=row["modified"],
+            valid_from=row["valid_from"] if "valid_from" in row.keys() else None,
+            valid_until=row["valid_until"] if "valid_until" in row.keys() else None,
         )
 
     # -- history (law 4) ---------------------------------------------------
@@ -592,6 +619,7 @@ class Store:
         if rec is None:
             return None
         rec.status = TRASH
+        rec.valid_until = _now()
         return self.update_record(rec, changed_by=by, reason=f"trash: {reason}")
 
     def retract(
@@ -602,6 +630,7 @@ class Store:
         if rec is None:
             return None
         rec.status = RETRACTED
+        rec.valid_until = _now()
         return self.update_record(rec, changed_by=by, reason=f"retract: {reason}")
 
     def supersede(
@@ -611,6 +640,7 @@ class Store:
         if rec is None:
             return None
         rec.status = SUPERSEDED
+        rec.valid_until = _now()
         return self.update_record(rec, changed_by=by, reason=f"supersede: {reason}")
 
     # -- search ------------------------------------------------------------

@@ -138,6 +138,8 @@ class Record:
     links: dict[str, list[str]] = field(default_factory=dict)
     created: str = ""
     modified: str = ""
+    valid_from: str | None = None
+    valid_until: str | None = None
 
     def __post_init__(self) -> None:
         if self.kind not in KINDS:
