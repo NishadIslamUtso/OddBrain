@@ -41,6 +41,7 @@ _MIN_OUTPUT_LEN = 20     # below this the block is not worth a prompt slot
 _MAX_RECORDS = 6
 _MAX_FACTS = 4
 _MAX_SNIPPET = 320
+_MAX_CHARS = 2000        # total recall budget per turn — memory must not flood context
 # §7: prefetch has a hard five-second deadline. A slow recall is a missed
 # recall, not a late one — the turn must not be held up.
 _MAX_SECONDS = 5.0
@@ -334,7 +335,7 @@ class MemoryOBProvider(MemoryProvider):
             self._receipt("ai:recall", hits[:_MAX_RECORDS],
                           purpose=f"prefetch: {query[:80]}")
 
-        hits.sort(key=lambda r: r.trust, reverse=True)
+        hits.sort(key=lambda r: (r.importance, r.trust), reverse=True)
         records = hits[:_MAX_RECORDS]
 
         if not records and not facts:
@@ -363,7 +364,12 @@ class MemoryOBProvider(MemoryProvider):
                 if text:
                     lines.append(f"- {text}")
 
-        return "\n".join(lines), len(records)
+        block = "\n".join(lines)
+        # Budget: trim the whole recall to a fixed character cap so memory can
+        # never flood the context, whatever the record mix.
+        if len(block) > _MAX_CHARS:
+            block = block[: _MAX_CHARS - 1].rstrip() + "…"
+        return block, len(records)
 
     def _receipt(self, recipient: str, records: list, *, purpose: str = "") -> None:
         """A sharing receipt. Never blocks and never fails the recall."""
@@ -535,7 +541,7 @@ class MemoryOBProvider(MemoryProvider):
                     except Exception:
                         autonomous = False
                     if autonomous:
-                        from memory_ob.records import Record
+                        from memory_ob.records import Record, importance_for
 
                         signed = asked = 0
                         for c in candidates:
@@ -547,6 +553,7 @@ class MemoryOBProvider(MemoryProvider):
                                         "speaker": "user",
                                         "title": c.text[:120],
                                         "body": c.text,
+                                        "importance": importance_for(c.text, c.kind_hint),
                                         "source": {
                                             **c.source,
                                             "context": c.context,

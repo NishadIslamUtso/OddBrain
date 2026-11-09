@@ -68,7 +68,8 @@ CREATE TABLE IF NOT EXISTS records (
     created TEXT NOT NULL,
     modified TEXT NOT NULL,
     valid_from TEXT,
-    valid_until TEXT
+    valid_until TEXT,
+    importance INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS history (
@@ -284,6 +285,8 @@ class Store:
             self.conn.execute("ALTER TABLE records ADD COLUMN valid_from TEXT")
         if "valid_until" not in have:
             self.conn.execute("ALTER TABLE records ADD COLUMN valid_until TEXT")
+        if "importance" not in have:
+            self.conn.execute("ALTER TABLE records ADD COLUMN importance INTEGER NOT NULL DEFAULT 0")
         facts_have = {
             row["name"]
             for row in self.conn.execute("PRAGMA table_info(facts)").fetchall()
@@ -453,14 +456,14 @@ class Store:
                 "UPDATE records SET kind=?, subject=?, speaker=?, status=?, trust=?,"
                 " title=?, body=?, tags=?, source=?, event_time=?, capture_time=?,"
                 " confirmed_by=?, never_send=?, demo=?, links=?, created=?,"
-                " modified=?, valid_from=?, valid_until=? WHERE id=?",
+                " modified=?, valid_from=?, valid_until=?, importance=? WHERE id=?",
                 (
                     rec.kind, rec.subject, rec.speaker, rec.status, rec.trust,
                     rec.title, rec.body, _json(rec.tags), _json(rec.source),
                     rec.event_time, rec.capture_time, rec.confirmed_by,
                     int(rec.never_send), int(rec.demo), _json(rec.links),
                     rec.created, rec.modified, rec.valid_from, rec.valid_until,
-                    rec.id,
+                    rec.importance, rec.id,
                 ),
             )
         else:
@@ -468,8 +471,8 @@ class Store:
                 "INSERT OR REPLACE INTO records"
                 "(id, kind, subject, speaker, status, trust, title, body, tags,"
                 " source, event_time, capture_time, confirmed_by, never_send,"
-                " demo, links, created, modified, valid_from, valid_until)"
-                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                " demo, links, created, modified, valid_from, valid_until, importance)"
+                " VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     rec.id, rec.kind, rec.subject, rec.speaker, rec.status,
                     rec.trust, rec.title, rec.body, _json(rec.tags),
@@ -477,6 +480,7 @@ class Store:
                     rec.confirmed_by, int(rec.never_send), int(rec.demo),
                     _json(rec.links),
                     rec.created, rec.modified, rec.valid_from, rec.valid_until,
+                    rec.importance,
                 ),
             )
         self.conn.execute(
@@ -565,6 +569,7 @@ class Store:
             modified=row["modified"],
             valid_from=row["valid_from"] if "valid_from" in row.keys() else None,
             valid_until=row["valid_until"] if "valid_until" in row.keys() else None,
+            importance=row["importance"] if "importance" in row.keys() else 0,
         )
 
     # -- history (law 4) ---------------------------------------------------

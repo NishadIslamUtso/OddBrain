@@ -7,7 +7,8 @@ a trust ladder where ``confirmed`` is reachable only through a Review card.
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+import re
+from dataclasses import dataclass, field, asdict
 from typing import Any
 
 # --- Kinds -----------------------------------------------------------------
@@ -48,6 +49,20 @@ CANDIDATE_MIN = 0.3
 CANDIDATE_MAX = 0.6
 # §2: confirmed is 0.9. Only a Review card gets a record here.
 CONFIRMED_MIN = 0.9
+
+
+def importance_for(text: str, kind_hint: str = NOTE) -> int:
+    """How load-bearing a memory is: 0 normal, 1 notable, 2 load-bearing.
+
+    Decisions, commitments and plans decay slowest — they are the ones that
+    change what the owner does next.
+    """
+    low = (text or "").lower()
+    if re.search(r"\b(decided|decision|agreed|committed|i will|we will|must|plan to|going to)\b", low):
+        return 2
+    if kind_hint in ("learning", "profile") or re.search(r"\b(learned|realized|important|always|never)\b", low):
+        return 1
+    return 0
 
 
 def _timestamp() -> str:
@@ -140,6 +155,7 @@ class Record:
     modified: str = ""
     valid_from: str | None = None
     valid_until: str | None = None
+    importance: int = 0
 
     def __post_init__(self) -> None:
         if self.kind not in KINDS:

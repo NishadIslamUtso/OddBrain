@@ -616,7 +616,8 @@ def create_app() -> FastAPI:
         # (leaves a card) when the fact is not clearly the owner's.
         signed = 0
         if _autonomous(settings):
-            signed = 0
+            from .records import Record, importance_for
+
             for c in cands:
                 # The extractor only returns facts about the speaking person,
                 # so a first-person marker in the paraphrase is not required.
@@ -630,6 +631,7 @@ def create_app() -> FastAPI:
                         "speaker": "user",
                         "title": c.text[:120],
                         "body": c.text,
+                        "importance": importance_for(c.text, c.kind_hint),
                         "source": {**c.source, "fact_id": "", "context": c.context, "sentiment": c.sentiment},
                     }
                 )
