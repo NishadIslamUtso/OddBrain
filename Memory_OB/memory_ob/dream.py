@@ -25,6 +25,17 @@ from .review import CardStore
 _WORD_RE = re.compile(r"[a-z0-9]+")
 
 
+def _days_since(stamp: str) -> float:
+    """Days since an ISO timestamp; 0 when it cannot be read."""
+    from datetime import datetime, timezone
+
+    try:
+        dt = datetime.strptime(stamp, "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=timezone.utc)
+    except ValueError:
+        return 0.0
+    return (datetime.now(timezone.utc) - dt).total_seconds() / 86400.0
+
+
 def _stem(token: str) -> str:
     """Very light suffix stripping, just enough for dedup.
 
@@ -223,6 +234,14 @@ def dream(
             if who not in known_people:
                 missing_people.append(who)
 
+    # --- stale entries ----------------------------------------------------
+    # A confirmed record untouched for a long time may no longer hold. The
+    # dream asks; it never quietly keeps or drops one.
+    stale: list[Any] = []
+    for r in confirmed:
+        if r.modified and _days_since(r.modified) > 90:
+            stale.append(r)
+
     # --- open cards -------------------------------------------------------
     if cards is not None:
         for m in merges[:20]:
@@ -265,6 +284,15 @@ def dream(
                 body=f"{who} was mentioned but has no profile. Create one?",
                 speakers=["memory_ob"],
             )
+        for r in stale[:10]:
+            cards.propose_ask(
+                title=f"Still true? {r.title}",
+                body=(
+                    f"This was confirmed and not touched for over 90 days: "
+                    f"{r.title!r}. Does it still hold?"
+                ),
+                speakers=["memory_ob"],
+            )
 
     return {
         "candidates": len(facts),
@@ -273,6 +301,7 @@ def dream(
         "conflicts": len(conflicts),
         "top_themes": themes.most_common(5),
         "missing_people": sorted(set(missing_people)),
+        "stale": len(stale),
         "cards_opened": bool(cards),
         "model": model_pass,
     }
