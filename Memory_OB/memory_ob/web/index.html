@@ -103,6 +103,7 @@
   }
   nav .spacer { flex: 1 1 auto; }
   nav .palette-btn { color: var(--text-3); }
+  nav .icon-btn { padding: 4px 8px; font-size: 15px; line-height: 1; }
   nav .palette-btn kbd {
     font-family: inherit; font-size: 11px; color: var(--text-4);
     border: 1px solid var(--stroke); border-radius: 4px; padding: 0 4px;
@@ -248,6 +249,27 @@
   .ver .diff-new { color: var(--ok); }
   .tag { display: inline-block; background: var(--bg-3); border-radius: 4px;
     padding: 0 6px; margin-right: 4px; font-size: 11px; color: var(--text-3); }
+
+  /* ---- home feed ---- */
+  .home-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 14px; flex-wrap: wrap; }
+  .home-head h2 { margin: 0; }
+  .home-head .sub { margin: 2px 0 0; }
+  .home-empty { text-align: center; padding: 48px 16px; }
+  .home-empty .big { font-size: 40px; margin-bottom: 10px; }
+  .home-empty .muted { font-size: 15px; margin-bottom: 4px; }
+  .card.feed { padding: 12px 14px; margin-bottom: 8px; }
+  .feed-top { display: flex; align-items: baseline; gap: 8px; }
+  .tag { font-size: 10px; text-transform: uppercase; letter-spacing: .06em; padding: 1px 6px; border-radius: 4px; flex-shrink: 0; }
+  .tag.new { background: #7fd98f22; color: var(--ok); }
+  .tag.changed { background: #e0a06022; color: var(--warn); }
+  .feed-title { font-weight: 500; }
+  .feed-when { margin-left: auto; font-size: 12px; flex-shrink: 0; }
+  .feed-diff { margin-top: 6px; }
+  .diff-row { font-size: 12px; display: flex; gap: 6px; flex-wrap: wrap; align-items: baseline; }
+  .diff-row .was { color: var(--text-4); text-decoration: line-through; }
+  .diff-row .arrow { color: var(--text-4); }
+  .diff-row .now { color: var(--ok); }
+  .card.conflict { border-left: 3px solid var(--accent); }
 
   /* ---- toasts ---- */
   #toasts {
@@ -715,11 +737,7 @@ async function render() {
   const nav = document.getElementById('nav');
   nav.innerHTML = '<h1>' + ICONS.brain + '<span class="word">Memory_OB</span></h1><span class="spacer"></span>';
   if (!state.advanced) {
-    const home = document.createElement('button');
-    home.innerHTML = ICONS.review + '<span>For you</span>';
-    home.className = state.tab === 'home' ? 'active' : '';
-    home.onclick = () => go('home');
-    nav.appendChild(home);
+    // Option A: one screen. No tab bar — just the feed below.
   } else {
     for (const [id, label, icon] of TABS) {
       const shown = (id === 'review' && autonomous) ? 'Doubts' : label;
@@ -737,9 +755,10 @@ async function render() {
     }
   }
   const adv = document.createElement('button');
-  adv.className = 'palette-btn';
+  adv.className = 'palette-btn icon-btn';
   adv.id = 'advToggle';
-  adv.innerHTML = (state.advanced ? 'Hide ' : '') + 'Advanced';
+  adv.title = state.advanced ? 'Hide advanced screens' : 'Show advanced screens';
+  adv.innerHTML = '⚙';
   adv.onclick = () => {
     state.advanced = !state.advanced;
     try { localStorage.setItem('memory_ob_advanced', state.advanced ? '1' : '0'); } catch (e) {}
@@ -1701,14 +1720,11 @@ async function viewSettings() {
       <h3 style="margin-top:0">Brain settings</h3>
       <div class="kv"><span>brain path</span><span>${esc(settings.brain_path || '(default vault)')}</span></div>
       <div class="kv"><span>semantic search</span><span>${settings.semantic ? 'on' : 'off'}</span></div>
-      <div class="kv"><span>sweep schedule</span><span>${esc(settings.sweep_schedule)}</span></div>
-      <div class="kv"><span>checkpoint before compress</span><span>${settings.checkpoint_required ? 'on' : 'off'}</span></div>
       <div class="kv"><span>show demo records</span><span>${settings.demo_visible ? 'on' : 'off'}</span></div>
       <div class="kv"><span>local/offline AI only</span><span>${settings.local_only ? 'on' : 'off'}</span></div>
       <div class="kv"><span>autonomous memory (AI may add/edit)</span><span>${settings.autonomous ? 'on' : 'off'}</span></div>
       <div class="toolbar" style="margin-top:10px">
         <button class="act" id="toggleSemantic">${settings.semantic ? 'Turn semantic off' : 'Turn semantic on'}</button>
-        <button class="act" id="toggleCheckpoint">${settings.checkpoint_required ? 'Turn checkpoint off' : 'Turn checkpoint on'}</button>
         <button class="act" id="toggleDemo">${settings.demo_visible ? 'Hide demo records' : 'Show demo records'}</button>
         <button class="act" id="toggleLocalOnly">${settings.local_only ? 'Allow online AI' : 'Local AI only'}</button>
         <button class="act" id="toggleAutonomous">${settings.autonomous ? 'Turn autonomous off' : 'Turn autonomous on'}</button>
@@ -1845,58 +1861,56 @@ function renderChangeDiff(ch) {
 }
 
 async function viewHome() {
-  const [changes, confs, people] = await Promise.all([
-    api('/api/changes?limit=20'),
-    api('/api/confirmations?status=pending').catch(() => ({ confirmations: [] })),
-    api('/api/people').catch(() => ({ people: [] })),
-  ]);
-  let insight = '';
-  try { insight = (await api('/api/insights')).insight || ''; } catch (e) {}
+  const changes = await api('/api/changes?limit=30');
   const list = changes.changes || [];
-  const pending = confs.confirmations || [];
-  let html = '';
-  if (pending.length) {
-    html += `<div class="card" style="border-left:3px solid var(--accent);margin-bottom:12px">
-      <div class="row"><span class="pill ask">the AI asks</span>
-        <span class="dim">${pending.length} doubt(s)</span></div>
-      ${pending.map(c => `<div class="muted" style="margin:6px 0">${esc(c.question)}</div>
-        <div class="toolbar">
-          <button class="act primary" data-conf-yes="${esc(c.id)}">yes</button>
-          <button class="act" data-conf-no="${esc(c.id)}">no</button>
-        </div>`).join('')}
+  let conflicts = [];
+  try {
+    const confs = await api('/api/confirmations?status=pending');
+    conflicts = (confs.confirmations || []);
+  } catch (e) {}
+  const noun = list.length === 1 ? 'thing' : 'things';
+  let html = `<div class="home-head">
+    <div><h2>Recently remembered</h2>
+      <div class="sub">${list.length ? `${list.length} ${noun} the AI kept for you.` : 'Nothing yet.'}</div></div>
+    <input type="search" id="homeSearch" placeholder="Search your memory…" style="min-width:220px">
+  </div>`;
+  // Only a genuine conflict is worth interrupting for.
+  if (conflicts.length) {
+    html += `<div class="card conflict">
+      <div class="row"><b>One thing to check</b><span class="pill ask">${conflicts.length}</span></div>
+      <div class="muted" style="margin:6px 0">${esc(conflicts[0].question)}</div>
+      <div class="toolbar">
+        <button class="act primary" data-conf-yes="${esc(conflicts[0].id)}">that's right</button>
+        <button class="act" data-conf-no="${esc(conflicts[0].id)}">no, skip it</button>
+      </div>
     </div>`;
   }
-  html += `<h2>For you</h2><div class="sub">What the AI remembered. Glance or ignore — it handles the rest.</div>`;
-  if (insight) {
-    html += `<div class="card" style="margin-bottom:12px"><div class="row"><b>The big picture</b></div>
-      <div class="muted" style="margin-top:4px">${esc(insight)}</div></div>`;
-  }
   if (!list.length) {
-    html += empty('Nothing yet', 'When the AI remembers something, it appears here with a before → after diff.');
+    html += `<div class="home-empty"><div class="big">🧠</div>
+      <div class="muted">The AI remembers things as you talk.</div>
+      <div class="dim">When it keeps something, it shows up here with what changed.</div></div>`;
   } else {
-    for (const ch of list.slice(0, 12)) {
-      const title = (ch.after && ch.after.title) || (ch.before && ch.before.title) || ch.entity;
-      html += `<div class="card">
-        <div class="row"><span class="pill">${esc(ch.entity)}</span><b>${esc(ch.action)}</b>
-          <span class="dim">${esc(ch.actor || '')} · ${fmtDate(ch.at)}</span></div>
-        ${title ? `<div class="muted" style="margin:4px 0">${esc(title)}</div>` : ''}
-        <div style="margin-top:4px">${renderChangeDiff(ch)}</div>
+    for (const ch of list.slice(0, 20)) {
+      const after = ch.after || {}, before = ch.before || {};
+      const title = after.title || before.title || ch.entity;
+      const isNew = ch.action === 'create';
+      const changed = diffSummary(before, after);
+      html += `<div class="card feed">
+        <div class="feed-top">
+          <span class="tag ${isNew ? 'new' : 'changed'}">${isNew ? 'new' : 'updated'}</span>
+          <span class="feed-title">${esc(title)}</span>
+          <span class="dim feed-when">${relTime(ch.at)}</span>
+        </div>
+        ${changed ? `<div class="feed-diff">${changed}</div>` : ''}
       </div>`;
     }
   }
-  if (people.people && people.people.length) {
-    html += `<div class="card" style="margin-top:12px">
-      <div class="row"><b>People</b><span class="dim">${people.people.length} profile(s)</span></div>
-      <div class="dim" style="font-size:12px;margin-top:4px">${people.people.map(p => esc(p.name)).join(' · ')}</div>
-    </div>`;
-  }
-  // Bind the inline confirmation buttons.
   setTimeout(() => {
     document.querySelectorAll('[data-conf-yes]').forEach(b => {
       b.onclick = async () => {
         await api('/api/confirmations/' + encodeURIComponent(b.getAttribute('data-conf-yes')) + '/answer',
           { method: 'POST', body: JSON.stringify({ answer: 'yes' }) });
-        toast('Noted.', 'ok'); render();
+        toast('Got it.', 'ok'); render();
       };
     });
     document.querySelectorAll('[data-conf-no]').forEach(b => {
@@ -1906,8 +1920,38 @@ async function viewHome() {
         toast('Skipped.', 'ok'); render();
       };
     });
+    const s = document.getElementById('homeSearch');
+    if (s) s.onkeydown = (e) => { if (e.key === 'Enter' && s.value.trim()) { state.advanced = true; try { localStorage.setItem('memory_ob_advanced','1'); } catch(_){} go('search'); setTimeout(() => { const q = document.querySelector('#main input[type=search]'); if (q) { q.value = s.value.trim(); q.dispatchEvent(new Event('input', {bubbles:true})); } }, 50); } };
   }, 0);
   return html;
+}
+
+function diffSummary(before, after) {
+  const b = before || {}, a = after || {};
+  const bits = [];
+  for (const k of Object.keys(a)) {
+    if (k === 'id' || k === 'created' || k === 'modified' || k === 'source') continue;
+    const bv = JSON.stringify(b[k] ?? '');
+    const av = JSON.stringify(a[k] ?? '');
+    if (bv === av) continue;
+    const label = k === 'title' ? 'name' : k === 'body' ? 'detail' : k;
+    bits.push(`<div class="diff-row"><span class="dim">${esc(label)}:</span>
+      <span class="was">${esc(bv === '""' || bv === '' ? '—' : bv)}</span>
+      <span class="arrow">→</span><span class="now">${esc(av === '""' || av === '' ? '—' : av)}</span></div>`);
+  }
+  return bits.join('');
+}
+
+function relTime(at) {
+  if (!at) return '';
+  const d = new Date(at);
+  if (isNaN(d.getTime())) return '';
+  const s = (Date.now() - d.getTime()) / 1000;
+  if (s < 60) return 'just now';
+  if (s < 3600) return Math.floor(s / 60) + 'm ago';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ago';
+  if (s < 86400 * 7) return Math.floor(s / 86400) + 'd ago';
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
 const VIEWS = {
@@ -2103,7 +2147,7 @@ async function bindLate() {
         render();
       } catch (e) { document.getElementById('appSettingsMsg').innerHTML = `<span class="err">${esc(e.message)}</span>`; }
     };
-    for (const [id, key] of [['toggleSemantic', 'semantic'], ['toggleCheckpoint', 'checkpoint_required'], ['toggleDemo', 'demo_visible'], ['toggleLocalOnly', 'local_only'], ['toggleAutonomous', 'autonomous']]) {
+    for (const [id, key] of [['toggleSemantic', 'semantic'], ['toggleDemo', 'demo_visible'], ['toggleLocalOnly', 'local_only'], ['toggleAutonomous', 'autonomous']]) {
       const b = document.getElementById(id);
       if (b) b.onclick = () => flip(key);
     }

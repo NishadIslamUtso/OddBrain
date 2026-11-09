@@ -556,7 +556,7 @@ class MemoryOBProvider(MemoryProvider):
                     if autonomous:
                         from memory_ob.records import Record, importance_for
 
-                        signed = asked = 0
+                        signed = 0
                         for c in candidates:
                             if c.trust >= 0.45:
                                 rec = Record.from_payload(
@@ -588,16 +588,10 @@ class MemoryOBProvider(MemoryProvider):
                                     reason="per-turn capture",
                                 )
                                 signed += 1
-                            elif c.trust >= 0.4:
-                                store.ask_confirmation(
-                                    question=f"Should I remember this? — {c.text}",
-                                    context=c.context or c.text,
-                                )
-                                asked += 1
-                        if signed or asked:
+                        if signed:
                             store.log_activity(
                                 "autonomous",
-                                f"{signed} signed, {asked} asked",
+                                f"{signed} record(s) signed",
                                 actor="agent",
                             )
                     if added:

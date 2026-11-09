@@ -711,21 +711,6 @@ def create_app() -> FastAPI:
                 signed += 1
             if signed:
                 st.log_activity("autonomous", f"{signed} record(s) signed", actor="memory_ob")
-            # Borderline facts: the AI asks instead of guessing.
-            asked = 0
-            for c in cands:
-                if c.trust >= 0.45:
-                    continue  # already signed
-                if c.trust < 0.4 or _META_RE.search(c.text):
-                    continue  # noise or too weak — leave it in the Inbox
-                st.ask_confirmation(
-                    question=f"Should I remember this? — {c.text}",
-                    context=c.context or c.text,
-                    created_by="memory_ob",
-                )
-                asked += 1
-            if asked:
-                st.log_activity("autonomous", f"{asked} confirmation(s) asked", actor="memory_ob")
         return {
             "candidates": len(cands),
             "facts": [
