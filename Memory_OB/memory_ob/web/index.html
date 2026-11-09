@@ -1173,8 +1173,15 @@ async function viewInbox() {
         <div class="muted">${esc(c.text)}</div>
       </div>
       <div class="dim" style="font-size:12px;margin:4px 0 8px">
-        score ${Number(c.trust).toFixed(2)} · ${esc(origin)}
+        score ${Number(c.trust).toFixed(2)} · ${esc(origin)}${c.corroborated ? ` · repeated ×${c.corroborated}` : ''}
       </div>
+      ${(() => { try { const m = typeof c.meta === 'string' ? JSON.parse(c.meta || '{}') : (c.meta || {});
+          const bits = [];
+          if (m.context) bits.push('context: ' + m.context);
+          if (m.sentiment) bits.push('tone: ' + m.sentiment);
+          if (m.people && m.people.length) bits.push('people: ' + m.people.join(', '));
+          return bits.length ? `<div class="dim" style="font-size:11px;margin:2px 0 6px">${bits.map(esc).join(' · ')}</div>` : '';
+        } catch (e) { return ''; } })()}
       <div class="toolbar">
         <button class="act primary" data-act="remember">remember</button>
         <button class="act danger" data-act="dismiss">not true</button>
@@ -1843,6 +1850,8 @@ async function viewHome() {
     api('/api/confirmations?status=pending').catch(() => ({ confirmations: [] })),
     api('/api/people').catch(() => ({ people: [] })),
   ]);
+  let insight = '';
+  try { insight = (await api('/api/insights')).insight || ''; } catch (e) {}
   const list = changes.changes || [];
   const pending = confs.confirmations || [];
   let html = '';
@@ -1858,6 +1867,10 @@ async function viewHome() {
     </div>`;
   }
   html += `<h2>For you</h2><div class="sub">What the AI remembered. Glance or ignore — it handles the rest.</div>`;
+  if (insight) {
+    html += `<div class="card" style="margin-bottom:12px"><div class="row"><b>The big picture</b></div>
+      <div class="muted" style="margin-top:4px">${esc(insight)}</div></div>`;
+  }
   if (!list.length) {
     html += empty('Nothing yet', 'When the AI remembers something, it appears here with a before → after diff.');
   } else {

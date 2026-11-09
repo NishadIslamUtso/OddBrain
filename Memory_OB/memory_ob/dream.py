@@ -167,6 +167,7 @@ def dream(
     and neither can sign anything.
     """
     cards = CardStore(store) if open_cards else None
+    corroborated = store.corroborate()
     facts = store.list_facts(status="candidate", limit=5000)
     records = store.list_records(include_private=False, limit=10000)
     confirmed = [r for r in records if r.trust >= 0.8 and r.status == "active"]
@@ -302,6 +303,7 @@ def dream(
         "top_themes": themes.most_common(5),
         "missing_people": sorted(set(missing_people)),
         "stale": len(stale),
+        "corroborated": corroborated,
         "cards_opened": bool(cards),
         "model": model_pass,
     }

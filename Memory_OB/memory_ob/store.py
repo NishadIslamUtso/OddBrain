@@ -89,6 +89,7 @@ CREATE TABLE IF NOT EXISTS facts (
     status TEXT NOT NULL DEFAULT 'candidate',
     source TEXT NOT NULL DEFAULT '{}',
     meta TEXT NOT NULL DEFAULT '{}',
+    corroborated INTEGER NOT NULL DEFAULT 0,
     demo INTEGER NOT NULL DEFAULT 0,
     created TEXT NOT NULL
 );
@@ -298,6 +299,10 @@ class Store:
         if "meta" not in facts_have:
             self.conn.execute(
                 "ALTER TABLE facts ADD COLUMN meta TEXT NOT NULL DEFAULT '{}'"
+            )
+        if "corroborated" not in facts_have:
+            self.conn.execute(
+                "ALTER TABLE facts ADD COLUMN corroborated INTEGER NOT NULL DEFAULT 0"
             )
         conv_have = {
             row["name"]
@@ -1233,6 +1238,50 @@ class Store:
         """
         self.conn.execute("UPDATE facts SET status = ? WHERE id = ?", (status, fact_id))
         self.conn.commit()
+
+    def corroborate(self, *, limit: int = 500) -> int:
+        """Mark facts that recur across distinct days.
+
+        A fact the owner says once may be noise; the same thing on three
+        different days is a pattern. Those get a corroborated count and rise.
+        Returns how many facts were corroborated.
+        """
+        import re as _re
+
+        def norm(text: str) -> str:
+            return " ".join(sorted(set(_re.findall(r"[a-z0-9]+", (text or "").lower()))))
+
+        rows = self.conn.execute(
+            "SELECT id, text, source, corroborated FROM facts "
+            "WHERE status = 'candidate' ORDER BY trust DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+        groups: dict[str, list] = {}
+        for r in rows:
+            key = norm(r["text"])
+            if len(key) > 8:
+                groups.setdefault(key, []).append(r)
+        count = 0
+        for key, items in groups.items():
+            if len(items) < 2:
+                continue
+            days = {
+                str(it["source"].get("session", ""))[:1]
+                for it in items
+                if isinstance(it["source"], dict)
+            }
+            if len(days) < 2 and len(items) < 3:
+                continue
+            for it in items:
+                self.conn.execute(
+                    "UPDATE facts SET corroborated = corroborated + 1 WHERE id = ?",
+                    (it["id"],),
+                )
+                count += 1
+        if count:
+            self.conn.commit()
+            self.log_activity("corroborate", f"{count} fact(s) repeated", actor="memory_ob")
+        return count
 
     def dismiss_facts(self, *, origin: str | None = None, status: str = "rejected") -> int:
         """Bulk-move candidate facts out of the pool.

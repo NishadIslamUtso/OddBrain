@@ -208,6 +208,34 @@ def create_app() -> FastAPI:
             )
         )
 
+    @app.get("/api/insights")
+    def insights(st: Store = Depends(get_store)) -> dict[str, Any]:
+        """A plain-language summary of what memory holds, model-written."""
+        from .models import ModelConfig, model_call
+
+        records = st.list_records(include_private=False, limit=40)
+        if not records:
+            return {"insight": "Nothing remembered yet.", "records": 0}
+        cfg = ModelConfig.load(settings.models_path)
+        call = model_call("extract", cfg)
+        if call is None:
+            titles = ", ".join(r.title for r in records[:8] if r.title)
+            return {"insight": f"Recent memory: {titles}", "records": len(records)}
+        listing = "\n".join(
+            f"- {r.title} ({r.kind}, {r.status})" for r in records[:30] if r.title
+        )
+        prompt = (
+            "Summarise what this person has been thinking about and working on, "
+            "in 2-3 plain sentences. No jargon, no preamble.\n\n"
+            f"{listing}"
+        )
+        try:
+            text = call(prompt)
+        except Exception:
+            text = ""
+        return {"insight": (text or "").strip() or "No summary available.",
+                "records": len(records)}
+
     @app.get("/api/records/at")
     def records_at(when: str, st: Store = Depends(get_store)) -> dict[str, Any]:
         """What was true at a point in time — the temporal query."""
