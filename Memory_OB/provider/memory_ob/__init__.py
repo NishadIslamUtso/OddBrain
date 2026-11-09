@@ -503,6 +503,19 @@ class MemoryOBProvider(MemoryProvider):
                     all_people: list[str] = []
                     all_topics: list[str] = []
                     for c in candidates:
+                        from memory_ob.api import _blocked_by_guardrails, _guardrails
+                        from memory_ob.config import Settings
+
+                        blocked = _blocked_by_guardrails(
+                            _guardrails(Settings.resolve()), c.text
+                        )
+                        if blocked:
+                            store.log_activity(
+                                "guardrail-block",
+                                f"{c.text[:80]} (~ {blocked})",
+                                actor="agent",
+                            )
+                            continue
                         store.add_fact(
                             c.text,
                             trust=c.trust,

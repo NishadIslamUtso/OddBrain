@@ -49,6 +49,28 @@ def _autonomous(cfg: Settings) -> bool:
         return False
 
 
+def _guardrails(cfg: Settings) -> list[str]:
+    try:
+        from .settings import load
+
+        return list(load(cfg.vault).guardrails or [])
+    except Exception:
+        return []
+
+
+def _blocked_by_guardrails(patterns: list[str], text: str) -> str:
+    """Return the first guardrail pattern that matches *text*, else ''."""
+    import re as _re
+
+    for pat in patterns:
+        try:
+            if pat and _re.search(pat, text, _re.IGNORECASE):
+                return pat
+        except _re.error:
+            continue
+    return ""
+
+
 def configure(s: Settings) -> None:
     """Point the app at a specific vault/db.
 
@@ -368,11 +390,23 @@ def create_app() -> FastAPI:
         records = [h for h in hits if exit.keep(h)]
         if records:
             _receipt(st, "ai:recall", records, purpose=f"search: {q[:80]}")
+        # §7 abstention: say plainly when memory has nothing, so the model does
+        # not fill the gap with a guess.
+        if not results and not candidates:
+            return {
+                "query": q,
+                "count": 0,
+                "results": [],
+                "candidates": [],
+                "found": False,
+                "abstention": "Memory_OB has nothing on this. Say so rather than guessing.",
+            }
         return {
             "query": q,
             "count": len(results),
             "results": results,
             "candidates": candidates,
+            "found": True,
         }
 
     # -- review ------------------------------------------------------------
@@ -589,6 +623,10 @@ def create_app() -> FastAPI:
             conv_id = st.add_conversation(text, origin=str(source.get("origin", "")), speaker="user")
             cands = extract_claims(text, source={**source, "conversation_id": conv_id}, model_call=call)
         for c in cands:
+            blocked = _blocked_by_guardrails(_guardrails(settings), c.text)
+            if blocked:
+                st.log_activity("guardrail-block", f"{c.text[:80]} (~ {blocked})", actor="memory_ob")
+                continue
             st.add_fact(
                 c.text,
                 trust=c.trust,
@@ -1051,6 +1089,7 @@ def create_app() -> FastAPI:
             "checkpoint_required", "backup_dir", "demo_visible",
             "local_only",
             "autonomous",
+            "guardrails",
             # Appearance — validated inside update() before they are stored.
             "theme", "accent", "font_family", "font_size", "density",
         }

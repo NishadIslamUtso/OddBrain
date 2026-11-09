@@ -28,6 +28,7 @@ DEFAULTS: dict[str, Any] = {
     "demo_visible": False,
     "local_only": False,
     "autonomous": False,
+    "guardrails": [],
     # Appearance. Validated by memory_ob.appearance before they are stored,
     # because they reach the UI as CSS custom properties.
     "theme": "auto",
@@ -48,6 +49,7 @@ class AppSettings:
     demo_visible: bool = False
     local_only: bool = False
     autonomous: bool = False
+    guardrails: list[str] = field(default_factory=list)
     theme: str = "auto"
     accent: str = "#d4a74a"
     font_family: str = ""
