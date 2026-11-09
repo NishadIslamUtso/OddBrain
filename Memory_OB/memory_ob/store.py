@@ -137,6 +137,17 @@ CREATE TABLE IF NOT EXISTS changes (
     reason TEXT
 );
 
+CREATE TABLE IF NOT EXISTS confirmations (
+    id TEXT PRIMARY KEY,
+    at TEXT NOT NULL,
+    question TEXT NOT NULL,
+    context TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    answer TEXT,
+    answered_at TEXT,
+    created_by TEXT
+);
+
 CREATE TABLE IF NOT EXISTS edges (
     src TEXT NOT NULL,
     dst TEXT NOT NULL,
@@ -1107,6 +1118,77 @@ class Store:
             }
             for r in rows
         ]
+
+    # -- confirmations (the AI asks, the owner answers) ---------------------
+
+    def ask_confirmation(
+        self, *, question: str, context: str = "", created_by: str = "memory_ob"
+    ) -> dict:
+        """Raise a doubt. The owner answers yes/no; nothing is written until then."""
+        from . import ids
+
+        cid = ids.new_id()
+        self.conn.execute(
+            "INSERT INTO confirmations(id, at, question, context, status, created_by) "
+            "VALUES(?,?,?,?,?,?)",
+            (cid, _now(), question, context, "pending", created_by),
+        )
+        self.conn.commit()
+        self.log_activity("confirm-ask", question[:120], actor=created_by)
+        conf = self.get_confirmation(cid)
+        assert conf is not None
+        return conf
+
+    def get_confirmation(self, cid: str) -> dict | None:
+        row = self.conn.execute(
+            "SELECT * FROM confirmations WHERE id = ?", (cid,)
+        ).fetchone()
+        if row is None:
+            return None
+        return {
+            "id": row["id"],
+            "at": row["at"],
+            "question": row["question"],
+            "context": row["context"],
+            "status": row["status"],
+            "answer": row["answer"],
+            "answered_at": row["answered_at"],
+            "created_by": row["created_by"],
+        }
+
+    def list_confirmations(self, *, status: str = "pending", limit: int = 20) -> list[dict]:
+        rows = self.conn.execute(
+            "SELECT * FROM confirmations WHERE status = ? ORDER BY at DESC LIMIT ?",
+            (status, limit),
+        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "at": r["at"],
+                "question": r["question"],
+                "context": r["context"],
+                "status": r["status"],
+                "answer": r["answer"],
+                "answered_at": r["answered_at"],
+                "created_by": r["created_by"],
+            }
+            for r in rows
+        ]
+
+    def answer_confirmation(
+        self, cid: str, *, answer: str, by: str = "owner"
+    ) -> dict | None:
+        """Record the owner's yes/no. The caller acts on it."""
+        conf = self.get_confirmation(cid)
+        if conf is None:
+            return None
+        self.conn.execute(
+            "UPDATE confirmations SET status='answered', answer=?, answered_at=? WHERE id=?",
+            (answer, _now(), cid),
+        )
+        self.conn.commit()
+        self.log_activity("confirm-answer", f"{cid}: {answer}", actor=by)
+        return self.get_confirmation(cid)
 
     def set_fact_status(self, fact_id: str, status: str) -> None:
         """Move a fact out of the candidate pool.

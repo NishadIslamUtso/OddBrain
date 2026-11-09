@@ -202,6 +202,7 @@ def extract_with_model(
         "Extract atomic facts about the person speaking. One JSON object per line.\n"
         "Rules:\n"
         "- Only facts the person stated about themselves or people they know.\n"
+        "- Keep the person's own wording (first person where they used it).\n"
         "- Preserve uncertainty and reported-vs-observed wording.\n"
         "- Include the surrounding context, the emotional tone, and any people named.\n"
         "- One short line each. No preamble.\n"

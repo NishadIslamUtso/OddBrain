@@ -10,7 +10,6 @@ Run:
 from __future__ import annotations
 
 import logging
-import re
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -549,7 +548,7 @@ def create_app() -> FastAPI:
     def capture(
         payload: dict[str, Any], st: Store = Depends(get_store)
     ) -> dict[str, Any]:
-        from .extract import extract_claims, extract_session
+        from .extract import _META_RE, extract_claims, extract_session
         from .models import ModelConfig, model_call
 
         source = payload.get("source") or {"origin": "api"}
@@ -614,7 +613,9 @@ def create_app() -> FastAPI:
         if _autonomous(settings):
             signed = 0
             for c in cands:
-                if c.trust < 0.5 or not re.search(r"\b(i|i'm|i've|my|me)\b", c.text.lower()):
+                # The extractor only returns facts about the speaking person,
+                # so a first-person marker in the paraphrase is not required.
+                if c.trust < 0.45:
                     continue
                 before = None
                 rec = Record.from_payload(
@@ -637,6 +638,21 @@ def create_app() -> FastAPI:
                 signed += 1
             if signed:
                 st.log_activity("autonomous", f"{signed} record(s) signed", actor="memory_ob")
+            # Borderline facts: the AI asks instead of guessing.
+            asked = 0
+            for c in cands:
+                if c.trust >= 0.45:
+                    continue  # already signed
+                if c.trust < 0.4 or _META_RE.search(c.text):
+                    continue  # noise or too weak — leave it in the Inbox
+                st.ask_confirmation(
+                    question=f"Should I remember this? — {c.text}",
+                    context=c.context or c.text,
+                    created_by="memory_ob",
+                )
+                asked += 1
+            if asked:
+                st.log_activity("autonomous", f"{asked} confirmation(s) asked", actor="memory_ob")
         return {
             "candidates": len(cands),
             "facts": [
@@ -711,6 +727,41 @@ def create_app() -> FastAPI:
                           before=None, after=rec.to_dict(), actor=actor, reason=reason)
             applied.append({"id": rec.id, "action": "create"})
         return {"applied": applied, "cards": cards, "autonomous": autonomous}
+
+    @app.get("/api/confirmations")
+    def list_confirmations(
+        status: str = "pending", st: Store = Depends(get_store)
+    ) -> dict[str, Any]:
+        return {"confirmations": st.list_confirmations(status=status)}
+
+    @app.post("/api/confirmations")
+    def ask_confirmation(
+        payload: dict[str, Any] | None = None, st: Store = Depends(get_store)
+    ) -> dict[str, Any]:
+        payload = payload or {}
+        question = str(payload.get("question") or "").strip()
+        if not question:
+            raise HTTPException(status_code=400, detail="a question is required")
+        return st.ask_confirmation(
+            question=question,
+            context=str(payload.get("context") or ""),
+            created_by="memory_ob",
+        )
+
+    @app.post("/api/confirmations/{cid}/answer")
+    def answer_confirmation(
+        cid: str,
+        payload: dict[str, Any] | None = None,
+        st: Store = Depends(get_store),
+    ) -> dict[str, Any]:
+        payload = payload or {}
+        answer = str(payload.get("answer") or "").strip().lower()
+        if answer not in ("yes", "no"):
+            raise HTTPException(status_code=400, detail="answer must be yes or no")
+        conf = st.answer_confirmation(cid, answer=answer, by="owner")
+        if conf is None:
+            raise HTTPException(status_code=404, detail="confirmation not found")
+        return conf
 
     @app.get("/api/people")
     def list_people(st: Store = Depends(get_store)) -> dict[str, Any]:

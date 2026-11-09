@@ -361,6 +361,7 @@
     </button>
   </nav>
   <main id="main"></main>
+  <div id="confirmations"></div>
 </div>
 <div id="toasts"></div>
 <div id="overlay"></div>
@@ -661,15 +662,57 @@ window.addEventListener('hashchange', render);
 
 /* ---- render ------------------------------------------------------------- */
 
+async function renderConfirmations() {
+  const box = document.getElementById('confirmations');
+  if (!box) return;
+  try {
+    const data = await api('/api/confirmations?status=pending');
+    const confs = data.confirmations || [];
+    if (!confs.length) { box.innerHTML = ''; return; }
+    box.innerHTML = confs.map(c => `
+      <div class="card" style="border-left:3px solid var(--accent);margin-bottom:8px">
+        <div class="row"><span class="pill ask">the AI asks</span>
+          <span class="dim">${fmtDate(c.at)}</span></div>
+        <div class="muted" style="margin:6px 0">${esc(c.question)}</div>
+        ${c.context ? `<div class="dim" style="font-size:12px;margin-bottom:6px">${esc(c.context)}</div>` : ''}
+        <div class="toolbar">
+          <button class="act primary" data-conf-yes="${esc(c.id)}">yes, remember it</button>
+          <button class="act" data-conf-no="${esc(c.id)}">no, skip</button>
+        </div>
+      </div>`).join('');
+    box.querySelectorAll('[data-conf-yes]').forEach(b => {
+      b.onclick = async () => {
+        await api('/api/confirmations/' + encodeURIComponent(b.getAttribute('data-conf-yes')) + '/answer',
+          { method: 'POST', body: JSON.stringify({ answer: 'yes' }) });
+        toast('Noted — it will be remembered.', 'ok');
+        renderConfirmations();
+      };
+    });
+    box.querySelectorAll('[data-conf-no]').forEach(b => {
+      b.onclick = async () => {
+        await api('/api/confirmations/' + encodeURIComponent(b.getAttribute('data-conf-no')) + '/answer',
+          { method: 'POST', body: JSON.stringify({ answer: 'no' }) });
+        toast('Skipped.', 'ok');
+        renderConfirmations();
+      };
+    });
+  } catch (e) { /* the banner is optional — never break the page */ }
+}
+
 async function render() {
   state.tab = route();
   if (location.hash !== '#/' + state.tab) history.replaceState(null, '', '#/' + state.tab);
 
+  let autonomous = false;
+  try { autonomous = !!(await api('/api/app-settings')).autonomous; } catch (e) {}
+  state.autonomous = autonomous;
+
   const nav = document.getElementById('nav');
   nav.innerHTML = '<h1>' + ICONS.brain + '<span class="word">Memory_OB</span></h1><span class="spacer"></span>';
   for (const [id, label, icon] of TABS) {
+    const shown = (id === 'review' && autonomous) ? 'Doubts' : label;
     const b = document.createElement('button');
-    b.innerHTML = ICONS[icon] + '<span>' + esc(label) + '</span>';
+    b.innerHTML = ICONS[icon] + '<span>' + esc(shown) + '</span>';
     b.className = state.tab === id ? 'active' : '';
     if (id === 'review' && state.data.reviewCount) {
       const s = document.createElement('span');
@@ -686,6 +729,7 @@ async function render() {
   pal.innerHTML = ICONS.search + '<span>Search</span><kbd>Ctrl K</kbd>';
   pal.onclick = openPalette;
   nav.appendChild(pal);
+  renderConfirmations();
 
   /* Capture the tab we are loading. A slow view (Settings reads the model
      config over the bridge) must never overwrite a tab the owner already
