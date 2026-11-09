@@ -649,7 +649,8 @@ function applyTheme() {
    linked. Kept in sync on every render. */
 function route() {
   const hash = location.hash.replace(/^#\/?/, '');
-  return TABS.some(t => t[0] === hash) ? hash : 'review';
+  if (hash === 'home') return 'home';
+  return TABS.some(t => t[0] === hash) ? hash : 'home';
 }
 
 function go(tab) {
@@ -700,6 +701,10 @@ async function renderConfirmations() {
 }
 
 async function render() {
+  if (typeof state.advanced === 'undefined') {
+    try { state.advanced = localStorage.getItem('memory_ob_advanced') === '1'; }
+    catch (e) { state.advanced = false; }
+  }
   state.tab = route();
   if (location.hash !== '#/' + state.tab) history.replaceState(null, '', '#/' + state.tab);
 
@@ -709,27 +714,45 @@ async function render() {
 
   const nav = document.getElementById('nav');
   nav.innerHTML = '<h1>' + ICONS.brain + '<span class="word">Memory_OB</span></h1><span class="spacer"></span>';
-  for (const [id, label, icon] of TABS) {
-    const shown = (id === 'review' && autonomous) ? 'Doubts' : label;
-    const b = document.createElement('button');
-    b.innerHTML = ICONS[icon] + '<span>' + esc(shown) + '</span>';
-    b.className = state.tab === id ? 'active' : '';
-    if (id === 'review' && state.data.reviewCount) {
-      const s = document.createElement('span');
-      s.className = 'badge';
-      s.textContent = state.data.reviewCount;
-      b.appendChild(s);
+  if (!state.advanced) {
+    const home = document.createElement('button');
+    home.innerHTML = ICONS.review + '<span>For you</span>';
+    home.className = state.tab === 'home' ? 'active' : '';
+    home.onclick = () => go('home');
+    nav.appendChild(home);
+  } else {
+    for (const [id, label, icon] of TABS) {
+      const shown = (id === 'review' && autonomous) ? 'Doubts' : label;
+      const b = document.createElement('button');
+      b.innerHTML = ICONS[icon] + '<span>' + esc(shown) + '</span>';
+      b.className = state.tab === id ? 'active' : '';
+      if (id === 'review' && state.data.reviewCount) {
+        const s = document.createElement('span');
+        s.className = 'badge';
+        s.textContent = state.data.reviewCount;
+        b.appendChild(s);
+      }
+      b.onclick = () => go(id);
+      nav.appendChild(b);
     }
-    b.onclick = () => go(id);
-    nav.appendChild(b);
   }
+  const adv = document.createElement('button');
+  adv.className = 'palette-btn';
+  adv.id = 'advToggle';
+  adv.innerHTML = (state.advanced ? 'Hide ' : '') + 'Advanced';
+  adv.onclick = () => {
+    state.advanced = !state.advanced;
+    try { localStorage.setItem('memory_ob_advanced', state.advanced ? '1' : '0'); } catch (e) {}
+    if (!state.advanced) go('home'); else render();
+  };
+  nav.appendChild(adv);
   const pal = document.createElement('button');
   pal.className = 'palette-btn';
   pal.id = 'openPalette';
   pal.innerHTML = ICONS.search + '<span>Search</span><kbd>Ctrl K</kbd>';
   pal.onclick = openPalette;
   nav.appendChild(pal);
-  renderConfirmations();
+  if (state.advanced) renderConfirmations();
 
   /* Capture the tab we are loading. A slow view (Settings reads the model
      config over the bridge) must never overwrite a tab the owner already
@@ -1814,6 +1837,66 @@ function renderChangeDiff(ch) {
   return rows.length ? rows.join('') : `<div class="dim">${esc(ch.reason || 'no field changes')}</div>`;
 }
 
+async function viewHome() {
+  const [changes, confs, people] = await Promise.all([
+    api('/api/changes?limit=20'),
+    api('/api/confirmations?status=pending').catch(() => ({ confirmations: [] })),
+    api('/api/people').catch(() => ({ people: [] })),
+  ]);
+  const list = changes.changes || [];
+  const pending = confs.confirmations || [];
+  let html = '';
+  if (pending.length) {
+    html += `<div class="card" style="border-left:3px solid var(--accent);margin-bottom:12px">
+      <div class="row"><span class="pill ask">the AI asks</span>
+        <span class="dim">${pending.length} doubt(s)</span></div>
+      ${pending.map(c => `<div class="muted" style="margin:6px 0">${esc(c.question)}</div>
+        <div class="toolbar">
+          <button class="act primary" data-conf-yes="${esc(c.id)}">yes</button>
+          <button class="act" data-conf-no="${esc(c.id)}">no</button>
+        </div>`).join('')}
+    </div>`;
+  }
+  html += `<h2>For you</h2><div class="sub">What the AI remembered. Glance or ignore — it handles the rest.</div>`;
+  if (!list.length) {
+    html += empty('Nothing yet', 'When the AI remembers something, it appears here with a before → after diff.');
+  } else {
+    for (const ch of list.slice(0, 12)) {
+      const title = (ch.after && ch.after.title) || (ch.before && ch.before.title) || ch.entity;
+      html += `<div class="card">
+        <div class="row"><span class="pill">${esc(ch.entity)}</span><b>${esc(ch.action)}</b>
+          <span class="dim">${esc(ch.actor || '')} · ${fmtDate(ch.at)}</span></div>
+        ${title ? `<div class="muted" style="margin:4px 0">${esc(title)}</div>` : ''}
+        <div style="margin-top:4px">${renderChangeDiff(ch)}</div>
+      </div>`;
+    }
+  }
+  if (people.people && people.people.length) {
+    html += `<div class="card" style="margin-top:12px">
+      <div class="row"><b>People</b><span class="dim">${people.people.length} profile(s)</span></div>
+      <div class="dim" style="font-size:12px;margin-top:4px">${people.people.map(p => esc(p.name)).join(' · ')}</div>
+    </div>`;
+  }
+  // Bind the inline confirmation buttons.
+  setTimeout(() => {
+    document.querySelectorAll('[data-conf-yes]').forEach(b => {
+      b.onclick = async () => {
+        await api('/api/confirmations/' + encodeURIComponent(b.getAttribute('data-conf-yes')) + '/answer',
+          { method: 'POST', body: JSON.stringify({ answer: 'yes' }) });
+        toast('Noted.', 'ok'); render();
+      };
+    });
+    document.querySelectorAll('[data-conf-no]').forEach(b => {
+      b.onclick = async () => {
+        await api('/api/confirmations/' + encodeURIComponent(b.getAttribute('data-conf-no')) + '/answer',
+          { method: 'POST', body: JSON.stringify({ answer: 'no' }) });
+        toast('Skipped.', 'ok'); render();
+      };
+    });
+  }, 0);
+  return html;
+}
+
 const VIEWS = {
   review: viewReview,
   inbox: viewInbox,
@@ -1829,6 +1912,7 @@ const VIEWS = {
   conversations: viewConversations,
   people: viewPeople,
   changes: viewChanges,
+  home: viewHome,
 };
 
 /* ---- late bindings ------------------------------------------------------

@@ -485,9 +485,101 @@ class MemoryOBProvider(MemoryProvider):
                     candidates = extract_session(
                         parts, source=session_source, model_call=call
                     )
+                    # Keep the raw turn too, so nothing is lost.
+                    raw = "\n".join(text for _, text in parts)
+                    conv_id = store.add_conversation(
+                        raw,
+                        origin="hermes",
+                        session=self._session_id,
+                        speaker="user",
+                        parts=[{"role": r, "content": t} for r, t in parts],
+                    )
+                    all_people: list[str] = []
+                    all_topics: list[str] = []
                     for c in candidates:
-                        store.add_fact(c.text, trust=c.trust, source=c.source)
+                        store.add_fact(
+                            c.text,
+                            trust=c.trust,
+                            source={**c.source, "conversation_id": conv_id},
+                            meta={
+                                "context": c.context,
+                                "sentiment": c.sentiment,
+                                "people": c.people,
+                            },
+                        )
                         added += 1
+                        for person in c.people:
+                            store.upsert_person(person)
+                            if person not in all_people:
+                                all_people.append(person)
+                        if c.kind_hint and c.kind_hint not in all_topics:
+                            all_topics.append(c.kind_hint)
+                    if conv_id and (all_people or all_topics):
+                        import json as _json
+
+                        store.conn.execute(
+                            "UPDATE conversations SET people=?, topics=? WHERE id=?",
+                            (_json.dumps(all_people), _json.dumps(all_topics), conv_id),
+                        )
+                        store.conn.commit()
+                        store.link_conversation(conv_id)
+
+                    # Option A: the AI manages memory itself. It signs the
+                    # clear facts, asks about the borderline ones, and logs a
+                    # diff for every write.
+                    autonomous = False
+                    try:
+                        from memory_ob.settings import load as _load_settings
+
+                        autonomous = bool(_load_settings(Path(db_path).parent.parent).autonomous)
+                    except Exception:
+                        autonomous = False
+                    if autonomous:
+                        from memory_ob.records import Record
+
+                        signed = asked = 0
+                        for c in candidates:
+                            if c.trust >= 0.45:
+                                rec = Record.from_payload(
+                                    {
+                                        "kind": c.kind_hint,
+                                        "subject": "self",
+                                        "speaker": "user",
+                                        "title": c.text[:120],
+                                        "body": c.text,
+                                        "source": {
+                                            **c.source,
+                                            "context": c.context,
+                                            "sentiment": c.sentiment,
+                                        },
+                                    }
+                                )
+                                store.sign_record(
+                                    rec, card_id="autonomous",
+                                    changed_by="memory_ob (autonomous)",
+                                    reason="per-turn capture",
+                                )
+                                store.log_change(
+                                    entity="record", entity_id=rec.id, action="create",
+                                    before=None,
+                                    after={**rec.to_dict(), "context": c.context,
+                                           "sentiment": c.sentiment},
+                                    actor="memory_ob (autonomous)",
+                                    reason="per-turn capture",
+                                )
+                                signed += 1
+                            elif c.trust >= 0.4:
+                                store.ask_confirmation(
+                                    question=f"Should I remember this? — {c.text}",
+                                    context=c.context or c.text,
+                                )
+                                asked += 1
+                        if signed or asked:
+                            store.log_activity(
+                                "autonomous",
+                                f"{signed} signed, {asked} asked",
+                                actor="agent",
+                            )
                     if added:
                         store.log_activity(
                             "capture",
