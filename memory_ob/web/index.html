@@ -1,0 +1,1457 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Memory_OB</title>
+<style>
+/* ---------------------------------------------------------------------------
+   Colours.
+   Every colour on this page is OPAQUE. The values below are only what shows for
+   a split second before the script runs; the script then reads the host app's
+   colours (or the system light/dark setting), turns them into solid colours,
+   and nudges text, borders and buttons until they can be read comfortably.
+   The host can inject its own values for --bg, --text, etc. after this block.
+   --------------------------------------------------------------------------- */
+:root {
+  color-scheme: dark;
+  --bg: #17181c; --bg-2: #1f2127; --bg-3: #292c34;
+  --stroke: #3a3e48; --stroke-2: #4b505c; --edge: #59606e;
+  --text: #f1f2f5; --text-2: #c9ccd4; --text-3: #a4a9b5;
+  --accent: #8fa3ff; --accent-text: #a9b8ff; --on-accent: #10131f;
+  --danger: #ff8f8f; --danger-bg: #3a2326;
+  --ok: #6fd39a; --ok-bg: #1f3329;
+  --warn: #f0c46a; --warn-bg: #38301d;
+  --c0: #8fa3ff; --c1: #6fd39a; --c2: #f0c46a; --c3: #ff9d7a;
+  --c4: #d79bff; --c5: #6fd0e0; --c6: #f08fc0; --c7: #b4c66a;
+  --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: light) {
+  :root {
+    color-scheme: light;
+    --bg: #f7f7f9; --bg-2: #ffffff; --bg-3: #eceef2;
+    --stroke: #cdd1d9; --stroke-2: #aeb4c0; --edge: #8b93a3;
+    --text: #15171c; --text-2: #3b404b; --text-3: #565c69;
+    --accent: #3a56d4; --accent-text: #2c45b8; --on-accent: #ffffff;
+    --danger: #b3261e; --danger-bg: #fbe9e7;
+    --ok: #1d7a46; --ok-bg: #e4f4ea;
+    --warn: #8a5a00; --warn-bg: #fbf0d6;
+    --c0: #3a56d4; --c1: #1d7a46; --c2: #8a5a00; --c3: #b4491f;
+    --c4: #7a3fb0; --c5: #0b7285; --c6: #a8286b; --c7: #5c6b13;
+  }
+}
+
+* { box-sizing: border-box; }
+html { font-size: 14px; background: var(--bg); }
+body {
+  margin: 0; min-height: 100vh;
+  background: var(--bg); color: var(--text);
+  font-family: var(--font); font-size: 1rem; line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+h1, h2, h3, h4 { margin: 0; font-weight: 650; line-height: 1.25; color: var(--text); }
+h1 { font-size: 1.4rem; } h2 { font-size: 1.12rem; } h3 { font-size: 1rem; }
+p { margin: 0; }
+a { color: var(--accent-text); }
+button, input, select, textarea { font: inherit; color: inherit; }
+::placeholder { color: var(--text-3); opacity: 1; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 6px; }
+.muted { color: var(--text-2); }
+.faint { color: var(--text-3); font-size: .86rem; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+[hidden] { display: none !important; }
+
+/* ---- layout ------------------------------------------------------------- */
+#app { max-width: 1100px; margin: 0 auto; padding: 0 16px 48px; }
+.topbar {
+  position: sticky; top: 0; z-index: 20; background: var(--bg);
+  padding: 12px 0 0; border-bottom: 1px solid var(--stroke);
+}
+.tabs { display: flex; gap: 4px; overflow-x: auto; scrollbar-width: none; padding-bottom: 0; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  appearance: none; background: none; border: 0; cursor: pointer; white-space: nowrap;
+  padding: 9px 14px; color: var(--text-2); font-weight: 560;
+  border-bottom: 3px solid transparent; margin-bottom: -1px; border-radius: 8px 8px 0 0;
+}
+.tab:hover { color: var(--text); background: var(--bg-2); }
+.tab[aria-current="page"] { color: var(--text); border-bottom-color: var(--accent); }
+.tab .badge {
+  display: inline-block; min-width: 1.3em; margin-left: 6px; padding: 0 6px; border-radius: 99px;
+  background: var(--accent); color: var(--on-accent); font-size: .78rem; font-weight: 700; text-align: center;
+}
+main { padding-top: 20px; }
+.screen > * + *, .gap > * + * { margin-top: 18px; }
+.head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
+.head p { color: var(--text-2); }
+.sec { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: 8px; }
+.sec h2 { display: flex; align-items: center; gap: 8px; }
+.count { background: var(--bg-3); color: var(--text); border-radius: 99px; padding: 0 8px; font-size: .82rem; font-weight: 600; }
+
+/* ---- banners ------------------------------------------------------------ */
+.banner {
+  display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap;
+  padding: 10px 14px; border-radius: var(--radius); border: 1px solid var(--stroke);
+  background: var(--bg-2); color: var(--text);
+}
+.banner.warn { background: var(--warn-bg); border-color: var(--warn); }
+.banner.danger { background: var(--danger-bg); border-color: var(--danger); }
+.banner.ok { background: var(--ok-bg); border-color: var(--ok); }
+#banners > * + * { margin-top: 8px; }
+
+/* ---- cards & rows ------------------------------------------------------- */
+.card { background: var(--bg-2); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 16px; }
+.card > * + * { margin-top: 10px; }
+.card.pad0 { padding: 0; }
+.eyebrow { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--accent-text); }
+.stack > * + * { margin-top: 10px; }
+.row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.row.end { justify-content: flex-end; }
+.row.between { justify-content: space-between; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.list { list-style: none; margin: 0; padding: 0; }
+.list > li + li { border-top: 1px solid var(--stroke); }
+
+.chip {
+  display: inline-block; padding: 1px 9px; border-radius: 99px; font-size: .8rem; font-weight: 560;
+  background: var(--bg-3); color: var(--text); border: 1px solid var(--stroke); white-space: nowrap;
+}
+.chip.accent { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.chip.ok { background: var(--ok-bg); color: var(--ok); border-color: var(--ok); }
+.chip.warn { background: var(--warn-bg); color: var(--warn); border-color: var(--warn); }
+.chip.danger { background: var(--danger-bg); color: var(--danger); border-color: var(--danger); }
+button.chip { cursor: pointer; }
+button.chip:hover { border-color: var(--stroke-2); }
+button.chip[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+
+/* ---- buttons ------------------------------------------------------------ */
+.btn {
+  appearance: none; cursor: pointer; border-radius: 8px; padding: 7px 14px; font-weight: 600;
+  background: var(--bg-3); color: var(--text); border: 1px solid var(--stroke-2);
+}
+.btn:hover { border-color: var(--text-3); }
+.btn.primary { background: var(--accent); color: var(--on-accent); border-color: var(--accent); }
+.btn.primary:hover { filter: brightness(1.08); }
+.btn.danger { background: var(--bg-2); color: var(--danger); border-color: var(--danger); }
+.btn.ghost { background: transparent; border-color: transparent; color: var(--accent-text); padding: 5px 8px; }
+.btn.ghost:hover { background: var(--bg-3); }
+.btn.sm { padding: 3px 10px; font-size: .88rem; }
+.btn[disabled] { opacity: .55; cursor: not-allowed; }
+
+/* ---- forms -------------------------------------------------------------- */
+.field > label, .lbl { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 4px; color: var(--text); }
+.field .hint { color: var(--text-2); font-size: .86rem; margin-top: 4px; }
+input[type=text], input[type=search], input[type=date], input[type=url], select, textarea {
+  width: 100%; padding: 8px 10px; border-radius: 8px;
+  background: var(--bg); color: var(--text); border: 1px solid var(--stroke-2);
+}
+textarea { resize: vertical; min-height: 84px; line-height: 1.45; }
+input:focus, select:focus, textarea:focus { border-color: var(--accent); outline: 2px solid var(--accent); outline-offset: 0; }
+select { appearance: auto; }
+.switch { display: flex; gap: 12px; align-items: flex-start; cursor: pointer; }
+.switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.switch .track {
+  flex: none; width: 40px; height: 22px; margin-top: 2px; border-radius: 99px; position: relative;
+  background: var(--bg-3); border: 1px solid var(--stroke-2); transition: background .15s;
+}
+.switch .track::after {
+  content: ""; position: absolute; top: 2px; left: 2px; width: 16px; height: 16px; border-radius: 50%;
+  background: var(--text-2); transition: transform .15s, background .15s;
+}
+.switch input:checked + .track { background: var(--accent); border-color: var(--accent); }
+.switch input:checked + .track::after { transform: translateX(18px); background: var(--on-accent); }
+.switch input:focus-visible + .track { outline: 2px solid var(--accent); outline-offset: 2px; }
+.switch input:disabled + .track { opacity: .5; }
+.switch .txt b { display: block; font-weight: 600; }
+.switch .txt span { color: var(--text-2); font-size: .88rem; }
+.radio { display: flex; gap: 10px; align-items: flex-start; cursor: pointer; padding: 10px 12px; border: 1px solid var(--stroke); border-radius: 8px; }
+.radio input { margin-top: 4px; accent-color: var(--accent); }
+.radio.on { border-color: var(--accent); background: var(--bg); }
+.radio b { display: block; font-weight: 600; }
+.radio span { color: var(--text-2); font-size: .88rem; }
+
+/* ---- the compare card ---------------------------------------------------- */
+.compare { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.compare > div { background: var(--bg); border: 1px solid var(--stroke); border-radius: 8px; padding: 10px 12px; }
+.compare .lbl { color: var(--text-2); font-weight: 600; margin-bottom: 2px; font-size: .82rem; }
+.compare .new { border-color: var(--accent); }
+@media (max-width: 560px) { .compare { grid-template-columns: 1fr; } }
+
+/* ---- feed --------------------------------------------------------------- */
+.feed-item { padding: 12px 16px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; }
+.feed-item.undone .text { text-decoration: line-through; color: var(--text-3); }
+.feed-item .top { grid-column: 1 / -1; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.feed-item .verb { font-weight: 700; }
+.feed-item .when { color: var(--text-2); font-size: .85rem; margin-left: auto; }
+.feed-item .was { color: var(--text-2); font-size: .9rem; }
+.feed-item .was s { color: var(--text-3); }
+
+/* ---- memories ----------------------------------------------------------- */
+.mem { padding: 11px 16px; }
+.mem .t { overflow-wrap: anywhere; }
+.mem .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px; color: var(--text-2); font-size: .85rem; }
+.mem .acts { margin-top: 6px; display: flex; gap: 4px; }
+.mem .editor { display: grid; gap: 8px; }
+
+/* ---- vault -------------------------------------------------------------- */
+.vault { display: grid; grid-template-columns: 230px 1fr; gap: 18px; align-items: start; }
+.v-side { position: sticky; top: 64px; max-height: calc(100vh - 90px); overflow: auto; padding-right: 4px; }
+.v-side h4 { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); margin: 14px 0 6px; }
+.v-side h4:first-child { margin-top: 0; }
+.tree button {
+  display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left;
+  background: none; border: 0; padding: 4px 8px; border-radius: 6px; cursor: pointer; color: var(--text);
+}
+.tree button:hover { background: var(--bg-3); }
+.tree button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.tree .n { color: var(--text-2); font-size: .82rem; }
+.tree button[aria-pressed="true"] .n { color: var(--on-accent); }
+.seg { display: inline-flex; border: 1px solid var(--stroke-2); border-radius: 8px; overflow: hidden; }
+.seg button { background: var(--bg-2); border: 0; padding: 6px 14px; cursor: pointer; font-weight: 600; color: var(--text-2); }
+.seg button + button { border-left: 1px solid var(--stroke-2); }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
+.notes li { padding: 10px 14px; cursor: pointer; }
+.notes li:hover { background: var(--bg-3); }
+.notes .title { font-weight: 600; }
+.notes .snip { color: var(--text-2); font-size: .9rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.notes .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; align-items: center; color: var(--text-2); font-size: .82rem; }
+svg.graph { width: 100%; height: min(70vh, 640px); min-height: 360px; background: var(--bg-2); border: 1px solid var(--stroke); border-radius: var(--radius); cursor: grab; display: block; touch-action: none; }
+svg.graph:active { cursor: grabbing; }
+svg.graph text { fill: var(--text); font-size: 11px; paint-order: stroke; stroke: var(--bg-2); stroke-width: 3px; pointer-events: none; }
+svg.graph .node { cursor: pointer; }
+svg.graph .node circle { stroke: var(--bg-2); stroke-width: 1.5px; }
+svg.graph .node:hover circle { stroke: var(--text); stroke-width: 2px; }
+svg.graph line { stroke: var(--edge); stroke-width: 1px; }
+svg.graph line.dim, svg.graph .node.dim { opacity: .18; }
+.legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--text-2); font-size: .85rem; }
+.legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
+.drawer-back { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 40; }
+.drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; z-index: 41; width: min(560px, 100%);
+  background: var(--bg); border-left: 1px solid var(--stroke-2); overflow: auto; padding: 18px 18px 40px;
+  box-shadow: -8px 0 24px rgba(0,0,0,.3);
+}
+.drawer > * + * { margin-top: 14px; }
+.md h1, .md h2, .md h3 { margin: 14px 0 6px; } .md h1 { font-size: 1.2rem; } .md h2 { font-size: 1.08rem; } .md h3 { font-size: 1rem; }
+.md p + p, .md ul + p, .md p + ul { margin-top: 8px; }
+.md ul { margin: 6px 0 0; padding-left: 1.2em; } .md li + li { margin-top: 3px; }
+.md code { background: var(--bg-3); border-radius: 4px; padding: 0 4px; }
+.md .wl { color: var(--accent-text); text-decoration: underline; cursor: pointer; }
+.md .wl.dead { color: var(--text-2); text-decoration: none; cursor: default; }
+@media (max-width: 760px) {
+  .vault { grid-template-columns: 1fr; }
+  .v-side { position: static; max-height: none; }
+  .v-side details { margin-bottom: 8px; }
+}
+
+/* ---- people ------------------------------------------------------------- */
+.split { display: grid; grid-template-columns: minmax(220px, 310px) 1fr; gap: 18px; align-items: start; }
+.split .back { display: none; }
+.person-row { display: block; width: 100%; text-align: left; background: none; border: 0; padding: 10px 14px; cursor: pointer; color: var(--text); }
+.person-row:hover { background: var(--bg-3); }
+.person-row[aria-current="true"] { background: var(--bg-3); box-shadow: inset 3px 0 0 var(--accent); }
+.person-row .name { font-weight: 600; }
+.person-row .sub { color: var(--text-2); font-size: .86rem; }
+.chat { background: var(--bg); border: 1px solid var(--stroke); border-radius: 8px; padding: 10px 12px; max-height: 340px; overflow: auto; }
+.chat p { padding: 4px 0; overflow-wrap: anywhere; white-space: pre-wrap; }
+.chat b { color: var(--accent-text); }
+@media (max-width: 760px) {
+  .split { grid-template-columns: 1fr; }
+  .split.sel .plist { display: none; }
+  .split:not(.sel) .pdetail { display: none; }
+  .split .back { display: inline-block; }
+}
+
+/* ---- misc ---------------------------------------------------------------- */
+.empty { text-align: center; padding: 28px 16px; color: var(--text-2); }
+.empty b { display: block; color: var(--text); font-size: 1.05rem; margin-bottom: 4px; }
+.msg { color: var(--text-2); font-size: .9rem; }
+.msg.err { color: var(--danger); } .msg.good { color: var(--ok); }
+.kv { display: grid; grid-template-columns: max-content 1fr; gap: 4px 14px; }
+.kv dt { color: var(--text-2); } .kv dd { margin: 0; overflow-wrap: anywhere; }
+.skeleton { color: var(--text-2); padding: 24px 0; }
+.sect-title { font-size: .8rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--text-2); margin: 4px 0 6px; }
+hr { border: 0; border-top: 1px solid var(--stroke); margin: 14px 0; }
+
+#toasts { position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%); z-index: 90; display: grid; gap: 8px; width: min(440px, calc(100% - 24px)); }
+.toast { background: var(--text); color: var(--bg); padding: 10px 14px; border-radius: 10px; font-weight: 560; box-shadow: 0 6px 24px rgba(0,0,0,.35); }
+.toast.err { background: var(--danger); color: var(--bg); }
+.modal-back { position: fixed; inset: 0; background: rgba(0,0,0,.55); z-index: 80; display: flex; align-items: center; justify-content: center; padding: 16px; }
+.modal { background: var(--bg-2); color: var(--text); border: 1px solid var(--stroke-2); border-radius: 14px; padding: 20px; width: min(460px, 100%); box-shadow: 0 12px 40px rgba(0,0,0,.45); }
+.modal > * + * { margin-top: 12px; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header class="topbar">
+    <nav class="tabs" id="tabs" aria-label="Memory_OB"></nav>
+  </header>
+  <div id="banners" style="margin-top:14px"></div>
+  <main id="main"><p class="skeleton">Loading…</p></main>
+</div>
+<div id="drawer-root"></div>
+<div id="modal-root"></div>
+<div id="toasts" role="status" aria-live="polite"></div>
+<script>
+  /* The host injects the API base here when this page is served from a
+     plugin backend. Standalone, it stays empty (same origin). */
+  window.__MEMORY_OB_BASE__ = "";
+  /* The write token. The backend injects it here, and every write echoes it
+     back — the pages authenticate by shape, not by a hand-typed header. */
+  window.__MEMORY_OB_TOKEN__ = "";
+</script>
+<script>
+'use strict';
+
+const API = window.__MEMORY_OB_BASE__ || '';
+const TOKEN = window.__MEMORY_OB_TOKEN__ || '';
+const TOKEN_HEADER = 'X-Memory-OB-Token';
+
+/* ==========================================================================
+   Look: follow the host app, but never trust it to be readable.
+   1. Read the host's colours (live from the parent window when it can be
+      reached, otherwise the values the backend wrote into this page).
+   2. Turn each into a SOLID colour (a see-through background is blended onto
+      the base colour, so nothing on this page is ever see-through).
+   3. Nudge text, borders and buttons until they pass a readability check.
+   4. Follow the host's font and text size.
+   The result is exposed as window.__memoryObTheme so it can be checked.
+   ========================================================================== */
+const Theme = (() => {
+  const cv = document.createElement('canvas'); cv.width = cv.height = 1;
+  const cx = cv.getContext('2d', { willReadFrequently: true });
+
+  /* Any CSS colour the browser understands -> [r,g,b,a] (a in 0..1), or null. */
+  function parse(value) {
+    if (!value || typeof value !== 'string') return null;
+    const v = value.trim();
+    if (!v || /^(inherit|initial|unset|none|transparent)$/i.test(v) && !/^transparent$/i.test(v)) return null;
+    try {
+      cx.fillStyle = '#010203'; cx.fillStyle = v;
+      const a1 = cx.fillStyle;
+      cx.fillStyle = '#fdfcfb'; cx.fillStyle = v;
+      if (a1 === '#010203' && cx.fillStyle === '#fdfcfb') return null;      /* not a colour */
+      cx.clearRect(0, 0, 1, 1); cx.fillRect(0, 0, 1, 1);
+      const d = cx.getImageData(0, 0, 1, 1).data;
+      return [d[0], d[1], d[2], d[3] / 255];
+    } catch (e) { return null; }
+  }
+  const clamp = (n, lo, hi) => Math.min(hi, Math.max(lo, n));
+  const hex = (c) => '#' + c.slice(0, 3).map(x => clamp(Math.round(x), 0, 255).toString(16).padStart(2, '0')).join('');
+  function over(c, base) {            /* blend c onto an opaque base */
+    const a = c[3] === undefined ? 1 : c[3];
+    return [c[0] * a + base[0] * (1 - a), c[1] * a + base[1] * (1 - a), c[2] * a + base[2] * (1 - a), 1];
+  }
+  const lin = (x) => { x /= 255; return x <= 0.03928 ? x / 12.92 : Math.pow((x + 0.055) / 1.055, 2.4); };
+  const lum = (c) => 0.2126 * lin(c[0]) + 0.7152 * lin(c[1]) + 0.0722 * lin(c[2]);
+  function ratio(a, b) { const x = lum(a), y = lum(b); return (Math.max(x, y) + 0.05) / (Math.min(x, y) + 0.05); }
+  const mix = (a, b, t) => [a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, a[2] + (b[2] - a[2]) * t, 1];
+  const WHITE = [255, 255, 255, 1], BLACK = [0, 0, 0, 1];
+
+  /* Move fg toward black or white (whichever helps) until it reads on every
+     surface in `on` at the given ratio. */
+  function ensure(fg, on, min) {
+    const worst = (c) => Math.min(...on.map(s => ratio(c, s)));
+    if (worst(fg) >= min) return fg;
+    const avg = on.reduce((s, c) => s + lum(c), 0) / on.length;
+    const towards = ratio(WHITE, on[0]) >= ratio(BLACK, on[0]) && avg < 0.5 ? WHITE : BLACK;
+    for (let t = 0.08; t <= 1.0001; t += 0.06) {
+      const c = mix(fg, towards, t);
+      if (worst(c) >= min) return c;
+    }
+    return towards;
+  }
+  function hsl(h, s, l) {
+    s /= 100; l /= 100;
+    const k = (n) => (n + h / 30) % 12, a = s * Math.min(l, 1 - l);
+    const f = (n) => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
+    return [255 * f(0), 255 * f(8), 255 * f(4), 1];
+  }
+
+  const FROM_HOST = {   /* host variable -> role */
+    bg: ['--ui-bg-chrome', '--ui-bg-sidebar', '--ui-bg-primary', '--ui-background'],
+    bg2: ['--ui-bg-secondary'],
+    bg3: ['--ui-bg-elevated'],
+    stroke: ['--ui-stroke-secondary'],
+    stroke2: ['--ui-stroke-tertiary'],
+    text: ['--ui-text-primary'],
+    text2: ['--ui-text-secondary'],
+    text3: ['--ui-text-tertiary', '--ui-text-quaternary'],
+    accent: ['--ui-accent'],
+  };
+  const OWN = { bg: '--bg', bg2: '--bg-2', bg3: '--bg-3', stroke: '--stroke', stroke2: '--stroke-2',
+                text: '--text', text2: '--text-2', text3: '--text-3', accent: '--accent' };
+
+  function hostStyle() {
+    try {
+      const p = window.parent;
+      if (p && p !== window && p.document && p.document.documentElement) {
+        return { cs: p.getComputedStyle(p.document.documentElement), body: p.getComputedStyle(p.document.body) };
+      }
+    } catch (e) { /* the host is on another origin: use what was written into this page */ }
+    return null;
+  }
+
+  function read(role, host, own) {
+    if (host) {
+      for (const name of FROM_HOST[role]) {
+        const c = parse(host.cs.getPropertyValue(name));
+        if (c) return c;
+      }
+    }
+    return parse(own.getPropertyValue(OWN[role]));
+  }
+
+  function build() {
+    const root = document.documentElement;
+    const host = hostStyle();
+    /* values written into this page by the backend (or this page's own defaults) */
+    root.style.removeProperty('--bg'); /* make sure we read the source, not our own earlier result */
+    for (const k of Object.values(OWN)) root.style.removeProperty(k);
+    const own = getComputedStyle(root);
+
+    const prefersLight = window.matchMedia && matchMedia('(prefers-color-scheme: light)').matches;
+    const dflt = prefersLight
+      ? { bg: '#f7f7f9', text: '#15171c', accent: '#3a56d4' }
+      : { bg: '#17181c', text: '#f1f2f5', accent: '#8fa3ff' };
+
+    let bg = read('bg', host, own);
+    bg = bg ? over(bg, prefersLight ? WHITE : [23, 24, 28, 1]) : parse(dflt.bg);
+    /* light or dark is decided by the background that was actually chosen */
+    const dark = ratio(bg, WHITE) > ratio(bg, BLACK);
+    const fgBase = dark ? [241, 242, 245, 1] : [21, 23, 28, 1];
+
+    let text = read('text', host, own);
+    text = text ? over(text, bg) : fgBase;
+
+    let bg2 = read('bg2', host, own); bg2 = bg2 ? over(bg2, bg) : mix(bg, text, dark ? 0.06 : 0.0);
+    if (!read('bg2', host, own) && !dark) bg2 = WHITE;
+    let bg3 = read('bg3', host, own); bg3 = bg3 ? over(bg3, bg) : mix(bg, text, dark ? 0.12 : 0.07);
+    /* a card must be told apart from the page it sits on */
+    if (ratio(bg2, bg) < 1.04 && ratio(bg3, bg) < 1.04) bg3 = mix(bg, text, dark ? 0.12 : 0.07);
+    if (ratio(bg3, bg2) < 1.05) bg3 = mix(bg2, text, dark ? 0.12 : 0.07);
+
+    const surfaces = [bg, bg2, bg3];
+    const T = {};
+    T.text = ensure(text, surfaces, 7);
+    let t2 = read('text2', host, own); t2 = t2 ? over(t2, bg) : mix(bg, T.text, 0.78);
+    T.text2 = ensure(t2, surfaces, 5.5);
+    let t3 = read('text3', host, own); t3 = t3 ? over(t3, bg) : mix(bg, T.text, 0.62);
+    T.text3 = ensure(t3, surfaces, 4.6);
+
+    let s1 = read('stroke', host, own); s1 = s1 ? over(s1, bg) : mix(bg, T.text, 0.16);
+    let s2 = read('stroke2', host, own); s2 = s2 ? over(s2, bg) : mix(bg, T.text, 0.30);
+    if (ratio(s1, bg) < 1.3) s1 = mix(bg, T.text, 0.18);
+    if (ratio(s2, bg) < 1.8) s2 = mix(bg, T.text, 0.34);
+    T.stroke = s1; T.stroke2 = s2; T.edge = ensure(mix(bg, T.text, 0.45), [bg, bg2], 2.4);
+
+    let acc = read('accent', host, own); acc = acc ? over(acc, bg) : parse(dflt.accent);
+    acc = ensure(acc, [bg, bg2], 3);                      /* usable as a line or a button */
+    const accText = ensure(acc, surfaces, 4.6);           /* usable as link text */
+    const onAcc = ratio(WHITE, acc) >= ratio(BLACK, acc) ? WHITE : [16, 19, 31, 1];
+    /* if neither white nor near-black reads on the accent, push the accent itself */
+    let accFinal = acc, onFinal = onAcc;
+    if (ratio(onAcc, acc) < 4.5) {
+      accFinal = mix(acc, dark ? BLACK : WHITE, 0.0);
+      for (let t = 0.05; t <= 1; t += 0.05) {
+        const c = mix(acc, dark ? WHITE : BLACK, t);
+        if (ratio(dark ? BLACK : WHITE, c) >= 4.5 && ratio(c, bg) >= 3) { accFinal = c; onFinal = dark ? BLACK : WHITE; break; }
+      }
+    }
+    T.accent = accFinal; T.accentText = accText; T.onAccent = onFinal;
+
+    const sem = (h) => {
+      const c = ensure(hsl(h, dark ? 80 : 70, dark ? 70 : 32), [bg, bg2, bg3], 4.6);
+      return { c, bg: mix(bg2, c, dark ? 0.16 : 0.10) };
+    };
+    const danger = sem(2), ok = sem(145), warn = sem(40);
+    /* the tinted background must keep its own text readable */
+    for (const s of [danger, ok, warn]) s.c = ensure(s.c, [s.bg, bg, bg2], 4.6);
+    T.danger = danger.c; T.dangerBg = danger.bg; T.ok = ok.c; T.okBg = ok.bg; T.warn = warn.c; T.warnBg = warn.bg;
+    /* ordinary text also has to read on the tinted warning/error/success panels */
+    const panels = [danger.bg, ok.bg, warn.bg];
+    T.text = ensure(T.text, [...surfaces, ...panels], 7);
+    T.text2 = ensure(T.text2, [...surfaces, ...panels], 5.5);
+
+    T.cat = [225, 145, 40, 15, 285, 190, 330, 75].map(h =>
+      ensure(hsl(h, dark ? 75 : 65, dark ? 68 : 36), [bg, bg2], 3.2));
+
+    const set = (n, c) => root.style.setProperty(n, hex(c));
+    set('--bg', bg); set('--bg-2', bg2); set('--bg-3', bg3);
+    set('--stroke', T.stroke); set('--stroke-2', T.stroke2); set('--edge', T.edge);
+    set('--text', T.text); set('--text-2', T.text2); set('--text-3', T.text3);
+    set('--accent', T.accent); set('--accent-text', T.accentText); set('--on-accent', T.onAccent);
+    set('--danger', T.danger); set('--danger-bg', T.dangerBg);
+    set('--ok', T.ok); set('--ok-bg', T.okBg); set('--warn', T.warn); set('--warn-bg', T.warnBg);
+    T.cat.forEach((c, i) => set('--c' + i, c));
+    root.style.colorScheme = dark ? 'dark' : 'light';
+
+    /* font and size follow the host */
+    try {
+      if (host) {
+        const fam = (host.cs.getPropertyValue('--ui-font') || host.body.fontFamily || '').trim();
+        if (fam) root.style.setProperty('--font', fam + ', system-ui, "Segoe UI", sans-serif');
+        const px = parseFloat(host.body.fontSize || host.cs.fontSize);
+        if (px >= 11 && px <= 22) root.style.fontSize = Math.max(13, Math.min(17, px)) + 'px';
+      }
+    } catch (e) { /* keep the defaults */ }
+
+    window.__memoryObTheme = {
+      mode: dark ? 'dark' : 'light',
+      tokens: Object.fromEntries(Object.entries({
+        bg, bg2, bg3, text: T.text, text2: T.text2, text3: T.text3, stroke: T.stroke, stroke2: T.stroke2,
+        accent: T.accent, accentText: T.accentText, onAccent: T.onAccent, danger: T.danger, dangerBg: T.dangerBg,
+        ok: T.ok, okBg: T.okBg, warn: T.warn, warnBg: T.warnBg,
+      }).map(([k, v]) => [k, hex(v)])),
+      ratios: {
+        text: Math.min(...[...surfaces, ...panels].map(s => ratio(T.text, s))),
+        text2: Math.min(...[...surfaces, ...panels].map(s => ratio(T.text2, s))),
+        text3: Math.min(...surfaces.map(s => ratio(T.text3, s))),
+        accentText: Math.min(...surfaces.map(s => ratio(T.accentText, s))),
+        onAccent: ratio(T.onAccent, T.accent),
+        danger: Math.min(ratio(T.danger, bg), ratio(T.danger, T.dangerBg), ratio(T.danger, bg2)),
+        ok: Math.min(ratio(T.ok, bg), ratio(T.ok, T.okBg), ratio(T.ok, bg2)),
+        warn: Math.min(ratio(T.warn, bg), ratio(T.warn, T.warnBg), ratio(T.warn, bg2)),
+        stroke: ratio(T.stroke, bg), accentOnBg: ratio(T.accent, bg),
+      },
+    };
+  }
+  build();
+  try { matchMedia('(prefers-color-scheme: light)').addEventListener('change', build); } catch (e) {}
+  return { rebuild: build, ratio, parse };
+})();
+
+/* ==========================================================================
+   Talking to Memory_OB
+   ========================================================================== */
+async function api(path, opts) {
+  const method = (opts && opts.method) || 'GET';
+  /* The payload stays an OBJECT: the host bridge serializes it, so handing it
+     a string here would double-encode and the server would reject the body. */
+  const payload = opts && opts.body !== undefined ? opts.body : undefined;
+  const headers = Object.assign(
+    { 'Content-Type': 'application/json', 'X-Memory-OB-Actor': 'owner' },
+    method === 'GET' ? {} : { [TOKEN_HEADER]: TOKEN }
+  );
+  /* Inside Hermes a plain fetch carries no session, so the app's own bridge
+     does the calling. Elsewhere (a browser tab) a normal fetch is used. */
+  let bridge = null;
+  try { bridge = window.parent && window.parent.hermesDesktop && window.parent.hermesDesktop.api; } catch (e) {}
+  if (typeof bridge === 'function') {
+    try { return await bridge({ path: API + path, method, body: payload, headers }); }
+    catch (e) { throw new Error(plainError(e && e.message)); }
+  }
+  let res;
+  try {
+    res = await fetch(API + path, {
+      method, headers, body: payload === undefined ? undefined : JSON.stringify(payload),
+    });
+  } catch (e) { throw new Error('Memory_OB is not answering. Is Hermes still running?'); }
+  if (!res.ok) {
+    let msg = '';
+    try { const j = await res.json(); msg = typeof j.detail === 'string' ? j.detail : ''; } catch (e) {}
+    throw new Error(plainError(msg, res.status));
+  }
+  return res.json();
+}
+function plainError(msg, status) {
+  const m = String(msg || '').trim();
+  if (m && !/^\d{3}\b/.test(m) && !/^Internal Server Error$/i.test(m)) return m;
+  if (status === 401 || /401/.test(m)) return 'Memory_OB did not accept that. Close this pane and open it again.';
+  if (status === 404 || /404/.test(m)) return 'That no longer exists.';
+  return 'Something went wrong on my side. Please try again.';
+}
+const enc = encodeURIComponent;
+
+/* ==========================================================================
+   Small helpers
+   ========================================================================== */
+const $ = (sel, el) => (el || document).querySelector(sel);
+const $$ = (sel, el) => Array.from((el || document).querySelectorAll(sel));
+function esc(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function when(iso) {
+  if (!iso) return '';
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso + 'T12:00:00' : iso);
+  if (isNaN(d)) return '';
+  const secs = (Date.now() - d.getTime()) / 1000;
+  if (secs < 45) return 'just now';
+  if (secs < 3600) return Math.round(secs / 60) + ' min ago';
+  if (secs < 86400) { const h = Math.round(secs / 3600); return h + (h === 1 ? ' hour ago' : ' hours ago'); }
+  if (secs < 2 * 86400) return 'yesterday';
+  if (secs < 7 * 86400) return Math.floor(secs / 86400) + ' days ago';
+  return d.toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' });
+}
+function day(iso) {
+  if (!iso) return '';
+  const d = new Date(/^\d{4}-\d{2}-\d{2}$/.test(iso) ? iso + 'T12:00:00' : iso);
+  return isNaN(d) ? '' : d.toLocaleDateString(undefined, { day: 'numeric', month: 'long', year: 'numeric' });
+}
+function plural(n, one, many) { return n + ' ' + (n === 1 ? one : (many || one + 's')); }
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
+
+/* Markdown, just enough for notes. The text is escaped FIRST, so nothing in it
+   can become a tag; the patterns below only ever see harmless entities. */
+function md(src, resolve) {
+  const lines = esc(src || '').split('\n');
+  const out = []; let list = false;
+  const inline = (t) => t
+    .replace(/\[\[([^\]|]+)(?:\|([^\]]+))?\]\]/g, (m, target, label) => {
+      const hit = resolve ? resolve(target.replace(/&amp;/g, '&').trim()) : '';
+      return hit
+        ? `<a class="wl" data-act="open-note" data-path="${esc(hit)}">${label || target}</a>`
+        : `<span class="wl dead">${label || target}</span>`;
+    })
+    .replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>')
+    .replace(/(^|[\s(])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>')
+    .replace(/`([^`]+)`/g, '<code>$1</code>');
+  for (const raw of lines) {
+    const line = raw.trimEnd();
+    const li = /^\s*[-*•]\s+(.*)$/.exec(line);
+    if (li) { if (!list) { out.push('<ul>'); list = true; } out.push('<li>' + inline(li[1]) + '</li>'); continue; }
+    if (list) { out.push('</ul>'); list = false; }
+    const h = /^(#{1,3})\s+(.*)$/.exec(line);
+    if (h) { out.push(`<h${h[1].length}>${inline(h[2])}</h${h[1].length}>`); continue; }
+    if (!line.trim()) continue;
+    out.push('<p>' + inline(line) + '</p>');
+  }
+  if (list) out.push('</ul>');
+  return out.join('');
+}
+function b64(buf) {
+  const u8 = new Uint8Array(buf); let s = ''; const CH = 0x8000;
+  for (let i = 0; i < u8.length; i += CH) s += String.fromCharCode.apply(null, u8.subarray(i, i + CH));
+  return btoa(s);
+}
+function catColor(cat, cats) {
+  const i = Math.max(0, (cats || state.categories || []).indexOf(cat));
+  return `var(--c${i % 8})`;
+}
+
+/* ---- toasts and dialogs (the page cannot use alert/confirm: the host blocks them) ---- */
+function toast(msg, bad) {
+  const el = document.createElement('div');
+  el.className = 'toast' + (bad ? ' err' : '');
+  el.textContent = msg;
+  $('#toasts').appendChild(el);
+  setTimeout(() => el.remove(), bad ? 6500 : 3800);
+}
+function ask({ title, body, yes = 'OK', no = 'Cancel', danger = false }) {
+  return new Promise(resolve => {
+    const root = $('#modal-root');
+    root.innerHTML = `<div class="modal-back"><div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <h2>${esc(title)}</h2><div class="muted">${body || ''}</div>
+      <div class="row end"><button class="btn" data-no>${esc(no)}</button>
+      <button class="btn ${danger ? 'danger' : 'primary'}" data-yes>${esc(yes)}</button></div></div></div>`;
+    const done = (v) => { root.innerHTML = ''; document.removeEventListener('keydown', onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === 'Escape') done(false); };
+    document.addEventListener('keydown', onKey);
+    $('[data-yes]', root).onclick = () => done(true);
+    $('[data-no]', root).onclick = () => done(false);
+    $('.modal-back', root).addEventListener('mousedown', (e) => { if (e.target.classList.contains('modal-back')) done(false); });
+    $('[data-no]', root).focus();
+  });
+}
+async function busy(btn, fn) {
+  if (btn) { btn.disabled = true; }
+  try { return await fn(); }
+  catch (e) { toast(e.message || 'Something went wrong.', true); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+/* ==========================================================================
+   State and navigation
+   ========================================================================== */
+const state = {
+  tab: 'review', categories: [], status: null, home: null,
+  vq: '', vview: 'list', vault: null, vg: { tags: false, people: true, sources: true, orphans: true },
+  people: [], person: null, personId: null, peopleQ: '',
+  settings: null, mem: {},
+};
+const TABS = [['review', 'Review'], ['vault', 'Vault'], ['people', 'People'], ['journal', 'Journal'], ['me', 'Me'], ['settings', 'Settings']];
+
+function renderTabs() {
+  const n = state.home ? (state.home.doubts.length + state.home.unsure.length) : 0;
+  $('#tabs').innerHTML = TABS.map(([k, label]) =>
+    `<button class="tab" data-act="tab" data-tab="${k}"${state.tab === k ? ' aria-current="page"' : ''}>${label}` +
+    (k === 'review' && n ? `<span class="badge" aria-label="${n} waiting">${n}</span>` : '') + '</button>').join('');
+}
+function renderBanners() {
+  const s = state.status; const el = $('#banners');
+  if (!s) { el.innerHTML = ''; return; }
+  const out = [];
+  if (s.paused) {
+    out.push(`<div class="banner warn"><span><b>Memory is paused.</b> Nothing new is being saved and nothing is being brought up in chats.</span>
+      <button class="btn sm" data-act="resume">Turn memory back on</button></div>`);
+  }
+  if (!s.helper.ready && s.waiting > 0) {
+    out.push(`<div class="banner"><span><b>${plural(s.waiting, 'thing')} waiting.</b> I cannot reach an AI helper right now, so I will read ${s.waiting === 1 ? 'it' : 'them'} as soon as one is available.</span>
+      <button class="btn sm" data-act="tab" data-tab="settings">AI settings</button></div>`);
+  } else if (s.reading && s.reading.running) {
+    out.push(`<div class="banner ok"><span><b>Reading your conversations…</b> ${s.reading.read ? plural(s.reading.read, 'conversation') + ' done so far.' : 'This can take a while.'}</span></div>`);
+  }
+  el.innerHTML = out.join('');
+}
+let pollTimer = null;
+async function refreshStatus() {
+  try {
+    state.status = await api('/api/status');
+    if (state.status.categories) state.categories = state.status.categories;
+    renderBanners();
+    clearTimeout(pollTimer);
+    if (state.status.reading && state.status.reading.running) pollTimer = setTimeout(refreshStatus, 4000);
+  } catch (e) { /* the screen's own load reports problems */ }
+}
+async function go(tab) {
+  state.tab = tab; renderTabs(); closeDrawer();
+  const main = $('#main'); main.innerHTML = '<p class="skeleton">Loading…</p>';
+  window.scrollTo(0, 0);
+  try { await SCREENS[tab](); }
+  catch (e) {
+    main.innerHTML = `<div class="card"><b>I could not load this screen.</b><p class="muted">${esc(e.message)}</p>
+      <button class="btn" data-act="tab" data-tab="${tab}">Try again</button></div>`;
+  }
+}
+function refreshHere() { return SCREENS[state.tab] && SCREENS[state.tab](true); }
+
+/* ---- a memory shown with Edit / Forget, used on several screens ---- */
+function memRow(m) {
+  state.mem[m.id] = m;
+  return `<li class="mem" data-mem="${esc(m.id)}"><div class="t">${esc(m.text)}</div>
+    <div class="meta">${m.category ? `<span class="chip" style="border-color:${catColor(m.category)}">${esc(m.category)}</span>` : ''}
+      ${m.extra || ''}${m.when ? `<span>${esc(m.when)}</span>` : ''}${m.by ? `<span>· ${m.by === 'AI' ? 'filed by AI' : 'by you'}</span>` : ''}</div>
+    <div class="acts"><button class="btn ghost sm" data-act="mem-edit" data-id="${esc(m.id)}">Edit</button>
+      <button class="btn ghost sm" data-act="mem-forget" data-id="${esc(m.id)}">Forget</button></div></li>`;
+}
+function memEditor(li, m) {
+  const cats = state.categories.map(c => `<option${c === m.category ? ' selected' : ''}>${esc(c)}</option>`).join('');
+  li.innerHTML = `<div class="editor"><textarea aria-label="Text">${esc(m.text)}</textarea>
+    <div class="row">${m.noCat ? '' : `<label class="lbl" style="margin:0">Filed under</label><select style="width:auto" aria-label="Category">${cats}</select>`}
+    <span class="grow"></span><button class="btn" data-act="mem-cancel">Cancel</button>
+    <button class="btn primary" data-act="mem-save" data-id="${esc(m.id)}">Save</button></div></div>`;
+  $('textarea', li).focus();
+}
+function localDay() { const d = new Date(); return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0'); }
+/* Keep what was typed in the page's boxes while a screen is drawn again. */
+async function keepFields(fn) {
+  const saved = {};
+  $$('#main input[id], #main textarea[id]').forEach(el => { if (el.type !== 'file') saved[el.id] = el.type === 'checkbox' ? el.checked : el.value; });
+  const mode = ($('input[name=aimode]:checked') || {}).value;
+  await fn();
+  for (const [id, v] of Object.entries(saved)) { const el = document.getElementById(id); if (el && el.type !== 'checkbox' && !el.hasAttribute('data-opt')) el.value = v; }
+  if (mode) { const r = $(`input[name=aimode][value=${mode}]`); if (r) { r.checked = true; $('#ai-custom').hidden = mode !== 'custom'; $$('label.radio').forEach(l => l.classList.toggle('on', $('input', l).checked)); } }
+}
+</script>
+<script>
+/* ==========================================================================
+   Screens
+   ========================================================================== */
+const SCREENS = {};
+
+function catFromTags(tags) {
+  for (const c of state.categories) {
+    const slug = 'topic/' + c.toLowerCase().replace(' & ', '-').replace(/ /g, '-');
+    if ((tags || []).includes(slug)) return c;
+  }
+  return '';
+}
+function section(title, n, inner) {
+  return `<section><div class="sec"><h2>${esc(title)}${n != null ? ` <span class="count">${n}</span>` : ''}</h2></div>${inner}</section>`;
+}
+function emptyBox(title, text) { return `<div class="card empty"><b>${esc(title)}</b>${esc(text)}</div>`; }
+
+/* ---------------------------------------------------------------- Review */
+SCREENS.review = async function (soft) {
+  const main = $('#main');
+  if (!soft || !$('#rv-body')) {
+    main.innerHTML = `<div class="screen">
+      <div class="head"><h1>Review</h1><p>What I filed for you lately, and anything I need you to decide.</p></div>
+      <div class="card">
+        <label class="lbl" for="tell">Tell me something</label>
+        <textarea id="tell" placeholder="Anything at all: a plan, a fact about you, an idea, someone you met. I will file it."></textarea>
+        <div class="row"><button class="btn primary" data-act="tell">Remember this</button>
+          <span class="msg" id="tell-msg">You can also just chat as usual. I pick things up on my own.</span></div>
+      </div>
+      <input type="search" id="rv-q" placeholder="Search everything I remember" aria-label="Search everything I remember" value="${esc(state.rq || '')}">
+      <div id="rv-body" class="gap"></div></div>`;
+  }
+  const h = await api('/api/home');
+  state.home = h; state.status = h.status;
+  if (h.status.categories) state.categories = h.status.categories;
+  renderTabs(); renderBanners();
+  if (h.status.reading && h.status.reading.running) refreshStatus();
+  if (state.rq) return runSearch(); else renderReviewBody();
+};
+
+function doubtCard(d) {
+  const buttons = d.options.map((o, i) =>
+    `<button class="btn${i === 0 ? ' primary' : ''}" data-act="doubt" data-id="${esc(d.id)}" data-choice="${esc(o.key)}">${esc(o.label)}</button>`).join('');
+  if (d.kind === 'changed') {
+    return `<article class="card" data-doubt="${esc(d.id)}"><div class="eyebrow">Which one is right?</div>
+      <p class="muted">What you just said does not match something I already had.</p>
+      <div class="compare"><div><div class="lbl">Before${d.before_when ? ' · ' + esc(when(d.before_when)) : ''}</div><p>${esc(d.before)}</p></div>
+      <div class="new"><div class="lbl">Now${d.after_when ? ' · ' + esc(when(d.after_when)) : ''}</div><p>${esc(d.after)}</p></div></div>
+      <div class="row">${buttons}</div></article>`;
+  }
+  if (d.kind === 'same_person') {
+    const tiles = (d.people || []).map(p => `<div><div class="lbl">${esc(p.relation || 'Person')}</div><p><b>${esc(p.name)}</b></p></div>`).join('');
+    return `<article class="card" data-doubt="${esc(d.id)}"><div class="eyebrow">Same person?</div>
+      <p class="muted">${esc(d.question)}</p><div class="compare">${tiles}</div><div class="row">${buttons}</div></article>`;
+  }
+  return `<article class="card" data-doubt="${esc(d.id)}"><div class="eyebrow">${esc(d.title || 'A question')}</div>
+    <p>${esc(d.question)}</p><div class="row">${buttons}</div></article>`;
+}
+function unsureCard(u) {
+  return `<article class="card"><div class="eyebrow">Not sure about this one</div><p>${esc(u.text)}</p>
+    <p class="faint">I am not sure this is a lasting fact about you. Should I keep it?</p>
+    <div class="row"><button class="btn primary" data-act="unsure-keep" data-id="${esc(u.id)}">Yes, keep it</button>
+    <button class="btn" data-act="unsure-skip" data-id="${esc(u.id)}">No, forget it</button></div></article>`;
+}
+function feedItem(f) {
+  const cat = f.category;
+  return `<li class="feed-item${f.undone ? ' undone' : ''}">
+    <div class="top"><span class="verb">${esc(f.verb)}</span>
+      ${cat ? `<span class="chip" style="border-color:${catColor(cat)}">${esc(cat)}</span>` : ''}
+      <span class="faint">${f.by === 'AI' ? 'by AI' : 'by you'}</span><span class="when">${esc(when(f.at))}</span></div>
+    <div><p class="text">${esc(f.text)}</p>${f.was ? `<p class="was">Before: <s>${esc(f.was)}</s></p>` : ''}</div>
+    <div>${f.undone ? '<span class="chip">Undone</span>' : f.can_undo ? `<button class="btn sm" data-act="undo" data-seq="${f.seq}">Undo</button>` : ''}</div></li>`;
+}
+function renderReviewBody() {
+  if (state.rq) return;
+  const h = state.home; const body = $('#rv-body'); if (!body || !h) return;
+  const parts = [];
+  if (h.doubts.length) parts.push(section('Needs your answer', h.doubts.length, `<div class="stack">${h.doubts.map(doubtCard).join('')}</div>`));
+  if (h.unsure.length) parts.push(section('Not sure about', h.unsure.length, `<div class="stack">${h.unsure.map(unsureCard).join('')}</div>`));
+  if (h.due.length) {
+    parts.push(section('Time to come back to', h.due.length, `<div class="card pad0"><ul class="list">${h.due.map(i =>
+      `<li class="mem"><div class="t">${esc(i.text)}</div><div class="meta"><span class="chip warn">Due ${esc(day(i.revisit_at))}</span></div></li>`).join('')}</ul></div>`));
+  }
+  if (h.feed.length) {
+    parts.push(section('Recently remembered', null, `<div class="card pad0"><ul class="list">${h.feed.map(feedItem).join('')}</ul></div>`));
+  } else if (!h.doubts.length && !h.unsure.length) {
+    parts.push(emptyBox('Nothing here yet', 'Tell me something above, or just chat as you normally do. I will remember what matters and list it here.'));
+  }
+  body.innerHTML = parts.join('');
+}
+async function runSearch() {
+  const body = $('#rv-body'); const q = (state.rq || '').trim();
+  if (!body) return;
+  if (!q) { renderReviewBody(); return; }
+  try {
+    const r = await api('/api/search?q=' + enc(q) + '&limit=30');
+    if ((state.rq || '').trim() !== q) return;            /* the box changed while we waited */
+    if (!r.found) { body.innerHTML = emptyBox('I do not have anything about that', 'Try another word, or tell me about it above.'); return; }
+    const mems = r.results.map(x => memRow({
+      id: x.id, text: x.body || x.title, category: catFromTags(x.tags), when: when(x.modified || x.created),
+      by: String(x.confirmed_by || '').startsWith('ai@') ? 'AI' : 'you',
+    })).join('');
+    const people = (r.people || []).map(p => `<button class="chip" data-act="goto-person" data-id="${esc(p.id)}">${esc(p.name)}${p.relation ? ' · ' + esc(p.relation) : ''}</button>`).join(' ');
+    body.innerHTML = (people ? section('People', null, `<div class="row">${people}</div>`) : '') +
+      (mems ? section('Memories', r.count, `<div class="card pad0"><ul class="list">${mems}</ul></div>`) : '');
+  } catch (e) { body.innerHTML = `<div class="card"><b>The search did not work.</b><p class="muted">${esc(e.message)}</p></div>`; }
+}
+
+/* ----------------------------------------------------------------- Vault */
+function qTokens(q) { const t = []; const re = /-?[^\s"]*"[^"]*"|\S+/g; let m; while ((m = re.exec(q || ''))) t.push(m[0]); return t; }
+function tokOn(tok) { return qTokens(state.vq).includes(tok); }
+function setQ(q) { state.vq = q.trim(); const el = $('#v-q'); if (el) el.value = state.vq; return loadVault(); }
+function toggleTok(tok, exclusivePrefix) {
+  let t = qTokens(state.vq); const had = t.includes(tok);
+  if (exclusivePrefix) t = t.filter(x => !x.startsWith(exclusivePrefix));
+  else t = t.filter(x => x !== tok);
+  if (!had) t.push(tok);
+  return setQ(t.join(' '));
+}
+function isoAgo(days) { const d = new Date(Date.now() - days * 864e5); return d.toISOString().slice(0, 10); }
+function noteChips(n) {
+  const typ = { person: 'Person', source: 'Conversation', summary: 'Summary' }[n.type];
+  return (typ ? `<span class="chip">${typ}</span>` : '') +
+    (n.type === 'memory' ? `<span class="chip" style="border-color:${catColor(n.category)}">${esc(n.category)}</span>` : '');
+}
+
+SCREENS.vault = async function (soft) {
+  if (!soft || !$('#v-content')) {
+    $('#main').innerHTML = `<div class="screen">
+      <div class="head"><h1>Vault</h1><p>All your notes, laid out like an Obsidian vault.</p></div>
+      <div class="vault"><aside class="v-side" id="v-side"></aside><div>
+        <div class="row" style="margin-bottom:10px">
+          <input type="search" id="v-q" style="flex:1 1 220px" value="${esc(state.vq)}" placeholder="Search or filter notes" aria-label="Search or filter notes">
+          <div class="seg" role="group" aria-label="View">
+            <button data-act="set-view" data-view="list">List</button><button data-act="set-view" data-view="graph">Graph</button></div>
+        </div>
+        <div id="v-chips" class="stack"></div>
+        <p class="faint" style="margin-top:8px">You can also type <b>tag:</b> <b>path:</b> <b>file:</b> <b>person:</b> <b>by:</b> <b>after:</b> <b>before:</b>, or put <b>-</b> in front of a word to leave it out.</p>
+        <div id="v-content" style="margin-top:12px"></div>
+      </div></div></div>`;
+  }
+  await loadVault();
+};
+
+async function loadVault() {
+  const r = await api('/api/vault/notes?q=' + enc(state.vq));
+  state.vault = r; if (r.categories) state.categories = r.categories;
+  $$('[data-act=set-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === state.vview)));
+  renderVaultSide(); renderVaultChips();
+  if (state.vview === 'graph') await renderGraphView(); else renderNoteList();
+}
+function renderVaultSide() {
+  const v = state.vault; const el = $('#v-side'); if (!el) return;
+  const folders = v.folders.map(f => {
+    const parts = f.path.split('/'); const tok = `path:"${f.path}/"`;
+    return `<button style="padding-left:${8 + (parts.length - 1) * 14}px" data-act="tok" data-tok='${esc(tok)}' aria-pressed="${tokOn(tok)}"><span>${esc(parts[parts.length - 1])}</span><span class="n">${f.count}</span></button>`;
+  }).join('');
+  const tags = v.tags.map(t => {
+    const parts = t.tag.split('/'); const tok = `tag:${t.tag}`;
+    return `<button style="padding-left:${8 + (parts.length - 1) * 14}px" title="#${esc(t.tag)}" data-act="tok" data-tok="${esc(tok)}" aria-pressed="${tokOn(tok)}"><span>#${esc(parts[parts.length - 1])}</span><span class="n">${t.count}</span></button>`;
+  }).join('');
+  el.innerHTML = `<details open><summary class="sect-title" style="cursor:pointer">Folders</summary><div class="tree">${folders || '<p class="faint">No folders yet.</p>'}</div></details>
+    <details open style="margin-top:12px"><summary class="sect-title" style="cursor:pointer">Tags</summary><div class="tree">${tags || '<p class="faint">No tags yet.</p>'}</div></details>`;
+}
+function renderVaultChips() {
+  const chip = (label, tok, ex) => `<button class="chip" data-act="tok" data-tok='${esc(tok)}'${ex ? ` data-ex="${ex}"` : ''} aria-pressed="${tokOn(tok)}">${esc(label)}</button>`;
+  const grp = (title, items) => `<div class="row"><span class="faint" style="min-width:84px">${title}</span>${items}</div>`;
+  $('#v-chips').innerHTML =
+    grp('Topic', state.categories.map(c => chip(c, `category:"${c}"`)).join('')) +
+    grp('Kind', chip('Memories', 'type:memory') + chip('People', 'type:person') + chip('Conversations', 'type:source')) +
+    grp('Filed by', chip('AI', 'by:ai') + chip('Me', 'by:you')) +
+    grp('When', chip('This week', 'after:' + isoAgo(7), 'after:') + chip('This month', 'after:' + isoAgo(30), 'after:') + chip('This year', 'after:' + isoAgo(365), 'after:')) +
+    grp('Other', chip('Has a come-back date', 'has:revisit') + chip('Not linked to anything', 'is:orphan'));
+}
+function renderNoteList() {
+  const v = state.vault; const el = $('#v-content');
+  const notes = v.notes.slice().sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
+  const shown = notes.slice(0, state.vShow || 200);
+  const info = `<p class="faint" style="margin-bottom:8px">${v.shown === v.total ? plural(v.total, 'note') : `${v.shown} of ${plural(v.total, 'note')}`}</p>`;
+  if (!notes.length) {
+    el.innerHTML = info + emptyBox(v.total ? 'No notes match' : 'The vault is empty', v.total ? 'Clear a filter to see more.' : 'Notes appear here as I file what you tell me.');
+    return;
+  }
+  el.innerHTML = info + `<div class="card pad0"><ul class="list notes">${shown.map(n => `<li data-act="open-note" data-path="${esc(n.path)}">
+    <div class="title">${esc(n.title)}</div>${n.snippet && n.snippet.trim() !== (n.title || '').trim() ? `<div class="snip">${esc(n.snippet)}</div>` : ''}
+    <div class="meta">${noteChips(n)}${n.sensitive ? '<span class="chip warn">Sensitive</span>' : ''}${n.revisit ? `<span class="chip warn">Come back ${esc(day(n.revisit))}</span>` : ''}
+    <span>${esc(when(n.updated))}</span></div></li>`).join('')}</ul></div>` +
+    (notes.length > shown.length ? `<div class="row" style="margin-top:10px;justify-content:center"><button class="btn" data-act="more-notes">Show more</button></div>` : '');
+}
+
+/* ---- graph ---- */
+async function renderGraphView() {
+  const g = state.vg; const el = $('#v-content');
+  const sw = (key, label) => `<label class="switch" style="align-items:center"><input type="checkbox" data-graph="${key}"${g[key] ? ' checked' : ''}><span class="track"></span><span class="txt"><b>${label}</b></span></label>`;
+  el.innerHTML = `<div class="row" style="margin-bottom:10px;gap:18px">${sw('tags', 'Tags')}${sw('people', 'People')}${sw('sources', 'Conversations')}${sw('orphans', 'Notes with no links')}</div>
+    <div id="g-wrap"><p class="skeleton">Drawing…</p></div>`;
+  const r = await api(`/api/vault/graph?q=${enc(state.vq)}&tags=${g.tags}&people=${g.people}&sources=${g.sources}&orphans=${g.orphans}`);
+  if (!r.nodes.length) { $('#g-wrap').innerHTML = emptyBox('Nothing to draw', 'No notes match. Clear a filter or add more memories.'); return; }
+  const used = [...new Set(r.nodes.filter(n => n.type === 'memory').map(n => n.category))];
+  const legend = used.map(c => `<span><i style="background:${catColor(c)}"></i>${esc(c)}</span>`).join('') +
+    (r.nodes.some(n => n.type === 'person') ? '<span><i style="background:var(--accent)"></i>Person</span>' : '') +
+    (r.nodes.some(n => n.type === 'source') ? '<span><i style="background:var(--text-3)"></i>Conversation</span>' : '') +
+    (r.nodes.some(n => n.type === 'tag') ? '<span><i style="background:var(--warn)"></i>Tag</span>' : '');
+  $('#g-wrap').innerHTML = `<svg class="graph" id="g-svg" role="img" aria-label="Graph of your notes and how they connect"></svg>
+    <p class="faint" style="margin-top:6px">Scroll to zoom, drag to move, click a dot to open it. ${plural(r.nodes.length, 'note')}, ${plural(r.edges.length, 'link')}.</p>
+    <div class="legend" style="margin-top:6px">${legend}</div>`;
+  drawGraph(r);
+}
+function drawGraph(r) {
+  const svg = $('#g-svg'); const W = svg.clientWidth || 800, H = svg.clientHeight || 520;
+  const nodes = r.nodes.map(n => Object.assign({}, n)); const byId = new Map(nodes.map(n => [n.id, n]));
+  const links = r.edges.map(e => ({ a: byId.get(e.source), b: byId.get(e.target) })).filter(l => l.a && l.b);
+  nodes.forEach((n, i) => { const a = i * 2.399963, rad = 26 * Math.sqrt(i + 1); n.x = W / 2 + rad * Math.cos(a); n.y = H / 2 + rad * Math.sin(a); n.vx = 0; n.vy = 0; });
+  const N = nodes.length, iters = Math.max(30, Math.min(240, Math.floor(3e7 / (N * N + 1))));
+  for (let t = 0; t < iters; t++) {
+    const cool = 1 - t / iters;
+    for (let i = 0; i < N; i++) {
+      const a = nodes[i];
+      for (let j = i + 1; j < N; j++) {
+        const b = nodes[j]; let dx = a.x - b.x, dy = a.y - b.y; let d2 = dx * dx + dy * dy;
+        if (d2 > 90000) continue;
+        if (d2 < 0.01) { dx = Math.random() - .5; dy = Math.random() - .5; d2 = dx * dx + dy * dy + .01; }
+        const f = 1800 / d2, d = Math.sqrt(d2);
+        a.vx += dx / d * f; a.vy += dy / d * f; b.vx -= dx / d * f; b.vy -= dy / d * f;
+      }
+    }
+    for (const l of links) {
+      const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, d = Math.sqrt(dx * dx + dy * dy) || 1, f = (d - 70) * 0.02;
+      l.a.vx += dx / d * f; l.a.vy += dy / d * f; l.b.vx -= dx / d * f; l.b.vy -= dy / d * f;
+    }
+    for (const n of nodes) {
+      n.vx += (W / 2 - n.x) * 0.004; n.vy += (H / 2 - n.y) * 0.004;
+      n.x += Math.max(-12, Math.min(12, n.vx)) * cool; n.y += Math.max(-12, Math.min(12, n.vy)) * cool; n.vx *= 0.6; n.vy *= 0.6;
+    }
+  }
+  const minX = Math.min(...nodes.map(n => n.x)), maxX = Math.max(...nodes.map(n => n.x));
+  const minY = Math.min(...nodes.map(n => n.y)), maxY = Math.max(...nodes.map(n => n.y));
+  const pad = 40, k0 = Math.min(2, (W - pad * 2) / Math.max(1, maxX - minX), (H - pad * 2) / Math.max(1, maxY - minY));
+  const view = { k: k0, x: W / 2 - k0 * (minX + maxX) / 2, y: H / 2 - k0 * (minY + maxY) / 2 };
+  const color = (n) => n.type === 'person' ? 'var(--accent)' : n.type === 'source' ? 'var(--text-3)' : n.type === 'tag' ? 'var(--warn)' : n.type === 'summary' ? 'var(--text-2)' : catColor(n.category);
+  const labelAll = N <= 45;
+  svg.innerHTML = `<g id="g-root"><g>${links.map((l, i) => `<line data-i="${i}" x1="${l.a.x.toFixed(1)}" y1="${l.a.y.toFixed(1)}" x2="${l.b.x.toFixed(1)}" y2="${l.b.y.toFixed(1)}"/>`).join('')}</g>
+    <g>${nodes.map((n, i) => `<g class="node" data-i="${i}" data-id="${esc(n.id)}" data-type="${n.type}"><title>${esc(n.label)}</title>
+      <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(5 + Math.min(8, Math.sqrt(n.degree || 0) * 2)).toFixed(1)}" fill="${color(n)}"/>
+      ${labelAll || (n.degree || 0) >= 3 ? `<text x="${(n.x + 9).toFixed(1)}" y="${(n.y + 4).toFixed(1)}">${esc(n.label.slice(0, 30))}</text>` : ''}</g>`).join('')}</g></g>`;
+  const root = $('#g-root', svg);
+  const apply = () => root.setAttribute('transform', `translate(${view.x.toFixed(1)} ${view.y.toFixed(1)}) scale(${view.k.toFixed(3)})`);
+  apply();
+  const neighbours = nodes.map(() => new Set());
+  links.forEach((l, i) => { const a = nodes.indexOf(l.a), b = nodes.indexOf(l.b); neighbours[a].add(b); neighbours[b].add(a); l.ia = a; l.ib = b; });
+  const nodeEls = $$('.node', svg), lineEls = $$('line', svg);
+  svg.onmouseover = (e) => {
+    const g = e.target.closest('.node'); if (!g) return; const i = +g.dataset.i;
+    nodeEls.forEach((el, j) => el.classList.toggle('dim', j !== i && !neighbours[i].has(j)));
+    lineEls.forEach((el, j) => el.classList.toggle('dim', links[j].ia !== i && links[j].ib !== i));
+  };
+  svg.onmouseout = () => { nodeEls.forEach(el => el.classList.remove('dim')); lineEls.forEach(el => el.classList.remove('dim')); };
+  let drag = null;
+  svg.onpointerdown = (e) => { drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: 0 }; svg.setPointerCapture(e.pointerId); };
+  svg.onpointermove = (e) => {
+    if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.moved = Math.max(drag.moved, Math.abs(dx) + Math.abs(dy));
+    view.x = drag.vx + dx; view.y = drag.vy + dy; apply();
+  };
+  svg.onpointerup = (e) => {
+    const was = drag; drag = null;
+    if (!was || was.moved > 5) return;
+    const g = document.elementFromPoint(e.clientX, e.clientY); const el = g && g.closest && g.closest('.node'); if (!el) return;
+    const n = nodes[+el.dataset.i];
+    if (n.type === 'tag') toggleTok('tag:' + n.id.slice(1)); else openNote(n.id);
+  };
+  svg.onwheel = (e) => {
+    e.preventDefault(); const rect = svg.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    const f = e.deltaY < 0 ? 1.15 : 1 / 1.15, nk = Math.max(0.2, Math.min(6, view.k * f)), r2 = nk / view.k;
+    view.x = mx - (mx - view.x) * r2; view.y = my - (my - view.y) * r2; view.k = nk; apply();
+  };
+}
+
+/* ---- one note, in a side panel ---- */
+function closeDrawer() { $('#drawer-root').innerHTML = ''; document.removeEventListener('keydown', drawerKey); }
+function drawerKey(e) { if (e.key === 'Escape' && !$('#modal-root').firstChild) closeDrawer(); }
+async function openNote(path, edit) {
+  const root = $('#drawer-root');
+  root.innerHTML = `<div class="drawer-back" data-act="close-drawer"></div><div class="drawer"><p class="skeleton">Opening…</p></div>`;
+  document.addEventListener('keydown', drawerKey);
+  try {
+    const n = await api('/api/vault/note?path=' + enc(path));
+    state.note = n;
+    const known = new Map();
+    [...(state.vault ? state.vault.notes : []), ...n.links, ...n.backlinks].forEach(x => { known.set(x.title.toLowerCase(), x.path); if (x.name) known.set(x.name.toLowerCase(), x.path); });
+    const resolve = (t) => known.get(t.toLowerCase()) || '';
+    const links = (list) => list.map(x => `<button class="chip" data-act="open-note" data-path="${esc(x.path)}">${esc(x.title)}</button>`).join(' ');
+    const chips = (n.category && n.type === 'memory' ? `<span class="chip" style="border-color:${catColor(n.category)}">${esc(n.category)}</span>` : '') +
+      n.tags.filter(t => !String(t).startsWith('topic/')).map(t => `<button class="chip" data-act="drawer-tag" data-tag="${esc(t)}">#${esc(t)}</button>`).join(' ') +
+      (n.revisit ? `<span class="chip warn">Come back ${esc(day(n.revisit))}</span>` : '');
+    let bodyHtml;
+    if (edit && n.type === 'memory') {
+      bodyHtml = `<div class="field"><label for="ne-body">What I remember</label><textarea id="ne-body" rows="5">${esc(n.body)}</textarea></div>
+        <div class="field"><label for="ne-cat">Filed under</label><select id="ne-cat">${n.categories.map(c => `<option${c === n.category ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
+        <div class="row end"><button class="btn" data-act="note-view">Cancel</button><button class="btn primary" data-act="note-save">Save</button></div>`;
+    } else if (edit && n.type === 'person') {
+      bodyHtml = `<div class="field"><label for="ne-name">Name</label><input type="text" id="ne-name" value="${esc(n.title)}"></div>
+        <div class="field"><label for="ne-notes">Notes</label><textarea id="ne-notes" rows="5">${esc(n.body)}</textarea></div>
+        <div class="row end"><button class="btn" data-act="note-view">Cancel</button><button class="btn primary" data-act="note-save">Save</button></div>`;
+    } else {
+      bodyHtml = `<div class="md">${md(n.body, resolve) || '<p class="muted">This note is empty.</p>'}</div>`;
+    }
+    root.innerHTML = `<div class="drawer-back" data-act="close-drawer"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="${esc(n.title)}">
+      <div class="row between"><button class="btn ghost" data-act="close-drawer">← Close</button>
+        <span class="row">${n.type === 'person' ? `<button class="btn sm" data-act="goto-person" data-id="${esc(n.id)}">Open profile</button>` : ''}
+        ${!edit && n.editable ? '<button class="btn sm" data-act="note-edit">Edit</button>' : ''}
+        ${!edit && n.type === 'memory' ? '<button class="btn sm danger" data-act="note-forget">Forget</button>' : ''}</span></div>
+      <h2>${esc(n.title)}</h2>
+      <div class="row">${chips}</div>
+      <p class="faint">${n.type === 'memory' ? `Filed by ${n.by === 'AI' ? 'AI' : 'you'} · ` : ''}${n.created ? 'Created ' + esc(when(n.created)) : ''}${n.updated && n.updated !== n.created ? ' · Updated ' + esc(when(n.updated)) : ''}</p>
+      ${bodyHtml}
+      ${!n.editable && !edit ? '<p class="faint">This note is written automatically. To change it, change the memories it is made from.</p>' : ''}
+      ${n.links.length ? `<div><div class="sect-title">Links to</div><div class="row">${links(n.links)}</div></div>` : ''}
+      ${n.backlinks.length ? `<div><div class="sect-title">Linked from</div><div class="row">${links(n.backlinks)}</div></div>` : ''}</div>`;
+  } catch (e) {
+    root.innerHTML = `<div class="drawer-back" data-act="close-drawer"></div><div class="drawer"><button class="btn ghost" data-act="close-drawer">← Close</button><p class="muted" style="margin-top:12px">${esc(e.message)}</p></div>`;
+  }
+}
+
+/* ---------------------------------------------------------------- People */
+function promptForm({ title, fields, yes }) {
+  return new Promise(resolve => {
+    const root = $('#modal-root');
+    root.innerHTML = `<div class="modal-back"><form class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}"><h2>${esc(title)}</h2>
+      ${fields.map(f => `<div class="field"><label for="pf-${f.id}">${esc(f.label)}</label>${f.area
+        ? `<textarea id="pf-${f.id}" rows="3" placeholder="${esc(f.ph || '')}">${esc(f.value || '')}</textarea>`
+        : `<input type="text" id="pf-${f.id}" value="${esc(f.value || '')}" placeholder="${esc(f.ph || '')}">`}</div>`).join('')}
+      <div class="row end"><button type="button" class="btn" data-no>Cancel</button><button type="submit" class="btn primary">${esc(yes)}</button></div></form></div>`;
+    const done = (v) => { root.innerHTML = ''; resolve(v); };
+    $('form', root).onsubmit = (e) => { e.preventDefault(); const out = {}; fields.forEach(f => out[f.id] = $('#pf-' + f.id, root).value.trim()); done(out); };
+    $('[data-no]', root).onclick = () => done(null);
+    $('input,textarea', root).focus();
+  });
+}
+function convRaw(c) {
+  const parts = Array.isArray(c.parts) && c.parts.length ? c.parts : null;
+  if (!parts) return `<div class="chat"><p>${esc(c.text)}</p></div>`;
+  const who = (r) => r === 'user' ? 'You' : r === 'assistant' ? 'AI' : r;
+  return `<div class="chat">${parts.map(p => `<p><b>${esc(who(p.role))}:</b> ${esc(p.content)}</p>`).join('')}</div>`;
+}
+
+SCREENS.people = async function (soft) {
+  const r = await api('/api/people'); state.people = r.people;
+  if (!soft || !$('#pl')) {
+    $('#main').innerHTML = `<div class="screen"><div class="head"><h1>People</h1><p>Everyone you have talked about or talked with, on any app.</p></div>
+      <div class="split${state.personId ? ' sel' : ''}" id="split"><div class="plist card pad0">
+        <div class="row" style="padding:12px 14px 8px"><input type="search" id="pl-q" class="grow" placeholder="Find a person" aria-label="Find a person" value="${esc(state.peopleQ)}">
+          <button class="btn sm" data-act="add-person">Add</button></div><div id="pl"></div></div>
+        <div class="pdetail" id="pd"></div></div></div>`;
+  }
+  renderPeopleList();
+  if (state.personId && state.people.some(p => p.id === state.personId)) await showPerson(state.personId);
+  else { state.personId = null; $('#split').classList.remove('sel'); $('#pd').innerHTML = state.people.length ? emptyBox('Pick someone', 'Choose a person on the left to see everything I know about them.') : emptyBox('No one yet', 'People appear here when you talk about them, or you can add someone yourself.'); }
+};
+function renderPeopleList() {
+  const q = state.peopleQ.toLowerCase();
+  const list = state.people.filter(p => !q || p.name.toLowerCase().includes(q) || p.aliases.some(a => a.toLowerCase().includes(q)));
+  $('#pl').innerHTML = list.length ? `<ul class="list">${list.map(p => `<li><button class="person-row" data-act="pick-person" data-id="${esc(p.id)}"${p.id === state.personId ? ' aria-current="true"' : ''}>
+    <div class="name">${esc(p.name)}</div><div class="sub">${esc([p.relation, plural(p.conversations, 'conversation'), p.platforms.join(', ')].filter(Boolean).join(' · '))}</div></button></li>`).join('')}</ul>`
+    : `<p class="faint" style="padding:0 14px 14px">${state.people.length ? 'No one matches.' : 'No one yet.'}</p>`;
+}
+async function showPerson(id, editing) {
+  state.personId = id; $('#split').classList.add('sel'); renderPeopleList();
+  const pd = $('#pd'); pd.innerHTML = '<p class="skeleton">Loading…</p>';
+  let p;
+  try { p = await api('/api/people/' + enc(id)); } catch (e) { pd.innerHTML = `<div class="card"><p class="muted">${esc(e.message)}</p></div>`; return; }
+  state.person = p;
+  const head = editing ? `<div class="stack"><div class="field"><label for="pe-name">Name</label><input type="text" id="pe-name" value="${esc(p.name)}"></div>
+      <div class="field"><label for="pe-rel">Who they are to you</label><input type="text" id="pe-rel" value="${esc(p.relation)}" placeholder="sister, friend, colleague…"></div>
+      <div class="field"><label for="pe-alias">Also known as</label><input type="text" id="pe-alias" value="${esc(p.aliases.join(', '))}" placeholder="other names or nicknames, separated by commas"></div>
+      <div class="field"><label for="pe-notes">Notes</label><textarea id="pe-notes" rows="4">${esc(p.notes)}</textarea></div>
+      <div class="row end"><button class="btn" data-act="cancel-person">Cancel</button><button class="btn primary" data-act="save-person">Save</button></div></div>`
+    : `<div class="row between"><div><h2>${esc(p.name)}</h2><p class="muted">${esc(p.relation || 'No relationship noted')}${p.aliases.length ? ' · also known as ' + esc(p.aliases.join(', ')) : ''}</p></div>
+      <button class="btn sm" data-act="edit-person">Edit</button></div>
+      <div class="row">${p.platforms.map(x => `<span class="chip">${esc(x)}</span>`).join('')}</div>
+      ${p.notes ? `<p>${esc(p.notes)}</p>` : '<p class="faint">No notes yet. Use Edit to add what matters about them.</p>'}`;
+  const mems = p.memory_list.map(m => memRow({ id: m.id, text: m.text, category: m.category, when: when(m.created) })).join('');
+  const convs = p.conversation_list.map(c => `<li class="mem" data-conv="${esc(c.id)}"><div class="row between"><div><span class="chip">${esc(c.platform)}</span> <span class="faint">${esc(day(c.created))}</span></div>
+    <button class="btn ghost sm" data-act="read-conv" data-id="${esc(c.id)}">Read it</button></div><div class="t muted" style="margin-top:4px">${esc(c.preview)}${c.preview.length >= 160 ? '…' : ''}</div><div class="conv-raw"></div></li>`).join('');
+  const others = p.others.map(o => `<option value="${esc(o.id)}">${esc(o.name)}</option>`).join('');
+  $('#pd').innerHTML = `<div class="stack"><button class="btn ghost back" data-act="back-people">← All people</button>
+    <div class="card">${head}</div>
+    <div class="card pad0"><div class="sec" style="padding:14px 16px 0"><h3>What I remember about ${esc(p.name)}</h3><span class="count">${p.memory_list.length}</span></div>
+      ${mems ? `<ul class="list">${mems}</ul>` : '<p class="faint" style="padding:0 16px 14px">Nothing yet. When you tell me about them, it shows up here.</p>'}</div>
+    <div class="card pad0"><div class="sec" style="padding:14px 16px 0"><h3>Conversations</h3><span class="count">${p.conversation_list.length}</span></div>
+      ${convs ? `<ul class="list">${convs}</ul>` : '<p class="faint" style="padding:0 16px 14px">No saved conversations with or about them yet.</p>'}</div>
+    ${others ? `<div class="card"><h3>Is this the same person as someone else?</h3>
+      <p class="muted">If ${esc(p.name)} also appears under another name, join the two profiles. Their notes and conversations are brought together. You can undo it from Review.</p>
+      <div class="row"><select id="merge-with" style="flex:1 1 200px" aria-label="Same person as">${others}</select>
+      <button class="btn" data-act="merge-person">Yes, same person</button></div></div>` : ''}
+    <div class="card"><h3>Remove this profile</h3><p class="muted">Takes ${esc(p.name)} out of your people. I will not make a profile for that name again. You can undo it from Review.</p>
+      <div class="row"><button class="btn danger" data-act="delete-person">Remove profile</button></div></div></div>`;
+  if (editing) $('#pe-name').focus();
+}
+
+/* --------------------------------------------------------------- Journal */
+SCREENS.journal = async function (soft) {
+  const j = await api('/api/journal'); state.journal = j;
+  if (!soft || !$('#bio')) {
+    $('#main').innerHTML = `<div class="screen"><div class="head"><h1>Journal</h1><p>Your story, written from everything I know about you.</p></div>
+      <div class="card" id="bio"></div>
+      <div class="card"><h2>Add to your journal</h2><div class="row"><div class="field" style="flex:0 0 190px"><label for="j-day">Date</label><input type="date" id="j-day" value="${localDay()}"></div></div>
+        <div class="field"><label for="j-text">What happened, or what is on your mind</label><textarea id="j-text" rows="3"></textarea></div>
+        <div class="row"><button class="btn primary" data-act="entry-add">Add entry</button><span class="msg" id="j-msg"></span></div></div>
+      <div id="entries"></div></div>`;
+  }
+  renderBio(); renderEntries();
+};
+function renderBio(editing) {
+  const b = state.journal.biography; const el = $('#bio'); if (!el) return;
+  const how = b.how === 'helper' ? `Written by AI from your memories · ${esc(when(b.updated))}`
+    : b.how === 'you' ? `Edited by you · ${esc(when(b.updated))}. I will not change it unless you ask.`
+    : b.how === 'outline' ? 'A plain outline for now. It becomes a proper biography as soon as an AI helper is available.' : '';
+  let body;
+  if (editing) {
+    body = `<textarea id="bio-text" rows="14" aria-label="Biography">${esc(b.text)}</textarea>
+      <div class="row end"><button class="btn" data-act="bio-cancel">Cancel</button><button class="btn primary" data-act="bio-save">Save</button></div>`;
+  } else if (!b.text) {
+    body = b.memories ? `<p class="muted">Nothing is written yet.</p><div class="row"><button class="btn primary" data-act="bio-rewrite">Write it now</button></div>`
+      : `<p class="muted">Nothing to write about yet. Tell me about yourself and I will write your biography.</p>`;
+  } else {
+    body = `<div class="md">${md(b.text)}</div>
+      <div class="row">${b.locked ? '<button class="btn" data-act="bio-unlock">Let AI update it again</button>' : ''}
+      <button class="btn" data-act="bio-rewrite">${b.locked ? 'Rewrite it from scratch' : 'Rewrite now'}</button><button class="btn" data-act="bio-edit">Edit</button></div>`;
+  }
+  el.innerHTML = `<div class="row between"><h2>Your biography</h2></div><p class="faint">${how}</p>${body}
+    ${!b.sensitive ? '<p class="faint">Health and money details are left out of this. You can include them in Settings.</p>' : ''}`;
+}
+function renderEntries() {
+  const list = state.journal.entries; const el = $('#entries'); if (!el) return;
+  list.forEach(e => { state.mem[e.id] = { id: e.id, text: e.text, noCat: true }; });
+  el.innerHTML = list.length ? `<section><div class="sec"><h2>Entries <span class="count">${list.length}</span></h2></div><div class="card pad0"><ul class="list">${list.map(e =>
+    `<li class="mem" data-mem="${esc(e.id)}"><div class="meta" style="margin:0 0 2px"><b>${esc(day(e.day))}</b>${e.by === 'AI' ? '<span>· written by AI</span>' : ''}</div><div class="t">${esc(e.text)}</div>
+    <div class="acts"><button class="btn ghost sm" data-act="mem-edit" data-id="${esc(e.id)}">Edit</button><button class="btn ghost sm" data-act="mem-forget" data-id="${esc(e.id)}">Remove</button></div></li>`).join('')}</ul></div></section>`
+    : emptyBox('No entries yet', 'Write about your day above. Entries are kept by date.');
+}
+
+/* -------------------------------------------------------------------- Me */
+SCREENS.me = async function () {
+  const m = await api('/api/me');
+  const secs = m.sections.map(s => {
+    const rows = s.items.map(i => memRow({
+      id: i.id, text: i.text, category: i.category, when: when(i.updated), by: i.by,
+      extra: i.revisit_at ? `<span class="chip warn">${i.revisit_at <= localDay() ? 'Due ' : 'Come back '}${esc(day(i.revisit_at))}</span>` : '',
+    })).join('');
+    const inner = `<div class="card pad0"><ul class="list">${rows}</ul></div>`;
+    return s.sensitive
+      ? `<details class="card pad0"><summary class="sec" style="padding:14px 16px;cursor:pointer"><h2>${esc(s.title)} <span class="count">${s.items.length}</span> <span class="chip">Private, tap to show</span></h2></summary><ul class="list">${rows}</ul></details>`
+      : section(s.title, s.items.length, inner);
+  }).join('');
+  $('#main').innerHTML = `<div class="screen"><div class="head"><h1>Me</h1><p>What matters about your life right now: what you are doing, planning and trying.</p></div>
+    ${secs || emptyBox('Nothing here yet', 'As you talk to me, this fills up on its own.')}</div>`;
+};
+
+/* -------------------------------------------------------------- Settings */
+SCREENS.settings = async function (soft) {
+  const s = await api('/api/settings'); state.settings = s; state.status = s.status; if (s.status.categories) state.categories = s.status.categories;
+  renderBanners();
+  const ai = s.ai, o = s.options, mean = s.status.meaning_search;
+  const meanText = !o.semantic ? 'Meaning search is off. Search still understands word endings, like “allergy” and “allergic”, but not different words with the same meaning.'
+    : mean.state === 'working' ? `Working. ${mean.indexed} of ${mean.memories} memories can be found by meaning.`
+    : 'Not set up yet, so search matches words only. To search by meaning, install a small model on this computer (run “ollama pull nomic-embed-text”), then press Prepare.';
+  const sw = (key, title, text, checked, disabled) => `<label class="switch"><input type="checkbox" data-opt="${key}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}><span class="track"></span><span class="txt"><b>${title}</b><span>${text}</span></span></label>`;
+  const stCls = ai.status.ready ? 'ok' : 'warn';
+  $('#main').innerHTML = `<div class="screen"><div class="head"><h1>Settings</h1><p>Memory_OB looks after itself. These are the only things you might want to change.</p></div>
+
+  <section class="card" id="s-ai"><h2>AI helper</h2>
+    <p class="muted">The AI helper reads what you tell me and files it. By default it uses the same AI as Hermes, so there is nothing to set up.</p>
+    <div class="banner ${stCls}"><span><b>${esc(ai.status.label)}</b></span></div>
+    <label class="radio${ai.mode === 'auto' ? ' on' : ''}"><input type="radio" name="aimode" value="auto"${ai.mode === 'auto' ? ' checked' : ''}><span><b>Automatic</b><span>${ai.hermes_found ? 'Use the AI that Hermes already uses.' : 'Hermes was not found, so I will look for a model running on this computer.'}</span></span></label>
+    <label class="radio${ai.mode === 'custom' ? ' on' : ''}"><input type="radio" name="aimode" value="custom"${ai.mode === 'custom' ? ' checked' : ''}><span><b>A model on this computer</b><span>Choose a model you run yourself with Ollama.</span></span></label>
+    <div id="ai-custom" class="stack" ${ai.mode === 'custom' ? '' : 'hidden'}>
+      <div class="field"><label for="ai-addr">Where Ollama is running</label><input type="text" id="ai-addr" value="${esc(ai.address)}"></div>
+      <div class="field"><label for="ai-model">Model</label><div class="row"><input type="text" id="ai-model" class="grow" list="ollama-models" value="${esc(ai.reading_model)}" placeholder="for example llama3.2"><button class="btn" data-act="check-models">Find models</button></div>
+        <datalist id="ollama-models"></datalist><p class="hint" id="ai-models-msg"></p></div></div>
+    <div class="field"><label for="ai-embed">Model for meaning search (optional)</label><input type="text" id="ai-embed" value="${esc(ai.meaning_model)}" placeholder="nomic-embed-text">
+      <p class="hint">Only used for searching by meaning. It always runs on this computer.</p></div>
+    <div class="row"><button class="btn primary" data-act="save-ai">Save</button></div></section>
+
+  <section class="card"><h2>Search</h2><p class="muted">${esc(meanText)}</p>
+    ${sw('semantic', 'Search by meaning as well as words', 'Finds a memory even when you use different words.', o.semantic)}
+    <div class="row"><button class="btn" data-act="prepare-embed">Prepare now</button><span class="msg" id="embed-msg"></span></div></section>
+
+  <section class="card"><h2>Privacy</h2>
+    ${sw('paused', 'Pause memory', 'Stop saving anything new and stop bringing memories into chats, until you turn this off.', s.paused)}
+    ${sw('local_only', 'Keep everything on this computer', 'Only use an AI that runs on this computer. Hermes’s AI, which may be online, is not used.', o.local_only)}
+    ${sw('bio_sensitive', 'Include health and money in my biography', 'Off by default, because a biography is the thing you are most likely to share.', o.bio_sensitive)}
+    <div class="field"><label for="never">Never remember</label><textarea id="never" rows="3" placeholder="One word or phrase per line">${esc(s.never_remember.join('\n'))}</textarea>
+      <p class="hint">If something you say contains one of these, I will not keep it. Passwords and keys are never kept either.</p></div>
+    <div class="row"><button class="btn" data-act="save-never">Save this list</button></div></section>
+
+  ${ai.hermes_found ? `<section class="card"><h2>Hermes</h2>
+    ${sw('sync_hermes', 'Keep Hermes’s own memory notes up to date', s.hermes_files ? 'Writes your confirmed memories into the memory notes Hermes already reads. Turning it off removes what I added.' : 'I could not find Hermes’s memory notes on this computer, so this is not available.', o.sync_hermes, !s.hermes_files)}
+    ${s.bridge ? `<div class="row between"><span><b>Hermes AI connection:</b> ${s.bridge.running ? 'running' : 'stopped'}</span>
+      <button class="btn sm" data-act="${s.bridge.running ? 'bridge-stop' : 'bridge-start'}">${s.bridge.running ? 'Stop' : 'Start'}</button></div>` : ''}</section>` : ''}
+
+  <section class="card" id="s-import"><h2>Bring in old memories</h2>
+    <p class="muted">A ChatGPT or Claude export (.zip or .json), a WhatsApp chat (.txt), a memory file (.md or .txt), or notes you paste. Your original is never changed.</p>
+    <div class="field"><label for="imp-file">Choose a file</label><input type="file" id="imp-file" accept=".zip,.json,.txt,.md,.markdown,text/plain,application/json,application/zip"></div>
+    <div class="field"><label for="imp-me">Your name in the chat (WhatsApp files only)</label><input type="text" id="imp-me" placeholder="So I know which lines are yours"></div>
+    <div class="field"><label for="imp-text">Or paste notes (one memory per line)</label><textarea id="imp-text" rows="4"></textarea></div>
+    <div class="row"><button class="btn primary" data-act="import">Bring in</button><span class="msg" id="imp-msg"></span></div></section>
+
+  <section class="card"><h2>Backup and tidy</h2>
+    ${s.integrity.changed.length || s.integrity.missing.length ? `<div class="banner danger"><span><b>Some original files are not what I saved.</b> ${esc([...s.integrity.changed.map(n => n + ' (changed)'), ...s.integrity.missing.map(n => n + ' (missing)')].join(', '))}. Anything I learned from them may be wrong.</span>
+      <button class="btn sm" data-act="accept-originals">I checked, they are fine</button></div>` : ''}
+    <p class="muted">I tidy my notes every night on my own. You can also do it now, or save a backup copy.</p>
+    <div class="row"><button class="btn" data-act="backup">Back up now</button><button class="btn" data-act="tidy">Tidy now</button><span class="msg" id="bk-msg"></span></div>
+    ${s.backups.length ? `<p class="faint">Latest backups: ${s.backups.map(esc).join(', ')}</p>` : ''}
+    <p class="faint">Your notes live in: ${esc(s.vault)}</p></section>
+
+  <section class="card"><h2>Remove Memory_OB</h2>
+    <p class="muted">To remove Memory_OB, open the Memory_OB folder and run <b>uninstall.ps1</b> (right-click, Run with PowerShell). It takes Memory_OB out of Hermes and stops the startup item. Your memories are kept unless you tell it to delete them, and a backup is made first.</p></section></div>`;
+};
+
+/* ==========================================================================
+   Clicks and typing
+   ========================================================================== */
+const MSG = { new: 'Saved the new answer.', old: 'Kept what I had.', both: 'Kept both.', yes: 'Done.', no: 'Okay, kept them separate.', merge: 'Joined.', dismiss: 'Dismissed.', approve: 'Added.', deny: 'Skipped.', ok: 'Done.' };
+
+document.addEventListener('click', async (e) => {
+  const el = e.target.closest('[data-act]'); if (!el) return;
+  const act = el.dataset.act, id = el.dataset.id;
+  if (el.tagName === 'A') e.preventDefault();
+  switch (act) {
+    case 'tab': return go(el.dataset.tab);
+    case 'resume': return busy(el, async () => { await api('/api/anonymous', { method: 'POST', body: { anonymous: false } }); toast('Memory is back on.'); await refreshStatus(); refreshHere(); });
+    case 'close-drawer': return closeDrawer();
+    case 'open-note': return openNote(el.dataset.path);
+    case 'note-edit': return openNote(state.note.path, true);
+    case 'note-view': return openNote(state.note.path);
+    case 'drawer-tag': closeDrawer(); if (state.tab !== 'vault') { await go('vault'); } return toggleTok('tag:' + el.dataset.tag);
+    case 'note-save': return busy(el, async () => {
+      const n = state.note; const body = { path: n.path };
+      if (n.type === 'memory') { body.body = $('#ne-body').value; body.category = $('#ne-cat').value; }
+      else { body.name = $('#ne-name').value; body.notes = $('#ne-notes').value; }
+      const fresh = await api('/api/vault/note', { method: 'PUT', body });
+      toast('Saved.'); await openNote(fresh.path || n.path); refreshHere();
+    });
+    case 'note-forget': {
+      const n = state.note;
+      if (!(await ask({ title: 'Forget this?', body: `“${esc(n.body)}”<br>I will stop using it. You can put it back from Review.`, yes: 'Forget it', danger: true }))) return;
+      return busy(el, async () => { await api('/api/records/' + enc(n.id), { method: 'DELETE' }); toast('Forgotten.'); closeDrawer(); refreshHere(); });
+    }
+    case 'goto-person': closeDrawer(); state.personId = id; return go('people');
+    case 'tell': return busy(el, async () => {
+      const t = $('#tell').value.trim(); if (!t) { toast('Type something first.', true); return; }
+      const r = await api('/api/tell', { method: 'POST', body: { text: t } });
+      const m = $('#tell-msg'); m.textContent = r.message; m.className = 'msg ' + (r.ok ? 'good' : 'err');
+      if (r.ok) $('#tell').value = '';
+      await refreshStatus(); await SCREENS.review(true);
+    });
+    case 'doubt': return busy(el, async () => {
+      await api(`/api/doubts/${enc(id)}/answer`, { method: 'POST', body: { answer: el.dataset.choice } });
+      toast(MSG[el.dataset.choice] || 'Done.'); await SCREENS.review(true);
+    });
+    case 'unsure-keep': return busy(el, async () => { await api(`/api/unsure/${enc(id)}/keep`, { method: 'POST' }); toast('Kept.'); await SCREENS.review(true); });
+    case 'unsure-skip': return busy(el, async () => { await api(`/api/unsure/${enc(id)}/skip`, { method: 'POST' }); toast('Dropped.'); await SCREENS.review(true); });
+    case 'undo': return busy(el, async () => { await api('/api/undo/' + enc(el.dataset.seq), { method: 'POST' }); toast('Put back.'); await SCREENS.review(true); });
+
+    case 'mem-edit': { const li = el.closest('[data-mem]'); return memEditor(li, state.mem[id]); }
+    case 'mem-cancel': return refreshHere();
+    case 'mem-save': return busy(el, async () => {
+      const li = el.closest('[data-mem]'); const text = $('textarea', li).value.trim(); const sel = $('select', li);
+      if (!text) { toast('A memory cannot be empty. Use Forget to remove it.', true); return; }
+      const body = { body: text }; if (sel) body.category = sel.value;
+      await api('/api/records/' + enc(id), { method: 'PUT', body });
+      toast('Saved.');
+      if (state.tab === 'journal') { await SCREENS.journal(true); } else { await refreshHere(); }
+    });
+    case 'mem-forget': {
+      const m = state.mem[id] || {};
+      if (!(await ask({ title: 'Forget this?', body: `“${esc(m.text || '')}”<br>I will stop using it. You can put it back from Review.`, yes: 'Forget it', danger: true }))) return;
+      return busy(el, async () => {
+        await api('/api/records/' + enc(id), { method: 'DELETE' }); toast('Forgotten.');
+        if (state.tab === 'journal') { await SCREENS.journal(true); } else { await refreshHere(); }
+      });
+    }
+
+    case 'tok': return toggleTok(el.dataset.tok, el.dataset.ex);
+    case 'set-view': state.vview = el.dataset.view; return loadVault();
+    case 'more-notes': state.vShow = (state.vShow || 200) + 200; return renderNoteList();
+
+    case 'pick-person': return showPerson(id);
+    case 'back-people': state.personId = null; return SCREENS.people(true);
+    case 'add-person': {
+      const v = await promptForm({ title: 'Add a person', yes: 'Add', fields: [{ id: 'name', label: 'Name' }, { id: 'relation', label: 'Who they are to you (optional)', ph: 'sister, friend, colleague…' }] });
+      if (!v) return; if (!v.name) { toast('A person needs a name.', true); return; }
+      try { const p = await api('/api/people', { method: 'POST', body: v }); state.personId = p.id; toast('Added.'); await SCREENS.people(true); } catch (err) { toast(err.message, true); }
+      return;
+    }
+    case 'edit-person': return showPerson(state.personId, true);
+    case 'cancel-person': return showPerson(state.personId);
+    case 'save-person': return busy(el, async () => {
+      const body = { name: $('#pe-name').value.trim(), relation: $('#pe-rel').value.trim(), notes: $('#pe-notes').value.trim(), aliases: $('#pe-alias').value.split(',').map(x => x.trim()).filter(Boolean) };
+      if (!body.name) { toast('A person needs a name.', true); return; }
+      await api('/api/people/' + enc(state.personId), { method: 'PUT', body }); toast('Saved.'); await SCREENS.people(true);
+    });
+    case 'read-conv': {
+      const li = el.closest('[data-conv]'); const box = $('.conv-raw', li);
+      if (box.innerHTML) { box.innerHTML = ''; el.textContent = 'Read it'; return; }
+      return busy(el, async () => { const c = await api('/api/conversations/' + enc(id)); box.innerHTML = '<div style="margin-top:8px">' + convRaw(c) + '</div>'; el.textContent = 'Hide'; });
+    }
+    case 'merge-person': {
+      const p = state.person; const other = $('#merge-with'); const o = p.others.find(x => x.id === other.value); if (!o) return;
+      if (!(await ask({ title: 'Join these two profiles?', body: `<b>${esc(o.name)}</b> and <b>${esc(p.name)}</b> will become one profile, <b>${esc(p.name)}</b>. Their notes and conversations come together. You can undo this from Review.`, yes: 'Yes, same person' }))) return;
+      return busy(el, async () => { await api('/api/people/merge', { method: 'POST', body: { keep_id: p.id, other_id: o.id } }); toast('Joined into one profile.'); await SCREENS.people(true); });
+    }
+    case 'delete-person': {
+      const p = state.person;
+      if (!(await ask({ title: `Remove ${p.name}?`, body: 'Their profile goes away and I will not make one for that name again. You can undo this from Review.', yes: 'Remove profile', danger: true }))) return;
+      return busy(el, async () => { await api('/api/people/' + enc(p.id), { method: 'DELETE' }); toast('Removed.'); state.personId = null; await SCREENS.people(true); });
+    }
+
+    case 'bio-rewrite': {
+      if (state.journal.biography.locked && !(await ask({ title: 'Rewrite your biography?', body: 'This replaces the version you edited.', yes: 'Rewrite it' }))) return;
+      return busy(el, async () => { toast('Writing…'); state.journal.biography = await api('/api/journal/biography', { method: 'POST', body: { action: 'rewrite' } }); renderBio(); });
+    }
+    case 'bio-edit': return renderBio(true);
+    case 'bio-cancel': return renderBio();
+    case 'bio-save': return busy(el, async () => { state.journal.biography = await api('/api/journal/biography', { method: 'POST', body: { action: 'save', text: $('#bio-text').value } }); toast('Saved. I will not change it unless you ask.'); renderBio(); });
+    case 'bio-unlock': return busy(el, async () => { state.journal.biography = await api('/api/journal/biography', { method: 'POST', body: { action: 'unlock' } }); toast('I can update it again.'); renderBio(); });
+    case 'entry-add': return busy(el, async () => {
+      const text = $('#j-text').value.trim(); if (!text) { toast('Write something first.', true); return; }
+      const r = await api('/api/journal/entry', { method: 'POST', body: { text, day: $('#j-day').value || null } });
+      state.journal.entries = r.entries; $('#j-text').value = ''; toast('Added.'); renderEntries();
+    });
+
+    case 'check-models': return busy(el, async () => {
+      const r = await api('/api/settings/ai/models?address=' + enc($('#ai-addr').value.trim()));
+      $('#ollama-models').innerHTML = r.models.map(m => `<option value="${esc(m)}">`).join('');
+      $('#ai-models-msg').textContent = r.reachable ? `Found ${plural(r.models.length, 'model')}. Pick one from the list.` : 'I could not reach Ollama there. Check that it is running and the address is right.';
+    });
+    case 'save-ai': return busy(el, async () => {
+      const mode = ($('input[name=aimode]:checked') || {}).value || 'auto';
+      const body = { mode, meaning_model: $('#ai-embed').value.trim() };
+      if (mode === 'custom') { body.address = $('#ai-addr').value.trim(); body.reading_model = $('#ai-model').value.trim(); }
+      await api('/api/settings/ai', { method: 'POST', body }); toast('Saved.'); await SCREENS.settings();
+    });
+    case 'prepare-embed': return busy(el, async () => { $('#embed-msg').textContent = 'Working…'; const r = await api('/api/embed', { method: 'POST', body: {} }); $('#embed-msg').textContent = r.message; await refreshStatus(); });
+    case 'save-never': return busy(el, async () => {
+      const words = $('#never').value.split('\n').map(x => x.trim()).filter(Boolean);
+      await api('/api/settings', { method: 'POST', body: { never_remember: words } }); toast('Saved.');
+    });
+    case 'bridge-start': case 'bridge-stop': return busy(el, async () => { await api('/api/proxy/' + act.slice(7), { method: 'POST' }); await SCREENS.settings(); });
+    case 'import': return busy(el, doImport);
+    case 'accept-originals': return busy(el, async () => { await api('/api/manifest', { method: 'POST' }); toast('Recorded again.'); await SCREENS.settings(); });
+    case 'backup': return busy(el, async () => { const r = await api('/api/backup', { method: 'POST' }); $('#bk-msg').textContent = 'Saved: ' + r.name; });
+    case 'tidy': return busy(el, async () => {
+      $('#bk-msg').textContent = 'Working…'; const r = await api('/api/tidy', { method: 'POST' });
+      const bad = r.steps.filter(s => s.ok === 'no').length;
+      $('#bk-msg').textContent = bad ? 'Done, but a part did not finish. I will try again tonight.' : 'All tidy.'; await refreshStatus();
+    });
+  }
+});
+
+async function doImport() {
+  const msg = $('#imp-msg'); const file = $('#imp-file').files[0]; const text = $('#imp-text').value.trim();
+  if (!file && !text) { msg.textContent = 'Choose a file or paste some notes first.'; msg.className = 'msg err'; return; }
+  msg.className = 'msg'; msg.textContent = 'Reading…';
+  const body = {};
+  if (file) {
+    if (file.size > 100 * 1024 * 1024) { msg.textContent = 'That file is too big to bring in from here (over 100 MB).'; msg.className = 'msg err'; return; }
+    body.name = file.name; body.data_b64 = b64(await file.arrayBuffer()); body.me = $('#imp-me').value.trim();
+  } else { body.name = 'pasted notes'; body.text = text; }
+  try {
+    const r = await api('/api/import', { method: 'POST', body });
+    msg.textContent = r.message || 'Done.'; msg.className = 'msg good';
+    $('#imp-file').value = ''; $('#imp-text').value = ''; refreshStatus();
+  } catch (e) { msg.textContent = e.message; msg.className = 'msg err'; }
+}
+
+document.addEventListener('change', async (e) => {
+  const t = e.target;
+  if (t.name === 'aimode') { $('#ai-custom').hidden = t.value !== 'custom'; $$('label.radio').forEach(l => l.classList.toggle('on', $('input', l).checked)); return; }
+  if (t.dataset.graph) { state.vg[t.dataset.graph] = t.checked; return renderGraphView(); }
+  if (t.dataset.opt) {
+    const key = t.dataset.opt; t.disabled = true;
+    try {
+      if (key === 'paused') await api('/api/anonymous', { method: 'POST', body: { anonymous: t.checked } });
+      else await api('/api/settings', { method: 'POST', body: { [key]: t.checked } });
+      toast('Saved.'); await keepFields(() => SCREENS.settings());
+    } catch (err) { t.checked = !t.checked; toast(err.message, true); }
+    finally { t.disabled = false; }
+  }
+});
+const onType = debounce((e) => {
+  const t = e.target;
+  if (t.id === 'rv-q') { state.rq = t.value; runSearch(); }
+  else if (t.id === 'v-q') { state.vq = t.value.trim(); state.vShow = 200; loadVault(); }
+  else if (t.id === 'pl-q') { state.peopleQ = t.value; renderPeopleList(); }
+}, 280);
+document.addEventListener('input', onType);
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.id === 'tell') { e.preventDefault(); const b = $('[data-act=tell]'); if (b) b.click(); }
+});
+
+/* ---- start ---- */
+(async function start() {
+  renderTabs();
+  try { await refreshStatus(); } catch (e) {}
+  await go('review');
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,367 @@
+"""The write pipeline — capture, extract, candidate pool, trust scores.
+
+Input is untrusted evidence. Instructions inside evidence are never obeyed.
+AI output is advice, not evidence of the owner's life. Everything that lands
+below the truth line is a *candidate* with a trust score; nothing becomes
+truth without a Review card.
+"""
+
+from __future__ import annotations
+
+import re
+from dataclasses import dataclass, field
+from typing import Any
+
+from . import hazards, ids, quotes
+from .records import CANDIDATE_MAX, CANDIDATE_MIN, NOTE, PROFILE
+
+_SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
+
+# Chatter that never becomes a fact: greetings, thanks, filler, one-word ack.
+_CHATTER_RE = re.compile(
+    r"^(?:hi|hello|hey|yo|ok|okay|yes|no|nope|thanks|thank you|thx|sure|"
+    r"cool|nice|great|done|next|continue|go|bye|goodbye|hm{1,3}|lol|lmao|"
+    r"sorry|please|wow|ah|oh|uh|um+)\b[.!\s]*$",
+    re.IGNORECASE,
+)
+
+_QUESTION_RE = re.compile(r"\?\s*$")
+
+# "I live in Dhaka and I study CSE" is two facts. Splitting them lets each be
+# found, edited and checked against older statements on its own. Only the
+# plain "I … and I …" shape is split: "My friend and I went" stays whole.
+_CLAUSE_SPLIT_RE = re.compile(r"(?:,\s*|\s+)(?:and|but)\s+(?=(?:i|we)\b)", re.IGNORECASE)
+_FIRST_PERSON_START_RE = re.compile(r"(?:i|we)\b", re.IGNORECASE)
+_MIN_CLAIM = 12
+
+# "I'll come back to this idea in a year" only makes sense next to the idea.
+_REVISIT_REF_RE = re.compile(
+    r"(?:i(?:'|’)?ll|i will|i(?:'|’)?m going to|i am going to|we(?:'|’)?ll|let me)\s+"
+    r"(?:come back|get back|go back|return|revisit|circle back|pick\b|look (?:at|into))\b[^.!?]*\b(?:this|that|it)\b",
+    re.IGNORECASE,
+)
+
+
+def _split_clauses(sentence: str) -> list[str]:
+    """One sentence as one claim, or as several when it joins separate "I …" statements."""
+    if not _FIRST_PERSON_START_RE.match(sentence):
+        return [sentence]
+    parts = [p.strip(" ,;") for p in _CLAUSE_SPLIT_RE.split(sentence)]
+    if len(parts) < 2 or any(len(p) < _MIN_CLAIM for p in parts):
+        return [sentence]
+    return [p if p[-1] in ".!?" else p + "." for p in parts]
+
+# The model's own "nothing here" answer. Treating it as a fact is how "ok"/"ok"
+# became a candidate.
+_NO_FACTS_RE = re.compile(
+    r"(?i)^\(?\s*(no (facts?|memories?|memorable (facts|memories))"
+    r"( to extract)?|nothing (worth (keeping|remembering)|memorable)|"
+    r"none|n/?a)\s*\)?[.!]?\s*$"
+)
+
+# Session noise: talk ABOUT the conversation, the tool, or the review UI —
+# "the speaker reports…", "the repo is at…", "score 0.45 · hermes". This is
+# working memory about the session, not a fact about the owner's life, and it
+# must never become a candidate.
+_META_RE = re.compile(
+    r"\b(?:the speaker|the assistant|the user|the owner|the agent|the model|"
+    r"the repo|the repository|github|pull request|"
+    r"the review|the memory|the candidate|the inbox|the vault|"
+    r"the session|this conversation|the conversation|the tool|the ui|"
+    r"the dashboard|the screen|the tab|score\s*\d|not true)\b",
+    re.IGNORECASE,
+)
+
+
+@dataclass(slots=True)
+class Candidate:
+    """One candidate fact below the truth line."""
+
+    id: str
+    text: str
+    trust: float = 0.3
+    kind_hint: str = NOTE
+    source: dict[str, Any] = field(default_factory=dict)
+    created: str = ""
+    context: str = ""
+    sentiment: str = ""
+    people: list[str] = field(default_factory=list)
+
+    def to_dict(self) -> dict[str, Any]:
+        from dataclasses import asdict
+
+        return asdict(self)
+
+
+def _now() -> str:
+    import time
+
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def split_claims(text: str) -> list[str]:
+    """Split raw text into candidate claim strings.
+
+    The hazard filter runs here too, not only on the model path. When no model
+    is available this is the only judge there is, and without it an
+    instruction-like string ("ignore all previous instructions…") becomes a
+    candidate that recall can later hand to a model.
+    """
+    out: list[str] = []
+    for raw in _SENTENCE_RE.split(text or ""):
+        s = " ".join(raw.split())
+        if len(s) < 12:
+            continue
+        if _CHATTER_RE.match(s):
+            continue
+        if _QUESTION_RE.search(s):
+            continue
+        if hazards.is_hazardous(s):
+            continue
+        if out and _REVISIT_REF_RE.match(s):
+            out[-1] = f"{out[-1]} {s}"       # "…business. I'll come back to this in a year." is one idea
+            continue
+        out.extend(_split_clauses(s))
+    return out
+
+
+def score_claim(claim: str) -> float:
+    """Heuristic trust score for a claim (0.3–0.6 candidate band)."""
+    score = 0.4
+    low = claim.lower()
+    # First-person statements about the owner are stronger self-knowledge.
+    if re.search(r"\b(i|i'm|i've|my|me)\b", low):
+        score += 0.05
+    # Specifics (numbers, dates, names) are stronger than vague statements.
+    if re.search(r"\b\d{1,4}\b", claim):
+        score += 0.05
+    if re.search(r"\b(?:because|so|therefore|since)\b", low):
+        score += 0.03
+    # Hedging lowers confidence.
+    if re.search(r"\b(?:maybe|perhaps|i guess|not sure|probably)\b", low):
+        score -= 0.08
+    return max(CANDIDATE_MIN, min(CANDIDATE_MAX, round(score, 2)))
+
+
+def _heuristic_meta(claim: str, text: str) -> tuple[str, str, list[str]]:
+    """Offline fallback: guess context, sentiment and people from the words.
+
+    Used when no model is available. Deliberately conservative — a wrong guess
+    is worse than an empty field, so anything uncertain is left blank.
+    """
+    low = claim.lower()
+    sentiment = ""
+    if re.search(r"\b(love|like|enjoy|happy|excited|grateful|glad|proud)\b", low):
+        sentiment = "positive"
+    elif re.search(r"\b(hate|dislike|angry|upset|frustrated|sad|annoyed|anxious)\b", low):
+        sentiment = "negative"
+    # People: capitalised words that are not the start of the sentence.
+    people = [
+        w for w in re.findall(r"\b([A-Z][a-z]{2,})\b", claim)
+        if w not in {"The", "This", "That", "They", "There", "What", "When", "It"}
+    ]
+    context = ""
+    if len(text) > len(claim) + 20:
+        context = text.strip().replace("\n", " ")[:200]
+    return context, sentiment, people
+
+
+def kind_hint_for(claim: str) -> str:
+    """Best-effort kind hint. Never authoritative — a card decides."""
+    low = claim.lower()
+    if re.search(r"\b(?:prefer|i like|i love|i hate|i always|i never)\b", low):
+        return PROFILE
+    if re.search(r"\b(?:learned|realized|understood|turns out|i found)\b", low):
+        return "learning"
+    if re.search(r"\b(?:today|yesterday|this morning|last night|on monday)\b", low):
+        return "journal"
+    return NOTE
+
+
+def extract_claims(
+    text: str,
+    *,
+    source: dict[str, Any] | None = None,
+    model_call: Any | None = None,
+) -> list[Candidate]:
+    """Turn raw evidence into candidate facts.
+
+    When *model_call* is given the model writes the candidates (and its output
+    is validated: hazards dropped, chatter dropped, every claim re-scored).
+    Without one, a built-in heuristic does the job offline.
+    """
+    if model_call is not None:
+        return extract_with_model(text, model_call=model_call, source=source)
+    out: list[Candidate] = []
+    for claim in split_claims(text):
+        if _META_RE.search(claim):
+            continue
+        context, sentiment, people = _heuristic_meta(claim, text)
+        out.append(
+            Candidate(
+                id=ids.new_id(),
+                text=claim,
+                trust=score_claim(claim),
+                kind_hint=kind_hint_for(claim),
+                source=source or {},
+                created=_now(),
+                context=context,
+                sentiment=sentiment,
+                people=people,
+            )
+        )
+    return out
+
+
+def extract_with_model(
+    text: str,
+    *,
+    model_call: Any,
+    source: dict[str, Any] | None = None,
+) -> list[Candidate]:
+    """Ask a model for atomic facts, then validate each line.
+
+    ``model_call`` is a callable taking a prompt string and returning text.
+    The model's output is treated as untrusted: hazards are scanned, chatter
+    is dropped, and every claim is re-scored.
+    """
+    prompt = (
+        "Extract atomic facts about the person speaking. One JSON object per line.\n"
+        "Rules:\n"
+        "- Only facts the person stated about themselves or people they know.\n"
+        "- Keep the person's own wording (first person where they used it).\n"
+        "- Preserve uncertainty and reported-vs-observed wording.\n"
+        "- Include the surrounding context, the emotional tone, and any people named.\n"
+        "- One short line each. No preamble.\n"
+        'Format: {"text": "...", "context": "...", "sentiment": "...", "people": ["..."]}\n\n'
+        f"Text:\n{text}"
+    )
+    try:
+        raw = model_call(prompt)
+    except Exception:
+        return extract_claims(text, source=source)
+    out: list[Candidate] = []
+    for line in (raw or "").splitlines():
+        s = line.strip().lstrip("-*• ").strip()
+        if _NO_FACTS_RE.match(s):
+            return []
+        if len(s) < 12 or _CHATTER_RE.match(s) or _META_RE.search(s):
+            continue
+        if hazards.is_hazardous(s):
+            continue
+        context = sentiment = ""
+        people: list[str] = []
+        if s.startswith("{"):
+            try:
+                import json as _json
+
+                obj = _json.loads(s)
+                s = str(obj.get("text") or "").strip()
+                context = str(obj.get("context") or "").strip()
+                sentiment = str(obj.get("sentiment") or "").strip()
+                people = [str(p).strip() for p in (obj.get("people") or []) if str(p).strip()]
+            except Exception:
+                pass
+        if len(s) < 12 or _META_RE.search(s):
+            continue
+        out.append(
+            Candidate(
+                id=ids.new_id(),
+                text=s,
+                trust=score_claim(s),
+                kind_hint=kind_hint_for(s),
+                source=source or {},
+                created=_now(),
+                context=context,
+                sentiment=sentiment,
+                people=people,
+            )
+        )
+    return out or extract_claims(text, source=source)
+
+
+def extract_session(
+    parts: list[tuple[str, str]],
+    *,
+    model_call: Any,
+    source: dict[str, Any] | None = None,
+) -> list[Candidate]:
+    """Extract the owner's durable facts from a whole labelled session.
+
+    The model sees who said what and is told the owner is the only subject, so
+    the assistant's own narration is context rather than material. Feeding the
+    session in one piece matters: extracting per speaker makes "the person
+    speaking" the assistant on its turns, and every sentence it utters becomes
+    a candidate about itself.
+
+    Falls back to the offline heuristic on the owner's turns when no model is
+    available.
+    """
+    transcript = "\n".join(
+        f"{role}: {text.strip()}"
+        for role, text in parts
+        if (text or "").strip()
+    )
+    if not transcript.strip():
+        return []
+
+    prompt = (
+        "Below is a conversation. The speaker labelled 'user' is the OWNER. "
+        "The speaker labelled 'assistant' is an assistant.\n"
+        "Extract atomic facts about the OWNER only. One per line.\n"
+        "Rules:\n"
+        "- Only what the OWNER stated about themselves: preferences, habits, "
+        "their work, their life, their plans.\n"
+        "- Nothing the assistant said, inferred, summarised or assumed.\n"
+        "- Nothing about the assistant.\n"
+        "- No feelings, diagnoses, motives or identities you infer.\n"
+        "- Preserve uncertainty and reported-vs-observed wording.\n"
+        "- One short line each. No preamble.\n\n"
+        f"Conversation:\n{transcript}"
+    )
+    try:
+        raw = model_call(prompt)
+    except Exception:
+        return _heuristic_from_owner(parts, source=source)
+
+    out: list[Candidate] = []
+    for line in (raw or "").splitlines():
+        s = line.strip().lstrip("-*• ").strip()
+        if _NO_FACTS_RE.match(s):
+            return []
+        if len(s) < 12 or _CHATTER_RE.match(s) or _META_RE.search(s):
+            continue
+        if hazards.is_hazardous(s):
+            continue
+        out.append(
+            Candidate(
+                id=ids.new_id(),
+                text=s,
+                trust=score_claim(s),
+                kind_hint=kind_hint_for(s),
+                source=source or {},
+                created=_now(),
+            )
+        )
+    return out or _heuristic_from_owner(parts, source=source)
+
+
+def _heuristic_from_owner(
+    parts: list[tuple[str, str]], *, source: dict[str, Any] | None = None
+) -> list[Candidate]:
+    """Offline fallback: only the owner's turns, never the assistant's."""
+    owner_text = "\n".join(
+        text.strip() for role, text in parts if role == "user" and (text or "").strip()
+    )
+    if not owner_text.strip():
+        return []
+    return extract_claims(owner_text, source=source)
+
+
+def make_quote(text: str, source_text: str) -> dict[str, str]:
+    """Build a hash-verified quote record (law 1)."""
+    return {
+        "quote": text,
+        "source_text": source_text,
+        "quote_hash": quotes.hash_quote(text, source_text),
+    }

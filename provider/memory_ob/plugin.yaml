@@ -1,0 +1,5 @@
+name: memory_ob
+version: 0.1.0
+description: "Memory_OB — memory for Hermes that files what you say by itself and asks you only when something conflicts."
+config_keys:
+  - memory.memory_ob
