@@ -64,7 +64,9 @@ def describe(change: dict[str, Any]) -> dict[str, Any]:
             item.update(verb="Edited a profile", text=str(after.get("name", "")), category="People")
     elif entity == "import":
         n = int(after.get("count", 0))
-        item.update(verb="Brought in", text=f"{n} memories from {after.get('source', 'a file')}",
+        chats = after.get("unit") == "conversations"
+        unit = ("conversation" if n == 1 else "conversations") if chats else ("memory" if n == 1 else "memories")
+        item.update(verb="Brought in", text=f"{n} {unit} from {after.get('source', 'a file')}",
                     category="Import")
     elif entity == "doubt":
         item.update(verb="Kept your earlier answer", text=str(after.get("text", "")),
@@ -79,7 +81,10 @@ def describe(change: dict[str, Any]) -> dict[str, Any]:
 def build(store: Any, *, limit: int = 60) -> list[dict[str, Any]]:
     """The most recent changes, newest first, each marked undoable or not."""
     items: list[dict[str, Any]] = []
+    private = store.private_ids()          # made private after the change was logged
     for change in store.list_changes(limit=limit):
+        if change["entity"] == "record" and change["entity_id"] in private:
+            continue
         if change["entity"] == "record" and not all(
             exit_gate.keep(snap) for snap in (change.get("before"), change.get("after")) if isinstance(snap, dict)
         ):

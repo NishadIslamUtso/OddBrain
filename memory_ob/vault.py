@@ -114,6 +114,9 @@ def folder_for(record: Any) -> str:
     """The vault folder a record's note lives in."""
     if record.kind in (JOURNAL, STORY):
         return "Journal"
+    project = topics.thread_of_tags(record.tags)
+    if project:
+        return f"{topics.IDEAS}/{note_name(project, fallback='Project')}"     # all of a project in one place
     return topics.category_of(record.tags, record.body or record.title)
 
 
@@ -126,6 +129,7 @@ def render_record(
     """Render one record as an Obsidian note."""
     category = topics.category_of(record.tags, record.body or record.title)
     free_tags = [t for t in record.tags if not str(t).startswith(topics.TAG_PREFIX)]
+    project = topics.thread_of_tags(record.tags)
     lines = ["---"]
     lines.append(f"id: {record.id}")
     lines.append(f"kind: {record.kind}")
@@ -150,6 +154,9 @@ def render_record(
     revisit = topics.revisit_of(record.source)
     if revisit:
         lines.append(f"revisit: {revisit}")
+    project = topics.thread_of_tags(record.tags)
+    if project:
+        lines.append(f"project: {_yaml_scalar(project)}")
     if record.never_send:
         lines.append("never_send: true")
     for label, targets in (record.links or {}).items():
@@ -158,6 +165,8 @@ def render_record(
     lines.append("---")
     lines.append("")
     lines.append(record.body or record.title or "")
+    if project:
+        lines += ["", f"Part of: [[{note_name(project, fallback='Project')}]]"]
     if people:
         lines += ["", "People: " + ", ".join(f"[[{p}]]" for p in people)]
     if related:
@@ -343,13 +352,23 @@ def write_person(store: Any, vault: Path, person: dict[str, Any]) -> Path:
     if person.get("notes"):
         lines += [person["notes"], ""]
     mentions: list[str] = []
+    days: list[str] = []
     names = {person["name"].lower(), *(a.lower() for a in person.get("aliases", []))}
     for rec in store.list_records(status=ACTIVE, limit=10000):
         rel_rec = idx.get(rec.id)
         if rel_rec and {p.lower() for p in _record_people(rec)} & names:
             mentions.append(f"- [[{Path(rel_rec).stem}]]")
+            days.append(_day(rec.event_time or rec.created))
+    days = sorted(d for d in days if d)
+    summary = [person["relation"]] if person.get("relation") else []
     if mentions:
-        lines += ["## Mentioned in", "", *mentions, ""]
+        summary.append(f"mentioned {len(mentions)} time{'s' if len(mentions) != 1 else ''}")
+        if days:
+            summary.append(f"first {days[0]}, latest {days[-1]}")
+    if summary:
+        lines += ["**" + " · ".join(summary) + "**", ""]
+    if mentions:
+        lines += ["## What I know", "", *mentions, ""]
     convs = store.person_conversations(person)
     if convs:
         lines += ["## Conversations", ""]
@@ -364,13 +383,96 @@ def write_person(store: Any, vault: Path, person: dict[str, Any]) -> Path:
     return target
 
 
+def project_threads(store: Any) -> dict[str, list[Any]]:
+    """Active, shareable records grouped by project tag."""
+    from . import exit as exit_gate
+
+    out: dict[str, list[Any]] = {}
+    for rec in store.list_records(status=ACTIVE, limit=100000):
+        if rec.never_send or rec.demo or not exit_gate.keep(rec):
+            continue
+        for tag in rec.tags:
+            if str(tag).startswith(topics.THREAD_PREFIX):
+                out.setdefault(str(tag), []).append(rec)
+    return out
+
+
+def write_projects(store: Any, vault: Path) -> int:
+    """One hub note per project: where it stands, what is next, and the whole story in order.
+
+    The hub is generated; the notes it links to are where details are edited.
+    """
+    vault = Path(vault)
+    idx = _load_index(vault)
+    threads = project_threads(store)
+    written = 0
+    live = set()
+    for tag, recs in threads.items():
+        title = topics.thread_title(tag)
+        key = f"project:{tag[len(topics.THREAD_PREFIX):]}"
+        live.add(key)
+        recs = sorted(recs, key=lambda r: (r.event_time or r.created or "", r.created or ""))
+        folder = f"{topics.IDEAS}/{note_name(title, fallback='Project')}"
+        rel = f"{folder}/{note_name(title, fallback='Project')}.md"
+        old = idx.get(key)
+
+        def line(r: Any) -> str:
+            stem = Path(idx[r.id]).stem if r.id in idx else ""
+            link = f" ([[{stem}]])" if stem else ""
+            return f"- {_day(r.event_time or r.created)} — {(r.body or r.title).strip()}{link}"
+
+        lines = ["---", f"id: {key}", "kind: project", f"title: {_yaml_scalar(title)}",
+                 f"tags: [{_yaml_scalar(tag)}]", "---", "", f"# {title}", "",
+                 "_Kept up to date automatically. Edit the notes it links to._", ""]
+        newest = list(reversed(recs))[:3]
+        lines += ["## Where it stands", "", *[line(r) for r in newest], ""]
+        later = [r for r in recs if topics.revisit_of(r.source)]
+        if later:
+            lines += ["## Come back to", "", *[
+                f"- {topics.revisit_of(r.source)} — {(r.body or r.title).strip()}" for r in later], ""]
+        todo = [r for r in recs if topics.TODO_TAG in r.tags and topics.DONE_TAG not in r.tags]
+        if todo:
+            lines += ["## To do", "", *[f"- [ ] {(r.body or r.title).strip()}" for r in todo], ""]
+        lines += ["## Timeline", "", *[line(r) for r in recs], ""]
+        convs = list(dict.fromkeys(
+            str((r.source or {}).get("conversation_id") or "") for r in recs))
+        convs = [c for c in convs if c]
+        if convs:
+            lines += ["## Where this came from", ""]
+            seen_stems: set[str] = set()
+            for cid in convs:
+                conv = store.get_conversation(cid)
+                if conv and conversation_note_stem(conv) not in seen_stems:
+                    seen_stems.add(conversation_note_stem(conv))
+                    lines.append(f"- [[{conversation_note_stem(conv)}]] ({conv.get('origin') or 'chat'})")
+            lines.append("")
+        target = vault / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text("\n".join(lines), encoding="utf-8")
+        if old and old != rel:
+            _remove(vault / old)
+        idx[key] = rel
+        written += 1
+    for key in [k for k in idx if k.startswith("project:") and k not in live]:
+        _remove(vault / idx.pop(key))
+    _save_index(vault, idx)
+    return written
+
+
 def conversation_note_stem(conv: dict[str, Any]) -> str:
     """The note name of a stored conversation."""
-    return f"{_day(conv.get('created'))} {note_name(conv.get('origin') or 'chat', limit=20)} {str(conv['id'])[:6]}"
+    # The start of an id is a clock reading, shared by everything made in the same
+    # minutes; the end is the part that differs.
+    return f"{_day(conv.get('created'))} {note_name(conv.get('origin') or 'chat', limit=20)} {str(conv['id']).split('-')[-1][:6]}"
 
 
-def write_conversation(vault: Path, conv: dict[str, Any]) -> Path:
-    """Write a stored conversation, verbatim, as a source note."""
+def write_conversation(vault: Path, conv: dict[str, Any], hide: list[str] | None = None) -> Path:
+    """Write a stored conversation, verbatim, as a source note.
+
+    *hide* lists sentences the owner made private; they are blanked in the note.
+    """
+    from .exit import mask
+
     vault = Path(vault)
     folder = vault / "Sources" / "Conversations"
     folder.mkdir(parents=True, exist_ok=True)
@@ -386,7 +488,7 @@ def write_conversation(vault: Path, conv: dict[str, Any]) -> Path:
     lines += ["tags: [source]", "---", ""]
     if people:
         lines += ["With: " + ", ".join(f"[[{p}]]" for p in people), ""]
-    lines += [conv.get("text") or "", ""]
+    lines += [mask(conv.get("text") or "", hide or []), ""]
     path.write_text("\n".join(lines), encoding="utf-8")
     return path
 
@@ -398,7 +500,7 @@ def write_summary_notes(store: Any, vault: Path, *, me_data: dict[str, Any] | No
 
     vault = Path(vault)
     (vault / ME_NOTE).write_text(
-        me_mod.render_markdown(me_data if me_data is not None else me_mod.build(store)),
+        me_mod.render_markdown(me_data if me_data is not None else me_mod.build(store, vault=vault)),
         encoding="utf-8",
     )
     if biography:
@@ -423,12 +525,19 @@ def rebuild(store: Any, vault: Path) -> dict[str, int]:
     for person in people:
         write_person(store, vault, store.get_person(person["id"]))
     convs = 0
+    stems: set[str] = set()
+    hide = store.private_phrases()
     for row in store.list_conversations(limit=100000):
         conv = store.get_conversation(row["id"])
         if conv:
-            write_conversation(vault, conv)
+            write_conversation(vault, conv, hide)
+            stems.add(conversation_note_stem(conv))
             convs += 1
+    for old in (vault / "Sources" / "Conversations").glob("*.md"):     # renders from an older naming
+        if old.stem not in stems:
+            _remove(old)
     write_summary_notes(store, vault)
+    write_projects(store, vault)
     return {"notes": written, "people": len(people), "conversations": convs}
 
 

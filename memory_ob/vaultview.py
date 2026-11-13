@@ -27,6 +27,7 @@ from .records import ACTIVE
 SENSITIVE = (topics.HEALTH, topics.MONEY)
 
 TYPE_MEMORY, TYPE_PERSON, TYPE_SOURCE, TYPE_SUMMARY = "memory", "person", "source", "summary"
+TYPE_PROJECT = "project"
 
 
 # -- every note --------------------------------------------------------------
@@ -34,6 +35,7 @@ TYPE_MEMORY, TYPE_PERSON, TYPE_SOURCE, TYPE_SUMMARY = "memory", "person", "sourc
 
 PLATFORMS = {
     "chatgpt": "ChatGPT", "claude": "Claude", "whatsapp": "WhatsApp", "hermes": "Hermes",
+    "telegram": "Telegram", "messenger": "Messenger", "instagram": "Instagram",
     "browser": "Browser", "api": "Typed in", "tell": "Typed in", "": "Other",
 }
 
@@ -97,6 +99,25 @@ def list_notes(store: Any, vault: Path) -> list[dict[str, Any]]:
             "sensitive": False, "conversation_id": "",
         })
 
+    for key, rel in sorted(idx.items()):
+        if not key.startswith("project:") or not (vault / rel).is_file():
+            continue
+        tag = topics.THREAD_PREFIX + key[len("project:"):]
+        members = [n for n in notes if n["type"] == TYPE_MEMORY and tag in n["tags"]]
+        if not members:
+            continue
+        notes.append({
+            "path": rel, "name": Path(rel).stem, "type": TYPE_PROJECT, "id": key,
+            "title": topics.thread_title(tag), "category": topics.IDEAS, "kind": "project",
+            "tags": [topics.tag_for(topics.IDEAS), tag],
+            "created": min(n["created"] or "" for n in members),
+            "updated": max(n["updated"] or "" for n in members), "by": "AI",
+            "people": sorted({p for n in members for p in n["people"]}), "revisit": "",
+            "snippet": f"{len(members)} notes · " + (members[-1]["snippet"] if members else "")[:150],
+            "sensitive": False, "conversation_id": "",
+        })
+
+    private = store.private_phrases()
     for conv in store.list_conversations(limit=100000):
         path = Path("Sources") / "Conversations" / f"{vault_mod.conversation_note_stem(conv)}.md"
         if not (vault / path).is_file():
@@ -106,7 +127,8 @@ def list_notes(store: Any, vault: Path) -> list[dict[str, Any]]:
             "title": conversation_title(conv), "category": "Sources", "kind": "conversation",
             "tags": ["source"], "created": conv.get("created", ""), "updated": conv.get("created", ""),
             "by": "you", "people": list(conv.get("people") or []), "revisit": "",
-            "snippet": (conv.get("text") or "")[:200], "sensitive": False, "conversation_id": conv["id"],
+            "snippet": exit_gate.mask(conv.get("text") or "", private)[:200], "sensitive": False,
+            "conversation_id": conv["id"],
         })
 
     for rel, title in ((vault_mod.ME_NOTE, "Me"), (vault_mod.BIOGRAPHY_NOTE, "Biography")):
@@ -269,6 +291,11 @@ def links(store: Any, notes: list[dict[str, Any]]) -> list[dict[str, str]]:
                 person = by_person.get(str(name).lower())
                 if person:
                     add(note["path"], person["path"], "person")
+        if note["type"] == TYPE_MEMORY:
+            for tag in note["tags"]:
+                hub = by_id.get("project:" + tag[len(topics.THREAD_PREFIX):]) if tag.startswith(topics.THREAD_PREFIX) else None
+                if hub:
+                    add(note["path"], hub["path"], "project")
         if note["type"] == TYPE_MEMORY and note["conversation_id"]:
             conv = by_id.get(note["conversation_id"])
             if conv:
@@ -388,9 +415,9 @@ def summary_for_status(store: Any, vault: Path) -> dict[str, int]:
             "sources": sum(1 for n in notes if n["type"] == TYPE_SOURCE)}
 
 
-def now_view(store: Any) -> dict[str, Any]:
+def now_view(store: Any, vault: Path | None = None) -> dict[str, Any]:
     """The Me screen's data."""
-    return me_mod.build(store)
+    return me_mod.build(store, vault=vault)
 
 
 _ = re  # kept for callers that import the module's regex helpers

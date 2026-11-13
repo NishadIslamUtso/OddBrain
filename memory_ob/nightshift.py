@@ -1,7 +1,8 @@
 """The night shift: everything Memory_OB does by itself, in one pass.
 
 It reads whatever was left waiting, looks for people who may be the same,
-brings the notes in the vault and the biography up to date, refreshes the
+brings the notes in the vault and the biography up to date, prepares meaning
+search (embeddings), refreshes the
 integrity manifest and, if the owner turned that on, updates Hermes's own
 memory notes. Each step stands alone: one failing does not stop the rest.
 
@@ -71,6 +72,25 @@ def run(settings: Settings, *, dry_run: bool = False, skip: tuple[str, ...] = ()
             data = biography.refresh(st, settings.vault, call, include_sensitive=app.bio_sensitive)
         return data["how"] or "nothing to write yet"
 
+    def embed() -> str:
+        from .embedder import ensure_embeddings
+
+        if not app.semantic:
+            return "off"
+        backend, slot = models.resolve_backend(cfg), cfg.slot("embed")
+        name = models.embed_model_name(slot)
+        total = 0
+        with Store(settings.db) as st:
+            while True:
+                n = ensure_embeddings(st, backend=backend, slot=slot, limit=100)
+                total += n
+                if n == 0:
+                    break
+            left = len(st.missing_embeddings(limit=1, model=name))
+        if left:
+            return f"{total} prepared; the embedding model ({name}) could not be reached for the rest"
+        return f"{total} prepared"
+
     def notes() -> str:
         from .vault import rebuild
 
@@ -95,7 +115,7 @@ def run(settings: Settings, *, dry_run: bool = False, skip: tuple[str, ...] = ()
         return "Hermes memory files not found" if report is None else f"{report['synced']} memories"
 
     steps = [("read", read_waiting), ("people", same_people), ("biography", bio),
-             ("notes", notes), ("manifest", manifest), ("hermes", hermes_sync)]
+             ("embed", embed), ("notes", notes), ("manifest", manifest), ("hermes", hermes_sync)]
     steps = [(n, f) for n, f in steps if n not in skip]
     if dry_run:
         return [{"step": n, "ok": "dry", "detail": "would run"} for n, _ in steps]

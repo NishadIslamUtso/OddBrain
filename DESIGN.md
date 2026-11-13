@@ -48,14 +48,21 @@ one door; a payload that claims a signature is ignored.
 what you said
   → passwords / keys / card numbers replaced with [hidden]
   → conversation saved raw
+  → "forget …" sentences run (matching memories go to trash) and are not themselves kept
   → read into claims (AI helper if there is one, simple rules if not)
+  → clauses containing [hidden] dropped; the rest of the message continues
+  → grounding: a claim must be supported by the owner's own words (quote hash-checked)
   → for each claim:
       hazard / "never remember" word       → dropped
-      duplicate of something known         → skipped
       hedged ("maybe", "I might")          → kept as "not sure"
-      no helper and not first person       → kept raw, read later
-      contradicts a saved memory           → one question (new / old / both)
-      otherwise                            → saved, filed in a category, in the feed
+      no helper, not first person, not
+        about a known project              → kept raw, read later
+      passing mood / one-off event         → Journal, dated; only checked for repeats
+      duplicate of something known         → skipped
+      contradicts a saved memory           → one question (new / old / both);
+                                             rules first, AI judge for borderline cases
+      otherwise                            → saved, filed in a category (tags: todo,
+                                             project/<name>), in the feed
 ```
 
 Every change writes a change-log entry with the old and new text, so the feed
@@ -94,7 +101,15 @@ reachable — it never claims to be semantic when it is not), and **entities**
 **The exit gate (`exit.py`).** The store takes anything; the door out obeys the
 law. Every record that reaches a screen, a model, an export or a receipt passes
 through it: `neverSend` records are dropped whole (text, title and counts), and
-hazardous text is dropped too.
+hazardous text is dropped too. Keeping a memory private sets `neverSend`; it also
+removes that memory from the feed and change log, and blanks its sentence in every
+saved conversation (screens and vault notes). Settings lists private memories by
+id only. In anonymous mode the provider's search, capture and review tools refuse.
+
+Embeddings are per model: vectors carry the model that made them, only the model
+in use is searched, a switch or an edit marks them stale, and nomic/mixedbread
+prefixes are applied (`models.embed_prefix`). The nightly run and a model change
+both re-embed in the background.
 
 ## 8. The AI helper
 
@@ -106,7 +121,8 @@ local. Two slots exist, `extract` (reading what you say, the biography) and
 ## 9. The nightly run
 
 Reads conversations still waiting for a helper · suggests people who may be the
-same · refreshes the biography (unless locked) · rewrites the notes · checks the
+same · refreshes the biography (unless locked) · prepares meaning search
+(embeddings) · rewrites the notes (including project folders) · checks the
 originals against the manifest (verify only — it never rewrites a fingerprint) ·
 updates Hermes's own notes if that switch is on.
 

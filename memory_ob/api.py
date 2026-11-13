@@ -171,9 +171,13 @@ def _status(st: Store) -> dict[str, Any]:
     cfg = ModelConfig.load(settings.models_path)
     app = _app_settings()
     stats = st.stats()
-    indexed = st.count_embeddings()
+    indexed = st.count_embeddings(models.embed_model_name(cfg.slot("embed")))
+    from . import embedder
+
     if not app.semantic:
         meaning = "off"
+    elif embedder.progress()["running"] and indexed < stats["active"]:
+        meaning = "preparing"
     elif indexed > 0:
         meaning = "working"
     else:
@@ -208,6 +212,7 @@ def _people_index(st: Store) -> list[dict[str, Any]]:
         for n in [p["name"], *p["aliases"]]:
             by_name[n.lower()] = entry
     seen_conv: set[tuple[str, str]] = set()
+    private = st.private_phrases()
     for conv in st.list_conversations(limit=100000):
         for n in conv.get("people") or []:
             entry = by_name.get(str(n).lower())
@@ -215,7 +220,7 @@ def _people_index(st: Store) -> list[dict[str, Any]]:
                 seen_conv.add((entry["id"], conv["id"]))
                 entry["conversations"].append({
                     "id": conv["id"], "origin": conv.get("origin") or "", "created": conv.get("created") or "",
-                    "preview": (conv.get("text") or "")[:160],
+                    "preview": exit.mask(conv.get("text") or "", private)[:160],
                 })
     from .records import ACTIVE
 
@@ -227,6 +232,11 @@ def _people_index(st: Store) -> list[dict[str, Any]]:
                 seen_rec.add((entry["id"], rec.id))
                 entry["memories"].append(rec)
     return list({id(v): v for v in by_name.values()}.values())
+
+
+def _n(count: int, one: str, many: str | None = None) -> str:
+    """"1 memory", "2 memories"."""
+    return f"{count} {one if count == 1 else (many or one + 's')}"
 
 
 def _platform(origin: str) -> str:
@@ -293,7 +303,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/home")
     def home(st: Store = Depends(get_store)) -> dict[str, Any]:
-        me = me_mod.build(st)
+        me = me_mod.build(st, vault=settings.vault)
         due = [i for s in me["sections"] if s["key"] == "coming" for i in s["items"] if i.get("due")]
         return {
             "doubts": doubts_mod.list_doubts(st),
@@ -440,6 +450,26 @@ def create_app() -> FastAPI:
         )
         _after_change(st)
         return saved.to_dict() if saved else {}
+
+    @app.post("/api/records/{record_id}/done")
+    def tick_off(record_id: str, payload: dict[str, Any] | None = None, st: Store = Depends(get_store)) -> dict[str, Any]:
+        r = st.get_record(record_id)
+        if r is None or not exit.keep(r):
+            raise HTTPException(status_code=404, detail="That item no longer exists.")
+        done = bool((payload or {}).get("done", True))
+        manager.mark_done(st, record_id, done=done, vault=settings.vault)
+        _after_change(st)
+        return {"ok": True, "done": done}
+
+    @app.post("/api/records/{record_id}/private")
+    def make_private(record_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
+        """Hide a memory from every screen and every AI. Bring it back from Settings."""
+        r = st.get_record(record_id)
+        if r is None or not exit.keep(r):
+            raise HTTPException(status_code=404, detail="That memory no longer exists.")
+        manager.make_private(st, record_id, vault=settings.vault)
+        _after_change(st)
+        return {"ok": True}
 
     @app.delete("/api/records/{record_id}")
     def forget_record(record_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -628,11 +658,13 @@ def create_app() -> FastAPI:
         return person
 
     @app.delete("/api/people/{person_id}")
-    def remove_person(person_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
-        person = manager.delete_person(st, person_id, vault=settings.vault)
+    def remove_person(person_id: str, chats: bool = False, st: Store = Depends(get_store)) -> dict[str, Any]:
+        """Remove a profile; with ``chats=true`` also the saved conversations that were only with them."""
+        person = manager.delete_person(st, person_id, vault=settings.vault, chats=chats)
         if person is None:
             raise _fail(404, "That person no longer exists.")
-        return {"ok": True}
+        _after_change(st)
+        return {"ok": True, "chats_removed": person.get("chats_removed", 0)}
 
     @app.post("/api/people/merge")
     def merge_people(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -646,7 +678,9 @@ def create_app() -> FastAPI:
 
     @app.get("/api/conversations")
     def list_conversations(limit: int = 200, offset: int = 0, st: Store = Depends(get_store)) -> dict[str, Any]:
-        return {"conversations": st.list_conversations(limit=limit, offset=offset),
+        private = st.private_phrases()
+        return {"conversations": [exit.mask_conversation(c, private)
+                                  for c in st.list_conversations(limit=limit, offset=offset)],
                 "total": st.count_conversations(), "limit": limit, "offset": offset}
 
     @app.get("/api/conversations/{conv_id}")
@@ -654,6 +688,7 @@ def create_app() -> FastAPI:
         c = st.get_conversation(conv_id)
         if c is None:
             raise HTTPException(status_code=404, detail="That conversation no longer exists.")
+        c = exit.mask_conversation(c, st.private_phrases())
         c["platform"] = _platform(c.get("origin") or "")
         return c
 
@@ -661,7 +696,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/me")
     def me(st: Store = Depends(get_store)) -> dict[str, Any]:
-        return me_mod.build(st)
+        return me_mod.build(st, vault=settings.vault)
 
     def _entries(st: Store) -> list[dict[str, Any]]:
         from .journal import journal_entries
@@ -744,7 +779,7 @@ def create_app() -> FastAPI:
             )
             result["notes"] = res
             notes_text = (
-                f"Brought in {res['saved']} memories"
+                f"Brought in {_n(res['saved'], 'memory', 'memories')}"
                 + (f", {res['duplicates']} were already known" if res["duplicates"] else "")
                 + (f", {res['asked']} need your answer" if res["asked"] else "")
                 + (f", {res['skipped']} skipped" if res["skipped"] else "") + "."
@@ -755,10 +790,11 @@ def create_app() -> FastAPI:
             helper_on = _helper() is not None
             if helper_on:
                 reader.kick(settings)
-            people_note = f" {len(res['people'])} people found." if res["people"] else ""
-            again = f" {res['already']} were already here." if res["already"] else ""
+            people_note = f" {_n(len(res['people']), 'person', 'people')} found." if res["people"] else ""
+            again = (f" {res['already']} {'was' if res['already'] == 1 else 'were'} already here."
+                     if res["already"] else "")
             chats_text = (
-                f"Kept {res['conversations']} conversations from {parsed.source}.{again}{people_note} "
+                f"Kept {_n(res['conversations'], 'conversation')} from {parsed.source}.{again}{people_note} "
                 + ("The AI is reading them now; this can take a while." if helper_on
                    else "They will be read once an AI helper is available.")
             )
@@ -810,6 +846,8 @@ def create_app() -> FastAPI:
             "hermes_files": bool(memory_path and user_path),
             "vault": str(settings.vault),
             "backups": backups,
+            # ids only: what a private memory says is never shown, not even here
+            "private_ids": sorted(st.private_ids()),
         }
 
     @app.post("/api/settings")
@@ -852,6 +890,7 @@ def create_app() -> FastAPI:
         """Use Hermes's model automatically, or a model of the owner's own."""
         mode = str(payload.get("mode") or "auto")
         cfg = ModelConfig.load(settings.models_path)
+        before = models.embed_model_name(cfg.slot("embed"))
         if mode == "auto":
             cfg.main = ModelSlot()
             cfg.auxiliary["embed"] = ModelSlot(model=str(payload.get("meaning_model") or "").strip())
@@ -869,6 +908,9 @@ def create_app() -> FastAPI:
             raise _fail(400, "Unknown choice.")
         settings.ensure_dirs()
         cfg.save(settings.models_path)
+        if models.embed_model_name(cfg.slot("embed")) != before and _app_settings().semantic:
+            from .embedder import kick as embed_in_background
+            embed_in_background(settings)          # another model: redo the numbers behind meaning search
         return {"ai": _ai_settings(), "status": _status(st)}
 
     @app.post("/api/embed")
@@ -885,7 +927,7 @@ def create_app() -> FastAPI:
         except Exception as exc:  # noqa: BLE001
             logger.info("embedding failed: %s", exc)
             n = 0
-        cached = st.count_embeddings()
+        cached = st.count_embeddings(models.embed_model_name(cfg.slot("embed")))
         if cached:
             message = f"Meaning search is ready for {cached} memories."
         else:
@@ -963,7 +1005,14 @@ def create_app() -> FastAPI:
 
     @app.get("/api/changes")
     def list_changes(limit: int = 100, st: Store = Depends(get_store)) -> dict[str, Any]:
-        return {"changes": st.list_changes(limit=limit)}
+        private = st.private_ids()
+        shown = [
+            c for c in st.list_changes(limit=limit)
+            if not (c["entity"] == "record" and (
+                c["entity_id"] in private
+                or not all(exit.keep(snap) for snap in (c.get("before"), c.get("after")) if isinstance(snap, dict))))
+        ]
+        return {"changes": shown}
 
     @app.get("/api/activity")
     def activity(limit: int = 50, st: Store = Depends(get_store)) -> list[dict[str, Any]]:
@@ -1056,12 +1105,11 @@ def create_app() -> FastAPI:
 
     @app.post("/api/neversend/{record_id}")
     def clear_neversend(record_id: str, request: Request = None) -> dict[str, Any]:
-        """Clear the neverSend flag on a record (owner decision, logged)."""
+        """Bring a private memory back (owner decision, logged)."""
         with Store(settings.db) as st:
-            rec = st.set_never_send(record_id, value=False, changed_by=_caller(request), reason="neversend_cleared")
-            if rec is None:
+            if not manager.bring_back(st, record_id, vault=settings.vault):
                 raise HTTPException(404, "record not found")
-            st.log_activity("neversend_cleared", f"flag cleared on {record_id}", actor=_caller(request))
+            _after_change(st)
         return {"ok": True}
 
     return app

@@ -26,10 +26,11 @@ import json
 import logging
 import re
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import conflicts, credentials, topics, vault as vault_mod
+from . import conflicts, quotes, credentials, topics, vault as vault_mod
 from .records import ACTIVE, Record, importance_for
 from .review import KEEP_BOTH, TAKE_NEW, TAKE_OLD, CardStore
 
@@ -119,6 +120,9 @@ class Outcome:
     waiting: int = 0
     blocked: int = 0
     secret: int = 0
+    forgotten: int = 0
+    forget_unclear: int = 0
+    ungrounded: int = 0
     record_ids: list[str] = field(default_factory=list)
     card_ids: list[str] = field(default_factory=list)
     people: list[str] = field(default_factory=list)
@@ -129,7 +133,8 @@ class Outcome:
         return {
             "saved": self.saved, "duplicates": self.duplicates, "asked": self.asked,
             "unsure": self.unsure, "waiting": self.waiting, "blocked": self.blocked,
-            "secret": self.secret,
+            "secret": self.secret, "forgotten": self.forgotten, "forget_unclear": self.forget_unclear,
+            "ungrounded": self.ungrounded,
             "record_ids": self.record_ids, "card_ids": self.card_ids,
             "people": self.people, "conversation_id": self.conversation_id,
             "read": self.read,
@@ -226,19 +231,39 @@ def describe(out: Outcome) -> str:
         bits.append(f"Skipped {out.blocked} because of your “never remember” list.")
     if out.secret:
         bits.append("I left out what looked like a password, key or card number.")
+    if out.ungrounded:
+        bits.append(f"Skipped {out.ungrounded} that did not match what you actually said.")
+    if out.forgotten:
+        bits.append("Forgotten." if out.forgotten == 1 else f"Forgot {out.forgotten} things.")
+    if out.forget_unclear:
+        bits.append("I could not tell which memory to forget. Search for it and use Forget.")
     return " ".join(bits) or "There was nothing in that to remember."
 
 
 # -- saving ------------------------------------------------------------------
 
 
-def _comparable(store: Any) -> list[Record]:
-    """Records a new statement is checked against: the owner's active, shareable ones."""
+def _comparable(store: Any, *, moments: bool = False) -> list[Record]:
+    """Records a new statement is checked against: the owner's active, shareable ones.
+
+    Lasting facts are compared with lasting facts only; passing moments ("tired
+    today") are compared with each other, so a mood never contradicts who you are.
+    """
     return [
         r for r in store.list_records(status=ACTIVE, limit=20000)
         if r.speaker == "user" and r.subject == "self" and not r.never_send
         and r.kind not in ("story", "capsule")
+        and (topics.MOMENT_TAG in r.tags) == moments
     ]
+
+
+def _known_threads(store: Any) -> list[str]:
+    seen: list[str] = []
+    for r in store.list_records(status=ACTIVE, limit=20000):
+        for tag in r.tags:
+            if str(tag).startswith(topics.THREAD_PREFIX) and tag not in seen:
+                seen.append(str(tag))
+    return seen
 
 
 def sign_new(
@@ -347,17 +372,74 @@ def capture(
         speaker="user", parts=parts or [], processed=False,
     )
     out.conversation_id = conv_id
+    _run_forget_commands(store, parts, conv_text, out, vault)
     csource = {**source, "conversation_id": conv_id}
-    cands = [c for c in _extract(conv_text, parts, csource, helper) if credentials.HIDDEN not in c.text]
+    cands = []
+    for c in _extract(conv_text, parts, csource, helper):
+        if credentials.HIDDEN in c.text:
+            c.text = credentials.drop_hidden(c.text)      # only the part that held the secret is lost
+            if not c.text:
+                continue
+        cands.append(c)
     used = bool(helper and helper.worked)
 
     _settle_all(store, cands, out, model_used=used, guardrails=guardrails or [],
-                actor=actor, reason=reason, conv_id=conv_id, ignore=ignored_people(vault))
+                actor=actor, reason=reason, conv_id=conv_id, ignore=ignored_people(vault), judge=helper,
+                owner_text=_owner_text(parts, conv_text), source_text=conv_text)
     if used or out.waiting == 0:
         store.mark_conversation_processed(conv_id)
     _tidy(store, vault, out)
     store.log_activity(log_activity_name, f"saved {out.saved}, asked {out.asked}", actor=actor)
     return out
+
+
+def _owner_text(parts: list[dict[str, Any]] | None, conv_text: str) -> str:
+    """Only what the owner said: the user's side of a conversation, or the text itself."""
+    if parts:
+        return "\n".join(str(p.get("content", "")) for p in parts if p.get("role", "user") == "user")
+    return conv_text
+
+
+def _run_forget_commands(
+    store: Any, parts: list[dict[str, Any]] | None, text: str, out: Outcome, vault: Path | None,
+) -> None:
+    """"forget that I like mangoes", said in chat, removes that memory (it goes to the trash)."""
+    from .extract import _SENTENCE_RE, forget_target
+
+    owner = ("\n".join(str(p.get("content", "")) for p in parts if p.get("role", "user") == "user")
+             if parts else text)
+    for sentence in _SENTENCE_RE.split(owner or ""):
+        what = forget_target(sentence)
+        if not what:
+            continue
+        target = _memory_matching(store, what)
+        if target is None:
+            out.forget_unclear += 1
+            continue
+        forget_record(store, target.id, vault=vault)
+        out.forgotten += 1
+
+
+def _memory_matching(store: Any, what: str) -> Record | None:
+    """The one active memory that says *what*, or None when none or several do."""
+    wanted = conflicts.read(what).stems
+    if not wanted:
+        return None
+    scored: list[tuple[float, int, Record]] = []
+    for rec in store.list_records(status=ACTIVE, limit=20000):
+        if rec.speaker != "user" or rec.subject != "self" or rec.never_send:
+            continue
+        have = conflicts.read(rec.body or rec.title).stems
+        shared = len(wanted & have)
+        ratio = shared / len(wanted)
+        if ratio >= 0.6 and shared >= 1:
+            scored.append((ratio, shared, rec))
+    if not scored:
+        return None
+    scored.sort(key=lambda t: (-t[0], -t[1]))
+    if len(scored) > 1 and scored[0][:2] == scored[1][:2]:
+        return None
+    return scored[0][2]
 
 
 def _chunks(parts: list[dict[str, Any]], limit: int = 12000) -> list[list[dict[str, Any]]]:
@@ -404,9 +486,21 @@ def _extract(
 def _settle_all(
     store: Any, cands: list[Any], out: Outcome, *, model_used: bool, guardrails: list[str],
     actor: str, reason: str, conv_id: str | None, ignore: set[str] | None = None,
+    judge: Any | None = None, owner_text: str | None = None, source_text: str = "",
 ) -> None:
+    from .extract import support
+
     people_seen: list[str] = []
     for c in cands:
+        if owner_text is not None:
+            grounded, evidence = support(c.text, owner_text)
+            if not grounded:
+                store.log_activity("not-grounded", c.text[:80], actor="memory_ob")
+                out.ungrounded += 1
+                continue
+            if evidence:
+                c.source = {**c.source, "quote": evidence,
+                            "quote_hash": quotes.hash_quote(evidence, source_text)}
         blocked = blocked_by_guardrails(guardrails, c.text)
         if blocked:
             store.log_activity("guardrail-block", f"{c.text[:80]} (~ {blocked})", actor="memory_ob")
@@ -422,7 +516,8 @@ def _settle_all(
             if name not in people_seen:
                 people_seen.append(name)
         settle_fact(store, fid, c.text, kind=c.kind_hint or "note", source=c.source, out=out,
-                    model_used=model_used, people=[n for n, _ in named], actor=actor, reason=reason)
+                    model_used=model_used, people=[n for n, _ in named], actor=actor, reason=reason,
+                    judge=judge)
     out.people = people_seen
     if conv_id and people_seen:
         store.set_conversation_people(conv_id, people_seen)
@@ -433,7 +528,7 @@ def settle_fact(
     store: Any, fact_id: str, text: str, *, kind: str, source: dict[str, Any], out: Outcome,
     model_used: bool, people: list[str], actor: str = AI,
     reason: str = "remembered from what you said", force: bool = False,
-    log: bool = True,
+    log: bool = True, judge: Any | None = None,
 ) -> str:
     """Decide what happens to one statement. Returns what was done.
 
@@ -449,12 +544,21 @@ def settle_fact(
         store.set_fact_status(fact_id, "unsure")
         out.unsure += 1
         return "unsure"
-    if not force and not model_used and not _FIRST_PERSON.search(text):
+    if (not force and not model_used and not _FIRST_PERSON.search(text)
+            and not topics.thread_of(text, _known_threads(store))):
+        # Not said in the first person and not about one of your projects: read it later.
         store.set_fact_status(fact_id, "waiting")
         out.waiting += 1
         return "waiting"
 
-    found = conflicts.find(text, _comparable(store))
+    moment = topics.is_moment(text)
+    if moment:
+        # A passing moment is kept, dated, in the Journal. It is only checked for repeats.
+        found = conflicts.find(text, _comparable(store, moments=True))
+        if found is not None and found[0] != conflicts.DUPLICATE:
+            found = None
+    else:
+        found = conflicts.find(text, _comparable(store), judge)
     if found is not None:
         verdict, existing = found
         if verdict == conflicts.DUPLICATE:
@@ -468,8 +572,21 @@ def settle_fact(
             out.card_ids.append(card.id)
         return "asked"
 
+    extra: list[str] = []
+    event_time = None
+    if moment:
+        kind = "journal"
+        extra.append(topics.MOMENT_TAG)
+        event_time = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    else:
+        kind = kind if kind in ("profile", "note", "learning") else "note"
+        if topics.is_todo(text):
+            extra.append(topics.TODO_TAG)
+        thread = topics.thread_of(text, _known_threads(store))
+        if thread:
+            extra.append(topics.thread_tag(thread))
     rec = sign_new(
-        store, text, kind=kind if kind in ("profile", "note", "learning", "journal") else "note",
+        store, text, kind=kind, tags=extra, event_time=event_time,
         source={**source, "fact_id": fact_id}, people=people, actor=actor, reason=reason,
         log=log,
     )
@@ -531,7 +648,8 @@ def process_waiting(
                 store.set_fact_status(fact["id"], "reprocessed")
         _settle_all(store, cands, out, model_used=True, guardrails=guardrails or [],
                     actor=AI, reason="read once the AI helper was available", conv_id=conv["id"],
-                    ignore=ignored_people(vault))
+                    ignore=ignored_people(vault), judge=helper,
+                    owner_text=_owner_text(parts, conv["text"]), source_text=conv["text"])
         store.mark_conversation_processed(conv["id"])
         out.read += 1
     if out.saved or out.asked or out.unsure:
@@ -556,10 +674,11 @@ def _tidy(store: Any, vault: Path | None, out: Outcome | None = None, *, record_
             if rec is not None:
                 vault_mod.write_record(store, vault, rec, index=idx)
         vault_mod._save_index(vault, idx)  # noqa: SLF001
+        vault_mod.write_projects(store, vault)
         if out and out.conversation_id:
             conv = store.get_conversation(out.conversation_id)
             if conv:
-                vault_mod.write_conversation(vault, conv)
+                vault_mod.write_conversation(vault, conv, store.private_phrases())
         names = set(out.people) if out else set()
         for name in names:
             person = store.find_person(name)
@@ -640,6 +759,8 @@ def edit_record(
     if rec is None:
         return None
     before = Record.from_dict(rec.to_dict())
+    if body is not None:
+        body, _ = credentials.redact(body)       # a password typed into an edit is hidden too
     if body is not None and body.strip():
         rec.body = body.strip()
         rec.title = rec.body[:120]
@@ -648,6 +769,9 @@ def edit_record(
         rec.tags = topics.with_category(
             [t for t in rec.tags if not t.startswith(topics.TAG_PREFIX)], cat
         )
+    if category in topics.CATEGORIES and category != topics.category_of(before.tags, before.body):
+        # Choosing a category yourself takes the note out of its project folder.
+        rec.tags = [t for t in rec.tags if not str(t).startswith(topics.THREAD_PREFIX)]
     revisit = topics.revisit_date(rec.body)
     if revisit:
         rec.source = {**rec.source, "revisit_at": revisit}
@@ -656,6 +780,95 @@ def edit_record(
                       reason="you edited it")
     _tidy(store, vault, None, record_ids=[record_id])
     return saved
+
+
+def mark_done(store: Any, record_id: str, *, done: bool = True, vault: Path | None = None) -> Record | None:
+    """Tick a to-do off (or put it back). Logged, so Undo works."""
+    rec = store.get_record(record_id)
+    if rec is None:
+        return None
+    before = Record.from_dict(rec.to_dict())
+    rec.tags = [t for t in rec.tags if t not in (topics.TODO_TAG, topics.DONE_TAG)]
+    rec.tags.append(topics.DONE_TAG if done else topics.TODO_TAG)
+    saved = store.sign_record(rec, card_id=OWNER, changed_by=OWNER,
+                              reason="you ticked it off" if done else "you put it back on the list")
+    log_record_change(store, action="update", before=before, after=saved, actor=OWNER,
+                      reason="you ticked it off" if done else "you put it back on the list")
+    _tidy(store, vault, None, record_ids=[record_id])
+    return saved
+
+
+def reminders(store: Any, *, today: str | None = None, limit: int = 6) -> list[dict[str, str]]:
+    """What the owner still has to do, and what they said they would come back to.
+
+    Open to-dos (not ticked off) and anything whose revisit day has arrived.
+    Private and hazardous memories never appear. Used by the AI helper's
+    start-of-session note and nowhere else that could leak.
+    """
+    from .exit import keep
+
+    day = today or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    out: list[dict[str, str]] = []
+    for rec in store.list_records(status="active", limit=10000):
+        if not keep(rec):
+            continue
+        text = (rec.body or rec.title or "").strip().replace("\n", " ")
+        if not text:
+            continue
+        revisit = topics.revisit_of(rec.source)
+        if topics.DONE_TAG in rec.tags:
+            continue
+        if revisit and revisit <= day:
+            out.append({"kind": "revisit", "due": revisit, "text": text[:160]})
+        elif topics.TODO_TAG in rec.tags:
+            out.append({"kind": "todo", "due": revisit or "", "text": text[:160]})
+    out.sort(key=lambda r: (r["kind"] != "revisit", r["due"] or "9999", r["text"]))
+    return out[:limit]
+
+
+def _refresh_conversation_notes(store: Any, vault: Path | None, rec: Record) -> None:
+    """Rewrite the saved-conversation notes that quote *rec*, so a private sentence is blanked
+    (or shown again) there too."""
+    from .exit import mask
+
+    if vault is None:
+        return
+    words = [w for w in (rec.body, rec.title, (rec.source or {}).get("quote")) if w]
+    hide = store.private_phrases()
+    for row in store.list_conversations(limit=100000):
+        if mask(row["text"], words) == row["text"]:
+            continue                                  # does not quote it
+        conv = store.get_conversation(row["id"])
+        if conv:
+            try:
+                vault_mod.write_conversation(vault, conv, hide)
+            except Exception:  # noqa: BLE001
+                logger.warning("could not update a conversation note", exc_info=True)
+
+
+def make_private(store: Any, record_id: str, *, vault: Path | None = None) -> bool:
+    """Hide one memory from every screen and every AI. It stays in the database.
+
+    The sentence is also blanked inside the saved conversations it came from.
+    """
+    rec = store.set_never_send(record_id, value=True, changed_by=OWNER, reason="you made it private")
+    if rec is None:
+        return False
+    store.log_activity("made-private", f"record {record_id}", actor=OWNER)
+    _tidy(store, vault, None, record_ids=[record_id])
+    _refresh_conversation_notes(store, vault, rec)
+    return True
+
+
+def bring_back(store: Any, record_id: str, *, vault: Path | None = None) -> bool:
+    """Make a private memory visible again."""
+    rec = store.set_never_send(record_id, value=False, changed_by=OWNER, reason="you brought it back")
+    if rec is None:
+        return False
+    store.log_activity("brought-back", f"record {record_id}", actor=OWNER)
+    _tidy(store, vault, None, record_ids=[record_id])
+    _refresh_conversation_notes(store, vault, rec)
+    return True
 
 
 def forget_record(store: Any, record_id: str, *, vault: Path | None = None) -> Record | None:
@@ -675,6 +888,7 @@ def add_journal_entry(
     store: Any, text: str, *, day: str | None = None, vault: Path | None = None
 ) -> Record:
     """The owner writes a dated journal entry. Signed as theirs."""
+    text, _ = credentials.redact(text)
     rec = sign_new(
         store, text.strip(), kind="journal", source={"origin": "journal"},
         actor=OWNER, reason="you wrote it", card_id=OWNER, event_time=day,
@@ -717,6 +931,8 @@ def update_person(
     store: Any, person_id: str, *, vault: Path | None = None, **fields: Any
 ) -> dict[str, Any] | None:
     before = store.get_person(person_id)
+    if isinstance(fields.get("notes"), str):
+        fields["notes"], _ = credentials.redact(fields["notes"])
     after = store.update_person(person_id, **fields)
     if before is None or after is None:
         return None
@@ -750,21 +966,45 @@ def add_person(
     return person
 
 
-def delete_person(store: Any, person_id: str, *, vault: Path | None = None) -> dict[str, Any] | None:
-    """Remove a profile the owner says is wrong. The name is not made into a profile again."""
+def delete_person(
+    store: Any, person_id: str, *, vault: Path | None = None, chats: bool = False,
+) -> dict[str, Any] | None:
+    """Remove a profile the owner says is wrong. The name is not made into a profile again.
+
+    With ``chats=True`` the saved conversations that were only with this person
+    go too (a group chat with others is kept). They are kept in the change log,
+    so Undo brings them back with the profile.
+    """
+    names = set()
+    person = store.get_person(person_id)
+    if person is None:
+        return None
+    names = {person["name"].lower(), *(a.lower() for a in person["aliases"])}
+    removed_chats: list[dict[str, Any]] = []
+    if chats:
+        for conv in store.person_conversations(person):
+            full = store.get_conversation(conv["id"])
+            involved = {str(p).lower() for p in (full or {}).get("people", [])}
+            if full and involved and involved <= names:
+                saved = store.delete_conversation(conv["id"])
+                if saved:
+                    removed_chats.append(saved)
     person = store.delete_person(person_id)
     if person is None:
         return None
-    store.log_change(entity="person", entity_id=person_id, action="remove", before=person, after=None,
-                     actor=OWNER, reason="you removed the profile")
+    before = {**person, "conversations": removed_chats} if removed_chats else person
+    store.log_change(entity="person", entity_id=person_id, action="remove", before=before, after=None,
+                     actor=OWNER, reason="you removed the profile" + (" and your chats with them" if chats else ""))
     if vault is not None:
-        names = ignored_people(vault) | {person["name"].lower(), *(a.lower() for a in person["aliases"])}
         try:
-            _save_ignored(vault, names)
+            _save_ignored(vault, ignored_people(vault) | names)
             _remove_person_note(vault, person_id)
+            for saved in removed_chats:
+                vault_mod._remove(Path(vault) / "Sources" / "Conversations"  # noqa: SLF001
+                                  / f"{vault_mod.conversation_note_stem(saved)}.md")
         except Exception:  # noqa: BLE001
             logger.warning("could not update person notes", exc_info=True)
-    return person
+    return {**person, "chats_removed": len(removed_chats)}
 
 
 def suggest_same_person(store: Any) -> int:
@@ -870,6 +1110,12 @@ def undo(store: Any, seq: int, *, vault: Path | None = None) -> dict[str, Any]:
                                 relation=b["relation"], notes=b["notes"])
         elif action == "remove":
             store.restore_person(change["before"])
+            for saved in change["before"].get("conversations", []):
+                store.restore_conversation(saved)
+                if vault is not None:
+                    conv = store.get_conversation(saved["id"])
+                    if conv:
+                        vault_mod.write_conversation(vault, conv, store.private_phrases())
             if vault is not None:
                 try:
                     vault_mod.write_person(store, vault, change["before"])
@@ -886,6 +1132,17 @@ def undo(store: Any, seq: int, *, vault: Path | None = None) -> dict[str, Any]:
             if store.get_record(rid) is not None:
                 store.trash(rid, reason=f"import undone (change {seq})", by=OWNER)
                 touched.append(rid)
+        for cid in change["after"].get("conversation_ids", []):
+            saved = store.delete_conversation(cid)
+            if saved and vault is not None:
+                vault_mod._remove(Path(vault) / "Sources" / "Conversations"  # noqa: SLF001
+                                  / f"{vault_mod.conversation_note_stem(saved)}.md")
+        for name in change["after"].get("people_created", []):
+            person = store.find_person(name)
+            if person and not store.person_conversations(person):
+                store.delete_person(person["id"])
+                if vault is not None:
+                    _remove_person_note(vault, person["id"])
     elif entity == "doubt":
         result = "cannot"  # keeping the old answer changed nothing, so there is nothing to put back
     else:
@@ -948,6 +1205,8 @@ def store_chats(
     kept = 0
     already = 0
     people_all: list[str] = []
+    new_conversations: list[str] = []
+    new_people: list[str] = []
     for chat in chats:
         parts, _ = credentials.redact_parts(chat["parts"])
         text = "\n".join(f"{p['role']}: {p['content']}" for p in parts)
@@ -961,20 +1220,29 @@ def store_chats(
             speaker="user", parts=parts, people=names, processed=False,
         )
         for name in names:
+            if store.find_person(name) is None and name not in new_people:
+                new_people.append(name)
             store.upsert_person(name)
             if name not in people_all:
                 people_all.append(name)
         if names:
             store.link_conversation(cid)
+        new_conversations.append(cid)
         kept += 1
         if vault is not None:
             try:
                 conv = store.get_conversation(cid)
                 if conv:
-                    vault_mod.write_conversation(vault, conv)
+                    vault_mod.write_conversation(vault, conv, store.private_phrases())
             except Exception:  # noqa: BLE001
                 logger.warning("could not write conversation note", exc_info=True)
     store.log_activity("import-chats", f"{kept} conversation(s) from {source_name}", actor=OWNER)
+    if new_conversations:
+        store.log_change(
+            entity="import", entity_id=f"import-{new_conversations[0]}", action="create", before=None,
+            after={"count": kept, "unit": "conversations", "source": source_name, "record_ids": [],
+                   "conversation_ids": new_conversations, "people_created": new_people},
+            actor=OWNER, reason=f"you imported {source_name}")
     if vault is not None:
         for name in people_all:
             person = store.find_person(name)

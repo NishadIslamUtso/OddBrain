@@ -98,6 +98,22 @@ def redact(text: str) -> tuple[str, int]:
     return out, count
 
 
+def drop_hidden(text: str) -> str:
+    """*text* without the clauses that held a secret; '' when too little is left.
+
+    "My student ID is 1000056707 and my wifi password is [hidden]" keeps the
+    first half: only the part that carried the secret is lost.
+    """
+    if HIDDEN not in (text or ""):
+        return text
+    clauses = [c.strip() for c in re.split(r"\s*(?:;|,|\band\b|\bbut\b)\s*", text, flags=re.I) if c.strip()]
+    kept = [c for c in clauses if HIDDEN not in c]
+    out = " and ".join(kept).strip(" ,;")
+    if len(out) < 12:
+        return ""
+    return out if out[-1] in ".!?" else out + "."
+
+
 def has_secret(text: str) -> bool:
     return redact(text)[1] > 0
 

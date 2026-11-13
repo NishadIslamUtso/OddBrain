@@ -23,6 +23,11 @@ hermes config set memory.provider memory_ob
 Passwords, API keys and card numbers are replaced with `[hidden]` by the engine
 before anything is stored, so the provider never has to think about them.
 
+At the start of a session the system prompt also lists the owner's open to-dos
+and any "come back to" dates that have arrived. They go through the same exit
+gate, are labelled as data rather than instructions, and are left out entirely in
+anonymous mode.
+
 ## Tools
 
 | Tool | Use |
@@ -31,7 +36,7 @@ before anything is stored, so the provider never has to think about them.
 | `memory_ob_capture` | Give Memory_OB something the owner said. It is filed by itself (in the background). |
 | `memory_ob_review` | List the questions waiting for the owner, or put one off with `later`. The agent can **never** answer one. |
 | `memory_ob_stats` | How much is remembered and how many questions are waiting. |
-| `memory_ob_anonymous` | Check, turn on or turn off anonymous mode (nothing recalled, nothing saved). |
+| `memory_ob_anonymous` | Check, turn on or turn off anonymous mode (nothing recalled, nothing saved). While it is on, `memory_ob_search`, `memory_ob_capture` and `memory_ob_review` refuse. The agent should turn it off only when the user asks. |
 
 ## Finding the engine
 

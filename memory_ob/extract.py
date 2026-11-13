@@ -27,6 +27,18 @@ _CHATTER_RE = re.compile(
 
 _QUESTION_RE = re.compile(r"\?\s*$")
 
+# "forget that I like mangoes" is an instruction to Memory_OB, never a memory.
+_FORGET_RE = re.compile(
+    r"^\s*(?:(?:please|pls|hey|ok|okay)[ ,]+)*(?:forget|delete|remove|erase|unremember)\s+"
+    r"(?:(?:that|about|the fact that|what i said about|my memory (?:of|about))\s+)?"
+    r"(?P<what>.{3,200}?)\s*[.!]?\s*$", re.I)
+
+
+def forget_target(sentence: str) -> str:
+    """What the owner asked to be forgotten ("I like mangoes"), or ''."""
+    m = _FORGET_RE.match(sentence or "")
+    return m.group("what").strip() if m else ""
+
 # "I live in Dhaka and I study CSE" is two facts. Splitting them lets each be
 # found, edited and checked against older statements on its own. Only the
 # plain "I … and I …" shape is split: "My friend and I went" stays whole.
@@ -115,6 +127,8 @@ def split_claims(text: str) -> list[str]:
         if _CHATTER_RE.match(s):
             continue
         if _QUESTION_RE.search(s):
+            continue
+        if _FORGET_RE.match(s):
             continue
         if hazards.is_hazardous(s):
             continue
@@ -356,6 +370,36 @@ def _heuristic_from_owner(
     if not owner_text.strip():
         return []
     return extract_claims(owner_text, source=source)
+
+
+_META_WORDS = frozenset({"owner", "user", "person", "speaker", "author", "they", "their"})
+
+
+def support(claim: str, owner_text: str) -> tuple[bool, str]:
+    """Is *claim* backed by what the owner actually said?
+
+    Returns ``(grounded, evidence)``, where *evidence* is the owner's own
+    sentence that backs it best. A claim is grounded when most of its content
+    words (and every number in it) appear in the owner's words. This stops an
+    AI helper from inventing or garbling a memory that is then saved silently.
+    """
+    from . import conflicts
+
+    wanted = {w for w in conflicts.read(claim).stems if w not in _META_WORDS}
+    if not wanted:
+        return True, ""
+    sentences = [x.strip() for x in _SENTENCE_RE.split(owner_text or "") if x.strip()]
+    have = conflicts.read(owner_text or "").stems
+    coverage = len(wanted & have) / len(wanted)
+    claim_numbers = set(conflicts._NUMBER_RE.findall(claim.lower()))      # noqa: SLF001
+    owner_numbers = set(conflicts._NUMBER_RE.findall((owner_text or "").lower()))      # noqa: SLF001
+    best, best_cover = "", 0.0
+    for sent in sentences:
+        cover = len(wanted & conflicts.read(sent).stems) / len(wanted)
+        if cover > best_cover:
+            best, best_cover = sent, cover
+    grounded = coverage >= 0.6 and claim_numbers <= owner_numbers
+    return grounded, best[:300]
 
 
 def make_quote(text: str, source_text: str) -> dict[str, str]:

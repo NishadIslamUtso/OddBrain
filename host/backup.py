@@ -18,7 +18,6 @@ tells you where, so a wrong restore never overwrites a good vault.
 from __future__ import annotations
 
 import argparse
-import os
 import shutil
 import sqlite3
 import sys

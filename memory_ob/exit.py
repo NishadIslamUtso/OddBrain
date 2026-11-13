@@ -15,10 +15,14 @@ the way IN. This is the way OUT — the boundary the model actually crosses.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable
 from typing import Any
 
 from . import hazards
+
+MASK = "[kept private]"
+_MIN_PHRASE = 8                       # shorter text would blank ordinary words everywhere
 
 # Fields whose contents could carry an instruction.
 _SCANNED_FIELDS = ("title", "body")
@@ -90,3 +94,36 @@ def card_out(card: dict[str, Any]) -> dict[str, Any] | None:
 def cards_out(cards: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
     """Filter review cards through :func:`card_out`."""
     return [c for c in (card_out(card) for card in cards) if c is not None]
+
+
+def mask(text: str, phrases: Iterable[str]) -> str:
+    """*text* with every private sentence replaced by "[kept private]".
+
+    A conversation is the owner's own raw words, so it can still hold a sentence
+    the owner later made private. Wherever a conversation is shown, that sentence
+    is blanked (matching ignores case and line breaks).
+    """
+    out = text or ""
+    for phrase in phrases:
+        phrase = " ".join(str(phrase or "").split())
+        if len(phrase) < _MIN_PHRASE:
+            continue
+        pattern = r"\s+".join(re.escape(word) for word in phrase.split(" "))
+        out = re.sub(pattern, MASK, out, flags=re.I)
+    return out
+
+
+def mask_conversation(conv: dict[str, Any], phrases: Iterable[str]) -> dict[str, Any]:
+    """A copy of a conversation (as the store returns it) with private sentences blanked."""
+    phrases = list(phrases)
+    if not phrases:
+        return conv
+    masked = dict(conv)
+    if "text" in masked:
+        masked["text"] = mask(str(masked.get("text") or ""), phrases)
+    if isinstance(masked.get("parts"), list):
+        masked["parts"] = [
+            {**p, "content": mask(str(p.get("content") or ""), phrases)} if isinstance(p, dict) else p
+            for p in masked["parts"]
+        ]
+    return masked

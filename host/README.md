@@ -63,7 +63,8 @@ does not stop the others:
 | read | reads conversations that were waiting for the AI helper |
 | people | suggests profiles that may be the same person (never merges) |
 | biography | refreshes the Journal biography unless you locked it |
-| notes | rewrites the vault notes and `Me.md` |
+| embed | prepares meaning search: embeds new or edited memories, and re-embeds everything after the embedding model was changed (skipped when meaning search is off) |
+| notes | rewrites the vault notes (including project folders) and `Me.md` |
 | manifest | checks imported originals against their fingerprints (verify only) |
 | hermes | updates Hermes's own memory notes, only if you turned that on |
 

@@ -940,6 +940,28 @@ class Store:
         self.conn.commit()
         return cid
 
+    def delete_conversation(self, conv_id: str) -> dict | None:
+        """Remove a stored conversation. Returns the whole row so it can be put back."""
+        row = self.conn.execute("SELECT * FROM conversations WHERE id = ?", (conv_id,)).fetchone()
+        if row is None:
+            return None
+        saved = {k: row[k] for k in row.keys()}
+        self.conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+        self.conn.execute("DELETE FROM edges WHERE src = ? OR dst = ?", (conv_id, conv_id))
+        self.conn.commit()
+        return saved
+
+    def restore_conversation(self, saved: dict) -> None:
+        """Put back a conversation removed by :meth:`delete_conversation`."""
+        if self.conn.execute("SELECT 1 FROM conversations WHERE id = ?", (saved["id"],)).fetchone():
+            return
+        cols = list(saved)
+        self.conn.execute(
+            f"INSERT INTO conversations({', '.join(cols)}) VALUES({', '.join('?' for _ in cols)})",
+            [saved[c] for c in cols],
+        )
+        self.conn.commit()
+
     def link_conversation(self, conv_id: str) -> int:
         """Connect a conversation to others sharing people or topics."""
         import json as _json
@@ -1261,8 +1283,11 @@ class Store:
 
     def person_conversations(self, person: dict) -> list[dict]:
         """Every stored conversation that names this person (or an alias)."""
+        from .exit import mask
+
         names = {person["name"].lower(), *(a.lower() for a in person["aliases"])}
         out = []
+        private = self.private_phrases()
         for row in self.conn.execute(
             "SELECT id, origin, people, created, text FROM conversations ORDER BY created DESC"
         ).fetchall():
@@ -1270,7 +1295,7 @@ class Store:
             if people & names:
                 out.append({
                     "id": row["id"], "origin": row["origin"], "created": row["created"],
-                    "preview": (row["text"] or "")[:160],
+                    "preview": mask(row["text"] or "", private)[:160],
                 })
         return out
 
@@ -1624,20 +1649,68 @@ class Store:
         blob = row["vec"]
         return list(struct.unpack(f"<{len(blob) // 4}f", blob))
 
-    def embedding_ids(self) -> list[str]:
-        rows = self.conn.execute("SELECT record_id FROM embeddings").fetchall()
+    def embedding_ids(self, model: str | None = None) -> list[str]:
+        """Records that have an embedding (from *model* only, when one is given)."""
+        if model is None:
+            rows = self.conn.execute("SELECT record_id FROM embeddings").fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT record_id FROM embeddings WHERE model = ?", (model,)).fetchall()
         return [r["record_id"] for r in rows]
 
-    def missing_embeddings(self, *, limit: int = 500) -> list[str]:
-        rows = self.conn.execute(
-            "SELECT id FROM records WHERE never_send = 0 AND status != 'trash'"
-            " AND id NOT IN (SELECT record_id FROM embeddings) LIMIT ?",
-            (limit,),
-        ).fetchall()
+    def missing_embeddings(self, *, limit: int = 500, model: str | None = None) -> list[str]:
+        """Records that need an embedding: none yet, one from another model, or an edit since.
+
+        With no *model* only the first case counts.
+        """
+        if model is None:
+            rows = self.conn.execute(
+                "SELECT id FROM records WHERE never_send = 0 AND status != 'trash'"
+                " AND id NOT IN (SELECT record_id FROM embeddings) LIMIT ?",
+                (limit,),
+            ).fetchall()
+        else:
+            rows = self.conn.execute(
+                "SELECT r.id FROM records r LEFT JOIN embeddings e ON e.record_id = r.id"
+                " WHERE r.never_send = 0 AND r.status != 'trash'"
+                " AND (e.record_id IS NULL OR e.model != ? OR r.modified > e.created)"
+                " ORDER BY (e.record_id IS NULL) DESC LIMIT ?",
+                (model, limit),
+            ).fetchall()
         return [r["id"] for r in rows]
 
-    def count_embeddings(self) -> int:
-        return int(self.conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0])
+    def count_embeddings(self, model: str | None = None) -> int:
+        if model is None:
+            return int(self.conn.execute("SELECT COUNT(*) FROM embeddings").fetchone()[0])
+        return int(self.conn.execute(
+            "SELECT COUNT(*) FROM embeddings e JOIN records r ON r.id = e.record_id"
+            " WHERE e.model = ? AND r.never_send = 0 AND r.status != 'trash'",
+            (model,)).fetchone()[0])
+
+    def private_ids(self) -> set[str]:
+        """Ids of the memories the owner made private (never shown, never sent)."""
+        return {r["id"] for r in self.conn.execute("SELECT id FROM records WHERE never_send = 1").fetchall()}
+
+    def private_phrases(self) -> list[str]:
+        """The words of every private memory (and the sentence it was taken from).
+
+        Used only to blank them where a saved conversation is shown.
+        """
+        out: list[str] = []
+        for row in self.conn.execute("SELECT title, body, source FROM records WHERE never_send = 1").fetchall():
+            try:
+                quote = (json.loads(row["source"] or "{}") or {}).get("quote")
+            except ValueError:
+                quote = ""
+            for text in (row["body"], row["title"], quote):
+                text = " ".join(str(text or "").split())
+                if len(text) >= 8 and text not in out:
+                    out.append(text)
+        return out
+
+    def delete_embedding(self, record_id: str) -> None:
+        self.conn.execute("DELETE FROM embeddings WHERE record_id = ?", (record_id,))
+        self.conn.commit()
 
     def drop_embeddings(self) -> None:
         self.conn.execute("DELETE FROM embeddings")

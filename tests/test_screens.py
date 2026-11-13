@@ -109,7 +109,7 @@ class Vault(ScreenCase):
         only = self.client.get("/api/vault/graph", params={"q": "path:Health type:memory"}).json()
         self.assertEqual(len(only["nodes"]), 2)
         no_sources = self.client.get("/api/vault/graph", params={"sources": "false"}).json()
-        self.assertEqual({n["type"] for n in no_sources["nodes"]}, {"memory"})
+        self.assertEqual({n["type"] for n in no_sources["nodes"]} - {"project"}, {"memory"})
 
     def test_a_person_in_a_memory_is_linked_in_the_graph(self) -> None:
         self.tell("My sister Riya is a doctor")
@@ -249,16 +249,25 @@ class Me(ScreenCase):
         self.tell("I have a peanut allergy")
         data = self.client.get("/api/me").json()
         sections = {s["key"]: s for s in data["sections"]}
-        self.assertIn("now", sections)
+        self.assertIn("projects", sections)
         self.assertIn("work", sections)
         self.assertTrue(sections["health"]["sensitive"])
-        self.assertTrue(any("bakery" in i["text"] for i in sections["now"]["items"]))
+        # a business idea is one project entry that opens its own note, not loose lines
+        entry = sections["projects"]["items"][0]
+        self.assertEqual(entry["title"], "Bakery")
+        self.assertTrue((Path(self.vault) / entry["path"]).is_file())
 
     def test_things_to_come_back_to_are_listed_with_their_date(self) -> None:
-        self.tell("I want to start a bakery business, I will come back to it in a year")
+        self.tell("I want to learn the violin, I will come back to it in a year")
         coming = [s for s in self.client.get("/api/me").json()["sections"] if s["key"] == "coming"]
         self.assertEqual(len(coming), 1)
         self.assertTrue(coming[0]["items"][0]["revisit_at"])
+
+    def test_a_project_shows_its_date_once_not_twice(self) -> None:
+        self.tell("I want to start a bakery business, I will come back to it in a year")
+        sections = {s["key"]: s for s in self.client.get("/api/me").json()["sections"]}
+        self.assertNotIn("coming", sections)
+        self.assertTrue(sections["projects"]["items"][0]["revisit_at"])
 
     def test_an_empty_page_is_empty_not_broken(self) -> None:
         self.assertEqual(self.client.get("/api/me").json(), {"sections": [], "total": 0})

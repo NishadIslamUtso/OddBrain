@@ -233,12 +233,15 @@ def _check_data(settings: Settings) -> list[Check]:
     try:
         stats = st.stats()
         total = int(stats.get("records") or 0)
-        missing = len(st.missing_embeddings(limit=500))
+        from .models import ModelConfig, embed_model_name
+
+        in_use = embed_model_name(ModelConfig.load(settings.models_path).slot("embed"))
+        missing = len(st.missing_embeddings(limit=500, model=in_use))
         checks.append(
             Check(
                 "embeddings",
                 missing == 0 or total == 0,
-                f"{st.count_embeddings()} cached, {missing} record(s) without one",
+                f"{st.count_embeddings(in_use)} ready for {in_use}, {missing} record(s) need one",
                 fix=None if (missing == 0 or total == 0) else "memory-ob embed",
             )
         )

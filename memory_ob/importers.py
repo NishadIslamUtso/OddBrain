@@ -6,6 +6,9 @@ Supported, in plain words:
 * a ChatGPT export (the ``.zip``, or the ``conversations.json`` inside it);
 * a Claude export (the ``.zip``, or its ``conversations.json``);
 * a WhatsApp chat (the ``.txt`` from "Export chat");
+* a Telegram chat (``result.json`` from Telegram Desktop's "Export chat history");
+* Messenger or Instagram messages (the ``message_1.json`` files, or the whole
+  "Download your information" ``.zip``);
 * any plain ``.txt`` or ``.md`` file, or pasted text: one memory per line, per
   bullet, or per paragraph.
 
@@ -73,6 +76,33 @@ def _decode(data: bytes) -> str:
 _BULLET = re.compile(r"^\s*(?:[-*+•]|\d+[.)])\s+")
 
 
+def _fit(entry: str) -> list[str]:
+    """An entry as one or more pieces of at most ``_MAX_ENTRY_CHARS``, cut at sentence ends.
+
+    A long paragraph is split rather than thrown away.
+    """
+    if len(entry) <= _MAX_ENTRY_CHARS:
+        return [entry]
+    pieces: list[str] = []
+    current = ""
+    for sentence in re.split(r"(?<=[.!?])\s+", entry):
+        while len(sentence) > _MAX_ENTRY_CHARS:          # one enormous sentence: cut at a space
+            cut = sentence.rfind(" ", 0, _MAX_ENTRY_CHARS) or _MAX_ENTRY_CHARS
+            if current:
+                pieces.append(current)
+                current = ""
+            pieces.append(sentence[:cut].strip())
+            sentence = sentence[cut:].strip()
+        if current and len(current) + 1 + len(sentence) > _MAX_ENTRY_CHARS:
+            pieces.append(current)
+            current = sentence
+        else:
+            current = f"{current} {sentence}".strip()
+    if current:
+        pieces.append(current)
+    return pieces
+
+
 def split_notes(text: str) -> list[str]:
     """One memory per entry. Understands ``§`` separators, bullets and paragraphs."""
     text = (text or "").replace("\r\n", "\n")
@@ -90,11 +120,11 @@ def split_notes(text: str) -> list[str]:
     for entry in raw:
         s = " ".join(entry.split())
         s = re.sub(r"^#+\s*", "", s)          # headings are not memories
-        if len(s) < 8 or len(s) > _MAX_ENTRY_CHARS:
-            continue
         if s.lower() in ("memory", "user", "notes", "user profile"):
             continue
-        out.append(s)
+        for piece in _fit(s):
+            if len(piece) >= 8:
+                out.append(piece)
     seen: set[str] = set()
     unique = []
     for s in out:
@@ -224,6 +254,146 @@ def _whatsapp(text: str, filename: str, me: str) -> Parsed:
     return Parsed(source="WhatsApp", chats=[chat])
 
 
+# -- Telegram --------------------------------------------------------------------
+
+
+def _telegram_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    if isinstance(value, list):
+        return "".join(v if isinstance(v, str) else str(v.get("text", "")) for v in value if v)
+    return ""
+
+
+def _owner_among(names: list[str], me: str) -> str:
+    """The owner's name as it appears in the chat, or a plain error asking for it."""
+    if not me.strip():
+        raise ImportError_(
+            "Type your name exactly as it appears in the chat (" + ", ".join(names[:6]) + "), then try again.")
+    found = next((n for n in names if n.lower() == me.strip().lower()), "")
+    if not found:
+        raise ImportError_(
+            f"I could not find “{me.strip()}” in that chat. The names in it are: " + ", ".join(names[:8]) + ".")
+    return found
+
+
+def _telegram(obj: Any, me: str) -> Parsed:
+    chats = []
+    if isinstance(obj, dict) and isinstance(obj.get("chats"), dict):
+        chats = [c for c in obj["chats"].get("list", []) if isinstance(c, dict)]
+        if not me.strip() and isinstance(obj.get("personal_information"), dict):
+            info = obj["personal_information"]
+            me = f"{info.get('first_name', '')} {info.get('last_name', '')}".strip()
+    elif isinstance(obj, dict):
+        chats = [obj]
+    parsed = Parsed(source="Telegram")
+    for chat in chats:
+        msgs = [m for m in chat.get("messages", []) if isinstance(m, dict) and m.get("type") == "message"]
+        names = sorted({str(m.get("from") or "") for m in msgs if m.get("from")})
+        if len(msgs) < 2 or not names:
+            continue
+        owner = _owner_among(names, me)
+        parts, others = [], []
+        for m in msgs:
+            body = _telegram_text(m.get("text")).strip()
+            who = str(m.get("from") or "")
+            if not body or not who:
+                continue
+            if who == owner:
+                parts.append({"role": "user", "content": body})
+            else:
+                parts.append({"role": "assistant", "name": who, "content": body})
+                if who not in others:
+                    others.append(who)
+        if parts:
+            parsed.chats.append({"title": f"Telegram: {chat.get('name') or ', '.join(others) or 'chat'}",
+                                 "when": "", "parts": parts, "people": others, "origin": "telegram"})
+    if not parsed.chats:
+        raise ImportError_("I did not find any messages in that Telegram export.")
+    return parsed
+
+
+# -- Messenger and Instagram ---------------------------------------------------------
+
+
+def _unmojibake(value: str) -> str:
+    """Meta writes UTF-8 text as if it were Latin-1; undo that."""
+    try:
+        return value.encode("latin-1").decode("utf-8")
+    except (UnicodeEncodeError, UnicodeDecodeError):
+        return value
+
+
+def _meta_threads(threads: dict[str, list[dict[str, Any]]], me: str, origin: str) -> Parsed:
+    """*threads* maps a conversation's folder to its ``message_N.json`` contents."""
+    prepared: list[tuple[str, list[dict[str, Any]], list[str]]] = []
+    for key, files in threads.items():
+        msgs: list[dict[str, Any]] = []
+        title = ""
+        for f in files:
+            msgs += [m for m in f.get("messages", []) if isinstance(m, dict)]
+            title = title or _unmojibake(str(f.get("title") or ""))
+        names = sorted({_unmojibake(str(m.get("sender_name") or "")) for m in msgs if m.get("sender_name")})
+        if len(msgs) >= 2 and names:
+            msgs.sort(key=lambda m: m.get("timestamp_ms") or 0)      # Meta lists newest first
+            prepared.append((title or key, msgs, names))
+    if not prepared:
+        raise ImportError_("I did not find any messages in that export.")
+    owner = me.strip()
+    if not owner:
+        common = set(prepared[0][2])
+        for _, _, names in prepared[1:]:
+            common &= set(names)
+        if len(prepared) > 1 and len(common) == 1:
+            owner = next(iter(common))             # you are in every conversation
+        else:
+            raise ImportError_(
+                "Type your name exactly as it appears in the chat ("
+                + ", ".join(prepared[0][2][:6]) + "), then try again.")
+    parsed = Parsed(source="Instagram" if origin == "instagram" else "Messenger")
+    for title, msgs, names in prepared:
+        found = next((n for n in names if n.lower() == owner.lower()), "")
+        if not found:
+            if len(prepared) == 1:
+                raise ImportError_(
+                    f"I could not find “{owner}” in that chat. The names in it are: " + ", ".join(names[:8]) + ".")
+            continue
+        parts, others = [], []
+        for m in msgs:
+            body = _unmojibake(str(m.get("content") or "")).strip()
+            who = _unmojibake(str(m.get("sender_name") or ""))
+            if not body or not who:
+                continue
+            if who == found:
+                parts.append({"role": "user", "content": body})
+            else:
+                parts.append({"role": "assistant", "name": who, "content": body})
+                if who not in others:
+                    others.append(who)
+        if parts:
+            parsed.chats.append({"title": f"{parsed.source}: {title}", "when": "", "parts": parts,
+                                 "people": others, "origin": origin})
+    if not parsed.chats:
+        raise ImportError_("I did not find any of your messages in that export.")
+    return parsed
+
+
+def _looks_binary(data: bytes) -> str:
+    """A plain description of a file that is not text, or ''."""
+    head = data[:4096]
+    if head.startswith(b"PK"):
+        return ""                                    # a zip: opened and checked by parse()
+    if head.startswith(b"%PDF"):
+        return "a PDF"
+    if head.startswith((b"\x89PNG", b"\xff\xd8\xff", b"GIF8", b"RIFF", b"BM")):
+        return "a picture or media file"
+    if head.startswith((b"\xff\xfe", b"\xfe\xff", b"\xef\xbb\xbf")):
+        return ""                                    # text with a byte-order mark
+    if b"\x00" in head:
+        return "a file that is not text"
+    return ""
+
+
 # -- entry point ----------------------------------------------------------------
 
 
@@ -234,6 +404,11 @@ def parse(name: str, data: bytes, *, me: str = "") -> Parsed:
     if not data:
         raise ImportError_("That file is empty.")
     lower = (name or "").lower()
+    kind = _looks_binary(data)
+    if kind:
+        raise ImportError_(
+            f"That looks like {kind}, and I can only read text. Save it as text or paste what you want "
+            "remembered. Chat exports (ChatGPT, Claude, WhatsApp, Telegram, Messenger, Instagram) work as they are.")
 
     if lower.endswith(".zip") or data[:2] == b"PK":
         try:
@@ -241,9 +416,31 @@ def parse(name: str, data: bytes, *, me: str = "") -> Parsed:
         except zipfile.BadZipFile as exc:
             raise ImportError_("I could not open that zip file.") from exc
         with zf:
-            target = next((n for n in zf.namelist() if n.lower().endswith("conversations.json")), None)
+            names_in = zf.namelist()
+            meta_files = [n for n in names_in if re.search(r"(?:^|/)message_\d+\.json$", n.lower())]
+            if meta_files:
+                threads: dict[str, list[dict[str, Any]]] = {}
+                for n in meta_files:
+                    try:
+                        threads.setdefault(n.rsplit("/", 1)[0], []).append(json.loads(_decode(zf.read(n))))
+                    except ValueError:
+                        continue
+                origin = "instagram" if ("instagram" in lower or any("instagram" in n.lower() for n in names_in)) \
+                    else "messenger"
+                return _meta_threads(threads, me, origin)
+            tele = next((n for n in names_in if n.lower().endswith("result.json")), None)
+            if tele:
+                try:
+                    return _telegram(json.loads(_decode(zf.read(tele))), me)
+                except ValueError as exc:
+                    if isinstance(exc, ImportError_):
+                        raise
+                    raise ImportError_("The Telegram file inside that zip is damaged.") from exc
+            target = next((n for n in names_in if n.lower().endswith("conversations.json")), None)
             if target is None:
-                raise ImportError_("There is no conversations.json inside that zip.")
+                if any(n.lower().startswith("word/") for n in names_in):
+                    raise ImportError_("That is a Word file. Save it as text, or paste what you want remembered.")
+                raise ImportError_("I did not find a chat export inside that zip.")
             try:
                 return _conversations(json.loads(_decode(zf.read(target))))
             except ValueError as exc:
@@ -254,11 +451,17 @@ def parse(name: str, data: bytes, *, me: str = "") -> Parsed:
     text = _decode(data)
     if lower.endswith(".json") or text.lstrip().startswith(("[", "{")):
         try:
-            return _conversations(json.loads(text))
-        except ImportError_:
-            raise
+            obj = json.loads(text)
         except ValueError as exc:
             raise ImportError_("That file looks damaged: it is not readable JSON.") from exc
+        if isinstance(obj, dict) and ("messages" in obj and any(
+                isinstance(m, dict) and "sender_name" in m for m in obj["messages"][:5])):
+            return _meta_threads({"chat": [obj]}, me, "instagram" if "instagram" in lower else "messenger")
+        if isinstance(obj, dict) and (isinstance(obj.get("chats"), dict) or (
+                "messages" in obj and any(isinstance(m, dict) and m.get("type") == "message"
+                                          for m in obj["messages"][:5]))):
+            return _telegram(obj, me)
+        return _conversations(obj)
 
     if sum(1 for ln in text.replace("\r\n", "\n").split("\n")[:400] if _WA_LINE.match(ln.strip("‎‏‪‬ "))) >= 3:
         return _whatsapp(text, name or "", me)

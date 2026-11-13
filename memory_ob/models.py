@@ -29,6 +29,30 @@ from typing import Any, Protocol
 
 from . import hermes
 
+DEFAULT_EMBED_MODEL = "nomic-embed-text"
+
+
+def embed_model_name(slot: "ModelSlot") -> str:
+    """The embedding model actually used for *slot* (the default when none is chosen)."""
+    return (slot.model or DEFAULT_EMBED_MODEL).strip()
+
+
+def embed_prefix(model: str, kind: str) -> str:
+    """The task prefix an embedding model was trained with, or ''.
+
+    Nomic's models (v1, v1.5 and v2-moe) are trained on prefixed text:
+    ``search_document:`` for what is stored and ``search_query:`` for what is
+    asked. Without them the matches are noticeably worse. Mixedbread's models
+    expect an instruction on the question only. Other models take plain text.
+    """
+    name = (model or "").lower()
+    if "nomic-embed" in name:
+        return "search_query: " if kind == "query" else "search_document: "
+    if "mxbai-embed" in name and kind == "query":
+        return "Represent this sentence for searching relevant passages: "
+    return ""
+
+
 DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 
 SLOTS: tuple[str, ...] = ("extract", "embed")

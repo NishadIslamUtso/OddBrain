@@ -191,7 +191,10 @@ select { appearance: auto; }
 .mem { padding: 11px 16px; }
 .mem .t { overflow-wrap: anywhere; }
 .mem .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-top: 4px; color: var(--text-2); font-size: .85rem; }
-.mem .acts { margin-top: 6px; display: flex; gap: 4px; }
+.mem .acts { margin-top: 6px; display: flex; gap: 4px; flex-wrap: wrap; }
+.mem.todo .row1 { display: flex; gap: 10px; align-items: flex-start; }
+.mem .tick { flex: 0 0 auto; width: 20px; height: 20px; margin-top: 2px; accent-color: var(--accent); cursor: pointer; }
+.mem.finished .t { text-decoration: line-through; color: var(--text-2); }
 .mem .editor { display: grid; gap: 8px; }
 
 /* ---- vault -------------------------------------------------------------- */
@@ -654,6 +657,22 @@ function ask({ title, body, yes = 'OK', no = 'Cancel', danger = false }) {
     $('[data-no]', root).focus();
   });
 }
+function choose({ title, body, options }) {         /* options: [{label, value, danger}] ; resolves to a value or null */
+  return new Promise(resolve => {
+    const root = $('#modal-root');
+    root.innerHTML = `<div class="modal-back"><div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+      <h2>${esc(title)}</h2><div class="muted">${body || ''}</div>
+      <div class="stack" style="margin-top:14px">${options.map((o, i) => `<button class="btn ${o.danger ? 'danger' : ''}" data-i="${i}">${esc(o.label)}</button>`).join('')}
+      <button class="btn ghost" data-no>Cancel</button></div></div></div>`;
+    const done = (v) => { root.innerHTML = ''; document.removeEventListener('keydown', onKey); resolve(v); };
+    const onKey = (e) => { if (e.key === 'Escape') done(null); };
+    document.addEventListener('keydown', onKey);
+    $$('[data-i]', root).forEach(b => { b.onclick = () => done(options[+b.dataset.i].value); });
+    $('[data-no]', root).onclick = () => done(null);
+    $('.modal-back', root).addEventListener('mousedown', (e) => { if (e.target.classList.contains('modal-back')) done(null); });
+    $('[data-no]', root).focus();
+  });
+}
 async function busy(btn, fn) {
   if (btn) { btn.disabled = true; }
   try { return await fn(); }
@@ -719,10 +738,17 @@ function refreshHere() { return SCREENS[state.tab] && SCREENS[state.tab](true); 
 /* ---- a memory shown with Edit / Forget, used on several screens ---- */
 function memRow(m) {
   state.mem[m.id] = m;
-  return `<li class="mem" data-mem="${esc(m.id)}"><div class="t">${esc(m.text)}</div>
-    <div class="meta">${m.category ? `<span class="chip" style="border-color:${catColor(m.category)}">${esc(m.category)}</span>` : ''}
-      ${m.extra || ''}${m.when ? `<span>${esc(m.when)}</span>` : ''}${m.by ? `<span>· ${m.by === 'AI' ? 'filed by AI' : 'by you'}</span>` : ''}</div>
+  const meta = `<div class="meta">${m.category ? `<span class="chip" style="border-color:${catColor(m.category)}">${esc(m.category)}</span>` : ''}
+      ${m.extra || ''}${m.when ? `<span>${esc(m.when)}</span>` : ''}${m.by ? `<span>· ${m.by === 'AI' ? 'filed by AI' : 'by you'}</span>` : ''}</div>`;
+  if (m.readonly) {                       /* a project: its notes live in one folder, opened as a note */
+    return `<li class="mem" data-mem="${esc(m.id)}"><div class="t"><b>${esc(m.title || m.text)}</b></div><div class="t muted">${esc(m.text)}</div>${meta}
+      <div class="acts"><button class="btn ghost sm" data-act="open-note" data-path="${esc(m.path)}">Open notes</button></div></li>`;
+  }
+  const tick = (m.todo || m.done)
+    ? `<input type="checkbox" class="tick" data-todo="${esc(m.id)}"${m.done ? ' checked' : ''} aria-label="${m.done ? 'Done. Untick to put it back on your list' : 'Mark as done'}">` : '';
+  return `<li class="mem${tick ? ' todo' : ''}${m.done ? ' finished' : ''}" data-mem="${esc(m.id)}"><div class="row1">${tick}<div class="grow"><div class="t">${esc(m.text)}</div>${meta}</div></div>
     <div class="acts"><button class="btn ghost sm" data-act="mem-edit" data-id="${esc(m.id)}">Edit</button>
+      <button class="btn ghost sm" data-act="mem-private" data-id="${esc(m.id)}">Keep private</button>
       <button class="btn ghost sm" data-act="mem-forget" data-id="${esc(m.id)}">Forget</button></div></li>`;
 }
 function memEditor(li, m) {
@@ -1055,7 +1081,7 @@ async function openNote(path, edit) {
       <div class="row between"><button class="btn ghost" data-act="close-drawer">← Close</button>
         <span class="row">${n.type === 'person' ? `<button class="btn sm" data-act="goto-person" data-id="${esc(n.id)}">Open profile</button>` : ''}
         ${!edit && n.editable ? '<button class="btn sm" data-act="note-edit">Edit</button>' : ''}
-        ${!edit && n.type === 'memory' ? '<button class="btn sm danger" data-act="note-forget">Forget</button>' : ''}</span></div>
+        ${!edit && n.type === 'memory' ? `<button class="btn sm" data-act="mem-private" data-id="${esc(n.id)}">Keep private</button><button class="btn sm danger" data-act="note-forget">Forget</button>` : ''}</span></div>
       <h2>${esc(n.title)}</h2>
       <div class="row">${chips}</div>
       <p class="faint">${n.type === 'memory' ? `Filed by ${n.by === 'AI' ? 'AI' : 'you'} · ` : ''}${n.created ? 'Created ' + esc(when(n.created)) : ''}${n.updated && n.updated !== n.created ? ' · Updated ' + esc(when(n.updated)) : ''}</p>
@@ -1192,6 +1218,7 @@ SCREENS.me = async function () {
   const secs = m.sections.map(s => {
     const rows = s.items.map(i => memRow({
       id: i.id, text: i.text, category: i.category, when: when(i.updated), by: i.by,
+      title: i.title, readonly: i.readonly, path: i.path, todo: i.todo, done: i.done,
       extra: i.revisit_at ? `<span class="chip warn">${i.revisit_at <= localDay() ? 'Due ' : 'Come back '}${esc(day(i.revisit_at))}</span>` : '',
     })).join('');
     const inner = `<div class="card pad0"><ul class="list">${rows}</ul></div>`;
@@ -1199,7 +1226,7 @@ SCREENS.me = async function () {
       ? `<details class="card pad0"><summary class="sec" style="padding:14px 16px;cursor:pointer"><h2>${esc(s.title)} <span class="count">${s.items.length}</span> <span class="chip">Private, tap to show</span></h2></summary><ul class="list">${rows}</ul></details>`
       : section(s.title, s.items.length, inner);
   }).join('');
-  $('#main').innerHTML = `<div class="screen"><div class="head"><h1>Me</h1><p>What matters about your life right now: what you are doing, planning and trying.</p></div>
+  $('#main').innerHTML = `<div class="screen"><div class="head"><h1>Me</h1><p>What matters about your life right now: what you are doing, planning and trying, and what is still on your list.</p></div>
     ${secs || emptyBox('Nothing here yet', 'As you talk to me, this fills up on its own.')}</div>`;
 };
 
@@ -1210,6 +1237,7 @@ SCREENS.settings = async function (soft) {
   const ai = s.ai, o = s.options, mean = s.status.meaning_search;
   const meanText = !o.semantic ? 'Meaning search is off. Search still understands word endings, like “allergy” and “allergic”, but not different words with the same meaning.'
     : mean.state === 'working' ? `Working. ${mean.indexed} of ${mean.memories} memories can be found by meaning.`
+    : mean.state === 'preparing' ? `Getting ready. ${mean.indexed} of ${mean.memories} memories can be found by meaning so far. This carries on by itself.`
     : 'Not set up yet, so search matches words only. To search by meaning, install a small model on this computer (run “ollama pull nomic-embed-text”), then press Prepare.';
   const sw = (key, title, text, checked, disabled) => `<label class="switch"><input type="checkbox" data-opt="${key}"${checked ? ' checked' : ''}${disabled ? ' disabled' : ''}><span class="track"></span><span class="txt"><b>${title}</b><span>${text}</span></span></label>`;
   const stCls = ai.status.ready ? 'ok' : 'warn';
@@ -1225,7 +1253,7 @@ SCREENS.settings = async function (soft) {
       <div class="field"><label for="ai-model">Model</label><div class="row"><input type="text" id="ai-model" class="grow" list="ollama-models" value="${esc(ai.reading_model)}" placeholder="for example llama3.2"><button class="btn" data-act="check-models">Find models</button></div>
         <datalist id="ollama-models"></datalist><p class="hint" id="ai-models-msg"></p></div></div>
     <div class="field"><label for="ai-embed">Model for meaning search (optional)</label><input type="text" id="ai-embed" value="${esc(ai.meaning_model)}" placeholder="nomic-embed-text">
-      <p class="hint">Only used for searching by meaning. It always runs on this computer.</p></div>
+      <p class="hint">Only used for searching by meaning, and it always runs on this computer. For example nomic-embed-text or nomic-embed-text-v2-moe. If you change it, I prepare search again by myself.</p></div>
     <div class="row"><button class="btn primary" data-act="save-ai">Save</button></div></section>
 
   <section class="card"><h2>Search</h2><p class="muted">${esc(meanText)}</p>
@@ -1246,11 +1274,16 @@ SCREENS.settings = async function (soft) {
       <button class="btn sm" data-act="${s.bridge.running ? 'bridge-stop' : 'bridge-start'}">${s.bridge.running ? 'Stop' : 'Start'}</button></div>` : ''}</section>` : ''}
 
   <section class="card" id="s-import"><h2>Bring in old memories</h2>
-    <p class="muted">A ChatGPT or Claude export (.zip or .json), a WhatsApp chat (.txt), a memory file (.md or .txt), or notes you paste. Your original is never changed.</p>
+    <p class="muted">A ChatGPT or Claude export (.zip or .json), a WhatsApp chat (.txt), a Telegram export (result.json), Messenger or Instagram messages (the .zip, or a message_1.json file), a memory file (.md or .txt), or notes you paste. Pictures, PDFs and Word files cannot be read. Your original is never changed, and you can undo an import from Review.</p>
     <div class="field"><label for="imp-file">Choose a file</label><input type="file" id="imp-file" accept=".zip,.json,.txt,.md,.markdown,text/plain,application/json,application/zip"></div>
-    <div class="field"><label for="imp-me">Your name in the chat (WhatsApp files only)</label><input type="text" id="imp-me" placeholder="So I know which lines are yours"></div>
+    <div class="field"><label for="imp-me">Your name in the chat (WhatsApp, Telegram, Messenger and Instagram files)</label><input type="text" id="imp-me" placeholder="So I know which lines are yours"></div>
     <div class="field"><label for="imp-text">Or paste notes (one memory per line)</label><textarea id="imp-text" rows="4"></textarea></div>
     <div class="row"><button class="btn primary" data-act="import">Bring in</button><span class="msg" id="imp-msg"></span></div></section>
+
+  ${(s.private_ids || []).length ? `<section class="card" id="s-private"><h2>Private memories</h2>
+    <p class="muted">These are hidden from every screen and every AI. I do not show what they say. Bring one back to see it again.</p>
+    <ul class="list">${s.private_ids.map(pid => `<li class="mem"><div class="row between"><span class="muted">Private memory …${esc(String(pid).slice(-6))}</span>
+      <button class="btn sm" data-act="bring-back" data-id="${esc(pid)}">Bring back</button></div></li>`).join('')}</ul></section>` : ''}
 
   <section class="card"><h2>Backup and tidy</h2>
     ${s.integrity.changed.length || s.integrity.missing.length ? `<div class="banner danger"><span><b>Some original files are not what I saved.</b> ${esc([...s.integrity.changed.map(n => n + ' (changed)'), ...s.integrity.missing.map(n => n + ' (missing)')].join(', '))}. Anything I learned from them may be wrong.</span>
@@ -1328,6 +1361,16 @@ document.addEventListener('click', async (e) => {
       });
     }
 
+    case 'mem-private': {
+      const m = state.mem[id] || {};
+      if (!(await ask({ title: 'Keep this private?', body: `“${esc(m.text || '')}”<br>I will hide it from every screen and from every AI, including the one in Hermes. It stays on this computer, and you can bring it back from Settings.`, yes: 'Keep it private' }))) return;
+      return busy(el, async () => { await api('/api/records/' + enc(id) + '/private', { method: 'POST' }); toast('Kept private.'); closeDrawer(); await refreshHere(); await refreshStatus(); });
+    }
+    case 'bring-back': {
+      if (!(await ask({ title: 'Bring this memory back?', body: 'It will show on every screen again, and the AI can use it.', yes: 'Bring it back' }))) return;
+      return busy(el, async () => { await api('/api/neversend/' + enc(id), { method: 'POST' }); toast('Brought back.'); await SCREENS.settings(); });
+    }
+
     case 'tok': return toggleTok(el.dataset.tok, el.dataset.ex);
     case 'set-view': state.vview = el.dataset.view; return loadVault();
     case 'more-notes': state.vShow = (state.vShow || 200) + 200; return renderNoteList();
@@ -1358,9 +1401,18 @@ document.addEventListener('click', async (e) => {
       return busy(el, async () => { await api('/api/people/merge', { method: 'POST', body: { keep_id: p.id, other_id: o.id } }); toast('Joined into one profile.'); await SCREENS.people(true); });
     }
     case 'delete-person': {
-      const p = state.person;
-      if (!(await ask({ title: `Remove ${p.name}?`, body: 'Their profile goes away and I will not make one for that name again. You can undo this from Review.', yes: 'Remove profile', danger: true }))) return;
-      return busy(el, async () => { await api('/api/people/' + enc(p.id), { method: 'DELETE' }); toast('Removed.'); state.personId = null; await SCREENS.people(true); });
+      const p = state.person; const n = p.conversation_list.length;
+      const pick = await choose({
+        title: `Remove ${p.name}?`,
+        body: 'I will not make a profile for that name again. You can undo this from Review.' + (n ? `<br><br>You have ${plural(n, 'saved conversation')} with or about them. Chats that were only with them can go too; group chats with other people stay.` : ''),
+        options: n ? [{ label: 'Remove the profile only', value: 'profile' }, { label: 'Remove the profile and their chats', value: 'chats', danger: true }]
+                   : [{ label: 'Remove the profile', value: 'profile', danger: true }],
+      });
+      if (!pick) return;
+      return busy(el, async () => {
+        const r = await api('/api/people/' + enc(p.id) + (pick === 'chats' ? '?chats=true' : ''), { method: 'DELETE' });
+        toast(pick === 'chats' && r.chats_removed ? `Removed, and ${plural(r.chats_removed, 'chat')} too.` : 'Removed.'); state.personId = null; await SCREENS.people(true);
+      });
     }
 
     case 'bio-rewrite': {
@@ -1424,6 +1476,13 @@ async function doImport() {
 document.addEventListener('change', async (e) => {
   const t = e.target;
   if (t.name === 'aimode') { $('#ai-custom').hidden = t.value !== 'custom'; $$('label.radio').forEach(l => l.classList.toggle('on', $('input', l).checked)); return; }
+  if (t.dataset.todo) {
+    t.disabled = true;
+    try { await api('/api/records/' + enc(t.dataset.todo) + '/done', { method: 'POST', body: { done: t.checked } }); toast(t.checked ? 'Ticked off.' : 'Back on your list.'); await SCREENS.me(); }
+    catch (err) { t.checked = !t.checked; toast(err.message, true); }
+    finally { t.disabled = false; }
+    return;
+  }
   if (t.dataset.graph) { state.vg[t.dataset.graph] = t.checked; return renderGraphView(); }
   if (t.dataset.opt) {
     const key = t.dataset.opt; t.disabled = true;
