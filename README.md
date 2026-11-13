@@ -109,11 +109,12 @@ memory-ob stats | activity | models | doctor | serve | proxy
   podcast"); an odd phrasing may not start one.
 * Search always finds close word forms (allergy / allergic). Search by
   *meaning* needs a local embedding model and the "meaning search" switch in
-  Settings; without it Settings says so. Use `ollama pull nomic-embed-text-v2-moe`
-  (or `nomic-embed-text`). Memory_OB adds the `search_document:` / `search_query:`
-  prefixes these models need, redoes the numbers by itself when you change the
-  model (in the background, and every night), and never mixes numbers from two
-  models.
+  Settings; without it Settings says so. Ollama (`ollama pull nomic-embed-text`)
+  and any OpenAI-compatible server work; llama.cpp's `llama-server` needs
+  `--embeddings`, which `host/llamacpp_embed.py` starts for you. Memory_OB adds
+  the `search_document:` / `search_query:` prefixes these models need, redoes
+  the numbers by itself when you change the model (in the background, and every
+  night), and never mixes numbers from two models.
 * A memory you keep private is blanked in the saved conversations too, wherever
   they are shown. The raw database still holds it (that is how you bring it back).
 * Model-dependent parts (the AI judge, extraction, biography) are tested with

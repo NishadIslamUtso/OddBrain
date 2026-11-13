@@ -226,6 +226,35 @@ def _openai_chat(
         raise ModelError(f"unexpected model response: {data!r}") from exc
 
 
+def _openai_embed(
+    base_url: str,
+    model: str,
+    text: str,
+    *,
+    api_key: str = "",
+    timeout: float = 120.0,
+) -> list[float]:
+    """Call an OpenAI-compatible ``/embeddings`` endpoint.
+
+    This is the shape llama.cpp's ``llama-server``, LM Studio, vLLM and most
+    self-hosted servers speak: ``{"model": ..., "input": ...}`` and a
+    ``data[0].embedding`` vector back. Ollama's ``/api/embeddings`` is the
+    other shape, handled separately.
+    """
+    url = base_url.rstrip("/") + "/embeddings"
+    headers = {"Authorization": f"Bearer {api_key or 'hermes'}"}
+    data = _post_json(
+        url, {"model": model, "input": text}, timeout=timeout, headers=headers
+    )
+    try:
+        vec = data["data"][0]["embedding"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ModelError(f"unexpected embedding response: {data!r}") from exc
+    if not vec:
+        raise ModelError("embedding model returned no vector")
+    return [float(x) for x in vec]
+
+
 def _ollama_chat(
     base_url: str, model: str, messages: list[dict[str, str]], timeout: float = 120.0
 ) -> str:
@@ -313,7 +342,16 @@ class LocalBackend:
         return _openai_chat(base, slot.model or "default", messages, api_key=key)
 
     def embed(self, slot: ModelSlot, text: str) -> list[float]:
-        return _ollama_embed(self._ollama(slot), self._model(slot, "nomic-embed-text"), text)
+        model = self._model(slot, "nomic-embed-text")
+        if "ollama" in slot.provider.lower():
+            return _ollama_embed(self._ollama(slot), model, text)
+        # llama.cpp / LM Studio / vLLM and other OpenAI-compatible servers.
+        base = slot.base_url or os.environ.get("OPENAI_BASE_URL", "")
+        if not base:
+            raise ModelError("no base_url configured for the embedding model")
+        return _openai_embed(
+            base, model, text, api_key=os.environ.get("OPENAI_API_KEY", "")
+        )
 
 
 _LOCAL_ONLY = False
