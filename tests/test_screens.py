@@ -49,47 +49,72 @@ class Vault(ScreenCase):
     def test_notes_are_sorted_into_obsidian_style_folders_and_nested_tags(self) -> None:
         data = self.client.get("/api/vault/notes").json()
         folders = {f["path"]: f["count"] for f in data["folders"]}
-        self.assertEqual(folders["Health"], 2)          # the allergy and the gym
+        self.assertEqual(folders["Health"], 1)          # the allergy and the gym share one Health note
+        self.assertEqual(folders["Projects & Ideas/Bakery"], 1)
         tags = {t["tag"] for t in data["tags"]}
         self.assertTrue(any(t.startswith("topic/") for t in tags), tags)
         self.assertIn("topic", tags)            # a parent tag counts its children, like Obsidian
         self.assertIn("Health", data["categories"])
+        self.assertTrue(all("_text" not in n for n in data["notes"]))      # search words are not sent to the screen
+
+    def test_one_note_per_subject_not_one_per_sentence(self) -> None:
+        files = [p for p in Path(self.vault).rglob("*.md") if p.relative_to(self.vault).parts[0] not in (".brain", ".obsidian")]
+        self.assertLessEqual(len(files), 3, files)
+        health = next(n for n in self.notes("path:Health"))
+        self.assertEqual(health["count"], 2)
+        self.assertEqual(health["count"], 2)
 
     def test_filters_work_like_obsidian(self) -> None:
-        # the memory itself plus the conversation it came from
-        self.assertEqual(len(self.notes("peanut")), 2)
-        self.assertEqual(len(self.notes("peanut type:memory")), 1)
-        self.assertEqual(len(self.notes("path:Health")), 2)
-        self.assertEqual(len(self.notes("tag:#topic/health")), 2)
-        self.assertEqual(len(self.notes("tag:#topic type:memory")), 3)
-        self.assertEqual(len(self.notes("path:Health -peanut")), 1)
-        self.assertEqual(len(self.notes('"peanut allergy" type:memory')), 1)
-        self.assertEqual(self.notes("by:you type:memory"), [])       # the AI filed these
-        self.assertEqual(len(self.notes("by:ai type:memory")), 3)
-        self.assertEqual(len(self.notes("type:source")), 3)
+        self.assertEqual(len(self.notes("peanut")), 1)               # the words inside a note are searched
+        self.assertEqual(len(self.notes("peanut type:topic")), 1)
+        self.assertEqual(len(self.notes("path:Health")), 1)
+        self.assertEqual(len(self.notes("tag:#topic/health")), 1)
+        self.assertEqual(len(self.notes("tag:#topic")), 2)           # Health and the Bakery project
+        self.assertEqual(self.notes("path:Health -peanut"), [])
+        self.assertEqual(len(self.notes('"peanut allergy" type:topic')), 1)
+        self.assertEqual(self.notes("by:you type:topic"), [])       # the AI filed these
+        self.assertEqual(len(self.notes("by:ai")), 2)
+        self.assertEqual(self.notes("type:source"), [])             # chats with Hermes are not files
         self.assertEqual(self.notes("zebra"), [])
 
-    def test_a_note_opens_with_its_words_and_can_be_edited(self) -> None:
-        note = self.notes("peanut type:memory")[0]
+    def test_a_note_opens_with_its_lines_and_each_line_can_be_edited(self) -> None:
+        note = self.notes("peanut")[0]
         got = self.client.get("/api/vault/note", params={"path": note["path"]}).json()
         self.assertIn("peanut allergy", got["body"])
-        self.assertTrue(got["editable"])
-
-        saved = self.client.put("/api/vault/note", json={"path": note["path"], "body": "I have a severe peanut allergy"})
+        self.assertFalse(got["editable"])
+        self.assertEqual(len(got["lines"]), 2)
+        line = next(l for l in got["lines"] if "peanut" in l["text"])
+        saved = self.client.put(f"/api/records/{line['id']}", json={"body": "I have a severe peanut allergy"})
         self.assertEqual(saved.status_code, 200, saved.text)
-        self.assertIn("severe", saved.json()["body"])
+        again = self.client.get("/api/vault/note", params={"path": note["path"]}).json()
+        self.assertIn("severe peanut allergy", again["body"])
+        self.assertEqual(len(again["lines"]), 2)
 
-    def test_the_category_can_be_changed_and_the_note_moves_folder(self) -> None:
-        note = self.notes("bakery type:memory")[0]
-        r = self.client.put("/api/vault/note", json={"path": note["path"], "category": "Interests"})
+    def test_the_category_can_be_changed_and_the_line_moves_note(self) -> None:
+        note = self.notes("peanut")[0]
+        line = next(l for l in self.client.get("/api/vault/note", params={"path": note["path"]}).json()["lines"]
+                    if "peanut" in l["text"])
+        r = self.client.put(f"/api/records/{line['id']}", json={"category": "Interests"})
         self.assertEqual(r.status_code, 200, r.text)
-        self.assertTrue(r.json()["path"].startswith("Interests/"))
-        self.assertFalse((Path(self.vault) / note["path"]).exists())
+        moved = self.notes("peanut")[0]
+        self.assertEqual(moved["path"], "Interests/Interests.md")
+        self.assertNotIn("peanut", (Path(self.vault) / "Health" / "Health.md").read_text(encoding="utf-8"))
+
+    def test_a_line_can_be_filed_in_a_note_of_its_own(self) -> None:
+        note = self.notes("peanut")[0]
+        line = next(l for l in self.client.get("/api/vault/note", params={"path": note["path"]}).json()["lines"]
+                    if "peanut" in l["text"])
+        r = self.client.put(f"/api/records/{line['id']}", json={"note": "Peanut allergy"})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue((Path(self.vault) / "Health" / "Peanut allergy.md").is_file())
+        self.assertIn("gym", (Path(self.vault) / "Health" / "Health.md").read_text(encoding="utf-8"))
 
     def test_bad_edits_are_refused_plainly(self) -> None:
-        path = self.notes("peanut type:memory")[0]["path"]
+        path = self.notes("peanut")[0]["path"]
         self.assertEqual(self.client.put("/api/vault/note", json={"path": path, "body": "  "}).status_code, 400)
-        self.assertEqual(self.client.put("/api/vault/note", json={"path": path, "category": "Nonsense"}).status_code, 400)
+        line = self.client.get("/api/vault/note", params={"path": path}).json()["lines"][0]
+        self.assertEqual(self.client.put(f"/api/records/{line['id']}", json={"body": "  "}).status_code, 400)
+        self.assertEqual(self.client.put(f"/api/records/{line['id']}", json={"category": "Nonsense"}).status_code, 400)
         self.assertEqual(self.client.get("/api/vault/note", params={"path": "Health/nope.md"}).status_code, 404)
 
     def test_a_note_cannot_escape_the_vault(self) -> None:
@@ -98,18 +123,19 @@ class Vault(ScreenCase):
             self.assertEqual(r.status_code, 404, path)
 
     def test_the_automatic_notes_cannot_be_edited_by_hand(self) -> None:
-        r = self.client.put("/api/vault/note", json={"path": "Me.md", "body": "x"})
-        self.assertIn(r.status_code, (400, 404))
+        r = self.client.put("/api/vault/note", json={"path": "Health/Health.md", "body": "x"})
+        self.assertEqual(r.status_code, 400)
 
     def test_the_graph_has_nodes_and_honours_filters(self) -> None:
         g = self.client.get("/api/vault/graph").json()
-        self.assertEqual(len([n for n in g["nodes"] if n["type"] == "memory"]), 3)
+        self.assertEqual(len([n for n in g["nodes"] if n["type"] == "topic"]), 1)
+        self.assertEqual(len([n for n in g["nodes"] if n["type"] == "project"]), 1)
         tagged = self.client.get("/api/vault/graph", params={"tags": "true"}).json()
         self.assertTrue(any(n["type"] == "tag" for n in tagged["nodes"]))
-        only = self.client.get("/api/vault/graph", params={"q": "path:Health type:memory"}).json()
-        self.assertEqual(len(only["nodes"]), 2)
+        only = self.client.get("/api/vault/graph", params={"q": "path:Health type:topic"}).json()
+        self.assertEqual(len(only["nodes"]), 1)
         no_sources = self.client.get("/api/vault/graph", params={"sources": "false"}).json()
-        self.assertEqual({n["type"] for n in no_sources["nodes"]} - {"project"}, {"memory"})
+        self.assertEqual({n["type"] for n in no_sources["nodes"]}, {"topic", "project"})
 
     def test_a_person_in_a_memory_is_linked_in_the_graph(self) -> None:
         self.tell("My sister Riya is a doctor")
@@ -272,10 +298,11 @@ class Me(ScreenCase):
     def test_an_empty_page_is_empty_not_broken(self) -> None:
         self.assertEqual(self.client.get("/api/me").json(), {"sections": [], "total": 0})
 
-    def test_me_md_is_written_into_the_vault(self) -> None:
+    def test_there_is_no_me_note_in_the_vault_but_the_memory_is_in_its_subject_note(self) -> None:
         self.tell("I study computer science at BRAC University")
         self.client.post("/api/tidy")
-        self.assertIn("computer science", (Path(self.vault) / "Me.md").read_text(encoding="utf-8"))
+        self.assertFalse((Path(self.vault) / "Me.md").exists())
+        self.assertIn("computer science", (Path(self.vault) / "Learning" / "Learning.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":

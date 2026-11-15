@@ -81,6 +81,7 @@ def main() -> int:
     scratch.mkdir(parents=True, exist_ok=True)
     os.environ["MEMORY_OB_VAULT"] = str(scratch / "vault")
     os.environ["MEMORY_OB_DB"] = str(scratch / "mob.db")
+    os.environ["MEMORY_OB_NO_PROBE_CACHE"] = "1"   # tests flip "is an AI there?" on purpose
 
     modules = test_modules()
     if not modules:

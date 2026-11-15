@@ -160,9 +160,13 @@ class Projects(Base):
         self.say("I'm thinking about starting a bakery business. I'll come back to this bakery idea in 2 weeks.")
         folder = self.vault / "Projects & Ideas" / "Bakery"
         self.assertTrue((folder / "Bakery.md").is_file())
-        self.assertEqual(len(list(folder.glob("*.md"))), 2)
+        self.assertEqual(len(list(folder.glob("*.md"))), 1)            # one note holds the whole project
         self.say("The bakery budget is now 8 lakh.")
-        self.assertEqual(len(list(folder.glob("*.md"))), 3)
+        self.assertEqual(len(list(folder.glob("*.md"))), 1)
+        text = (folder / "Bakery.md").read_text(encoding="utf-8")
+        self.assertIn("starting a bakery business", text)
+        self.assertIn("8 lakh", text)
+        self.assertIn("## Timeline", text)
 
     def test_a_changed_budget_is_asked_about(self) -> None:
         self.say("My budget for the bakery business is 5 lakh taka.")

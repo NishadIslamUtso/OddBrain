@@ -59,6 +59,17 @@ _VERB_RE = re.compile(
     r"spoke to|spoke with|hung out with|hang out with|lunch with|dinner with|went with|"
     r"agreed with|trained with|train with|study with|studied with|playing with|play with)\s+" + _NAME
 )
+# "a bakery called Sweet Rise": "called" here gives a name to a thing, it is not a phone call.
+_CALLERS = frozenset("i we he she they you who then just also and later earlier".split())
+
+
+def _is_naming(text: str, m: re.Match[str]) -> bool:
+    if not m.group(0).lower().startswith("called"):
+        return False
+    before = re.findall(r"[A-Za-z']+", text[:m.start()])
+    return not before or before[-1].lower() not in _CALLERS
+
+
 # A name that starts a sentence and is followed by something only a person does.
 _SUBJECT_RE = re.compile(
     r"(?:^|[.!?]\s+)" + _NAME
@@ -175,6 +186,8 @@ def people_in(text: str, hinted: list[str] | None = None, ignore: set[str] | Non
     for m in _RELATION_RE.finditer(text or ""):
         found.setdefault(m.group(2), m.group(1).lower())
     for m in _VERB_RE.finditer(text or ""):
+        if _is_naming(text or "", m):
+            continue
         found.setdefault(m.group(1), "")
     for m in _SUBJECT_RE.finditer(text or ""):
         found.setdefault(m.group(1), "")
@@ -271,11 +284,14 @@ def sign_new(
     actor: str = AI, reason: str = "remembered from what you said",
     card_id: str | None = None, tags: list[str] | None = None,
     people: list[str] | None = None, event_time: str | None = None,
-    log: bool = True,
+    log: bool = True, category: str | None = None,
 ) -> Record:
-    """Save one statement as a signed memory and log it to the feed."""
+    """Save one statement as a signed memory and log it to the feed.
+
+    *category* is where the librarian filed it; without one, simple rules decide.
+    """
     card_id = card_id or (AI_CARD if actor == AI else OWNER)
-    category = topics.categorize(text)
+    category = category if category in topics.CATEGORIES else topics.categorize(text)
     src = dict(source or {})
     if people:
         src["people"] = list(dict.fromkeys([*src.get("people", []), *people]))
@@ -375,7 +391,8 @@ def capture(
     _run_forget_commands(store, parts, conv_text, out, vault)
     csource = {**source, "conversation_id": conv_id}
     cands = []
-    for c in _extract(conv_text, parts, csource, helper):
+    hint = librarian_context(store) if helper is not None else ""
+    for c in _extract(conv_text, parts, csource, helper, hint):
         if credentials.HIDDEN in c.text:
             c.text = credentials.drop_hidden(c.text)      # only the part that held the secret is lost
             if not c.text:
@@ -459,8 +476,66 @@ def _chunks(parts: list[dict[str, Any]], limit: int = 12000) -> list[list[dict[s
     return chunks
 
 
+HINT_LIMIT = 1800
+
+
+def librarian_context(store: Any) -> str:
+    """What the owner already has, in a few lines, so the AI files into it instead of inventing.
+
+    The notes (with how many lines each holds), the projects and the people with
+    how they are related. Private memories are left out: the AI helper may run
+    on someone else's computer, and what is private never leaves this one.
+    """
+    from collections import Counter
+
+    try:
+        mine = [r for r in store.list_records(status=ACTIVE, limit=20000)
+                if r.speaker == "user" and r.subject == "self"]
+        records = [r for r in mine if not r.never_send]
+
+        def named(rs: list[Record]) -> set[str]:
+            return {str(n).lower() for r in rs for n in (r.source or {}).get("people", [])}
+
+        hidden = named([r for r in mine if r.never_send]) - named(records)    # only in private memories
+        notes: dict[str, Counter[str]] = {}
+        projects: Counter[str] = Counter()
+        for r in records:
+            project = topics.thread_of_tags(r.tags)
+            if project:
+                projects[project] += 1
+            elif r.kind not in ("journal", "story") and topics.TODO_TAG not in r.tags \
+                    and topics.DONE_TAG not in r.tags:
+                title = topics.note_of_tags(r.tags)
+                if title:
+                    notes.setdefault(topics.category_of(r.tags, r.body or r.title), Counter())[title] += 1
+        lines: list[str] = []
+        for category in topics.CATEGORIES:
+            if category in notes:
+                lines.append(f"{category}: " + ", ".join(
+                    f"{t} ({n})" for t, n in notes[category].most_common(12)))
+        if projects:
+            lines.append("Projects: " + ", ".join(f"{p} ({n})" for p, n in projects.most_common(12)))
+        people = [f"{p['name']} ({p['relation']})" if p.get("relation") else p["name"]
+                  for p in store.list_people(limit=40) if p["name"].lower() not in hidden]
+        if people:
+            lines.append("People: " + ", ".join(people))
+        text = "\n".join(lines)
+        return text if len(text) <= HINT_LIMIT else text[:HINT_LIMIT].rsplit(",", 1)[0]
+    except Exception:  # noqa: BLE001
+        logger.warning("could not list the notes for the librarian", exc_info=True)
+        return ""
+
+
+def _speaker(part: dict[str, Any]) -> str:
+    """The label the reader sees: "user" for the owner, "other (Rahim)" for another person in a chat."""
+    role = str(part.get("role", "user"))
+    name = " ".join(str(part.get("name") or "").split())[:60]
+    return f"other ({name})" if role != "user" and name else role
+
+
 def _extract(
     conv_text: str, parts: list[dict[str, Any]] | None, source: dict[str, Any], model_call: Any | None,
+    hint: str = "",
 ) -> list[Any]:
     """Candidate statements from a pasted text or a labelled conversation."""
     from .extract import extract_claims, extract_session
@@ -469,8 +544,8 @@ def _extract(
         found: list[Any] = []
         for chunk in _chunks(parts):
             found.extend(extract_session(
-                [(str(p.get("role", "user")), str(p.get("content", ""))) for p in chunk],
-                source={**source, "speaker": "user"}, model_call=model_call,
+                [(_speaker(p), str(p.get("content", ""))) for p in chunk],
+                source={**source, "speaker": "user"}, model_call=model_call, hint=hint,
             ))
         return found
     if parts:
@@ -480,7 +555,7 @@ def _extract(
             if p.get("role", "user") == "user" and str(p.get("content", "")).strip()
         )
         return extract_claims(owner, source={**source, "speaker": "user"}) if owner else []
-    return extract_claims(conv_text, source=source, model_call=model_call)
+    return extract_claims(conv_text, source=source, model_call=model_call, hint=hint)
 
 
 def _settle_all(
@@ -515,9 +590,14 @@ def _settle_all(
             store.upsert_person(name, relation=relation)
             if name not in people_seen:
                 people_seen.append(name)
-        settle_fact(store, fid, c.text, kind=c.kind_hint or "note", source=c.source, out=out,
+        filing = None
+        if model_used and c.filed_by:
+            filing = {"category": c.category, "note": c.note, "project": c.project,
+                      "todo": c.todo, "moment": c.moment}
+        settle_fact(store, fid, c.text, kind=c.kind_hint or "note",
+                    source={**c.source, "filed_by": "ai" if filing else "rules"}, out=out,
                     model_used=model_used, people=[n for n, _ in named], actor=actor, reason=reason,
-                    judge=judge)
+                    judge=judge, filing=filing)
     out.people = people_seen
     if conv_id and people_seen:
         store.set_conversation_people(conv_id, people_seen)
@@ -528,9 +608,12 @@ def settle_fact(
     store: Any, fact_id: str, text: str, *, kind: str, source: dict[str, Any], out: Outcome,
     model_used: bool, people: list[str], actor: str = AI,
     reason: str = "remembered from what you said", force: bool = False,
-    log: bool = True, judge: Any | None = None,
+    log: bool = True, judge: Any | None = None, filing: dict[str, Any] | None = None,
 ) -> str:
     """Decide what happens to one statement. Returns what was done.
+
+    *filing* is where the AI librarian put it (category, note, project, to-do,
+    passing moment). Whatever it did not say is decided by simple rules.
 
     One of ``saved``, ``duplicate``, ``asked``, ``unsure``, ``waiting``.
     ``force`` is the owner saying "yes, remember this" to something the AI was
@@ -551,7 +634,10 @@ def settle_fact(
         out.waiting += 1
         return "waiting"
 
-    moment = topics.is_moment(text)
+    filing = filing or {}
+    moment = filing.get("moment")
+    if moment is None:
+        moment = topics.is_moment(text)
     if moment:
         # A passing moment is kept, dated, in the Journal. It is only checked for repeats.
         found = conflicts.find(text, _comparable(store, moments=True))
@@ -580,15 +666,26 @@ def settle_fact(
         event_time = datetime.now(timezone.utc).strftime("%Y-%m-%d")
     else:
         kind = kind if kind in ("profile", "note", "learning") else "note"
-        if topics.is_todo(text):
+        todo = filing.get("todo")
+        if todo is None:
+            todo = topics.is_todo(text)
+        if todo:
             extra.append(topics.TODO_TAG)
-        thread = topics.thread_of(text, _known_threads(store))
+        known = _known_threads(store)
+        if filing.get("project"):
+            slug = topics.thread_slug(filing["project"])
+            same = next((t for t in known if t[len(topics.THREAD_PREFIX):] == slug), "")
+            thread = topics.thread_title(same) if same else filing["project"]
+        else:
+            thread = topics.thread_of(text, known)
         if thread:
             extra.append(topics.thread_tag(thread))
+        elif filing.get("note") and not todo:
+            extra.append(topics.note_tag(filing["note"]))
     rec = sign_new(
         store, text, kind=kind, tags=extra, event_time=event_time,
         source={**source, "fact_id": fact_id}, people=people, actor=actor, reason=reason,
-        log=log,
+        log=log, category=filing.get("category") or None,
     )
     store.set_fact_status(fact_id, "promoted")
     out.saved += 1
@@ -640,7 +737,7 @@ def process_waiting(
         parts = conv.get("parts") or None
         source = {"origin": conv.get("origin") or "api", "session": conv.get("session") or "",
                   "conversation_id": conv["id"]}
-        cands = _extract(conv["text"], parts, source, helper)
+        cands = _extract(conv["text"], parts, source, helper, librarian_context(store))
         if not helper.worked:
             break  # the helper is not answering; try again later, change nothing
         for fact in store.list_facts(status="waiting", limit=5000):
@@ -669,21 +766,27 @@ def _tidy(store: Any, vault: Path | None, out: Outcome | None = None, *, record_
         ids = record_ids if record_ids is not None else (out.record_ids if out else [])
         vault_mod.ensure_layout(vault)
         idx = vault_mod._load_index(vault)  # noqa: SLF001
+        dirty: set[str] = set()
+        cache: dict[str, Any] = {}
+        names = set(out.people) if out else set()
         for rid in ids:
             rec = store.get_record(rid)
             if rec is not None:
-                vault_mod.write_record(store, vault, rec, index=idx)
+                vault_mod.write_record(store, vault, rec, index=idx, dirty=dirty, cache=cache)
+                names.update(vault_mod._record_people(rec))  # noqa: SLF001
         vault_mod._save_index(vault, idx)  # noqa: SLF001
-        vault_mod.write_projects(store, vault)
-        if out and out.conversation_id:
-            conv = store.get_conversation(out.conversation_id)
-            if conv:
-                vault_mod.write_conversation(vault, conv, store.private_phrases())
-        names = set(out.people) if out else set()
+        # People first, so a line links to a person who already has a note.
         for name in names:
             person = store.find_person(name)
             if person:
                 vault_mod.write_person(store, vault, person)
+        idx = vault_mod._load_index(vault)  # noqa: SLF001
+        vault_mod.render_notes(store, vault, dirty, idx, cache=cache)
+        vault_mod._save_index(vault, idx)  # noqa: SLF001
+        if out and out.conversation_id:
+            conv = store.get_conversation(out.conversation_id)
+            if conv:
+                vault_mod.write_conversation(vault, conv, store.private_phrases())
         from . import biography
 
         vault_mod.write_summary_notes(store, vault, biography=biography.load(vault)["text"] or None)
@@ -692,7 +795,7 @@ def _tidy(store: Any, vault: Path | None, out: Outcome | None = None, *, record_
 
 
 def refresh_vault(store: Any, vault: Path | None, record_ids: list[str] | None = None) -> None:
-    """Public: rewrite notes for some records (or none) plus Me.md."""
+    """Public: rewrite the notes for some records."""
     _tidy(store, vault, None, record_ids=record_ids or [])
 
 
@@ -752,9 +855,9 @@ def _find_by_card(store: Any, card_id: str) -> Record | None:
 
 def edit_record(
     store: Any, record_id: str, *, body: str | None = None, category: str | None = None,
-    vault: Path | None = None,
+    note: str | None = None, vault: Path | None = None,
 ) -> Record | None:
-    """The owner edits a memory's text or moves it to another category."""
+    """The owner edits a memory's text, moves it to another category, or files it in another note."""
     rec = store.get_record(record_id)
     if rec is None:
         return None
@@ -771,7 +874,11 @@ def edit_record(
         )
     if category in topics.CATEGORIES and category != topics.category_of(before.tags, before.body):
         # Choosing a category yourself takes the note out of its project folder.
-        rec.tags = [t for t in rec.tags if not str(t).startswith(topics.THREAD_PREFIX)]
+        rec.tags = [t for t in rec.tags if not str(t).startswith((topics.THREAD_PREFIX, topics.NOTE_PREFIX))]
+    if note is not None:
+        rec.tags = [t for t in rec.tags if not str(t).startswith(topics.NOTE_PREFIX)]
+        if note.strip() and note.strip().lower() != topics.category_of(rec.tags, rec.body).lower():
+            rec.tags.append(topics.note_tag(vault_mod.note_name(note, fallback="Note")))
     revisit = topics.revisit_date(rec.body)
     if revisit:
         rec.source = {**rec.source, "revisit_at": revisit}
@@ -854,6 +961,7 @@ def make_private(store: Any, record_id: str, *, vault: Path | None = None) -> bo
     rec = store.set_never_send(record_id, value=True, changed_by=OWNER, reason="you made it private")
     if rec is None:
         return False
+    store.delete_embedding(record_id)          # its meaning-search numbers go too; they come back if it is brought back
     store.log_activity("made-private", f"record {record_id}", actor=OWNER)
     _tidy(store, vault, None, record_ids=[record_id])
     _refresh_conversation_notes(store, vault, rec)
@@ -1132,6 +1240,14 @@ def undo(store: Any, seq: int, *, vault: Path | None = None) -> dict[str, Any]:
             if store.get_record(rid) is not None:
                 store.trash(rid, reason=f"import undone (change {seq})", by=OWNER)
                 touched.append(rid)
+        imported = set(change["after"].get("conversation_ids", []))
+        if imported:
+            # Memories the AI read out of those chats later on go with them, unless you changed them since.
+            for rec in store.list_records(status=ACTIVE, limit=20000):
+                if ((rec.source or {}).get("conversation_id") in imported
+                        and str(rec.confirmed_by or "").startswith("ai@") and rec.id not in touched):
+                    store.trash(rec.id, reason=f"import undone (change {seq})", by=OWNER)
+                    touched.append(rec.id)
         for cid in change["after"].get("conversation_ids", []):
             saved = store.delete_conversation(cid)
             if saved and vault is not None:
@@ -1209,7 +1325,8 @@ def store_chats(
     new_people: list[str] = []
     for chat in chats:
         parts, _ = credentials.redact_parts(chat["parts"])
-        text = "\n".join(f"{p['role']}: {p['content']}" for p in parts)
+        # In a group chat each person is named, so "who said what" survives in the saved text.
+        text = "\n".join(f"{p.get('name') or p['role']}: {p['content']}" for p in parts)
         names = [str(n) for n in chat.get("people", [])]
         origin, title = str(chat.get("origin", "")), str(chat.get("title", ""))
         if store.has_conversation(text, origin=origin, session=title):

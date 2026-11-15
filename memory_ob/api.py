@@ -14,6 +14,7 @@ from __future__ import annotations
 import base64
 import logging
 from collections.abc import Iterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +34,7 @@ from . import (
     reader,
     startup,
     topics,
+    vault as vault_mod,
     vaultview,
 )
 from . import settings as settings_mod
@@ -136,13 +138,23 @@ def _paused() -> bool:
     return anonymous.is_anonymous(settings.vault)
 
 
+def _hermes_notes_message(report: dict[str, Any]) -> str:
+    """One plain sentence about what went into Hermes's notes."""
+    total, shown = int(report.get("synced", 0)), int(report.get("shown", 0))
+    if total == 0:
+        return "Turned on. Nothing is saved yet, so there is nothing to write."
+    if shown >= total:
+        return f"Turned on. Put {_n(total, 'memory', 'memories')} into Hermes's notes."
+    return (f"Turned on. Put the {_n(shown, 'most useful memory', 'most useful memories')} into Hermes's notes "
+            f"(they only have room for a short list). Hermes can search the other {total - shown}.")
+
+
 def _after_change(st: Store) -> None:
     """Keep Hermes's own memory notes current when the owner asked for that."""
     try:
-        if _app_settings().sync_hermes:
-            from . import nightshift
+        from . import nightshift
 
-            nightshift.sync_hermes(st, settings, enabled=True)
+        nightshift.refresh_hermes_notes(st, settings.vault)
     except Exception:  # noqa: BLE001 - never fail a save over a notes file
         logger.warning("could not update Hermes memory files", exc_info=True)
 
@@ -254,8 +266,31 @@ def _person_card(entry: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _warm_up() -> None:
+    """Ask once, in the background, whether an AI is reachable, so the first screen does not wait for it."""
+    import threading
+
+    def work() -> None:
+        try:
+            from . import hermes as hermes_mod
+
+            if hermes_mod.available():
+                hermes_mod.main_slot()          # the first look runs `hermes config get`
+            models.helper_state(ModelConfig.load(settings.models_path))
+        except Exception:  # noqa: BLE001 - only a head start
+            logger.debug("warm-up failed", exc_info=True)
+
+    threading.Thread(target=work, name="memory-ob-warm-up", daemon=True).start()
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    _warm_up()
+    yield
+
+
 def create_app() -> FastAPI:
-    app = FastAPI(title="Memory_OB", version="0.2.0")
+    app = FastAPI(title="Memory_OB", version="0.2.0", lifespan=_lifespan)
 
     @app.middleware("http")
     async def gate_writes(request: Request, call_next):
@@ -445,11 +480,15 @@ def create_app() -> FastAPI:
         category = payload.get("category")
         if category is not None and category not in topics.CATEGORIES:
             raise _fail(400, "That is not one of the categories.")
+        note = payload.get("note")
         saved = manager.edit_record(
-            st, record_id, body=None if body is None else str(body), category=category, vault=settings.vault,
+            st, record_id, body=None if body is None else str(body), category=category,
+            note=None if note is None else str(note), vault=settings.vault,
         )
         _after_change(st)
-        return saved.to_dict() if saved else {}
+        out = saved.to_dict() if saved else {}
+        out["note"] = vault_mod._load_index(settings.vault).get(record_id, "")  # noqa: SLF001 - where it is filed now
+        return out
 
     @app.post("/api/records/{record_id}/done")
     def tick_off(record_id: str, payload: dict[str, Any] | None = None, st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -486,6 +525,10 @@ def create_app() -> FastAPI:
     def search(
         request: Request, q: str = Query(..., min_length=1), limit: int = 20, st: Store = Depends(get_store),
     ) -> dict[str, Any]:
+        if _paused() and _caller(request) != "owner":
+            # Paused means nothing is brought into chats. The owner can still look at their own notes.
+            return {"query": q, "count": 0, "results": [], "people": [], "found": False, "paused": True,
+                    "abstention": "Memory is paused by the owner. Do not use memory in this chat."}
         cfg = ModelConfig.load(settings.models_path)
         hits = st.search_all(
             q, limit=limit, backend=models.resolve_backend(cfg), slot=cfg.slot("embed"),
@@ -516,8 +559,15 @@ def create_app() -> FastAPI:
         linked_edges = vaultview.links(st, notes)
         linked = {e["source"] for e in linked_edges} | {e["target"] for e in linked_edges}
         shown = vaultview.filter_notes(notes, q, linked=linked)
+        words = vaultview.parse_query(q)["words"]
+        out = []
+        for n in shown:
+            item = vaultview.public(n)
+            if words:
+                item["hits"] = vaultview.hits(n, words)
+            out.append(item)
         return {
-            "notes": shown, "total": len(notes), "shown": len(shown),
+            "notes": out, "total": len(notes), "shown": len(shown),
             "tags": vaultview.tag_counts(notes), "folders": vaultview.folder_counts(notes),
             "categories": list(topics.CATEGORIES),
         }
@@ -531,28 +581,18 @@ def create_app() -> FastAPI:
 
     @app.put("/api/vault/note")
     def vault_save_note(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
-        """Edit a note: a memory's words or category, or a person's profile."""
+        """Edit a person's note. Subject notes are edited line by line (each line is a memory)."""
         path = str(payload.get("path") or "")
         try:
             note = vaultview.read_note(st, settings.vault, path)
         except vaultview.NoteError as exc:
             raise _fail(404, str(exc))
         if not note["editable"]:
-            raise _fail(400, "This note is written automatically. Change the memories it is made from instead.")
-        if note["type"] == vaultview.TYPE_MEMORY:
-            body = payload.get("body")
-            if body is not None and not str(body).strip():
-                raise _fail(400, "A memory cannot be empty. Use Forget to remove it.")
-            category = payload.get("category")
-            if category is not None and category not in topics.CATEGORIES:
-                raise _fail(400, "That is not one of the categories.")
-            manager.edit_record(st, note["id"], body=None if body is None else str(body),
-                                category=category, vault=settings.vault)
-        else:
-            manager.update_person(
-                st, note["id"], vault=settings.vault,
-                **{k: payload[k] for k in ("name", "relation", "notes") if k in payload},
-            )
+            raise _fail(400, "This note is written automatically. Change its lines (each one is a memory) instead.")
+        manager.update_person(
+            st, note["id"], vault=settings.vault,
+            **{k: payload[k] for k in ("name", "relation", "notes") if k in payload},
+        )
         _after_change(st)
         fresh = next((n for n in vaultview.list_notes(st, settings.vault) if n["id"] == note["id"]), None)
         return vaultview.read_note(st, settings.vault, fresh["path"]) if fresh else {}
@@ -864,19 +904,27 @@ def create_app() -> FastAPI:
                 raise _fail(400, "That is not a list of words.")
             changes["guardrails"] = payload["never_remember"]
         warning = ""
+        message = ""
         if "sync_hermes" in payload:
             want = bool(payload["sync_hermes"])
             report = sync_hermes(st, settings, enabled=want)
             if report is None:
                 if want:
-                    raise _fail(400, "I could not find Hermes's memory files on this computer, so this cannot be turned on.")
+                    raise _fail(400, "I could not find Hermes on this computer, so this cannot be turned on.")
                 warning = "Hermes's memory files were not found, so there was nothing to clean up."
+            elif want:
+                message = _hermes_notes_message(report)
             changes["sync_hermes"] = want
         settings_mod.update(settings.vault, **changes)
         models.configure_local_only(settings.vault)
+        from . import probe
+
+        probe.forget()
         out = get_settings(st)
         if warning:
             out["warning"] = warning
+        if message:
+            out["message"] = message
         return out
 
     @app.get("/api/settings/ai/models")
@@ -908,6 +956,9 @@ def create_app() -> FastAPI:
             raise _fail(400, "Unknown choice.")
         settings.ensure_dirs()
         cfg.save(settings.models_path)
+        from . import probe
+
+        probe.forget()                            # the choice changed, so look again
         if models.embed_model_name(cfg.slot("embed")) != before and _app_settings().semantic:
             from .embedder import kick as embed_in_background
             embed_in_background(settings)          # another model: redo the numbers behind meaning search
@@ -973,6 +1024,9 @@ def create_app() -> FastAPI:
         from . import proxy as px
 
         ok = px.start()
+        from . import probe
+
+        probe.forget("hermes-proxy")
         out = px.status(settings.vault)
         out["ok"] = ok
         return out
@@ -982,6 +1036,9 @@ def create_app() -> FastAPI:
         from . import proxy as px
 
         ok = px.stop()
+        from . import probe
+
+        probe.forget("hermes-proxy")
         out = px.status(settings.vault)
         out["ok"] = ok
         return out

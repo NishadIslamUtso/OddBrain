@@ -198,35 +198,73 @@ select { appearance: auto; }
 .mem .editor { display: grid; gap: 8px; }
 
 /* ---- vault -------------------------------------------------------------- */
-.vault { display: grid; grid-template-columns: 230px 1fr; gap: 18px; align-items: start; }
-.v-side { position: sticky; top: 64px; max-height: calc(100vh - 90px); overflow: auto; padding-right: 4px; }
-.v-side h4 { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); margin: 14px 0 6px; }
-.v-side h4:first-child { margin-top: 0; }
-.tree button {
-  display: flex; justify-content: space-between; gap: 8px; width: 100%; text-align: left;
-  background: none; border: 0; padding: 4px 8px; border-radius: 6px; cursor: pointer; color: var(--text);
-}
-.tree button:hover { background: var(--bg-3); }
-.tree button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
-.tree .n { color: var(--text-2); font-size: .82rem; }
-.tree button[aria-pressed="true"] .n { color: var(--on-accent); }
+.vx { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 16px; align-items: start; }
+.vx.noside { grid-template-columns: minmax(0, 1fr); }
+.vx.noside .vx-side { display: none; }
+.vx-side { position: sticky; top: 62px; max-height: calc(100vh - 80px); display: flex; flex-direction: column; background: var(--bg-2); border: 1px solid var(--stroke); border-radius: var(--radius); overflow: hidden; }
+.vx-tools { padding: 10px; border-bottom: 1px solid var(--stroke); display: grid; gap: 8px; }
+.vx-tools summary, .vx-disp summary { cursor: pointer; font-weight: 600; color: var(--text-2); }
+.vx-tree { overflow: auto; padding: 6px; flex: 1 1 auto; min-height: 140px; }
+.vx-tree ul { list-style: none; margin: 0; padding: 0; }
+.vx-row { display: flex; width: 100%; align-items: center; gap: 4px; text-align: left; background: none; border: 0; border-radius: 6px; padding: 4px 8px 4px calc(6px + var(--d, 0) * 14px); cursor: pointer; color: var(--text); }
+.vx-row:hover { background: var(--bg-3); }
+.vx-row .chev { width: 1.1em; flex: 0 0 auto; color: var(--text-2); text-align: center; }
+.vx-row .nm { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vx-row .n { flex: 0 0 auto; color: var(--text-2); font-size: .8rem; }
+.vx-row.dir .nm { font-weight: 600; }
+.vx-row.more { color: var(--accent-text); }
+.vx-row[aria-selected="true"] { background: var(--accent); color: var(--on-accent); }
+.vx-row[aria-selected="true"] .n { color: var(--on-accent); }
+.vx-hit { display: block; width: 100%; text-align: left; background: none; border: 0; border-bottom: 1px solid var(--stroke); padding: 8px 10px; cursor: pointer; color: var(--text); }
+.vx-hit:hover { background: var(--bg-3); }
+.vx-hit .t { font-weight: 600; } .vx-hit .p { color: var(--text-3); font-size: .8rem; margin-left: 6px; }
+.vx-hit .ctx { display: block; color: var(--text-2); font-size: .88rem; overflow-wrap: anywhere; margin-top: 2px; }
+mark { background: var(--warn-bg); color: var(--warn); border-radius: 3px; padding: 0 2px; }
+kbd { font: inherit; font-size: .78rem; padding: 0 6px; border: 1px solid var(--stroke-2); border-bottom-width: 2px; border-radius: 5px; background: var(--bg-3); color: var(--text-2); }
+.vx-main { min-width: 0; }
+.vx-bar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 12px; }
+.vx-crumb { color: var(--text-2); font-size: .88rem; flex: 1 1 12em; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vx-note { display: grid; grid-template-columns: minmax(0, 1fr) 210px; gap: 16px; align-items: start; }
+.vx-article { background: var(--bg-2); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 16px 18px; min-width: 0; }
+.vx-article > * + * { margin-top: 10px; }
+.vx-rail details { background: var(--bg-2); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 8px 12px; }
+.vx-rail details + details { margin-top: 8px; }
+.vx-rail summary { cursor: pointer; font-weight: 650; font-size: .88rem; }
+.vx-links { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 2px; }
+.vx-links button { text-align: left; background: none; border: 0; padding: 3px 6px; border-radius: 6px; cursor: pointer; color: var(--accent-text); width: 100%; }
+.vx-links button:hover { background: var(--bg-3); }
+.vx-h { font-size: .78rem; text-transform: uppercase; letter-spacing: .05em; color: var(--text-2); margin-top: 14px !important; font-weight: 700; }
+.vx-lines { list-style: none; margin: 0; padding: 0; }
+.vx-line { display: flex; gap: 10px; align-items: flex-start; padding: 9px 4px; border-top: 1px solid var(--stroke); }
+.vx-lines > .vx-line:first-child { border-top: 0; }
+.vx-line .tick { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 3px; accent-color: var(--accent); cursor: pointer; }
+.vx-lt { flex: 1 1 auto; min-width: 0; }
+.vx-lt .t { overflow-wrap: anywhere; }
+.vx-line.finished .t { text-decoration: line-through; color: var(--text-2); }
+.vx-line .meta { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; color: var(--text-2); font-size: .82rem; margin-top: 2px; }
+.vx-line .editor { display: grid; gap: 8px; }
+.vx-acts { display: flex; gap: 2px; flex: 0 0 auto; opacity: 0; transition: opacity .12s; }
+.vx-line:hover .vx-acts, .vx-line:focus-within .vx-acts { opacity: 1; }
+@media (hover: none) { .vx-acts { opacity: 1; } }
+#g-wrap { position: relative; background: var(--bg-2); border: 1px solid var(--stroke); border-radius: var(--radius); overflow: hidden; height: min(68vh, 640px); min-height: 340px; }
+#g-canvas { display: block; width: 100%; height: 100%; cursor: grab; touch-action: none; }
+.vx-zoom { position: absolute; right: 10px; bottom: 10px; display: grid; gap: 6px; }
+.vx-zoom .btn { width: 34px; height: 34px; padding: 0; font-size: 1.1rem; line-height: 1; }
+.vx-tip { position: absolute; left: 10px; top: 10px; background: var(--bg); border: 1px solid var(--stroke-2); border-radius: 8px; padding: 3px 10px; font-size: .86rem; pointer-events: none; }
+.vx-disp { margin-top: 10px; background: var(--bg-2); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 10px 14px; }
+.vx-disp .ctl { display: grid; grid-template-columns: minmax(9em, 12em) 1fr; gap: 8px 14px; align-items: center; margin-top: 10px; max-width: 520px; }
+.check { display: inline-flex; gap: 6px; align-items: center; cursor: pointer; }
+input[type=range] { accent-color: var(--accent); width: 100%; }
+.sw-back { align-items: flex-start; padding-top: 12vh; }
+.sw { width: min(560px, 100%); }
+.sw ul { list-style: none; margin: 8px 0 0; padding: 0; max-height: 50vh; overflow: auto; }
+.sw li button { display: flex; justify-content: space-between; gap: 10px; width: 100%; text-align: left; background: none; border: 0; border-radius: 8px; padding: 7px 10px; cursor: pointer; color: var(--text); }
+.sw li[aria-selected="true"] button { background: var(--accent); color: var(--on-accent); }
+.sw li[aria-selected="true"] .faint { color: var(--on-accent); }
 .seg { display: inline-flex; border: 1px solid var(--stroke-2); border-radius: 8px; overflow: hidden; }
 .seg button { background: var(--bg-2); border: 0; padding: 6px 14px; cursor: pointer; font-weight: 600; color: var(--text-2); }
 .seg button + button { border-left: 1px solid var(--stroke-2); }
 .seg button[aria-pressed="true"] { background: var(--accent); color: var(--on-accent); }
-.notes li { padding: 10px 14px; cursor: pointer; }
-.notes li:hover { background: var(--bg-3); }
-.notes .title { font-weight: 600; }
-.notes .snip { color: var(--text-2); font-size: .9rem; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-.notes .meta { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 4px; align-items: center; color: var(--text-2); font-size: .82rem; }
-svg.graph { width: 100%; height: min(70vh, 640px); min-height: 360px; background: var(--bg-2); border: 1px solid var(--stroke); border-radius: var(--radius); cursor: grab; display: block; touch-action: none; }
-svg.graph:active { cursor: grabbing; }
-svg.graph text { fill: var(--text); font-size: 11px; paint-order: stroke; stroke: var(--bg-2); stroke-width: 3px; pointer-events: none; }
-svg.graph .node { cursor: pointer; }
-svg.graph .node circle { stroke: var(--bg-2); stroke-width: 1.5px; }
-svg.graph .node:hover circle { stroke: var(--text); stroke-width: 2px; }
-svg.graph line { stroke: var(--edge); stroke-width: 1px; }
-svg.graph line.dim, svg.graph .node.dim { opacity: .18; }
 .legend { display: flex; gap: 12px; flex-wrap: wrap; color: var(--text-2); font-size: .85rem; }
 .legend i { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 5px; }
 .drawer-back { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 40; }
@@ -235,17 +273,18 @@ svg.graph line.dim, svg.graph .node.dim { opacity: .18; }
   background: var(--bg); border-left: 1px solid var(--stroke-2); overflow: auto; padding: 18px 18px 40px;
   box-shadow: -8px 0 24px rgba(0,0,0,.3);
 }
-.drawer > * + * { margin-top: 14px; }
 .md h1, .md h2, .md h3 { margin: 14px 0 6px; } .md h1 { font-size: 1.2rem; } .md h2 { font-size: 1.08rem; } .md h3 { font-size: 1rem; }
 .md p + p, .md ul + p, .md p + ul { margin-top: 8px; }
 .md ul { margin: 6px 0 0; padding-left: 1.2em; } .md li + li { margin-top: 3px; }
 .md code { background: var(--bg-3); border-radius: 4px; padding: 0 4px; }
 .md .wl { color: var(--accent-text); text-decoration: underline; cursor: pointer; }
 .md .wl.dead { color: var(--text-2); text-decoration: none; cursor: default; }
+@media (max-width: 1000px) { .vx-note { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 760px) {
-  .vault { grid-template-columns: 1fr; }
-  .v-side { position: static; max-height: none; }
-  .v-side details { margin-bottom: 8px; }
+  .vx { grid-template-columns: minmax(0, 1fr); }
+  .vx-side { position: static; max-height: 60vh; }
+  .vx-acts { opacity: 1; }
+  .vx-line { flex-wrap: wrap; }
 }
 
 /* ---- people ------------------------------------------------------------- */
@@ -528,7 +567,22 @@ const Theme = (() => {
 /* ==========================================================================
    Talking to Memory_OB
    ========================================================================== */
-async function api(path, opts) {
+/* A screen that is still loading when you open another one must not draw
+   itself over the new one. Reading something for a screen therefore checks, when
+   the answer arrives, that you are still on the tab that asked. If not, the
+   answer is dropped: the old screen simply stops there. Saves are never dropped,
+   and neither are reads that belong to no screen ({ global: true }). */
+function api(path, opts) {
+  const method = (opts && opts.method) || 'GET';
+  const tab = state.tab;
+  const left = () => method === 'GET' && !(opts && opts.global) && state.tab !== tab;
+  const forever = () => new Promise(() => {});
+  return rawApi(path, opts).then(
+    (out) => (left() ? forever() : out),
+    (err) => { if (left()) return forever(); throw err; }
+  );
+}
+async function rawApi(path, opts) {
   const method = (opts && opts.method) || 'GET';
   /* The payload stays an OBJECT: the host bridge serializes it, so handing it
      a string here would double-encode and the server would reject the body. */
@@ -685,7 +739,7 @@ async function busy(btn, fn) {
    ========================================================================== */
 const state = {
   tab: 'review', categories: [], status: null, home: null,
-  vq: '', vview: 'list', vault: null, vg: { tags: false, people: true, sources: true, orphans: true },
+  v: null,
   people: [], person: null, personId: null, peopleQ: '',
   settings: null, mem: {},
 };
@@ -716,7 +770,7 @@ function renderBanners() {
 let pollTimer = null;
 async function refreshStatus() {
   try {
-    state.status = await api('/api/status');
+    state.status = await api('/api/status', { global: true });
     if (state.status.categories) state.categories = state.status.categories;
     renderBanners();
     clearTimeout(pollTimer);
@@ -724,7 +778,7 @@ async function refreshStatus() {
   } catch (e) { /* the screen's own load reports problems */ }
 }
 async function go(tab) {
-  state.tab = tab; renderTabs(); closeDrawer();
+  state.tab = tab; renderTabs(); closeDrawer(); stopGraph();
   const main = $('#main'); main.innerHTML = '<p class="skeleton">Loading…</p>';
   window.scrollTo(0, 0);
   try { await SCREENS[tab](); }
@@ -880,218 +934,542 @@ async function runSearch() {
 }
 
 /* ----------------------------------------------------------------- Vault */
+/* Laid out like an Obsidian vault: a folder tree on the left (folders open and close, and it
+   remembers which), the note in the middle with what links to it beside it, a graph that moves
+   and can be dragged, and Ctrl+O to jump to any note. Every line in a note is one memory. */
+const VKEY = 'memory_ob.vault';
+const PAGE = 120;                       /* rows shown in one folder before "Show more" */
+function vstate() {
+  if (state.v) return state.v;
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(VKEY) || '{}') || {}; } catch (e) {}
+  state.v = {
+    open: saved.open || null, sort: saved.sort || 'name', recent: saved.recent || [], hideSide: !!saved.hideSide,
+    g: Object.assign({ tags: false, people: true, sources: true, orphans: true, local: false, depth: 1, names: true,
+      center: 0.4, repel: 0.5, link: 0.5, dist: 0.4 }, saved.g || {}),
+    view: 'note', note: null, cur: null, q: '', all: [], total: 0, tree: null, byKey: new Map(), found: null,
+    more: {}, shown: 40, seq: 0, gdata: null, tags: [],
+  };
+  return state.v;
+}
+const vsave = debounce(() => {
+  const v = state.v; if (!v) return;
+  try { localStorage.setItem(VKEY, JSON.stringify({ open: v.open, sort: v.sort, recent: v.recent.slice(0, 8), hideSide: v.hideSide, g: v.g })); } catch (e) {}
+}, 400);
+const inVault = () => state.tab === 'vault' && !!$('#v-content');
+
+/* ---- search words and filters ---- */
 function qTokens(q) { const t = []; const re = /-?[^\s"]*"[^"]*"|\S+/g; let m; while ((m = re.exec(q || ''))) t.push(m[0]); return t; }
-function tokOn(tok) { return qTokens(state.vq).includes(tok); }
-function setQ(q) { state.vq = q.trim(); const el = $('#v-q'); if (el) el.value = state.vq; return loadVault(); }
+function qWords(q) { return qTokens(q).filter(t => !t.startsWith('-') && !/^[a-z]+:/i.test(t)).map(t => t.replace(/^"|"$/g, '').toLowerCase()).filter(Boolean); }
+function tokOn(tok) { return qTokens(vstate().q).includes(tok); }
+function setQ(q) {
+  const v = vstate(); v.q = q.trim(); v.shown = 40; const el = $('#v-q'); if (el) el.value = v.q;
+  return Promise.all([runVaultSearch(), v.view === 'graph' ? showGraph() : null]);
+}
 function toggleTok(tok, exclusivePrefix) {
-  let t = qTokens(state.vq); const had = t.includes(tok);
-  if (exclusivePrefix) t = t.filter(x => !x.startsWith(exclusivePrefix));
-  else t = t.filter(x => x !== tok);
+  let t = qTokens(vstate().q); const had = t.includes(tok);
+  if (exclusivePrefix) t = t.filter(x => !x.startsWith(exclusivePrefix)); else t = t.filter(x => x !== tok);
   if (!had) t.push(tok);
   return setQ(t.join(' '));
 }
 function isoAgo(days) { const d = new Date(Date.now() - days * 864e5); return d.toISOString().slice(0, 10); }
-function noteChips(n) {
-  const typ = { person: 'Person', source: 'Conversation', summary: 'Summary' }[n.type];
-  return (typ ? `<span class="chip">${typ}</span>` : '') +
-    (n.type === 'memory' ? `<span class="chip" style="border-color:${catColor(n.category)}">${esc(n.category)}</span>` : '');
+/* the matching words picked out of a line, safely (the text is escaped piece by piece) */
+function mark(text, words) {
+  const raw = String(text || ''); if (!words.length) return esc(raw);
+  const low = raw.toLowerCase(); const spans = [];
+  for (const w of words) { let i = 0; while ((i = low.indexOf(w, i)) >= 0) { spans.push([i, i + w.length]); i += w.length; } }
+  spans.sort((a, b) => a[0] - b[0]); let out = '', at = 0;
+  for (const [a, b] of spans) { if (a < at) continue; out += esc(raw.slice(at, a)) + '<mark>' + esc(raw.slice(a, b)) + '</mark>'; at = b; }
+  return out + esc(raw.slice(at));
 }
 
+/* ---- the screen ---- */
 SCREENS.vault = async function (soft) {
-  if (!soft || !$('#v-content')) {
-    $('#main').innerHTML = `<div class="screen">
-      <div class="head"><h1>Vault</h1><p>All your notes, laid out like an Obsidian vault.</p></div>
-      <div class="vault"><aside class="v-side" id="v-side"></aside><div>
-        <div class="row" style="margin-bottom:10px">
-          <input type="search" id="v-q" style="flex:1 1 220px" value="${esc(state.vq)}" placeholder="Search or filter notes" aria-label="Search or filter notes">
-          <div class="seg" role="group" aria-label="View">
-            <button data-act="set-view" data-view="list">List</button><button data-act="set-view" data-view="graph">Graph</button></div>
-        </div>
-        <div id="v-chips" class="stack"></div>
-        <p class="faint" style="margin-top:8px">You can also type <b>tag:</b> <b>path:</b> <b>file:</b> <b>person:</b> <b>by:</b> <b>after:</b> <b>before:</b>, or put <b>-</b> in front of a word to leave it out.</p>
-        <div id="v-content" style="margin-top:12px"></div>
-      </div></div></div>`;
-  }
-  await loadVault();
+  const v = vstate();
+  if (!soft || !$('#v-tree')) vShell();
+  await loadAll();
+  paintTree(); paintBar();
+  if (v.note && !v.all.some(n => n.path === v.note)) { v.note = null; v.cur = null; paintTree(); paintBar(); }   /* its last line was forgotten */
+  if (v.view === 'graph') return showGraph();
+  if (v.note) return showNote(v.note, false, true);
+  paintHome();
 };
-
-async function loadVault() {
-  const r = await api('/api/vault/notes?q=' + enc(state.vq));
-  state.vault = r; if (r.categories) state.categories = r.categories;
-  $$('[data-act=set-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === state.vview)));
-  renderVaultSide(); renderVaultChips();
-  if (state.vview === 'graph') await renderGraphView(); else renderNoteList();
+function vShell() {
+  const v = vstate();
+  $('#main').innerHTML = `<div class="screen">
+    <div class="head"><h1>Vault</h1><p>Your notes, laid out like an Obsidian vault.</p></div>
+    <div class="vx${v.hideSide ? ' noside' : ''}" id="vx">
+      <aside class="vx-side" id="vx-side" aria-label="Your notes">
+        <div class="vx-tools">
+          <input type="search" id="v-q" value="${esc(v.q)}" placeholder="Search your notes" aria-label="Search your notes">
+          <div class="row">
+            <button class="btn sm" data-act="v-collapse" id="v-collapse">Collapse all</button>
+            <select id="v-sort" aria-label="Sort notes" style="width:auto;flex:1 1 8em">
+              <option value="name">Name A–Z</option><option value="name-desc">Name Z–A</option>
+              <option value="new">Changed, newest first</option><option value="old">Changed, oldest first</option>
+              <option value="big">Biggest first</option></select>
+          </div>
+          <button class="btn sm" data-act="v-switcher">Jump to a note <kbd>Ctrl O</kbd></button>
+          <details class="vx-filters"><summary>Filters</summary>
+            <div id="v-chips" class="stack" style="margin-top:8px"></div>
+            <p class="faint" style="margin-top:8px">You can also type <b>tag:</b> <b>path:</b> <b>file:</b> <b>person:</b> <b>by:</b> <b>after:</b> <b>before:</b>, or put <b>-</b> in front of a word to leave it out.</p>
+          </details>
+        </div>
+        <div class="vx-tree" id="v-tree" role="tree" aria-label="Folders and notes"></div>
+      </aside>
+      <section class="vx-main">
+        <div class="vx-bar">
+          <button class="btn sm" data-act="v-side" id="v-sidebtn" aria-expanded="${!v.hideSide}">Notes list</button>
+          <div class="seg" role="group" aria-label="View">
+            <button data-act="v-view" data-view="note">Note</button><button data-act="v-view" data-view="graph">Graph</button></div>
+          <span class="vx-crumb" id="v-crumb"></span>
+        </div>
+        <div id="v-content"></div>
+      </section>
+    </div></div>`;
+  $('#v-sort').value = v.sort;
 }
-function renderVaultSide() {
-  const v = state.vault; const el = $('#v-side'); if (!el) return;
-  const folders = v.folders.map(f => {
-    const parts = f.path.split('/'); const tok = `path:"${f.path}/"`;
-    return `<button style="padding-left:${8 + (parts.length - 1) * 14}px" data-act="tok" data-tok='${esc(tok)}' aria-pressed="${tokOn(tok)}"><span>${esc(parts[parts.length - 1])}</span><span class="n">${f.count}</span></button>`;
-  }).join('');
-  const tags = v.tags.map(t => {
-    const parts = t.tag.split('/'); const tok = `tag:${t.tag}`;
-    return `<button style="padding-left:${8 + (parts.length - 1) * 14}px" title="#${esc(t.tag)}" data-act="tok" data-tok="${esc(tok)}" aria-pressed="${tokOn(tok)}"><span>#${esc(parts[parts.length - 1])}</span><span class="n">${t.count}</span></button>`;
-  }).join('');
-  el.innerHTML = `<details open><summary class="sect-title" style="cursor:pointer">Folders</summary><div class="tree">${folders || '<p class="faint">No folders yet.</p>'}</div></details>
-    <details open style="margin-top:12px"><summary class="sect-title" style="cursor:pointer">Tags</summary><div class="tree">${tags || '<p class="faint">No tags yet.</p>'}</div></details>`;
+async function loadAll() {
+  const v = vstate();
+  const r = await api('/api/vault/notes?q=');
+  v.all = r.notes; v.total = r.total; v.tags = r.tags || []; if (r.categories) state.categories = r.categories;
+  v.byKey = new Map();
+  for (const n of v.all) [n.title, n.name, n.path.replace(/\.md$/i, '')].forEach(k => { if (k) v.byKey.set(String(k).toLowerCase(), n.path); });
+  v.tree = buildTree(v.all);
+  if (!v.open) { v.open = {}; for (const d of allDirs(v.tree)) v.open[d.path] = d.count <= 14; }
+  if (v.q) { v.seq++; v.found = await api('/api/vault/notes?q=' + enc(v.q)); }
+}
+async function runVaultSearch() {
+  const v = vstate(); const mine = ++v.seq;
+  if (!v.q) { v.found = null; return paintTree(); }
+  const r = await api('/api/vault/notes?q=' + enc(v.q));
+  if (mine !== v.seq || !inVault()) return;
+  v.found = r; paintTree();
+}
+function paintBar() {
+  if (!inVault()) return; const v = vstate();
+  $$('[data-act=v-view]').forEach(b => b.setAttribute('aria-pressed', String(b.dataset.view === v.view)));
+  const c = $('#v-crumb'); if (c) c.textContent = v.view === 'note' && v.cur ? v.cur.path.replace(/\.md$/i, '').split('/').join('  ›  ') : '';
+}
+
+/* ---- the folder tree ---- */
+function buildTree(notes) {
+  const root = { name: '', path: '', dirs: new Map(), files: [], count: 0, updated: '' };
+  for (const n of notes) {
+    const parts = n.path.split('/'); let node = root;
+    for (let i = 0; i < parts.length - 1; i++) {
+      const p = parts.slice(0, i + 1).join('/');
+      if (!node.dirs.has(parts[i])) node.dirs.set(parts[i], { name: parts[i], path: p, dirs: new Map(), files: [], count: 0, updated: '' });
+      node = node.dirs.get(parts[i]); node.count++; if ((n.updated || '') > node.updated) node.updated = n.updated || '';
+    }
+    node.files.push(n);
+  }
+  return root;
+}
+function allDirs(node, out) { out = out || []; for (const d of node.dirs.values()) { out.push(d); allDirs(d, out); } return out; }
+function sortBy(kind) {
+  const nm = (a, b) => String(a.name || a.title).localeCompare(String(b.name || b.title), undefined, { numeric: true, sensitivity: 'base' });
+  const up = (a, b) => (b.updated || '').localeCompare(a.updated || '');
+  return { name: nm, 'name-desc': (a, b) => nm(b, a), new: (a, b) => up(a, b) || nm(a, b), old: (a, b) => up(b, a) || nm(a, b),
+    big: (a, b) => ((b.count || 0) - (a.count || 0)) || nm(a, b) }[kind] || nm;
+}
+function treeRows(node, depth, out) {
+  const v = vstate(); const by = sortBy(v.sort);
+  const dirs = [...node.dirs.values()].sort((a, b) => v.sort === 'big' ? (b.count - a.count) || by(a, b) : by(a, b));
+  for (const d of dirs) {
+    const open = !!v.open[d.path];
+    out.push(`<li role="none"><button class="vx-row dir" role="treeitem" aria-level="${depth + 1}" aria-expanded="${open}" data-act="v-dir" data-path="${esc(d.path)}" style="--d:${depth}">
+      <span class="chev" aria-hidden="true">${open ? '▾' : '▸'}</span><span class="nm">${esc(d.name)}</span><span class="n">${d.count}</span></button></li>`);
+    if (open) treeRows(d, depth + 1, out);
+  }
+  const files = node.files.slice().sort(by); const lim = v.more[node.path] || PAGE;
+  for (const f of files.slice(0, lim)) {
+    const on = v.note === f.path;
+    out.push(`<li role="none"><button class="vx-row file" role="treeitem" aria-level="${depth + 1}" aria-selected="${on}" data-act="open-note" data-path="${esc(f.path)}" style="--d:${depth}">
+      <span class="chev" aria-hidden="true"></span><span class="nm">${esc(f.title)}</span>${f.count > 1 ? `<span class="n">${f.count}</span>` : ''}</button></li>`);
+  }
+  if (files.length > lim) out.push(`<li role="none"><button class="vx-row more" data-act="v-more-files" data-path="${esc(node.path)}" style="--d:${depth}"><span class="chev"></span><span class="nm">Show ${Math.min(PAGE, files.length - lim)} more of ${files.length - lim}</span></button></li>`);
+}
+function paintTree() {
+  if (!inVault()) return; const v = vstate(); const el = $('#v-tree'); if (!el) return;
+  const focus = document.activeElement && el.contains(document.activeElement) ? document.activeElement.dataset.path : null;
+  renderVaultChips();
+  const any = Object.values(v.open || {}).some(Boolean); const cb = $('#v-collapse'); if (cb) cb.textContent = any ? 'Collapse all' : 'Expand all';
+  if (v.q) {
+    const r = v.found; if (!r) { el.innerHTML = '<p class="faint" style="padding:8px">Searching…</p>'; return; }
+    const words = qWords(v.q); const shown = r.notes.slice(0, v.shown);
+    el.innerHTML = `<div class="row between" style="padding:2px 6px 6px"><span class="faint">${r.shown === r.total ? plural(r.total, 'note') : `${r.shown} of ${plural(r.total, 'note')}`}</span><button class="btn ghost sm" data-act="v-clear">Clear search</button></div>` +
+      (shown.length ? `<ul>${shown.map(n => `<li><button class="vx-hit" data-act="open-note" data-path="${esc(n.path)}"><span class="t">${esc(n.title)}</span><span class="p">${esc(n.path.split('/').slice(0, -1).join(' › '))}</span>
+        ${(n.hits && n.hits.length ? n.hits : (n.snippet && n.snippet.trim() !== (n.title || '').trim() ? [n.snippet] : [])).slice(0, 3).map(h => `<span class="ctx">${mark(h, words)}</span>`).join('')}</button></li>`).join('')}</ul>` +
+        (r.notes.length > shown.length ? `<button class="vx-row more" data-act="v-more-hits" style="--d:0"><span class="chev"></span><span class="nm">Show more</span></button>` : '')
+        : `<p class="faint" style="padding:8px">No notes match. Clear a word or a filter to see more.</p>`);
+    return;
+  }
+  if (!v.all.length) { el.innerHTML = '<p class="faint" style="padding:8px">Nothing here yet. Notes appear as I file what you tell me.</p>'; return; }
+  const out = []; treeRows(v.tree, 0, out);
+  el.innerHTML = `<ul role="none">${out.join('')}</ul>`;
+  if (focus) { const again = $$('.vx-row', el).find(b => b.dataset.path === focus); if (again) again.focus(); }
+  const act = $('.vx-row[aria-selected=true]', el); if (act && v.reveal) { act.scrollIntoView({ block: 'nearest' }); v.reveal = false; }
 }
 function renderVaultChips() {
+  const el = $('#v-chips'); if (!el) return;
   const chip = (label, tok, ex) => `<button class="chip" data-act="tok" data-tok='${esc(tok)}'${ex ? ` data-ex="${ex}"` : ''} aria-pressed="${tokOn(tok)}">${esc(label)}</button>`;
-  const grp = (title, items) => `<div class="row"><span class="faint" style="min-width:84px">${title}</span>${items}</div>`;
-  $('#v-chips').innerHTML =
+  const grp = (title, items) => `<div class="row"><span class="faint" style="min-width:74px">${title}</span>${items}</div>`;
+  el.innerHTML =
     grp('Topic', state.categories.map(c => chip(c, `category:"${c}"`)).join('')) +
-    grp('Kind', chip('Memories', 'type:memory') + chip('People', 'type:person') + chip('Conversations', 'type:source')) +
+    grp('Kind', chip('Notes', 'type:topic') + chip('Projects', 'type:project') + chip('People', 'type:person') + chip('Chats', 'type:source')) +
     grp('Filed by', chip('AI', 'by:ai') + chip('Me', 'by:you')) +
     grp('When', chip('This week', 'after:' + isoAgo(7), 'after:') + chip('This month', 'after:' + isoAgo(30), 'after:') + chip('This year', 'after:' + isoAgo(365), 'after:')) +
     grp('Other', chip('Has a come-back date', 'has:revisit') + chip('Not linked to anything', 'is:orphan'));
 }
-function renderNoteList() {
-  const v = state.vault; const el = $('#v-content');
-  const notes = v.notes.slice().sort((a, b) => (b.updated || '').localeCompare(a.updated || ''));
-  const shown = notes.slice(0, state.vShow || 200);
-  const info = `<p class="faint" style="margin-bottom:8px">${v.shown === v.total ? plural(v.total, 'note') : `${v.shown} of ${plural(v.total, 'note')}`}</p>`;
-  if (!notes.length) {
-    el.innerHTML = info + emptyBox(v.total ? 'No notes match' : 'The vault is empty', v.total ? 'Clear a filter to see more.' : 'Notes appear here as I file what you tell me.');
-    return;
-  }
-  el.innerHTML = info + `<div class="card pad0"><ul class="list notes">${shown.map(n => `<li data-act="open-note" data-path="${esc(n.path)}">
-    <div class="title">${esc(n.title)}</div>${n.snippet && n.snippet.trim() !== (n.title || '').trim() ? `<div class="snip">${esc(n.snippet)}</div>` : ''}
-    <div class="meta">${noteChips(n)}${n.sensitive ? '<span class="chip warn">Sensitive</span>' : ''}${n.revisit ? `<span class="chip warn">Come back ${esc(day(n.revisit))}</span>` : ''}
-    <span>${esc(when(n.updated))}</span></div></li>`).join('')}</ul></div>` +
-    (notes.length > shown.length ? `<div class="row" style="margin-top:10px;justify-content:center"><button class="btn" data-act="more-notes">Show more</button></div>` : '');
+function reveal(path) { const v = vstate(); const parts = path.split('/'); for (let i = 1; i < parts.length; i++) v.open[parts.slice(0, i).join('/')] = true; v.reveal = true; vsave(); }
+
+/* the empty middle: what changed lately */
+function paintHome() {
+  if (!inVault()) return; const v = vstate(); const el = $('#v-content');
+  if (!v.all.length) { el.innerHTML = emptyBox('The vault is empty', 'Notes appear here as I file what you tell me.'); return; }
+  const lately = v.all.filter(n => n.type !== 'source' && n.type !== 'summary').sort((a, b) => (b.updated || '').localeCompare(a.updated || '')).slice(0, 8);
+  const folders = [...v.tree.dirs.values()].sort(sortBy('name'));
+  el.innerHTML = `<div class="vx-article"><h2>${plural(v.total, 'note')}</h2>
+    <p class="muted">Pick a note on the left, press <kbd>Ctrl O</kbd> to jump to one by name, or open the Graph to see how they connect.</p>
+    <div class="vx-h">Changed lately</div>
+    <ul class="vx-links">${lately.map(n => `<li><button data-act="open-note" data-path="${esc(n.path)}">${esc(n.title)} <span class="faint">${esc(n.path.split('/').slice(0, -1).join(' › '))} · ${esc(when(n.updated))}</span></button></li>`).join('')}</ul>
+    <div class="vx-h">Folders</div>
+    <div class="row">${folders.map(f => `<button class="chip" data-act="v-dir-open" data-path="${esc(f.path)}">${esc(f.name)} · ${f.count}</button>`).join('')}</div></div>`;
 }
 
-/* ---- graph ---- */
-async function renderGraphView() {
-  const g = state.vg; const el = $('#v-content');
-  const sw = (key, label) => `<label class="switch" style="align-items:center"><input type="checkbox" data-graph="${key}"${g[key] ? ' checked' : ''}><span class="track"></span><span class="txt"><b>${label}</b></span></label>`;
-  el.innerHTML = `<div class="row" style="margin-bottom:10px;gap:18px">${sw('tags', 'Tags')}${sw('people', 'People')}${sw('sources', 'Conversations')}${sw('orphans', 'Notes with no links')}</div>
-    <div id="g-wrap"><p class="skeleton">Drawing…</p></div>`;
-  const r = await api(`/api/vault/graph?q=${enc(state.vq)}&tags=${g.tags}&people=${g.people}&sources=${g.sources}&orphans=${g.orphans}`);
-  if (!r.nodes.length) { $('#g-wrap').innerHTML = emptyBox('Nothing to draw', 'No notes match. Clear a filter or add more memories.'); return; }
-  const used = [...new Set(r.nodes.filter(n => n.type === 'memory').map(n => n.category))];
-  const legend = used.map(c => `<span><i style="background:${catColor(c)}"></i>${esc(c)}</span>`).join('') +
-    (r.nodes.some(n => n.type === 'person') ? '<span><i style="background:var(--accent)"></i>Person</span>' : '') +
-    (r.nodes.some(n => n.type === 'source') ? '<span><i style="background:var(--text-3)"></i>Conversation</span>' : '') +
-    (r.nodes.some(n => n.type === 'tag') ? '<span><i style="background:var(--warn)"></i>Tag</span>' : '');
-  $('#g-wrap').innerHTML = `<svg class="graph" id="g-svg" role="img" aria-label="Graph of your notes and how they connect"></svg>
-    <p class="faint" style="margin-top:6px">Scroll to zoom, drag to move, click a dot to open it. ${plural(r.nodes.length, 'note')}, ${plural(r.edges.length, 'link')}.</p>
-    <div class="legend" style="margin-top:6px">${legend}</div>`;
-  drawGraph(r);
+/* ---- one note ---- */
+function lineRow(l, note) {
+  state.mem[l.id] = { id: l.id, text: l.text, category: l.category };
+  const tick = (l.todo || l.done) ? `<input type="checkbox" class="tick" data-todo="${esc(l.id)}"${l.done ? ' checked' : ''} aria-label="Done">` : '';
+  const people = (l.people || []).map(p => { const hit = vstate().byKey.get(String(p).toLowerCase()); return hit ? `<button class="chip" data-act="open-note" data-path="${esc(hit)}">${esc(p)}</button>` : `<span class="chip">${esc(p)}</span>`; }).join('');
+  return `<li class="vx-line${l.done ? ' finished' : ''}" data-mem="${esc(l.id)}">${tick}
+    <div class="vx-lt"><div class="t">${esc(l.text)}</div>
+      <div class="meta">${l.date ? `<span>${esc(l.date)}</span>` : ''}${l.filed_by === 'ai' ? '<span>· filed by AI</span>' : ''}${l.revisit ? `<span class="chip warn">Come back ${esc(day(l.revisit))}</span>` : ''}${people}</div></div>
+    <div class="vx-acts"><button class="btn ghost sm" data-act="vl-edit" data-id="${esc(l.id)}">Edit</button>
+      <button class="btn ghost sm" data-act="mem-private" data-id="${esc(l.id)}">Private</button>
+      <button class="btn ghost sm" data-act="mem-forget" data-id="${esc(l.id)}">Forget</button></div></li>`;
 }
-function drawGraph(r) {
-  const svg = $('#g-svg'); const W = svg.clientWidth || 800, H = svg.clientHeight || 520;
-  const nodes = r.nodes.map(n => Object.assign({}, n)); const byId = new Map(nodes.map(n => [n.id, n]));
-  const links = r.edges.map(e => ({ a: byId.get(e.source), b: byId.get(e.target) })).filter(l => l.a && l.b);
-  nodes.forEach((n, i) => { const a = i * 2.399963, rad = 26 * Math.sqrt(i + 1); n.x = W / 2 + rad * Math.cos(a); n.y = H / 2 + rad * Math.sin(a); n.vx = 0; n.vy = 0; });
-  const N = nodes.length, iters = Math.max(30, Math.min(240, Math.floor(3e7 / (N * N + 1))));
-  for (let t = 0; t < iters; t++) {
-    const cool = 1 - t / iters;
+function lineGroups(lines) {
+  if (lines.some(l => l.todo || l.done)) {
+    const g = [['Open', lines.filter(l => l.todo)], ['Done', lines.filter(l => l.done)], ['', lines.filter(l => !l.todo && !l.done)]];
+    return g.filter(x => x[1].length);
+  }
+  if (lines.length > 30) {
+    const m = new Map(); for (const l of lines) { const k = (l.date || '').slice(0, 7) || 'Undated'; if (!m.has(k)) m.set(k, []); m.get(k).push(l); }
+    return [...m.entries()];
+  }
+  return [['', lines]];
+}
+function noteHtml(n, edit) {
+  const v = vstate();
+  const resolve = (t) => v.byKey.get(String(t).toLowerCase().replace(/\.md$/i, '')) || '';
+  const linkBtns = (list) => list.map(x => `<li><button data-act="open-note" data-path="${esc(x.path)}">${esc(x.title)}</button></li>`).join('');
+  const tags = (n.tags || []).filter(t => !String(t).startsWith('topic/'));
+  const chips = (n.category && (n.type === 'topic' || n.type === 'project') ? `<span class="chip" style="border-color:${catColor(n.category)}">${esc(n.category)}</span>` : '') +
+    (n.sensitive ? '<span class="chip warn">Sensitive</span>' : '') +
+    tags.map(t => `<button class="chip" data-act="v-tag" data-tag="${esc(t)}">#${esc(t)}</button>`).join(' ') +
+    (n.revisit ? `<span class="chip warn">Come back ${esc(day(n.revisit))}</span>` : '');
+  let body, outline = [];
+  if (edit && n.type === 'person') {
+    body = `<div class="field"><label for="ne-name">Name</label><input type="text" id="ne-name" value="${esc(n.title)}"></div>
+      <div class="field"><label for="ne-notes">Notes</label><textarea id="ne-notes" rows="5">${esc(n.body)}</textarea></div>
+      <div class="row end"><button class="btn" data-act="note-view">Cancel</button><button class="btn primary" data-act="note-save">Save</button></div>`;
+  } else if (n.lines && n.lines.length) {
+    const groups = lineGroups(n.lines);
+    body = groups.map(([h, ls], i) => (h ? `<div class="vx-h" id="grp-${i}">${esc(h)} <span class="faint">${ls.length}</span></div>` : '') + `<ul class="vx-lines">${ls.map(l => lineRow(l, n)).join('')}</ul>`).join('');
+    outline = groups.filter(g => g[0]).map(([h], i) => ({ text: h, id: 'grp-' + i }));
+  } else {
+    body = `<div class="md">${md(n.body, resolve) || '<p class="muted">This note is empty.</p>'}</div>`;
+    outline = (n.outline || []).map((o, i) => ({ text: o.text, id: '' , level: o.level }));
+  }
+  const acts = (n.type === 'person' && !edit) ? `<span class="row"><button class="btn sm" data-act="note-edit">Edit</button><button class="btn sm" data-act="goto-person" data-id="${esc(n.id)}">Open profile</button></span>` : '';
+  const folder = n.path.split('/').slice(0, -1).join(' › ');
+  const sub = [folder, n.lines && n.lines.length ? plural(n.lines.length, 'line') : '', n.updated ? 'changed ' + when(n.updated) : ''].filter(Boolean).join(' · ');
+  return `<div class="vx-note"><article class="vx-article"><div class="row between"><h2>${esc(n.title)}</h2>${acts}</div>
+      <p class="faint">${esc(sub)}</p>${chips ? `<div class="row">${chips}</div>` : ''}${body}
+      ${n.type === 'topic' || n.type === 'project' || n.type === 'summary' || n.type === 'source' ? '' : ''}</article>
+    <aside class="vx-rail" aria-label="About this note">
+      <details open><summary>Linked from <span class="count">${n.backlinks.length}</span></summary>${n.backlinks.length ? `<ul class="vx-links">${linkBtns(n.backlinks)}</ul>` : '<p class="faint">Nothing links here yet.</p>'}</details>
+      <details open><summary>Links to <span class="count">${n.links.length}</span></summary>${n.links.length ? `<ul class="vx-links">${linkBtns(n.links)}</ul>` : '<p class="faint">No links out.</p>'}</details>
+      ${outline.length ? `<details open><summary>On this page</summary><ul class="vx-links">${outline.map(o => `<li><button data-act="v-jump" data-to="${esc(o.id)}">${esc(o.text)}</button></li>`).join('')}</ul></details>` : ''}
+    </aside></div>`;
+}
+async function showNote(path, edit, quiet) {
+  const v = vstate(); v.view = 'note'; v.note = path;
+  if (!inVault()) return;
+  const el = $('#v-content'); paintBar();
+  if (!quiet) el.innerHTML = '<p class="skeleton">Opening…</p>';
+  let n;
+  try { n = await api('/api/vault/note?path=' + enc(path)); }
+  catch (e) {
+    if (v.note !== path || !inVault()) return;
+    v.note = null; v.cur = null; paintBar(); paintTree();
+    $('#v-content').innerHTML = emptyBox('That note is gone', e.message); return;
+  }
+  if (v.note !== path || v.view !== 'note' || !inVault()) return;
+  v.cur = n; state.note = n;
+  v.recent = [path, ...v.recent.filter(p => p !== path)].slice(0, 8); vsave();
+  reveal(path); paintTree(); paintBar();
+  $('#v-content').innerHTML = noteHtml(n, edit);
+}
+function openNote(path, edit) {
+  const v = vstate(); v.view = 'note'; v.note = path;
+  if (state.tab !== 'vault') return go('vault');
+  paintBar(); return showNote(path, edit);
+}
+function closeDrawer() { const r = $('#drawer-root'); if (r) r.innerHTML = ''; }
+
+/* a line of a note: edit its words, and for an ordinary note, which note it is filed in */
+function lineEditor(li, id) {
+  const v = vstate(); const note = v.cur; const l = (note.lines || []).find(x => x.id === id); if (!l) return;
+  const plain = note.type === 'topic' && !l.todo && !l.done && !l.moment;
+  const here = note.title.toLowerCase() === (note.category || '').toLowerCase() ? '' : note.title;
+  const cats = state.categories.map(c => `<option${c === l.category ? ' selected' : ''}>${esc(c)}</option>`).join('');
+  const names = [...new Set(v.all.filter(n => n.type === 'topic' && n.category === l.category).map(n => n.title))].filter(t => t.toLowerCase() !== l.category.toLowerCase());
+  li.innerHTML = `<div class="editor" style="width:100%"><textarea aria-label="Text">${esc(l.text)}</textarea>
+    ${plain ? `<div class="row"><label class="lbl" style="margin:0">Topic</label><select style="width:auto" data-f="cat" aria-label="Topic">${cats}</select>
+      <label class="lbl" style="margin:0">In the note</label><input type="text" data-f="note" list="vl-notes" value="${esc(here)}" placeholder="a short name, or leave empty" style="flex:1 1 12em" aria-label="Note it is filed in">
+      <datalist id="vl-notes">${names.map(t => `<option value="${esc(t)}">`).join('')}</datalist></div>` : ''}
+    <div class="row end"><button class="btn" data-act="vl-cancel">Cancel</button><button class="btn primary" data-act="vl-save" data-id="${esc(id)}" data-plain="${plain}">Save</button></div></div>`;
+  $('textarea', li).focus();
+}
+
+/* ---- jump to a note by name (Ctrl+O) ---- */
+function fuzzy(q, text) {
+  const t = String(text || '').toLowerCase(); q = q.toLowerCase(); if (!q) return 1;
+  const i = t.indexOf(q); if (i === 0) return 100; if (i > 0) return /[\s/›]/.test(t[i - 1]) ? 80 : 60;
+  let qi = 0, last = -2, score = 0;
+  for (let k = 0; k < t.length && qi < q.length; k++) if (t[k] === q[qi]) { score += k === last + 1 ? 3 : 1; last = k; qi++; }
+  return qi === q.length ? 10 + score : 0;
+}
+async function openSwitcher() {
+  if (state.tab !== 'vault') await go('vault');
+  const v = vstate(); if (!v.all.length) { try { await loadAll(); } catch (e) { return; } }
+  const root = $('#modal-root'); if (root.querySelector('.sw')) return;
+  root.innerHTML = `<div class="modal-back sw-back"><div class="modal sw" role="dialog" aria-modal="true" aria-label="Jump to a note">
+    <input type="search" id="sw-q" placeholder="Type a note name" aria-label="Note name" autocomplete="off">
+    <ul id="sw-list" role="listbox" aria-label="Matching notes"></ul><p class="faint"><kbd>↑</kbd> <kbd>↓</kbd> to move · <kbd>Enter</kbd> to open · <kbd>Esc</kbd> to close</p></div></div>`;
+  let list = [], sel = 0;
+  const close = () => { root.innerHTML = ''; };
+  const open = (n) => { close(); if (n) openNote(n.path); };
+  const paint = () => {
+    const q = $('#sw-q').value.trim();
+    if (!q) {
+      const rec = v.recent.map(p => v.all.find(n => n.path === p)).filter(Boolean);
+      const rest = v.all.slice().sort((a, b) => (b.updated || '').localeCompare(a.updated || '')).filter(n => !rec.includes(n));
+      list = [...rec, ...rest].slice(0, 12);
+    } else {
+      list = v.all.map(n => ({ n, s: Math.max(fuzzy(q, n.title), fuzzy(q, n.path) * 0.8) })).filter(x => x.s > 0)
+        .sort((a, b) => b.s - a.s || (b.n.updated || '').localeCompare(a.n.updated || '')).slice(0, 12).map(x => x.n);
+    }
+    sel = Math.min(sel, Math.max(0, list.length - 1));
+    $('#sw-list').innerHTML = list.length ? list.map((n, i) => `<li role="option" aria-selected="${i === sel}"><button data-i="${i}"><span>${esc(n.title)}</span><span class="faint">${esc(n.path.split('/').slice(0, -1).join(' › '))}</span></button></li>`).join('')
+      : '<li class="faint" style="padding:8px">No note has that name.</li>';
+  };
+  $('#sw-q').addEventListener('input', () => { sel = 0; paint(); });
+  $('#sw-q').addEventListener('keydown', (e) => {
+    if (e.key === 'ArrowDown') { e.preventDefault(); sel = Math.min(list.length - 1, sel + 1); paint(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); sel = Math.max(0, sel - 1); paint(); }
+    else if (e.key === 'Enter') { e.preventDefault(); open(list[sel]); }
+    else if (e.key === 'Escape') { e.preventDefault(); close(); }
+  });
+  $('#sw-list').addEventListener('click', (e) => { const b = e.target.closest('[data-i]'); if (b) open(list[+b.dataset.i]); });
+  $('.sw-back').addEventListener('mousedown', (e) => { if (e.target.classList.contains('sw-back')) close(); });
+  paint(); $('#sw-q').focus();
+}
+
+/* ---- the graph ---- */
+const GRAPH = { raf: 0, pos: new Map(), view: null, ro: null };
+function stopGraph() {
+  if (GRAPH.raf) cancelAnimationFrame(GRAPH.raf); GRAPH.raf = 0;
+  if (GRAPH.ro) { GRAPH.ro.disconnect(); GRAPH.ro = null; }
+  GRAPH.live = null;
+}
+/* The physics, kept apart from the drawing so it can be tested on its own. */
+function makeSim(nodes, links) {
+  const sim = { alpha: 1, alphaTarget: 0, nodes, links, p: { center: 0.4, repel: 0.5, link: 0.5, dist: 0.4 } };
+  sim.tick = function () {
+    const p = sim.p, N = nodes.length; sim.alpha += (sim.alphaTarget - sim.alpha) * 0.0228; const a = sim.alpha;
+    const gc = 0.01 + p.center * 0.09, rep = 20 + p.repel * 180, R = 90 + p.repel * 200, R2 = R * R;
+    const grid = new Map();
+    for (let i = 0; i < N; i++) { const n = nodes[i]; const key = Math.floor(n.x / R) * 100003 + Math.floor(n.y / R); const c = grid.get(key); if (c) c.push(i); else grid.set(key, [i]); }
     for (let i = 0; i < N; i++) {
-      const a = nodes[i];
-      for (let j = i + 1; j < N; j++) {
-        const b = nodes[j]; let dx = a.x - b.x, dy = a.y - b.y; let d2 = dx * dx + dy * dy;
-        if (d2 > 90000) continue;
-        if (d2 < 0.01) { dx = Math.random() - .5; dy = Math.random() - .5; d2 = dx * dx + dy * dy + .01; }
-        const f = 1800 / d2, d = Math.sqrt(d2);
-        a.vx += dx / d * f; a.vy += dy / d * f; b.vx -= dx / d * f; b.vy -= dy / d * f;
+      const n = nodes[i]; const gx = Math.floor(n.x / R), gy = Math.floor(n.y / R);
+      for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) {
+        const cell = grid.get((gx + dx) * 100003 + gy + dy); if (!cell) continue;
+        for (const j of cell) {
+          if (j <= i) continue; const m = nodes[j]; let ex = n.x - m.x, ey = n.y - m.y, d2 = ex * ex + ey * ey;
+          if (d2 > R2) continue;
+          if (d2 < 0.01) { ex = Math.random() - 0.5; ey = Math.random() - 0.5; d2 = ex * ex + ey * ey + 0.01; }
+          const d = Math.sqrt(d2); let f = rep * a / Math.max(d, 10); const gap = n.r + m.r + 3 - d; if (gap > 0) f += gap * 0.5;
+          const fx = ex / d * f, fy = ey / d * f; n.vx += fx; n.vy += fy; m.vx -= fx; m.vy -= fy;
+        }
       }
     }
-    for (const l of links) {
-      const dx = l.b.x - l.a.x, dy = l.b.y - l.a.y, d = Math.sqrt(dx * dx + dy * dy) || 1, f = (d - 70) * 0.02;
-      l.a.vx += dx / d * f; l.a.vy += dy / d * f; l.b.vx -= dx / d * f; l.b.vy -= dy / d * f;
+    const L = 28 + p.dist * 150, k = 0.02 + p.link * 0.4;
+    for (const [i, j] of links) {
+      const s = nodes[i], t = nodes[j]; const dx = t.x - s.x, dy = t.y - s.y, d = Math.sqrt(dx * dx + dy * dy) || 1;
+      const f = (d - L) / d * k * a, bs = s.deg / (s.deg + t.deg || 1);
+      t.vx -= dx * f * bs; t.vy -= dy * f * bs; s.vx += dx * f * (1 - bs); s.vy += dy * f * (1 - bs);
     }
     for (const n of nodes) {
-      n.vx += (W / 2 - n.x) * 0.004; n.vy += (H / 2 - n.y) * 0.004;
-      n.x += Math.max(-12, Math.min(12, n.vx)) * cool; n.y += Math.max(-12, Math.min(12, n.vy)) * cool; n.vx *= 0.6; n.vy *= 0.6;
+      n.vx -= n.x * gc * a; n.vy -= n.y * gc * a; n.vx *= 0.6; n.vy *= 0.6;
+      const sp = Math.hypot(n.vx, n.vy); if (sp > 40) { n.vx *= 40 / sp; n.vy *= 40 / sp; }
+      if (n.fx != null) { n.x = n.fx; n.y = n.fy; n.vx = n.vy = 0; } else { n.x += n.vx; n.y += n.vy; }
     }
-  }
-  const minX = Math.min(...nodes.map(n => n.x)), maxX = Math.max(...nodes.map(n => n.x));
-  const minY = Math.min(...nodes.map(n => n.y)), maxY = Math.max(...nodes.map(n => n.y));
-  const pad = 40, k0 = Math.min(2, (W - pad * 2) / Math.max(1, maxX - minX), (H - pad * 2) / Math.max(1, maxY - minY));
-  const view = { k: k0, x: W / 2 - k0 * (minX + maxX) / 2, y: H / 2 - k0 * (minY + maxY) / 2 };
-  const color = (n) => n.type === 'person' ? 'var(--accent)' : n.type === 'source' ? 'var(--text-3)' : n.type === 'tag' ? 'var(--warn)' : n.type === 'summary' ? 'var(--text-2)' : catColor(n.category);
-  const labelAll = N <= 45;
-  svg.innerHTML = `<g id="g-root"><g>${links.map((l, i) => `<line data-i="${i}" x1="${l.a.x.toFixed(1)}" y1="${l.a.y.toFixed(1)}" x2="${l.b.x.toFixed(1)}" y2="${l.b.y.toFixed(1)}"/>`).join('')}</g>
-    <g>${nodes.map((n, i) => `<g class="node" data-i="${i}" data-id="${esc(n.id)}" data-type="${n.type}"><title>${esc(n.label)}</title>
-      <circle cx="${n.x.toFixed(1)}" cy="${n.y.toFixed(1)}" r="${(5 + Math.min(8, Math.sqrt(n.degree || 0) * 2)).toFixed(1)}" fill="${color(n)}"/>
-      ${labelAll || (n.degree || 0) >= 3 ? `<text x="${(n.x + 9).toFixed(1)}" y="${(n.y + 4).toFixed(1)}">${esc(n.label.slice(0, 30))}</text>` : ''}</g>`).join('')}</g></g>`;
-  const root = $('#g-root', svg);
-  const apply = () => root.setAttribute('transform', `translate(${view.x.toFixed(1)} ${view.y.toFixed(1)}) scale(${view.k.toFixed(3)})`);
-  apply();
-  const neighbours = nodes.map(() => new Set());
-  links.forEach((l, i) => { const a = nodes.indexOf(l.a), b = nodes.indexOf(l.b); neighbours[a].add(b); neighbours[b].add(a); l.ia = a; l.ib = b; });
-  const nodeEls = $$('.node', svg), lineEls = $$('line', svg);
-  svg.onmouseover = (e) => {
-    const g = e.target.closest('.node'); if (!g) return; const i = +g.dataset.i;
-    nodeEls.forEach((el, j) => el.classList.toggle('dim', j !== i && !neighbours[i].has(j)));
-    lineEls.forEach((el, j) => el.classList.toggle('dim', links[j].ia !== i && links[j].ib !== i));
+    return sim.alpha > 0.002 || sim.alphaTarget > 0;
   };
-  svg.onmouseout = () => { nodeEls.forEach(el => el.classList.remove('dim')); lineEls.forEach(el => el.classList.remove('dim')); };
-  let drag = null;
-  svg.onpointerdown = (e) => { drag = { x: e.clientX, y: e.clientY, vx: view.x, vy: view.y, moved: 0 }; svg.setPointerCapture(e.pointerId); };
-  svg.onpointermove = (e) => {
-    if (!drag) return; const dx = e.clientX - drag.x, dy = e.clientY - drag.y; drag.moved = Math.max(drag.moved, Math.abs(dx) + Math.abs(dy));
-    view.x = drag.vx + dx; view.y = drag.vy + dy; apply();
-  };
-  svg.onpointerup = (e) => {
-    const was = drag; drag = null;
-    if (!was || was.moved > 5) return;
-    const g = document.elementFromPoint(e.clientX, e.clientY); const el = g && g.closest && g.closest('.node'); if (!el) return;
-    const n = nodes[+el.dataset.i];
-    if (n.type === 'tag') toggleTok('tag:' + n.id.slice(1)); else openNote(n.id);
-  };
-  svg.onwheel = (e) => {
-    e.preventDefault(); const rect = svg.getBoundingClientRect(); const mx = e.clientX - rect.left, my = e.clientY - rect.top;
-    const f = e.deltaY < 0 ? 1.15 : 1 / 1.15, nk = Math.max(0.2, Math.min(6, view.k * f)), r2 = nk / view.k;
-    view.x = mx - (mx - view.x) * r2; view.y = my - (my - view.y) * r2; view.k = nk; apply();
-  };
+  return sim;
 }
-
-/* ---- one note, in a side panel ---- */
-function closeDrawer() { $('#drawer-root').innerHTML = ''; document.removeEventListener('keydown', drawerKey); }
-function drawerKey(e) { if (e.key === 'Escape' && !$('#modal-root').firstChild) closeDrawer(); }
-async function openNote(path, edit) {
-  const root = $('#drawer-root');
-  root.innerHTML = `<div class="drawer-back" data-act="close-drawer"></div><div class="drawer"><p class="skeleton">Opening…</p></div>`;
-  document.addEventListener('keydown', drawerKey);
+function graphSubset() {
+  const v = vstate(), d = v.gdata; if (!d) return { nodes: [], edges: [] };
+  if (!v.g.local) return { nodes: d.nodes, edges: d.edges };
+  if (!v.note || !d.nodes.some(n => n.id === v.note)) return { nodes: [], edges: [], need: true };
+  const adj = new Map(); for (const e of d.edges) { (adj.get(e.source) || adj.set(e.source, []).get(e.source)).push(e.target); (adj.get(e.target) || adj.set(e.target, []).get(e.target)).push(e.source); }
+  const seen = new Map([[v.note, 0]]); let frontier = [v.note];
+  for (let depth = 1; depth <= v.g.depth; depth++) { const next = []; for (const id of frontier) for (const o of adj.get(id) || []) if (!seen.has(o)) { seen.set(o, depth); next.push(o); } frontier = next; }
+  return { nodes: d.nodes.filter(n => seen.has(n.id)), edges: d.edges.filter(e => seen.has(e.source) && seen.has(e.target)) };
+}
+async function showGraph() {
+  const v = vstate(); v.view = 'graph'; if (!inVault()) return;
+  stopGraph(); paintBar();
+  const g = v.g; const el = $('#v-content');
+  const sw = (key, label) => `<label class="check"><input type="checkbox" data-graph="${key}"${g[key] ? ' checked' : ''}> ${label}</label>`;
+  const sl = (key, label) => `<label for="gf-${key}">${label}</label><input type="range" id="gf-${key}" data-force="${key}" min="0" max="1" step="0.01" value="${g[key]}">`;
+  el.innerHTML = `<div id="g-wrap"><canvas id="g-canvas" role="img" aria-label="Graph of your notes and how they connect"></canvas>
+      <div class="vx-zoom"><button class="btn" data-act="g-zoom" data-dir="in" aria-label="Zoom in">+</button><button class="btn" data-act="g-zoom" data-dir="out" aria-label="Zoom out">−</button><button class="btn" data-act="g-zoom" data-dir="fit" aria-label="Fit everything" title="Fit everything">◎</button></div>
+      <div class="vx-tip" id="g-tip" hidden></div></div>
+    <p class="faint" id="g-info" style="margin-top:6px">Drawing…</p><div class="legend" id="g-legend" style="margin-top:6px"></div>
+    <details class="vx-disp"><summary>Display and forces</summary>
+      <div class="row" style="gap:16px;margin-top:8px">${sw('people', 'People')}${sw('sources', 'Conversations')}${sw('tags', 'Tags')}${sw('orphans', 'Notes with no links')}${sw('names', 'Names')}</div>
+      <div class="row" style="gap:16px;margin-top:8px">${sw('local', 'Only around the open note')}<label class="check">How far <select data-depth style="width:auto"><option value="1"${g.depth === 1 ? ' selected' : ''}>1 step</option><option value="2"${g.depth === 2 ? ' selected' : ''}>2 steps</option><option value="3"${g.depth === 3 ? ' selected' : ''}>3 steps</option></select></label></div>
+      <div class="ctl">${sl('center', 'Pull to the middle')}${sl('repel', 'Push apart')}${sl('link', 'Link strength')}${sl('dist', 'Link length')}</div>
+      <div class="row" style="margin-top:8px"><button class="btn sm" data-act="g-reset">Reset forces</button></div></details>`;
   try {
-    const n = await api('/api/vault/note?path=' + enc(path));
-    state.note = n;
-    const known = new Map();
-    [...(state.vault ? state.vault.notes : []), ...n.links, ...n.backlinks].forEach(x => { known.set(x.title.toLowerCase(), x.path); if (x.name) known.set(x.name.toLowerCase(), x.path); });
-    const resolve = (t) => known.get(t.toLowerCase()) || '';
-    const links = (list) => list.map(x => `<button class="chip" data-act="open-note" data-path="${esc(x.path)}">${esc(x.title)}</button>`).join(' ');
-    const chips = (n.category && n.type === 'memory' ? `<span class="chip" style="border-color:${catColor(n.category)}">${esc(n.category)}</span>` : '') +
-      n.tags.filter(t => !String(t).startsWith('topic/')).map(t => `<button class="chip" data-act="drawer-tag" data-tag="${esc(t)}">#${esc(t)}</button>`).join(' ') +
-      (n.revisit ? `<span class="chip warn">Come back ${esc(day(n.revisit))}</span>` : '');
-    let bodyHtml;
-    if (edit && n.type === 'memory') {
-      bodyHtml = `<div class="field"><label for="ne-body">What I remember</label><textarea id="ne-body" rows="5">${esc(n.body)}</textarea></div>
-        <div class="field"><label for="ne-cat">Filed under</label><select id="ne-cat">${n.categories.map(c => `<option${c === n.category ? ' selected' : ''}>${esc(c)}</option>`).join('')}</select></div>
-        <div class="row end"><button class="btn" data-act="note-view">Cancel</button><button class="btn primary" data-act="note-save">Save</button></div>`;
-    } else if (edit && n.type === 'person') {
-      bodyHtml = `<div class="field"><label for="ne-name">Name</label><input type="text" id="ne-name" value="${esc(n.title)}"></div>
-        <div class="field"><label for="ne-notes">Notes</label><textarea id="ne-notes" rows="5">${esc(n.body)}</textarea></div>
-        <div class="row end"><button class="btn" data-act="note-view">Cancel</button><button class="btn primary" data-act="note-save">Save</button></div>`;
-    } else {
-      bodyHtml = `<div class="md">${md(n.body, resolve) || '<p class="muted">This note is empty.</p>'}</div>`;
-    }
-    root.innerHTML = `<div class="drawer-back" data-act="close-drawer"></div><div class="drawer" role="dialog" aria-modal="true" aria-label="${esc(n.title)}">
-      <div class="row between"><button class="btn ghost" data-act="close-drawer">← Close</button>
-        <span class="row">${n.type === 'person' ? `<button class="btn sm" data-act="goto-person" data-id="${esc(n.id)}">Open profile</button>` : ''}
-        ${!edit && n.editable ? '<button class="btn sm" data-act="note-edit">Edit</button>' : ''}
-        ${!edit && n.type === 'memory' ? `<button class="btn sm" data-act="mem-private" data-id="${esc(n.id)}">Keep private</button><button class="btn sm danger" data-act="note-forget">Forget</button>` : ''}</span></div>
-      <h2>${esc(n.title)}</h2>
-      <div class="row">${chips}</div>
-      <p class="faint">${n.type === 'memory' ? `Filed by ${n.by === 'AI' ? 'AI' : 'you'} · ` : ''}${n.created ? 'Created ' + esc(when(n.created)) : ''}${n.updated && n.updated !== n.created ? ' · Updated ' + esc(when(n.updated)) : ''}</p>
-      ${bodyHtml}
-      ${!n.editable && !edit ? '<p class="faint">This note is written automatically. To change it, change the memories it is made from.</p>' : ''}
-      ${n.links.length ? `<div><div class="sect-title">Links to</div><div class="row">${links(n.links)}</div></div>` : ''}
-      ${n.backlinks.length ? `<div><div class="sect-title">Linked from</div><div class="row">${links(n.backlinks)}</div></div>` : ''}</div>`;
-  } catch (e) {
-    root.innerHTML = `<div class="drawer-back" data-act="close-drawer"></div><div class="drawer"><button class="btn ghost" data-act="close-drawer">← Close</button><p class="muted" style="margin-top:12px">${esc(e.message)}</p></div>`;
+    v.gdata = await api(`/api/vault/graph?q=${enc(v.q)}&tags=${g.tags}&people=${g.people}&sources=${g.sources}&orphans=${g.orphans}`);
+  } catch (e) { if (inVault() && v.view === 'graph') $('#g-wrap').innerHTML = emptyBox('I could not draw the graph', e.message); return; }
+  if (!inVault() || v.view !== 'graph') return;
+  drawGraph();
+}
+function drawGraph() {
+  const v = vstate(), g = v.g; if (!inVault() || v.view !== 'graph') return;
+  stopGraph();
+  const sub = graphSubset(); const wrap = $('#g-wrap'), canvas = $('#g-canvas');
+  if (!wrap) return;
+  if (!sub.nodes.length) {
+    $('#g-info').textContent = ''; $('#g-legend').innerHTML = '';
+    wrap.innerHTML = sub.need ? emptyBox('No note is open', 'Open a note first, then come back to see what is around it.') : emptyBox('Nothing to draw', 'No notes match. Clear a filter or add more memories.');
+    return;
   }
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const deg = new Map(); for (const e of sub.edges) { deg.set(e.source, (deg.get(e.source) || 0) + 1); deg.set(e.target, (deg.get(e.target) || 0) + 1); }
+  const nodes = sub.nodes.map((n, i) => {
+    const p = GRAPH.pos.get(n.id), a = i * 2.399963, rad = 14 * Math.sqrt(i + 1), d = deg.get(n.id) || 0;
+    return Object.assign({}, n, { i, x: p ? p.x : rad * Math.cos(a), y: p ? p.y : rad * Math.sin(a), vx: 0, vy: 0, fx: null, fy: null, deg: d,
+      r: 4 + Math.min(10, Math.sqrt(d) * 2 + Math.sqrt(n.count || 0) * 0.6) });
+  });
+  const byId = new Map(nodes.map(n => [n.id, n]));
+  const links = sub.edges.map(e => [byId.get(e.source), byId.get(e.target)]).filter(l => l[0] && l[1]).map(l => [l[0].i, l[1].i]);
+  const adj = nodes.map(() => new Set()); for (const [a, b] of links) { adj[a].add(b); adj[b].add(a); }
+  const sim = makeSim(nodes, links); Object.assign(sim.p, { center: g.center, repel: g.repel, link: g.link, dist: g.dist });
+  const warm = GRAPH.pos.size >= nodes.length * 0.5;
+  sim.alpha = warm ? 0.25 : 1;
+  const used = [...new Set(nodes.filter(n => n.type === 'topic' || n.type === 'project').map(n => n.category))];
+  $('#g-info').textContent = `${plural(nodes.length, 'note')}, ${plural(links.length, 'link')}${g.local && v.cur ? ` around “${v.cur.title}”` : ''}. Drag a dot, scroll to zoom, drag the background to move, click a dot to open it.`;
+  $('#g-legend').innerHTML = used.map(c => `<span><i style="background:${catColor(c)}"></i>${esc(c)}</span>`).join('') +
+    (nodes.some(n => n.type === 'person') ? '<span><i style="background:var(--accent)"></i>Person</span>' : '') +
+    (nodes.some(n => n.type === 'source') ? '<span><i style="background:var(--text-3)"></i>Conversation</span>' : '') +
+    (nodes.some(n => n.type === 'tag') ? '<span><i style="background:var(--warn)"></i>Tag</span>' : '');
+
+  let W = 0, H = 0, dpr = 1, hover = -1, drag = null, pan = null, cols = null;
+  const view = { k: 1, x: 0, y: 0 };
+  const css = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim() || '#888';
+  const colors = () => {
+    if (!cols || performance.now() - cols.t > 2000) cols = { t: performance.now(), bg: css('--bg-2'), text: css('--text'), edge: css('--edge'), accent: css('--accent'), warn: css('--warn'), t3: css('--text-3'), t2: css('--text-2'), cats: [0, 1, 2, 3, 4, 5, 6, 7].map(i => css('--c' + i)) };
+    return cols;
+  };
+  const colorOf = (n, c) => n.type === 'person' ? c.accent : n.type === 'source' ? c.t3 : n.type === 'tag' ? c.warn : n.type === 'summary' ? c.t2 : c.cats[Math.max(0, state.categories.indexOf(n.category)) % 8];
+  const resize = () => {
+    const r = wrap.getBoundingClientRect(); W = Math.max(200, Math.round(r.width)); H = Math.max(200, Math.round(r.height)); dpr = window.devicePixelRatio || 1;
+    canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr); canvas.style.width = W + 'px'; canvas.style.height = H + 'px';
+  };
+  const fit = (animate) => {
+    let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity; for (const n of nodes) { x0 = Math.min(x0, n.x); x1 = Math.max(x1, n.x); y0 = Math.min(y0, n.y); y1 = Math.max(y1, n.y); }
+    const pad = 50, k = Math.max(0.15, Math.min(2, (W - pad * 2) / Math.max(40, x1 - x0), (H - pad * 2) / Math.max(40, y1 - y0)));
+    view.k = k; view.x = W / 2 - k * (x0 + x1) / 2; view.y = H / 2 - k * (y0 + y1) / 2;
+  };
+  const toWorld = (px, py) => ({ x: (px - view.x) / view.k, y: (py - view.y) / view.k });
+  const pick = (px, py) => { for (let i = nodes.length - 1; i >= 0; i--) { const n = nodes[i]; if (Math.hypot(n.x * view.k + view.x - px, n.y * view.k + view.y - py) <= n.r * view.k + 4) return i; } return -1; };
+  const draw = () => {
+    if (!canvas.isConnected) return; const c = colors();
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+    ctx.save(); ctx.translate(view.x, view.y); ctx.scale(view.k, view.k);
+    const near = hover >= 0 ? adj[hover] : null;
+    ctx.lineWidth = 1 / view.k; ctx.strokeStyle = c.edge;
+    for (const [a, b] of links) {
+      const on = hover < 0 || a === hover || b === hover;
+      ctx.globalAlpha = on ? (hover >= 0 ? 0.95 : 0.55) : 0.08; ctx.strokeStyle = hover >= 0 && on ? c.text : c.edge;
+      ctx.beginPath(); ctx.moveTo(nodes[a].x, nodes[a].y); ctx.lineTo(nodes[b].x, nodes[b].y); ctx.stroke();
+    }
+    for (const n of nodes) {
+      const lit = hover < 0 || n.i === hover || near.has(n.i) ; ctx.globalAlpha = lit ? 1 : 0.15;
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, 6.2832); ctx.fillStyle = colorOf(n, c); ctx.fill();
+      ctx.lineWidth = (n.i === hover || n.label && v.note === n.id ? 2.5 : 1.2) / view.k; ctx.strokeStyle = (n.i === hover || v.note === n.id) ? c.text : c.bg; ctx.stroke();
+    }
+    if (g.names) {
+      ctx.font = `${12 / view.k}px system-ui, sans-serif`; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+      const show = (n) => hover >= 0 ? (n.i === hover || near.has(n.i)) : (view.k > 0.75 || n.deg >= 3 || nodes.length <= 40);
+      for (const n of nodes) {
+        if (!show(n)) continue; const fade = hover >= 0 ? 1 : Math.max(0.35, Math.min(1, (view.k - 0.4) / 0.5 + (n.deg >= 3 ? 0.4 : 0)));
+        ctx.globalAlpha = fade; ctx.lineWidth = 3 / view.k; ctx.strokeStyle = c.bg; ctx.strokeText(n.label.slice(0, 32), n.x + n.r + 4 / view.k, n.y);
+        ctx.fillStyle = c.text; ctx.fillText(n.label.slice(0, 32), n.x + n.r + 4 / view.k, n.y);
+      }
+    }
+    ctx.restore(); ctx.globalAlpha = 1;
+  };
+  const save = () => { for (const n of nodes) GRAPH.pos.set(n.id, { x: n.x, y: n.y }); GRAPH.view = { ...view }; };
+  const frame = () => {
+    GRAPH.raf = 0; if (!canvas.isConnected) { save(); return; }
+    const moving = sim.tick(); draw();
+    if (moving) GRAPH.raf = requestAnimationFrame(frame); else save();
+  };
+  const wake = () => { if (!GRAPH.raf) GRAPH.raf = requestAnimationFrame(frame); };
+  const pt = (e) => { const r = canvas.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
+  const tip = (i) => { const t = $('#g-tip'); if (!t) return; if (i < 0) { t.hidden = true; return; } const n = nodes[i]; t.hidden = false; t.textContent = n.label + (n.category && n.type !== 'person' ? ' · ' + n.category : n.type === 'person' ? ' · person' : ''); };
+  const open = (n) => { save(); if (n.type === 'tag') setQ('tag:' + n.id.slice(1)); else openNote(n.id); };
+
+  canvas.onpointerdown = (e) => {
+    canvas.setPointerCapture(e.pointerId); const p = pt(e), h = pick(p.x, p.y);
+    if (h >= 0) { const w = toWorld(p.x, p.y); drag = { n: nodes[h], sx: p.x, sy: p.y, moved: 0 }; drag.n.fx = w.x; drag.n.fy = w.y; sim.alphaTarget = 0.25; sim.alpha = Math.max(sim.alpha, 0.25); wake(); }
+    else pan = { x: p.x, y: p.y, vx: view.x, vy: view.y, moved: 0 };
+  };
+  canvas.onpointermove = (e) => {
+    const p = pt(e);
+    if (drag) { drag.moved = Math.max(drag.moved, Math.abs(p.x - drag.sx) + Math.abs(p.y - drag.sy)); const w = toWorld(p.x, p.y); drag.n.fx = w.x; drag.n.fy = w.y; wake(); }
+    else if (pan) { pan.moved = Math.max(pan.moved, Math.abs(p.x - pan.x) + Math.abs(p.y - pan.y)); view.x = pan.vx + p.x - pan.x; view.y = pan.vy + p.y - pan.y; draw(); }
+    else { const h = pick(p.x, p.y); if (h !== hover) { hover = h; canvas.style.cursor = h >= 0 ? 'pointer' : 'grab'; tip(h); draw(); } }
+  };
+  canvas.onpointerup = () => {
+    const d = drag; drag = null; pan = null; sim.alphaTarget = 0;
+    if (d) { d.n.fx = d.n.fy = null; if (d.moved < 5) open(d.n); else wake(); }
+  };
+  canvas.onpointerleave = () => { if (!drag && !pan && hover >= 0) { hover = -1; tip(-1); draw(); } };
+  canvas.ondblclick = (e) => { const p = pt(e); if (pick(p.x, p.y) < 0) { fit(); draw(); } };
+  canvas.onwheel = (e) => {
+    e.preventDefault(); const p = pt(e), f = e.deltaY < 0 ? 1.15 : 1 / 1.15, nk = Math.max(0.15, Math.min(6, view.k * f)), r = nk / view.k;
+    view.x = p.x - (p.x - view.x) * r; view.y = p.y - (p.y - view.y) * r; view.k = nk; draw();
+  };
+  const zoomBy = (f) => { const nk = Math.max(0.15, Math.min(6, view.k * f)), r = nk / view.k; view.x = W / 2 - (W / 2 - view.x) * r; view.y = H / 2 - (H / 2 - view.y) * r; view.k = nk; draw(); };
+
+  resize();
+  if (warm && GRAPH.view) Object.assign(view, GRAPH.view);
+  else { for (let t = 0, n = Math.min(80, Math.floor(4e6 / (nodes.length * nodes.length + 1))); t < n; t++) sim.tick(); sim.alpha = Math.max(sim.alpha, 0.3); fit(); }
+  GRAPH.ro = new ResizeObserver(() => { resize(); draw(); }); GRAPH.ro.observe(wrap);
+  GRAPH.live = { nodes, sim, view, draw, wake, pick, zoomBy, fit: () => { fit(); draw(); }, params: () => sim.p, reheat: (p) => { Object.assign(sim.p, p); sim.alpha = Math.max(sim.alpha, 0.5); wake(); } };
+  window.__graphDebug = GRAPH.live;
+  draw(); wake();
 }
 
 /* ---------------------------------------------------------------- People */
@@ -1137,6 +1515,7 @@ function renderPeopleList() {
     : `<p class="faint" style="padding:0 14px 14px">${state.people.length ? 'No one matches.' : 'No one yet.'}</p>`;
 }
 async function showPerson(id, editing) {
+  if (state.tab !== 'people') return;
   state.personId = id; $('#split').classList.add('sel'); renderPeopleList();
   const pd = $('#pd'); pd.innerHTML = '<p class="skeleton">Loading…</p>';
   let p;
@@ -1269,7 +1648,7 @@ SCREENS.settings = async function (soft) {
     <div class="row"><button class="btn" data-act="save-never">Save this list</button></div></section>
 
   ${ai.hermes_found ? `<section class="card"><h2>Hermes</h2>
-    ${sw('sync_hermes', 'Keep Hermes’s own memory notes up to date', s.hermes_files ? 'Writes your confirmed memories into the memory notes Hermes already reads. Turning it off removes what I added.' : 'I could not find Hermes’s memory notes on this computer, so this is not available.', o.sync_hermes, !s.hermes_files)}
+    ${sw('sync_hermes', 'Keep Hermes’s own memory notes up to date', s.hermes_files ? 'Puts a short list of the most useful things I know about you into the notes Hermes reads at the start of every chat. Hermes only has room for a short list, so the rest stays searchable. Turning it off removes what I added.' : 'I could not find Hermes on this computer, so this is not available.', o.sync_hermes, !s.hermes_files)}
     ${s.bridge ? `<div class="row between"><span><b>Hermes AI connection:</b> ${s.bridge.running ? 'running' : 'stopped'}</span>
       <button class="btn sm" data-act="${s.bridge.running ? 'bridge-stop' : 'bridge-start'}">${s.bridge.running ? 'Stop' : 'Start'}</button></div>` : ''}</section>` : ''}
 
@@ -1311,21 +1690,38 @@ document.addEventListener('click', async (e) => {
     case 'resume': return busy(el, async () => { await api('/api/anonymous', { method: 'POST', body: { anonymous: false } }); toast('Memory is back on.'); await refreshStatus(); refreshHere(); });
     case 'close-drawer': return closeDrawer();
     case 'open-note': return openNote(el.dataset.path);
-    case 'note-edit': return openNote(state.note.path, true);
-    case 'note-view': return openNote(state.note.path);
-    case 'drawer-tag': closeDrawer(); if (state.tab !== 'vault') { await go('vault'); } return toggleTok('tag:' + el.dataset.tag);
+    case 'note-edit': return openNote(vstate().cur.path, true);
+    case 'note-view': return openNote(vstate().cur.path);
     case 'note-save': return busy(el, async () => {
-      const n = state.note; const body = { path: n.path };
-      if (n.type === 'memory') { body.body = $('#ne-body').value; body.category = $('#ne-cat').value; }
-      else { body.name = $('#ne-name').value; body.notes = $('#ne-notes').value; }
+      const n = vstate().cur; const body = { path: n.path, name: $('#ne-name').value, notes: $('#ne-notes').value };
       const fresh = await api('/api/vault/note', { method: 'PUT', body });
-      toast('Saved.'); await openNote(fresh.path || n.path); refreshHere();
+      toast('Saved.'); await loadAll(); await openNote(fresh.path || n.path); paintTree();
     });
-    case 'note-forget': {
-      const n = state.note;
-      if (!(await ask({ title: 'Forget this?', body: `“${esc(n.body)}”<br>I will stop using it. You can put it back from Review.`, yes: 'Forget it', danger: true }))) return;
-      return busy(el, async () => { await api('/api/records/' + enc(n.id), { method: 'DELETE' }); toast('Forgotten.'); closeDrawer(); refreshHere(); });
-    }
+    case 'v-tag': return setQ('tag:' + el.dataset.tag);
+    case 'v-dir': { const v = vstate(); v.open[el.dataset.path] = !v.open[el.dataset.path]; vsave(); return paintTree(); }
+    case 'v-dir-open': { const v = vstate(); v.open[el.dataset.path] = true; v.reveal = false; vsave(); paintTree(); const row = $$('#v-tree .vx-row').find(b => b.dataset.path === el.dataset.path); if (row) row.scrollIntoView({ block: 'nearest' }); return; }
+    case 'v-collapse': { const v = vstate(); const any = Object.values(v.open).some(Boolean); for (const d of allDirs(v.tree)) v.open[d.path] = !any; vsave(); return paintTree(); }
+    case 'v-more-files': { const v = vstate(); v.more[el.dataset.path] = (v.more[el.dataset.path] || PAGE) + PAGE; return paintTree(); }
+    case 'v-more-hits': vstate().shown += 40; return paintTree();
+    case 'v-clear': return setQ('');
+    case 'v-view': { const v = vstate(); if (el.dataset.view === 'graph') return showGraph(); v.view = 'note'; stopGraph(); if (v.note) return showNote(v.note); paintBar(); return paintHome(); }
+    case 'v-side': { const v = vstate(); v.hideSide = !v.hideSide; vsave(); $('#vx').classList.toggle('noside', v.hideSide); el.setAttribute('aria-expanded', String(!v.hideSide)); return; }
+    case 'v-switcher': return openSwitcher();
+    case 'v-jump': { const t = document.getElementById(el.dataset.to); if (t) t.scrollIntoView({ block: 'start', behavior: 'smooth' }); return; }
+    case 'vl-edit': return lineEditor(el.closest('[data-mem]'), id);
+    case 'vl-cancel': return refreshHere();
+    case 'vl-save': return busy(el, async () => {
+      const li = el.closest('[data-mem]'); const text = $('textarea', li).value.trim();
+      if (!text) { toast('A memory cannot be empty. Use Forget to remove it.', true); return; }
+      const body = { body: text };
+      if (el.dataset.plain === 'true') { body.category = $('[data-f=cat]', li).value; body.note = $('[data-f=note]', li).value.trim(); }
+      const saved = await api('/api/records/' + enc(id), { method: 'PUT', body });
+      toast('Saved.'); const v = vstate(); await loadAll();
+      if (saved && saved.note && saved.note !== v.note && v.all.some(n => n.path === saved.note)) { v.note = saved.note; }
+      await showNote(v.note, false, true); paintTree();
+    });
+    case 'g-zoom': { const L = GRAPH.live; if (!L) return; return el.dataset.dir === 'fit' ? L.fit() : L.zoomBy(el.dataset.dir === 'in' ? 1.3 : 1 / 1.3); }
+    case 'g-reset': { const v = vstate(); Object.assign(v.g, { center: 0.4, repel: 0.5, link: 0.5, dist: 0.4 }); vsave(); $$('[data-force]').forEach(r => { r.value = v.g[r.dataset.force]; }); if (GRAPH.live) GRAPH.live.reheat(v.g); return; }
     case 'goto-person': closeDrawer(); state.personId = id; return go('people');
     case 'tell': return busy(el, async () => {
       const t = $('#tell').value.trim(); if (!t) { toast('Type something first.', true); return; }
@@ -1372,8 +1768,6 @@ document.addEventListener('click', async (e) => {
     }
 
     case 'tok': return toggleTok(el.dataset.tok, el.dataset.ex);
-    case 'set-view': state.vview = el.dataset.view; return loadVault();
-    case 'more-notes': state.vShow = (state.vShow || 200) + 200; return renderNoteList();
 
     case 'pick-person': return showPerson(id);
     case 'back-people': state.personId = null; return SCREENS.people(true);
@@ -1478,18 +1872,24 @@ document.addEventListener('change', async (e) => {
   if (t.name === 'aimode') { $('#ai-custom').hidden = t.value !== 'custom'; $$('label.radio').forEach(l => l.classList.toggle('on', $('input', l).checked)); return; }
   if (t.dataset.todo) {
     t.disabled = true;
-    try { await api('/api/records/' + enc(t.dataset.todo) + '/done', { method: 'POST', body: { done: t.checked } }); toast(t.checked ? 'Ticked off.' : 'Back on your list.'); await SCREENS.me(); }
+    try { await api('/api/records/' + enc(t.dataset.todo) + '/done', { method: 'POST', body: { done: t.checked } }); toast(t.checked ? 'Ticked off.' : 'Back on your list.'); await refreshHere(); }
     catch (err) { t.checked = !t.checked; toast(err.message, true); }
     finally { t.disabled = false; }
     return;
   }
-  if (t.dataset.graph) { state.vg[t.dataset.graph] = t.checked; return renderGraphView(); }
+  if (t.dataset.graph) {
+    const v = vstate(); v.g[t.dataset.graph] = t.checked; vsave();
+    return ['local', 'names'].includes(t.dataset.graph) ? drawGraph() : showGraph();
+  }
+  if (t.dataset.depth !== undefined) { const v = vstate(); v.g.depth = +t.value; vsave(); return drawGraph(); }
+  if (t.id === 'v-sort') { const v = vstate(); v.sort = t.value; vsave(); return paintTree(); }
   if (t.dataset.opt) {
     const key = t.dataset.opt; t.disabled = true;
     try {
+      let said = 'Saved.';
       if (key === 'paused') await api('/api/anonymous', { method: 'POST', body: { anonymous: t.checked } });
-      else await api('/api/settings', { method: 'POST', body: { [key]: t.checked } });
-      toast('Saved.'); await keepFields(() => SCREENS.settings());
+      else { const r = await api('/api/settings', { method: 'POST', body: { [key]: t.checked } }); if (r && r.message) said = r.message; }
+      toast(said); await keepFields(() => SCREENS.settings());
     } catch (err) { t.checked = !t.checked; toast(err.message, true); }
     finally { t.disabled = false; }
   }
@@ -1497,13 +1897,34 @@ document.addEventListener('change', async (e) => {
 const onType = debounce((e) => {
   const t = e.target;
   if (t.id === 'rv-q') { state.rq = t.value; runSearch(); }
-  else if (t.id === 'v-q') { state.vq = t.value.trim(); state.vShow = 200; loadVault(); }
+  else if (t.id === 'v-q') { const v = vstate(); v.q = t.value.trim(); v.shown = 40; runVaultSearch(); if (v.view === 'graph') showGraph(); }
   else if (t.id === 'pl-q') { state.peopleQ = t.value; renderPeopleList(); }
 }, 280);
-document.addEventListener('input', onType);
+document.addEventListener('input', (e) => {
+  const t = e.target;
+  if (t.dataset && t.dataset.force) { const v = vstate(); v.g[t.dataset.force] = +t.value; vsave(); if (GRAPH.live) GRAPH.live.reheat({ [t.dataset.force]: +t.value }); return; }
+  onType(e);
+});
 document.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && (e.ctrlKey || e.metaKey) && e.target.id === 'tell') { e.preventDefault(); const b = $('[data-act=tell]'); if (b) b.click(); }
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === 'o') { e.preventDefault(); openSwitcher(); return; }
+  /* the folder tree works from the keyboard like Obsidian's: arrows move, right opens, left closes */
+  const row = e.target.closest && e.target.closest('#v-tree .vx-row');
+  if (row) {
+    const rows = $$('#v-tree .vx-row'); const i = rows.indexOf(row);
+    if (e.key === 'ArrowDown') { e.preventDefault(); (rows[i + 1] || row).focus(); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); (rows[i - 1] || row).focus(); }
+    else if (row.classList.contains('dir') && e.key === 'ArrowRight' && row.getAttribute('aria-expanded') === 'false') { e.preventDefault(); row.click(); }
+    else if (row.classList.contains('dir') && e.key === 'ArrowLeft' && row.getAttribute('aria-expanded') === 'true') { e.preventDefault(); row.click(); }
+  }
 });
+
+/* A screen only draws while its own tab is open: a save that finishes after you moved on
+   must not bring the old screen back. (go() sets the tab before it calls the screen.) */
+for (const name of Object.keys(SCREENS)) {
+  const draw = SCREENS[name];
+  SCREENS[name] = function () { return state.tab === name ? draw.apply(this, arguments) : Promise.resolve(); };
+}
 
 /* ---- start ---- */
 (async function start() {

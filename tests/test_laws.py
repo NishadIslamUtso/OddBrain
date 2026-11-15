@@ -327,6 +327,17 @@ class TestStore(unittest.TestCase):
         assert got is not None
         self.assertEqual(got.title, "indexed item")
 
+    def test_rebuild_index_keeps_waiting_statements_and_hand_made_links(self):
+        a, b = make_record(), make_record()
+        self.store.add_record(a)
+        self.store.add_record(b)
+        self.store.link(a.id, b.id, "supports")
+        fid = self.store.add_fact("something waiting to be read", trust=0.4)
+        self.store.set_fact_status(fid, "waiting")
+        self.store.rebuild_index()
+        self.assertEqual(self.store.get_fact(fid)["status"], "waiting")
+        self.assertIn((a.id, b.id, "supports"), self.store.edges(a.id))
+
     def test_stats(self):
         r = make_record(trust=0.9)
         sign(self.store, r)

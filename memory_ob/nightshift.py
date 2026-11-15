@@ -32,15 +32,36 @@ def _step(name: str, fn: Any) -> dict[str, str]:
         return {"step": name, "ok": "no", "detail": f"{type(exc).__name__}: {exc}"}
 
 
-def sync_hermes(store: Store, settings: Settings, *, enabled: bool) -> dict[str, Any] | None:
-    """Update (or, when switched off, clean up) Hermes's own memory notes."""
+def sync_hermes(store: Store, settings: Settings | None, *, enabled: bool) -> dict[str, Any] | None:
+    """Update (or, when switched off, clean up) Hermes's own memory notes.
+
+    Returns ``None`` when Hermes is not on this computer.
+    """
     from . import sync
-    from .hermes import hermes_memory_paths
+    from .hermes import hermes_memory_paths, memory_limits
 
     memory_path, user_path = hermes_memory_paths()
     if not memory_path or not user_path:
         return None
-    return sync.sync_all(store, memory_path=memory_path, user_path=user_path, enabled=enabled)
+    memory_limit, user_limit = memory_limits()
+    return sync.sync_all(store, memory_path=memory_path, user_path=user_path, enabled=enabled,
+                         memory_limit=memory_limit, user_limit=user_limit)
+
+
+def refresh_hermes_notes(store: Store, vault: Any) -> dict[str, Any] | None:
+    """Bring Hermes's notes up to date, but only if the owner switched that on.
+
+    Called after anything that changes what is remembered — a save in the app
+    or a chat that Hermes handed to Memory_OB — so the notes do not wait for
+    the nightly run. Never raises: a notes file must not break a save.
+    """
+    try:
+        if not load_settings(vault).sync_hermes:
+            return None
+        return sync_hermes(store, None, enabled=True)
+    except Exception:  # noqa: BLE001
+        logger.warning("could not update Hermes memory files", exc_info=True)
+        return None
 
 
 def run(settings: Settings, *, dry_run: bool = False, skip: tuple[str, ...] = ()) -> list[dict[str, str]]:

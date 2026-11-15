@@ -22,6 +22,7 @@ import shutil
 import sqlite3
 import sys
 import tempfile
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -99,11 +100,62 @@ def list_backups(vault: Path | None = None) -> list[Path]:
     return sorted(d.glob("memory-ob-*.zip"), reverse=True)
 
 
+class BackupError(ValueError):
+    """The archive is not a safe Memory_OB backup. The message is plain enough to show the owner."""
+
+
+MAX_RESTORE_BYTES = 8 * 1024 ** 3       # nobody's notes are bigger than this; a zip bomb is
+
+
+def _check_archive(zf: zipfile.ZipFile, target: Path) -> None:
+    root = target.resolve()
+    total = 0
+    names: list[str] = []
+    for info in zf.infolist():
+        name = info.filename.replace("\\", "/")
+        if name.startswith("/") or (len(name) > 1 and name[1] == ":") or ".." in name.split("/"):
+            raise BackupError("That backup has files that point outside its own folder, so I did not open it.")
+        mode = info.external_attr >> 16
+        if mode and (mode & 0o170000) == 0o120000:
+            raise BackupError("That backup contains a shortcut (symbolic link), so I did not open it.")
+        if not (root / name).resolve().is_relative_to(root):
+            raise BackupError("That backup has files that point outside its own folder, so I did not open it.")
+        total += info.file_size
+        names.append(name)
+    if total > MAX_RESTORE_BYTES:
+        raise BackupError("That backup is far larger than any real one, so I did not open it.")
+    if "ledger.sqlite" not in names and not any(n.startswith("vault/") for n in names):
+        raise BackupError("That file does not look like a Memory_OB backup (no notes or memory file inside).")
+
+
 def restore_backup(archive: Path, dest: Path | None = None) -> Path:
-    """Unpack an archive into a fresh folder and return its path."""
+    """Unpack an archive into a fresh folder and return its path.
+
+    The archive is checked first (nothing may land outside the folder, no
+    shortcuts, a sane size, and it must hold notes or the memory file), and the
+    memory file is checked for damage after.
+    """
     target = Path(dest) if dest else Path.cwd() / f"memory-ob-restore-{_stamp()}"
-    target.mkdir(parents=True, exist_ok=True)
-    shutil.unpack_archive(str(archive), str(target))
+    try:
+        with zipfile.ZipFile(str(archive)) as zf:
+            target.mkdir(parents=True, exist_ok=True)
+            _check_archive(zf, target)
+            zf.extractall(str(target))
+    except zipfile.BadZipFile as exc:
+        raise BackupError("That file is not a readable backup (it is damaged or not a zip).") from exc
+    ledger = target / "ledger.sqlite"
+    if ledger.is_file():
+        try:
+            conn = sqlite3.connect(str(ledger))
+            try:
+                ok = conn.execute("PRAGMA integrity_check").fetchone()
+            finally:
+                conn.close()
+        except sqlite3.DatabaseError:
+            ok = None
+        if not ok or ok[0] != "ok":
+            raise BackupError(f"The memory file inside that backup is damaged. It was unpacked into {target} "
+                              "for you to look at, but do not use it as your memory.")
     return target
 
 
@@ -128,7 +180,11 @@ def main() -> int:
         if not args.restore.is_file():
             print(f"no such archive: {args.restore}")
             return 1
-        target = restore_backup(args.restore, args.dest)
+        try:
+            target = restore_backup(args.restore, args.dest)
+        except BackupError as exc:
+            print(str(exc))
+            return 1
         print(f"restored to: {target}")
         return 0
 

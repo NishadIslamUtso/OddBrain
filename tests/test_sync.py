@@ -196,5 +196,221 @@ class TestApi(SyncCase):
             self.assertIn("my own memory notes", text)
 
 
+class TestHermesFolder(SyncCase):
+    """Hermes keeps MEMORY.md and USER.md in a ``memories`` folder. That is where we must look."""
+
+    def _client(self):
+        from memory_ob import api
+        from tests.helpers import AuthedClient
+
+        api.settings = api.Settings.resolve(vault=self.vault, db=self.db, models_path=self.tmp / "models.json")
+        return AuthedClient.create(api.create_app(), self.vault)
+
+    def _home(self, *, memories: bool = False) -> Path:
+        home = self.tmp / "hermes-home"
+        (home / "memories").mkdir(parents=True) if memories else home.mkdir()
+        return home
+
+    def _add_text(self, rid: str, text: str, *, tags: list[str] | None = None, kind: str = "profile",
+                  importance: int = 0, never_send: bool = False) -> None:
+        from tests.helpers import sign
+
+        sign(self.store, Record(id=rid, kind=kind, subject="self", speaker="user", trust=0.9, title=text,
+                                body=text, tags=tags or [], importance=importance, never_send=never_send))
+
+    def test_finds_the_memories_folder(self) -> None:
+        from unittest import mock
+
+        from memory_ob import hermes
+
+        home = self._home(memories=True)
+        with mock.patch.object(hermes, "HERMES_HOME", home):
+            memory, user = hermes.hermes_memory_paths()
+        self.assertEqual(memory, home / "memories" / "MEMORY.md")
+        self.assertEqual(user, home / "memories" / "USER.md")
+
+    def test_hermes_installed_but_never_saved_anything_still_works(self) -> None:
+        """No memories folder yet: it is made, the files are not looked for in the wrong place."""
+        from unittest import mock
+
+        from memory_ob import hermes
+
+        home = self._home()
+        self._add_text("a", "I am a student at BRAC University")
+        client = self._client()
+        with mock.patch.object(hermes, "HERMES_HOME", home):
+            self.assertTrue(client.get("/api/settings").json()["hermes_files"])
+            r = client.post("/api/settings", json={"sync_hermes": True})
+        self.assertEqual(r.status_code, 200, r.text)
+        self.assertIn("Turned on", r.json()["message"])
+        self.assertIn("BRAC University", (home / "memories" / "USER.md").read_text(encoding="utf-8"))
+        self.assertIn("memory_ob_search", (home / "memories" / "MEMORY.md").read_text(encoding="utf-8"))
+        self.assertFalse((home / "MEMORY.md").exists())
+
+    def test_the_block_is_its_own_entry(self) -> None:
+        """Hermes splits its notes on a line holding only the section sign."""
+        self.user.write_text("Likes tea\n\u00a7\nDislikes noise\n", encoding="utf-8")
+        self._add_text("a", "I live in Dhaka")
+        sync.sync_file(self.store, self.user, heading=sync.USER_HEADING, enabled=True)
+        entries = [e.strip() for e in self.user.read_text(encoding="utf-8").split(sync.DELIM) if e.strip()]
+        self.assertEqual(entries[0], "Likes tea")
+        self.assertEqual(entries[1], "Dislikes noise")
+        self.assertEqual(len(entries), 3)
+        self.assertTrue(entries[2].startswith(sync.BEGIN) and entries[2].endswith(sync.END))
+
+    def test_a_long_list_never_passes_its_share_or_hermes_limit(self) -> None:
+        for i in range(80):
+            self._add_text(f"r{i}", f"I have fact number {i} and it is written out in a reasonably long way to take room")
+        self.user.write_text("Owner wrote this entry\n", encoding="utf-8")
+        report = sync.sync_all(self.store, memory_path=self.memory, user_path=self.user, enabled=True,
+                               memory_limit=2200, user_limit=1375)
+        for path, limit in ((self.user, 1375), (self.memory, 2200)):
+            text = path.read_text(encoding="utf-8")
+            joined = sync.DELIM.join(e.strip() for e in text.split(sync.DELIM) if e.strip())
+            self.assertLessEqual(len(joined), limit, path.name)
+            block = text[text.index(sync.BEGIN): text.index(sync.END) + len(sync.END)]
+            self.assertLessEqual(len(block), int(limit * sync.SHARE), path.name)
+            for entry in joined.split(sync.DELIM):
+                self.assertLessEqual(len(entry), limit)
+        self.assertIn("Owner wrote this entry", self.user.read_text(encoding="utf-8"))
+        self.assertLess(report["shown"], report["synced"])
+        self.assertIn("more: memory_ob_search", self.user.read_text(encoding="utf-8"))
+
+    def test_what_does_not_fit_in_user_md_goes_to_memory_md(self) -> None:
+        for i in range(30):
+            self._add_text(f"r{i}", f"Fact {i}: the owner has some detail number {i} worth keeping around")
+        report = sync.sync_all(self.store, memory_path=self.memory, user_path=self.user, enabled=True)
+        self.assertGreater(report["user"]["shown"], 0)
+        self.assertGreater(report["memory"]["shown"], 0)
+        self.assertEqual(report["shown"], report["user"]["shown"] + report["memory"]["shown"])
+
+    def test_most_important_come_first(self) -> None:
+        for i in range(40):
+            self._add_text(f"r{i}", f"Ordinary thing {i} that is somewhat long so that not everything fits here")
+        self._add_text("big", "Decided to finish the thesis by March", importance=2)
+        self._add_text("mem", "Important learning about sleep", kind="learning", importance=1)
+        sync.sync_all(self.store, memory_path=self.memory, user_path=self.user, enabled=True)
+        text = self.memory.read_text(encoding="utf-8")
+        self.assertIn("Decided to finish the thesis by March", text)
+        self.assertIn("Important learning about sleep", self.user.read_text(encoding="utf-8"))
+
+    def test_no_room_means_nothing_is_written_and_hermes_is_left_alone(self) -> None:
+        original = "x" * 1300
+        self.user.write_text(original, encoding="utf-8")
+        self._add_text("a", "I live in Dhaka")
+        result = sync.sync_file(self.store, self.user, heading=sync.USER_HEADING, enabled=True, limit=1375)
+        self.assertEqual(result.get("note"), "no room")
+        self.assertEqual(self.user.read_text(encoding="utf-8"), original)
+
+    def test_a_block_that_no_longer_fits_is_taken_out(self) -> None:
+        self._add_text("a", "I live in Dhaka")
+        sync.sync_file(self.store, self.user, heading=sync.USER_HEADING, enabled=True)
+        self.assertIn(sync.BEGIN, self.user.read_text(encoding="utf-8"))
+        grown = self.user.read_text(encoding="utf-8").replace(sync.BEGIN, "y" * 1300 + sync.DELIM + sync.BEGIN)
+        self.user.write_text(grown, encoding="utf-8")
+        sync.sync_file(self.store, self.user, heading=sync.USER_HEADING, enabled=True, limit=1375)
+        self.assertNotIn(sync.BEGIN, self.user.read_text(encoding="utf-8"))
+
+    def test_section_signs_and_new_lines_in_a_memory_cannot_split_an_entry(self) -> None:
+        self._add_text("a", "first line\n\u00a7\nsecond line")
+        sync.sync_file(self.store, self.user, heading=sync.USER_HEADING, enabled=True)
+        entries = [e for e in self.user.read_text(encoding="utf-8").split(sync.DELIM) if e.strip()]
+        self.assertEqual(len(entries), 1)
+
+    def test_only_the_first_change_makes_a_backup(self) -> None:
+        self.user.write_text("my notes\n", encoding="utf-8")
+        for i in range(6):
+            self._add_text(f"r{i}", f"Fact {i}")
+            sync.sync_file(self.store, self.user, heading=sync.USER_HEADING, enabled=True)
+        self.assertEqual(len(list(self.tmp.glob("USER.md.*.bak"))), 1)
+
+    def test_old_style_blocks_are_replaced_and_removed(self) -> None:
+        old = f"mine\n\n{sync._OLD_BEGIN}\n\n# User (confirmed)\n\n- old line\n\n{sync._OLD_END}\n"
+        self.user.write_text(old, encoding="utf-8")
+        self._add_text("a", "I live in Dhaka")
+        sync.sync_file(self.store, self.user, heading=sync.USER_HEADING, enabled=True)
+        text = self.user.read_text(encoding="utf-8")
+        self.assertNotIn("old line", text)
+        self.assertIn("mine", text)
+        self.assertEqual(text.count(sync.BEGIN), 1)
+        sync.sync_file(self.store, self.user, heading=sync.USER_HEADING, enabled=False)
+        self.assertEqual(self.user.read_text(encoding="utf-8").strip(), "mine")
+
+    def test_switching_off_leaves_an_empty_file_when_it_was_only_ours(self) -> None:
+        self._add_text("a", "I live in Dhaka")
+        sync.sync_file(self.store, self.user, heading=sync.USER_HEADING, enabled=True)
+        sync.sync_file(self.store, self.user, heading=sync.USER_HEADING, enabled=False)
+        self.assertEqual(self.user.read_text(encoding="utf-8").strip(), "")
+
+    def test_moments_finished_to_dos_private_and_empty_stay_out(self) -> None:
+        self._add_text("moment", "Felt tired this morning", tags=["moment"])
+        self._add_text("done", "Buy milk", tags=["todo", "done"])
+        self._add_text("secret", "My private thing", never_send=True)
+        self._add_text("open", "Call the dentist", tags=["todo"])
+        self._add_text("keep", "I study CSE")
+        sync.sync_all(self.store, memory_path=self.memory, user_path=self.user, enabled=True)
+        both = self.memory.read_text(encoding="utf-8") + self.user.read_text(encoding="utf-8")
+        for gone in ("Felt tired", "Buy milk", "My private thing"):
+            self.assertNotIn(gone, both)
+        self.assertIn("Call the dentist", self.memory.read_text(encoding="utf-8"))
+        self.assertIn("I study CSE", self.user.read_text(encoding="utf-8"))
+
+    def test_limits_come_from_hermes_config(self) -> None:
+        from unittest import mock
+
+        from memory_ob import hermes
+
+        home = self._home()
+        (home / "config.yaml").write_text("memory:\n  memory_char_limit: 5000\n  user_char_limit: 3000\n", encoding="utf-8")
+        with mock.patch.object(hermes, "HERMES_HOME", home):
+            self.assertEqual(hermes.memory_limits(), (5000, 3000))
+        with mock.patch.object(hermes, "HERMES_HOME", self.tmp / "none"):
+            self.assertEqual(hermes.memory_limits(), (2200, 1375))
+
+    def test_notes_follow_a_save_and_a_chat_without_waiting_for_the_nightly_run(self) -> None:
+        from unittest import mock
+
+        from memory_ob import hermes, nightshift, settings as settings_mod
+
+        home = self._home(memories=True)
+        self.store.close()
+        self.store = Store(self.db)
+        with mock.patch.object(hermes, "HERMES_HOME", home):
+            # Off: nothing is written.
+            self._add_text("a", "I live in Dhaka")
+            self.assertIsNone(nightshift.refresh_hermes_notes(self.store, self.vault))
+            self.assertFalse((home / "memories" / "USER.md").exists())
+            # On: the next refresh writes it, and the one after a new memory updates it.
+            self.vault.mkdir(parents=True, exist_ok=True)
+            settings_mod.update(self.vault, sync_hermes=True)
+            nightshift.refresh_hermes_notes(self.store, self.vault)
+            self.assertIn("I live in Dhaka", (home / "memories" / "USER.md").read_text(encoding="utf-8"))
+            self._add_text("b", "I have a sister called Mim")
+            nightshift.refresh_hermes_notes(self.store, self.vault)
+            self.assertIn("sister called Mim", (home / "memories" / "USER.md").read_text(encoding="utf-8"))
+
+    def test_saving_in_the_app_updates_the_notes(self) -> None:
+        from unittest import mock
+
+        from memory_ob import hermes
+
+        home = self._home(memories=True)
+        client = self._client()
+        with mock.patch.object(hermes, "HERMES_HOME", home):
+            self.assertEqual(client.post("/api/settings", json={"sync_hermes": True}).status_code, 200)
+            r = client.post("/api/tell", json={"text": "I live in Dhaka."})
+            self.assertEqual(r.status_code, 200, r.text)
+            self.assertIn("live in Dhaka", (home / "memories" / "USER.md").read_text(encoding="utf-8"))
+
+    def test_a_windows_file_with_crlf_and_a_bom_is_still_read_as_entries(self) -> None:
+        self.user.write_bytes("\ufeffLikes tea\r\n\u00a7\r\nDislikes noise\r\n".encode("utf-8"))
+        self._add_text("a", "I live in Dhaka")
+        sync.sync_file(self.store, self.user, heading=sync.USER_HEADING, enabled=True)
+        raw = self.user.read_bytes()
+        self.assertNotIn(b"\r\n", raw.split(sync.BEGIN.encode())[1])  # our entry is written with plain \n
+        entries = [e.strip() for e in self.user.read_text(encoding="utf-8-sig").split(sync.DELIM) if e.strip()]
+        self.assertEqual(entries[:2], ["Likes tea", "Dislikes noise"])
+
+
 if __name__ == "__main__":
     unittest.main()

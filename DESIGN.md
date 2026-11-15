@@ -15,7 +15,7 @@ Raw material is kept separately and never edited:
 |---|---|---|
 | Raw | every conversation, speaker-tagged; imported original files in `Sources/Files` (fingerprinted in `MANIFEST.json`) | never auto-pruned |
 | Memories | records (what you said about yourself), people, edges | history kept forever |
-| View | the markdown vault, `Me.md`, the biography | rebuilt any time |
+| View | the markdown vault (notes by subject, project notes, journal, biography) | rebuilt any time |
 | Screens | Review · Vault · People · Journal · Me · Settings | rendering only |
 
 ## 2. Records
@@ -49,9 +49,13 @@ what you said
   → passwords / keys / card numbers replaced with [hidden]
   → conversation saved raw
   → "forget …" sentences run (matching memories go to trash) and are not themselves kept
-  → read into claims (AI helper if there is one, simple rules if not)
+  → read into claims by the librarian (AI helper if there is one, simple rules if not);
+    the AI also picks the category, an optional note title and the people, and is shown
+    existing note titles so it files into them (`extract.py`, `manager.librarian_context`)
   → clauses containing [hidden] dropped; the rest of the message continues
-  → grounding: a claim must be supported by the owner's own words (quote hash-checked)
+  → grounding: a claim must be supported by the owner's own words (quote hash-checked;
+    ≥60% of its stems, its numbers are a subset, and it may not introduce a capitalised
+    name the owner never wrote)
   → for each claim:
       hazard / "never remember" word       → dropped
       hedged ("maybe", "I might")          → kept as "not sure"
@@ -104,7 +108,9 @@ through it: `neverSend` records are dropped whole (text, title and counts), and
 hazardous text is dropped too. Keeping a memory private sets `neverSend`; it also
 removes that memory from the feed and change log, and blanks its sentence in every
 saved conversation (screens and vault notes). Settings lists private memories by
-id only. In anonymous mode the provider's search, capture and review tools refuse.
+id only. In anonymous mode the provider's search, capture and review tools refuse,
+and the HTTP search refuses non-owner callers. Anonymous mode turns off only when the
+owner turns it off in the app; the provider's tool can read it or turn it on, never off.
 
 Embeddings are per model: vectors carry the model that made them, only the model
 in use is searched, a switch or an edit marks them stale, and nomic/mixedbread
@@ -126,9 +132,32 @@ same · refreshes the biography (unless locked) · prepares meaning search
 originals against the manifest (verify only — it never rewrites a fingerprint) ·
 updates Hermes's own notes if that switch is on.
 
+### Hermes's own notes (the optional switch)
+
+Hermes reads `MEMORY.md` and `USER.md` from its `memories` folder at the start
+of every chat, and keeps them small (2,200 and 1,375 characters unless its
+config says otherwise); once a file is full Hermes cannot save anything of its
+own. So Memory_OB writes **one short entry** in each file, never the whole
+ledger: at most 45% of the file, leaving room for Hermes's own entries, with a
+pointer to `memory_ob_search` for everything else. `USER.md` gets facts about
+the owner; `MEMORY.md` gets the pointer, projects and decisions, and whatever
+did not fit in `USER.md`. Moments, finished to-dos and private memories are never
+included. The entry is its own `§`-separated entry, the owner's text is never
+touched, the first change keeps a backup (three are kept), and the notes are
+refreshed after every save in the app and after every chat Hermes hands over —
+not only at night.
+
 ## 10. Physical shape
 
 * **Engine** — `memory_ob`, Python; FastAPI for the API (`fastapi`, `uvicorn`).
+* **Vault layout** — layout 2 (`.brain/vault-layout.json`): notes by subject. A category
+  folder has a general note (`Health/Health.md`) and AI-named notes (`Health/Knee injury.md`);
+  lines are `- [ ]/[x]? date — text · [[Person]] ^recordid`, so edits and deletes map to one
+  record. Projects, to-dos, journal months, people and imported chats have fixed homes.
+  The old layout (a note per memory) is migrated after a verified backup. `Me.md` is no
+  longer written.
+* **Release** — `release.py` writes `RELEASE_FILES.txt`; the installer moves anything an older
+  release shipped that is not on the list into `_retired/`.
 * **Screens** — one file, `memory_ob/web/index.html`, vanilla JS. It follows the
   host's `--ui-*` colours, fonts and sizes, always paints opaque panels, and
   checks its own contrast so text is readable in light and dark.

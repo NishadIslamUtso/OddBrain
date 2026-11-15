@@ -200,17 +200,23 @@ class TestVault(unittest.TestCase):
     def tearDown(self):
         self.store.close()
 
-    def test_render_and_parse_roundtrip(self):
+    def test_a_memory_is_one_dated_line_with_its_id(self):
         r = make_record(title="Hello world", body="Some body", tags=["a", "b"])
-        text = vault.render_record(r)
-        self.assertIn("kind: note", text)
+        line = vault.render_line(r)
+        self.assertTrue(line.startswith("- "), line)
+        self.assertIn("Some body", line)
+        self.assertTrue(line.endswith("^" + r.id), line)
+        self.assertEqual("\n" in line, False)
+
+    def test_a_subject_note_is_frontmatter_a_title_and_lines(self):
+        a = make_record(title="one", body="First thing", tags=["topic/health"])
+        b = make_record(title="two", body="Second thing", tags=["topic/health"])
+        text = vault.render_topic("Health/Health.md", [b, a])
         meta, body = vault.parse_frontmatter(text)
-        self.assertEqual(meta["id"], r.id)
-        self.assertEqual(meta["title"], "Hello world")
-        tags = [t.strip() for t in meta["tags"].split(",")]
-        self.assertTrue({"a", "b"} <= set(tags), tags)
-        self.assertTrue(any(t.startswith("topic/") for t in tags), tags)
-        self.assertIn("Some body", body)
+        self.assertEqual(meta["kind"], "topic")
+        self.assertEqual(meta["category"], "Health")
+        self.assertIn("# Health", body)
+        self.assertEqual([i["id"] for i in vault.parse_lines("Health/Health.md", text)], [a.id, b.id] if a.id < b.id else [b.id, a.id])
 
     def test_export_excludes_neversend(self):
         a = make_record(title="public", body="public body")
@@ -243,7 +249,7 @@ class TestVault(unittest.TestCase):
         st2 = Store(db2)
         n = vault.import_vault(self.vault, st2)
         self.assertEqual(n, 1)
-        self.assertEqual(st2.list_records()[0].title, "imported")
+        self.assertEqual(st2.list_records()[0].body, "body text")
         st2.close()
 
     def test_import_does_not_duplicate(self):

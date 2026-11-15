@@ -64,7 +64,7 @@ does not stop the others:
 | people | suggests profiles that may be the same person (never merges) |
 | biography | refreshes the Journal biography unless you locked it |
 | embed | prepares meaning search: embeds new or edited memories, and re-embeds everything after the embedding model was changed (skipped when meaning search is off) |
-| notes | rewrites the vault notes (including project folders) and `Me.md` |
+| notes | rewrites the vault notes (subject notes, project notes, journal, people) |
 | manifest | checks imported originals against their fingerprints (verify only) |
 | hermes | updates Hermes's own memory notes, only if you turned that on |
 

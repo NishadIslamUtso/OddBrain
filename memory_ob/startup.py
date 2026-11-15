@@ -86,7 +86,9 @@ def prepare(settings: Settings) -> dict[str, Any]:
                 state["cards_retired"] = True
                 _save_state(vault, state)
             vault_mod.ensure_layout(vault)
-            if not (vault / vault_mod.INDEX_FILE).is_file() and st.stats()["records"]:
+            if vault_mod.needs_subject_layout(vault):
+                report["subject_notes"] = vault_mod.migrate_to_subject_notes(st, vault)
+            elif not (vault / vault_mod.INDEX_FILE).is_file() and st.stats()["records"]:
                 report["notes"] = vault_mod.rebuild(st, vault)
         _done.add(key)
         if report:

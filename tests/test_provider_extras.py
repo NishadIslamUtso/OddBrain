@@ -76,7 +76,9 @@ class AnonymousGuard(ProviderTestCase):
         from memory_ob import anonymous
 
         anonymous.set_anonymous(self.vault, True)
-        self.provider.handle_tool_call("memory_ob_anonymous", {"action": "off"})
+        refused = self.provider.handle_tool_call("memory_ob_anonymous", {"action": "off"})
+        self.assertIn("Only the owner", refused)                       # the assistant cannot end it
+        anonymous.set_anonymous(self.vault, False)                      # the owner's switch in Settings
         out = self.provider.handle_tool_call("memory_ob_search", {"query": "passport"})
         self.assertNotIn("Anonymous mode is on", out)
 

@@ -20,6 +20,7 @@ moment Hermes changes. We ask Hermes.
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -43,7 +44,8 @@ def _hermes_home() -> Path:
     return Path.home() / ".hermes"
 
 
-HERMES_HOME = _hermes_home()
+_DEFAULT_HOME = _hermes_home()
+HERMES_HOME = _DEFAULT_HOME
 if os.environ.get("HERMES_EXE"):
     HERMES_EXE = Path(os.environ["HERMES_EXE"])
 elif sys.platform == "win32":
@@ -70,20 +72,70 @@ def config_path() -> Path | None:
     return p if p.exists() else None
 
 
-def hermes_memory_paths() -> tuple[Path | None, Path | None]:
-    """Where Hermes keeps its standing memory files, if it is installed.
+# What Hermes allows in each notes file unless its own config says otherwise.
+DEFAULT_MEMORY_LIMIT = 2200
+DEFAULT_USER_LIMIT = 1375
 
-    ``MEMORY.md`` and ``USER.md`` live at the Hermes home. Both are returned
-    even when absent — the sync writes them only when the owner opts in.
-    """
-    memory = HERMES_HOME / "MEMORY.md"
-    user = HERMES_HOME / "USER.md"
-    return (memory if memory.exists() else None, user if user.exists() else None)
+
+def _home_candidates() -> list[Path]:
+    """Folders Hermes may live in. A test (or a portable install) that points
+    HERMES_HOME somewhere else is believed and nothing else is searched."""
+    homes = [HERMES_HOME]
+    if HERMES_HOME is _DEFAULT_HOME and not os.environ.get("HERMES_HOME"):
+        alt = Path.home() / ".hermes"
+        if alt != HERMES_HOME:
+            homes.append(alt)
+    return homes
 
 
 def hermes_memory_dir() -> Path | None:
-    """The Hermes home when it is installed (for the sync's backups)."""
-    return HERMES_HOME if HERMES_HOME.is_dir() else None
+    """The folder where Hermes keeps MEMORY.md and USER.md, if Hermes is here.
+
+    Hermes keeps them in a ``memories`` folder inside its home. Hermes only
+    makes the folder the first time it saves something, so a Hermes that is
+    installed but has not saved anything yet still gets one.
+    """
+    homes = _home_candidates()
+    for home in homes:
+        if (home / "memories").is_dir():
+            return home / "memories"
+    for home in homes:  # older layout: the files straight in the home folder
+        if (home / "MEMORY.md").is_file() or (home / "USER.md").is_file():
+            return home
+    for home in homes:
+        if home.is_dir():
+            return home / "memories"
+    return None
+
+
+def hermes_memory_paths() -> tuple[Path | None, Path | None]:
+    """Where Hermes keeps its standing memory notes, if Hermes is installed.
+
+    Both paths come back even when the files are not made yet: the sync makes
+    them, and only when the owner switched it on.
+    """
+    folder = hermes_memory_dir()
+    if folder is None:
+        return None, None
+    return folder / "MEMORY.md", folder / "USER.md"
+
+
+def memory_limits() -> tuple[int, int]:
+    """How many characters Hermes allows in MEMORY.md and USER.md."""
+    memory, user = DEFAULT_MEMORY_LIMIT, DEFAULT_USER_LIMIT
+    for home in _home_candidates():
+        try:
+            text = (home / "config.yaml").read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        found = re.search(r"^\s*memory_char_limit:\s*(\d+)", text, re.M)
+        if found:
+            memory = int(found.group(1))
+        found = re.search(r"^\s*user_char_limit:\s*(\d+)", text, re.M)
+        if found:
+            user = int(found.group(1))
+        break
+    return memory, user
 
 
 def config_get(key: str) -> str | None:
@@ -145,7 +197,16 @@ def aux_slot(task: str) -> dict[str, str]:
 
 
 def proxy_available(timeout: float = 2.0) -> bool:
-    """True when the Hermes proxy is accepting connections."""
+    """True when the Hermes proxy is accepting connections.
+
+    The answer is remembered for a short while (see :mod:`memory_ob.probe`).
+    """
+    from . import probe
+
+    return probe.remembered("hermes-proxy", lambda: _proxy_up(timeout))
+
+
+def _proxy_up(timeout: float) -> bool:
     import urllib.error
     import urllib.request
 

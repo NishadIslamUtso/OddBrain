@@ -60,6 +60,22 @@ SLOTS: tuple[str, ...] = ("extract", "embed")
 _LOCAL_PROVIDERS = ("local", "custom", "lmstudio", "vllm", "llamacpp")
 
 
+def _is_this_computer(address: str) -> bool:
+    """True when *address* really points at this computer.
+
+    Looks at the host itself. A substring check would call
+    ``https://localhost.example.com`` or ``https://example.com/?127.0.0.1``
+    local, and "local only" would then let the owner's words go online.
+    """
+    from urllib.parse import urlparse
+
+    try:
+        host = (urlparse(address if "://" in address else "http://" + address).hostname or "").lower()
+    except ValueError:
+        return False
+    return host in ("localhost", "127.0.0.1", "::1", "0.0.0.0") or host.endswith(".localhost")
+
+
 @dataclass(slots=True)
 class ModelSlot:
     """One model slot: provider / model / base_url."""
@@ -105,7 +121,7 @@ class ModelSlot:
         if "ollama" in provider or provider in _LOCAL_PROVIDERS:
             return True
         if self.base_url:
-            return "localhost" in self.base_url or "127.0.0.1" in self.base_url
+            return _is_this_computer(self.base_url)
         return provider in ("auto", "")
 
 
@@ -478,14 +494,18 @@ def embed(
 
 
 def is_available(slot: ModelSlot, *, timeout: float = 3.0) -> bool:
-    """Cheap liveness check for a local model server."""
+    """Cheap liveness check for a local model server (remembered briefly, see :mod:`memory_ob.probe`)."""
     if not slot.is_local:
         return False
+    from . import probe
+
+    base = (slot.base_url or DEFAULT_OLLAMA_URL).rstrip("/")
+    return probe.remembered("ollama:" + base, lambda: _server_up(base, timeout))
+
+
+def _server_up(base: str, timeout: float) -> bool:
     try:
-        req = urllib.request.Request(
-            (slot.base_url or DEFAULT_OLLAMA_URL).rstrip("/") + "/api/tags",
-            method="GET",
-        )
+        req = urllib.request.Request(base + "/api/tags", method="GET")
         with urllib.request.urlopen(req, timeout=timeout):
             return True
     except (urllib.error.URLError, OSError, ValueError):

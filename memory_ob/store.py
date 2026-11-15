@@ -1605,9 +1605,9 @@ class Store:
         return out
 
     def rebuild_index(self) -> None:
-        """Drop and rebuild the disposable index. Never touches the ledger."""
-        self.conn.execute("DELETE FROM facts")
-        self.conn.execute("DELETE FROM edges")
+        """Rebuild the search index. Never touches the ledger, the pool of statements waiting
+        to be read or asked about, or the links the owner made by hand: only the
+        machine-made shared-tag links are redrawn."""
         self.conn.execute("DELETE FROM records_fts")
         for row in self.conn.execute("SELECT * FROM records").fetchall():
             rec = self._row_to_record(row)
@@ -1617,6 +1617,7 @@ class Store:
                 (rec.id, rec.title, rec.body, " ".join(rec.tags)),
             )
         self.conn.commit()
+        self.rebuild_shared_edges()
 
     # -- embeddings (the meaning leg of search) ----------------------------
 

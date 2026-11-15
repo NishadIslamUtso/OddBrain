@@ -26,8 +26,9 @@ from .records import ACTIVE
 
 SENSITIVE = (topics.HEALTH, topics.MONEY)
 
-TYPE_MEMORY, TYPE_PERSON, TYPE_SOURCE, TYPE_SUMMARY = "memory", "person", "source", "summary"
+TYPE_TOPIC, TYPE_PERSON, TYPE_SOURCE, TYPE_SUMMARY = "topic", "person", "source", "summary"
 TYPE_PROJECT = "project"
+TYPE_MEMORY = TYPE_TOPIC            # older name for a note made of memories
 
 
 # -- every note --------------------------------------------------------------
@@ -62,27 +63,59 @@ def _by(rec: Any) -> str:
     return "AI" if str(rec.confirmed_by or "").startswith("ai@") else "you"
 
 
+def _note_kind(rel: str) -> str:
+    return {"Journal": "journal"}.get(rel.split("/")[0], "topic")
+
+
 def list_notes(store: Any, vault: Path) -> list[dict[str, Any]]:
-    """Every note the vault holds, as plain data."""
+    """Every note the vault holds, as plain data.
+
+    A subject note stands for the memories filed in it, so it carries their
+    ids (``record_ids``) and, for searching, all their words (``_text``, which
+    is never sent to the screen).
+    """
     vault = Path(vault)
     idx = vault_mod._load_index(vault)  # noqa: SLF001
     notes: list[dict[str, Any]] = []
+    by_rel: dict[str, list[str]] = {}
+    for key, rel in idx.items():
+        if vault_mod._is_record_key(key):  # noqa: SLF001
+            by_rel.setdefault(rel, []).append(key)
+    project_rels = {rel: key for key, rel in idx.items() if key.startswith("project:")}
+    records = {r.id: r for r in store.list_records(status=ACTIVE, limit=100000)}
 
-    for rec in store.list_records(status=ACTIVE, limit=100000):
-        rel = idx.get(rec.id)
-        if not rel or not (vault / rel).is_file() or not exit_gate.keep(rec):
+    for rel, ids in sorted(by_rel.items()):
+        if not (vault / rel).is_file():
             continue
-        category = topics.category_of(rec.tags, rec.body or rec.title)
-        free = [t for t in rec.tags if not str(t).startswith(topics.TAG_PREFIX)]
+        members = [records[i] for i in ids if i in records and exit_gate.keep(records[i])]
+        if not members:
+            continue
+        members.sort(key=lambda r: (r.event_time or r.created or "", r.id))
+        top = rel.split("/")[0]
+        category = topics.IDEAS if top == topics.IDEAS else top if top in topics.CATEGORIES else "Journal"
+        tags = [topics.tag_for(category)] if category in topics.CATEGORIES else ["journal"]
+        project_key = project_rels.get(rel, "")
+        if project_key:
+            tags.append(topics.THREAD_PREFIX + project_key[len("project:"):])
+        people = sorted({p for r in members for p in (r.source or {}).get("people", []) if str(p).strip()})
+        ai = sum(1 for r in members if _by(r) == "AI")
+        newest = members[-1]
+        title = Path(rel).stem
         notes.append({
-            "path": rel, "name": Path(rel).stem, "type": TYPE_MEMORY, "id": rec.id,
-            "title": rec.title or Path(rel).stem, "category": category, "kind": rec.kind,
-            "tags": [topics.tag_for(category), *free],
-            "created": rec.created, "updated": rec.modified or rec.created,
-            "by": _by(rec), "people": list((rec.source or {}).get("people", [])),
-            "revisit": topics.revisit_of(rec.source) or "",
-            "snippet": (rec.body or "")[:200], "sensitive": category in SENSITIVE,
-            "conversation_id": (rec.source or {}).get("conversation_id", ""),
+            "path": rel, "name": title, "title": title,
+            "type": TYPE_PROJECT if project_key else TYPE_TOPIC, "id": project_key,
+            "category": category, "kind": "project" if project_key else _note_kind(rel),
+            "tags": tags, "created": min(r.created or "" for r in members),
+            "updated": max(r.modified or r.created or "" for r in members),
+            "by": "AI" if ai * 2 >= len(members) else "you", "people": people,
+            "revisit": min((topics.revisit_of(r.source) or "9999" for r in members), default="") if any(
+                topics.revisit_of(r.source) for r in members) else "",
+            "snippet": f"{len(members)} {'memory' if len(members) == 1 else 'memories'} · latest: "
+                       f"{(newest.body or newest.title or '')[:150]}",
+            "sensitive": category in SENSITIVE, "conversation_id": "", "count": len(members),
+            "record_ids": [r.id for r in members],
+            "_text": " ".join((r.body or r.title or "") for r in members)[:20000],
+            "_lines": [(r.body or r.title or "") for r in members][:400],
         })
 
     for person in store.list_people(limit=100000):
@@ -96,25 +129,7 @@ def list_notes(store: Any, vault: Path) -> list[dict[str, Any]]:
             "updated": person.get("modified", "") or person.get("created", ""), "by": "you",
             "people": [person["name"]], "revisit": "",
             "snippet": (person.get("notes") or person.get("relation") or "")[:200],
-            "sensitive": False, "conversation_id": "",
-        })
-
-    for key, rel in sorted(idx.items()):
-        if not key.startswith("project:") or not (vault / rel).is_file():
-            continue
-        tag = topics.THREAD_PREFIX + key[len("project:"):]
-        members = [n for n in notes if n["type"] == TYPE_MEMORY and tag in n["tags"]]
-        if not members:
-            continue
-        notes.append({
-            "path": rel, "name": Path(rel).stem, "type": TYPE_PROJECT, "id": key,
-            "title": topics.thread_title(tag), "category": topics.IDEAS, "kind": "project",
-            "tags": [topics.tag_for(topics.IDEAS), tag],
-            "created": min(n["created"] or "" for n in members),
-            "updated": max(n["updated"] or "" for n in members), "by": "AI",
-            "people": sorted({p for n in members for p in n["people"]}), "revisit": "",
-            "snippet": f"{len(members)} notes · " + (members[-1]["snippet"] if members else "")[:150],
-            "sensitive": False, "conversation_id": "",
+            "sensitive": False, "conversation_id": "", "count": 0, "record_ids": [],
         })
 
     private = store.private_phrases()
@@ -128,18 +143,36 @@ def list_notes(store: Any, vault: Path) -> list[dict[str, Any]]:
             "tags": ["source"], "created": conv.get("created", ""), "updated": conv.get("created", ""),
             "by": "you", "people": list(conv.get("people") or []), "revisit": "",
             "snippet": exit_gate.mask(conv.get("text") or "", private)[:200], "sensitive": False,
-            "conversation_id": conv["id"],
+            "conversation_id": conv["id"], "count": 0, "record_ids": [],
         })
 
-    for rel, title in ((vault_mod.ME_NOTE, "Me"), (vault_mod.BIOGRAPHY_NOTE, "Biography")):
-        if (vault / rel).is_file():
-            notes.append({
-                "path": rel, "name": Path(rel).stem, "type": TYPE_SUMMARY, "id": "", "title": title,
-                "category": "Summary", "kind": "summary", "tags": [], "created": "", "updated": "",
-                "by": "AI", "people": [], "revisit": "", "snippet": "", "sensitive": False,
-                "conversation_id": "",
-            })
+    if (vault / vault_mod.BIOGRAPHY_NOTE).is_file():
+        notes.append({
+            "path": vault_mod.BIOGRAPHY_NOTE, "name": "Biography", "type": TYPE_SUMMARY, "id": "",
+            "title": "Biography", "category": "Journal", "kind": "summary", "tags": ["journal"],
+            "created": "", "updated": "", "by": "AI", "people": [], "revisit": "", "snippet": "",
+            "sensitive": False, "conversation_id": "", "count": 0, "record_ids": [],
+        })
     return notes
+
+
+def public(note: dict[str, Any]) -> dict[str, Any]:
+    """A note as the screen gets it: no search text and no list of ids (the note itself has its lines)."""
+    return {k: v for k, v in note.items() if not k.startswith("_") and k != "record_ids"}
+
+
+def hits(note: dict[str, Any], words: list[str], *, limit: int = 3) -> list[str]:
+    """The lines of a note that hold the searched words, so a result shows why it matched."""
+    if not words:
+        return []
+    out: list[str] = []
+    for line in note.get("_lines", []):
+        low = line.lower()
+        if any(w in low for w in words):
+            out.append(line[:220])
+            if len(out) >= limit:
+                break
+    return out
 
 
 # -- the search box ----------------------------------------------------------------
@@ -201,7 +234,7 @@ def _has_tag(note: dict[str, Any], wanted: str) -> bool:
 
 def matches(note: dict[str, Any], f: dict[str, Any], *, linked: set[str] | None = None) -> bool:
     """Whether *note* passes every part of a parsed query."""
-    hay = f"{note['title']} {note['snippet']} {' '.join(note['tags'])} {' '.join(note['people'])}".lower()
+    hay = f"{note['title']} {note['snippet']} {note.get('_text', '')} {' '.join(note['tags'])} {' '.join(note['people'])}".lower()
     if any(w not in hay for w in f["words"]):
         return False
     if any(w in hay for w in f["not_words"]):
@@ -267,8 +300,8 @@ def folder_counts(notes: list[dict[str, Any]]) -> list[dict[str, Any]]:
 # -- links and the graph -----------------------------------------------------------------
 
 
-def links(store: Any, notes: list[dict[str, Any]]) -> list[dict[str, str]]:
-    """Every link between notes: person mentions, curated links, and sources."""
+def links(store: Any, notes: list[dict[str, Any]], vault: Path | None = None) -> list[dict[str, str]]:
+    """Every link between notes: who is mentioned where, curated links, and sources."""
     by_id = {n["id"]: n for n in notes if n["id"]}
     by_person = {n["title"].lower(): n for n in notes if n["type"] == TYPE_PERSON}
     for person in store.list_people(limit=100000):
@@ -286,28 +319,20 @@ def links(store: Any, notes: list[dict[str, Any]]) -> list[dict[str, str]]:
         out.append({"source": a, "target": b, "kind": kind})
 
     for note in notes:
-        if note["type"] in (TYPE_MEMORY, TYPE_SOURCE):
+        if note["type"] in (TYPE_TOPIC, TYPE_PROJECT, TYPE_SOURCE):
             for name in note["people"]:
                 person = by_person.get(str(name).lower())
                 if person:
                     add(note["path"], person["path"], "person")
-        if note["type"] == TYPE_MEMORY:
-            for tag in note["tags"]:
-                hub = by_id.get("project:" + tag[len(topics.THREAD_PREFIX):]) if tag.startswith(topics.THREAD_PREFIX) else None
-                if hub:
-                    add(note["path"], hub["path"], "project")
-        if note["type"] == TYPE_MEMORY and note["conversation_id"]:
-            conv = by_id.get(note["conversation_id"])
-            if conv:
-                add(note["path"], conv["path"], "source")
+    by_record = {rid: n["path"] for n in notes for rid in n.get("record_ids", [])}
     try:
         data = store.graph()
         for edge in data.get("edges", []):
             if edge.get("label") == "shares_tag":
                 continue
-            a, b = by_id.get(edge["src"]), by_id.get(edge["dst"])
+            a, b = by_record.get(edge["src"]), by_record.get(edge["dst"])
             if a and b:
-                add(a["path"], b["path"], "related")
+                add(a, b, "related")
     except Exception:  # noqa: BLE001 - links are a bonus; the screen works without them
         pass
     return out
@@ -336,7 +361,7 @@ def graph(
     edges = [e for e in all_links if e["source"] in keep_paths and e["target"] in keep_paths]
     nodes: list[dict[str, Any]] = [
         {"id": n["path"], "label": n["title"][:48], "type": n["type"], "category": n["category"],
-         "sensitive": n["sensitive"]}
+         "sensitive": n["sensitive"], "count": n.get("count", 0)}
         for n in kept
     ]
     if show_tags:
@@ -375,8 +400,34 @@ def _safe_path(vault: Path, rel: str) -> Path:
     return target
 
 
+def _line_data(rec: Any) -> dict[str, Any]:
+    """One memory as a row of a note on the screen."""
+    free = [t for t in (rec.tags or []) if not str(t).startswith((topics.TAG_PREFIX, topics.NOTE_PREFIX,
+                                                                  topics.THREAD_PREFIX))
+            and t not in (topics.TODO_TAG, topics.DONE_TAG, topics.MOMENT_TAG)]
+    tags = rec.tags or []
+    return {
+        "id": rec.id, "text": rec.body or rec.title or "", "date": (rec.event_time or rec.created or "")[:10],
+        "by": _by(rec), "category": topics.category_of(tags, rec.body or rec.title), "tags": free,
+        "todo": topics.TODO_TAG in tags and topics.DONE_TAG not in tags, "done": topics.DONE_TAG in tags,
+        "moment": rec.kind in ("journal", "story") or topics.MOMENT_TAG in tags,
+        "people": list((rec.source or {}).get("people", [])), "revisit": topics.revisit_of(rec.source) or "",
+        "quote": (rec.source or {}).get("quote", ""), "conversation_id": (rec.source or {}).get("conversation_id", ""),
+        "filed_by": (rec.source or {}).get("filed_by", ""),
+    }
+
+
+def _outline(body: str) -> list[dict[str, Any]]:
+    out = []
+    for line in body.splitlines():
+        m = re.match(r"^(#{1,6})\s+(.*\S)\s*$", line)
+        if m:
+            out.append({"level": len(m.group(1)), "text": m.group(2)})
+    return out
+
+
 def read_note(store: Any, vault: Path, rel: str) -> dict[str, Any]:
-    """One note: its text, its details, what links to it, and whether it can be edited."""
+    """One note: its lines, its details, what links to it, and whether it can be edited."""
     target = _safe_path(vault, rel)
     if not target.is_file():
         raise NoteError("That note no longer exists.")
@@ -387,11 +438,21 @@ def read_note(store: Any, vault: Path, rel: str) -> dict[str, Any]:
     by_path = {n["path"]: n for n in notes}
     outgoing = [by_path[e["target"]] for e in all_links if e["source"] == rel and e["target"] in by_path]
     incoming = [by_path[e["source"]] for e in all_links if e["target"] == rel and e["source"] in by_path]
+    # A link is two-way for the reader: who it points at and who points at it.
+    outgoing += [by_path[e["source"]] for e in all_links if e["target"] == rel and e["source"] in by_path
+                 and by_path[e["source"]]["type"] == TYPE_PERSON]
+    outgoing = list({n["path"]: n for n in outgoing}.values())
 
     def brief(n: dict[str, Any]) -> dict[str, str]:
-        return {"path": n["path"], "title": n["title"], "type": n["type"]}
+        return {"path": n["path"], "title": n["title"], "type": n["type"], "category": n["category"]}
 
     kind = note["type"] if note else TYPE_SUMMARY
+    lines: list[dict[str, Any]] = []
+    if note and note.get("record_ids"):
+        for rid in note["record_ids"]:
+            rec = store.get_record(rid)
+            if rec is not None:
+                lines.append(_line_data(rec))
     return {
         "path": rel, "type": kind, "id": note["id"] if note else "",
         "title": note["title"] if note else Path(rel).stem,
@@ -401,8 +462,8 @@ def read_note(store: Any, vault: Path, rel: str) -> dict[str, Any]:
         "by": note["by"] if note else "AI", "people": note["people"] if note else [],
         "revisit": note["revisit"] if note else "",
         "sensitive": bool(note and note["sensitive"]),
-        "body": body.strip(), "meta": meta,
-        "editable": kind in (TYPE_MEMORY, TYPE_PERSON),
+        "body": body.strip(), "meta": meta, "lines": lines, "outline": _outline(body),
+        "editable": kind == TYPE_PERSON,
         "links": [brief(n) for n in outgoing], "backlinks": [brief(n) for n in incoming],
         "categories": list(topics.CATEGORIES),
     }
@@ -410,7 +471,7 @@ def read_note(store: Any, vault: Path, rel: str) -> dict[str, Any]:
 
 def summary_for_status(store: Any, vault: Path) -> dict[str, int]:
     notes = list_notes(store, vault)
-    return {"notes": sum(1 for n in notes if n["type"] == TYPE_MEMORY),
+    return {"notes": sum(1 for n in notes if n["type"] in (TYPE_TOPIC, TYPE_PROJECT)),
             "people": sum(1 for n in notes if n["type"] == TYPE_PERSON),
             "sources": sum(1 for n in notes if n["type"] == TYPE_SOURCE)}
 

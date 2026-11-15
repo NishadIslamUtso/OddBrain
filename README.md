@@ -20,7 +20,7 @@ remembered. Open the Memory_OB tab only when you want to look, fix or search.
 | Screen | What it is |
 |---|---|
 | **Review** | The only screen that ever needs you. Shows what was just remembered (with **Undo**), questions where something you said now disagrees with something remembered ("Your answer changed": keep new / keep old / keep both), and a few "not sure" items. A box at the top lets you tell it something directly, and search covers everything. You can also say "forget that I like mangoes" there, or in a chat. |
-| **Vault** | Your notes exactly like Obsidian: category folders, nested tags, links, a graph, and Obsidian-style filters (`tag:#topic/health`, `path:Health`, `by:ai`, `-word`, `"exact phrase"`, `after:2026-01-01`, `has:revisit`, `is:orphan`, `type:memory`, `person:Riya`). Open a note to read or edit it. The AI makes the folders, tags and links; you can move or edit anything. |
+| **Vault** | Your notes laid out like Obsidian. A folder tree on the left that opens and closes (the open/closed state is remembered, there is a collapse-all button, and **Ctrl+O** jumps to any note by name). Click a note to read it; hover a line to edit or delete just that line. A graph view shows how notes link (drag, zoom, show only what's around the open note, sliders for the forces, hide loose notes). Search takes Obsidian-style filters (`tag:#topic/health`, `path:Health`, `by:ai`, `-word`, `"exact phrase"`, `after:2026-01-01`, `has:revisit`, `is:orphan`, `type:memory`, `person:Riya`) and shows the matching lines, not just the file. Notes are by subject, not one file per sentence. The AI makes the folders, titles and links; you can edit anything. |
 | **People** | A profile for everyone you talk about or talked to, on any platform, linked to the raw conversations. Two profiles that are the same person can be joined with one click (and un-joined from the feed). Removing a person asks whether their chats go too (group chats with other people always stay); undo brings everything back. |
 | **Journal** | A professional biography of you, written from what is remembered (health and money are left out unless you allow them in Settings), plus dated journal entries. Edit it yourself and it is locked against AI rewrites until you unlock it. |
 | **Me** | What is current: your **to-do list** (tick things off; they move to "Earlier"), **projects** (each with its own folder and a note that opens from here), what you're doing, things you said you'd come back to (with the date), work and study, about you, and (collapsed) health and money. Every memory has **Keep private**: it disappears from every screen and every AI and can only be brought back from Settings. |
@@ -46,8 +46,16 @@ remembered. Open the Memory_OB tab only when you want to look, fix or search.
 * A **to-do** ("I need to renew my passport") goes on your list; Hermes is told
   about open to-dos and due "come back to" dates at the start of a session, as
   data, never as an instruction.
+* **The AI is the librarian.** With an AI helper it reads what you said, splits
+  it into separate facts, picks the category, gives a note a short title when a
+  subject deserves its own note ("Passport renewal", "Knee injury"), and spots
+  the people. It is shown the titles of your existing notes so it adds to them
+  instead of making near-copies. It may not invent names or details that are
+  not in your words (that claim is dropped). With no helper it falls back to
+  simple rules, and says which one filed each memory.
 * A project ("my bakery business") gets a folder, `Projects & Ideas/<Project>/`,
-  with a note that gathers everything about it.
+  with a note that gathers everything about it. Anything tagged to a project
+  always goes into that project's note.
 * People named in a message get a profile. Profiles are **never** joined by the
   AI; only you can say two are the same.
 * The AI never answers your questions for you.
@@ -81,12 +89,17 @@ powershell -ExecutionPolicy Bypass -File uninstall.ps1               # keep memo
 powershell -ExecutionPolicy Bypass -File uninstall.ps1 -DeleteData   # also delete them
 ```
 
-Either way a backup zip is made first, next to the memories folder.
+Either way a backup zip is made first, next to the memories folder. A backup
+is checked before it is trusted, and restoring one refuses a damaged or
+unsafe zip instead of half-restoring.
 
 **Updating from an older version:** extract the new files over the old folder,
-run `install.ps1` again, then fully quit and reopen Hermes. The installer clears
-out the few files the old version had that this one no longer uses, and your
-existing memories are moved into the new layout after a backup zip is made.
+run `install.ps1` again, then fully quit and reopen Hermes. Each release lists
+its own files in `RELEASE_FILES.txt`; the installer moves any older file that is
+no longer on that list into a `_retired` folder (nothing is deleted, so you can
+look or put one back), and your existing memories are moved into the new layout
+after a backup zip is made. If Windows is using a temporary home folder for the
+install, it warns you instead of installing into the wrong place.
 
 ## Command line
 
@@ -117,8 +130,12 @@ memory-ob stats | activity | models | doctor | serve | proxy
   night), and never mixes numbers from two models.
 * A memory you keep private is blanked in the saved conversations too, wherever
   they are shown. The raw database still holds it (that is how you bring it back).
-* Model-dependent parts (the AI judge, extraction, biography) are tested with
-  stand-ins here, not with a real model.
+* Model-dependent parts (the AI judge, the librarian, biography) are tested with
+  stand-ins here, not with a real model. The screens were tested in a real
+  browser (Chromium), and the whole thing has not yet been run inside Hermes on
+  Windows.
+* Anonymous mode is the owner's switch: Hermes can read it or turn it **on**, but
+  only you, in the app, can turn it off.
 * New categories are fixed (Health, Money, Projects & Ideas, Work & Business,
   Learning, Plans, Interests, Life); the AI adds free-form tags and links
   inside them.
@@ -130,9 +147,12 @@ memory-ob stats | activity | models | doctor | serve | proxy
 
 ```
 Documents/Hermes/Memory_OB/        your memories (open this in Obsidian)
-  Health/ Money/ Work & Business/ …   one folder per category
-  People/  Journal/  Me.md            profiles, biography, "what is current"
-  Sources/Conversations/              the raw conversations
+  Health/ Money/ Work & Business/ …   one folder per category; each has a general
+                                      note plus notes by subject, with dated lines
+  Plans/To-do.md                      your to-do list (open and done)
+  Projects & Ideas/<Project>/         one note per project
+  People/  Journal/                   profiles; monthly journal + Biography.md
+  Sources/Conversations/              imported chats only (live chats stay in the app)
   Sources/Files/                      untouched originals you imported
   .obsidian/  .brain/                 Obsidian settings; the private database,
                                       settings, write key and receipts
@@ -146,6 +166,7 @@ installer, uninstaller, nightly run), `skills/` (agent skills), `tests/`.
 
 ```
 python run_tests.py        # everything, one command
+python release.py ../Memory_OB-update-N.zip   # build a release zip + RELEASE_FILES.txt
 ```
 
 `DESIGN.md` records the rules the engine will not bend and why.

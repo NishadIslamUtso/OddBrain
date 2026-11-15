@@ -75,6 +75,20 @@ def _merge_into(srcs: list[Path], dst: Path) -> tuple[int, int]:
     return total, removed
 
 
+def temporary_home(project: Path) -> str:
+    """Why this folder is a poor permanent home ("Downloads", "Temp"), or "" when it is fine.
+
+    The installed plugin points at the folder the installer ran from. Run from a
+    folder that gets cleaned out, it stops working the day that folder does.
+    """
+    parts = {p.lower() for p in Path(project).resolve().parts}
+    if "downloads" in parts:
+        return "your Downloads folder"
+    if "temp" in parts or "tmp" in parts:
+        return "a temporary folder"
+    return ""
+
+
 def install(*, enable: bool = True, startup: bool = True,
             remove_startup: bool = False) -> int:
     home = hermes_home()
@@ -108,6 +122,16 @@ def install(*, enable: bool = True, startup: bool = True,
     ]
 
     print(f"Hermes home: {home}")
+    try:
+        sys.path.insert(0, str(SRC))
+        import retire
+
+        moved = retire.sweep(SRC.parent)
+        if moved:
+            print(f"  moved {len(moved)} old file(s) out of the way (into _retired): "
+                  + ", ".join(moved[:6]) + (" ..." if len(moved) > 6 else ""))
+    except Exception as exc:  # noqa: BLE001 - tidying up must never stop an install
+        print(f"  could not tidy old files: {exc}")
     for label, srcs, dst, prune in groups:
         for src in srcs:
             if not src.is_dir():
@@ -122,6 +146,11 @@ def install(*, enable: bool = True, startup: bool = True,
     # Where the engine actually lives, recorded so the installed plugin never
     # has to guess a folder layout on someone else's machine.
     project = SRC.parent
+    where = temporary_home(project)
+    if where:
+        print(f"  WARNING: Memory_OB is being installed from {where}. If that folder is ever cleaned out, "
+              "Memory_OB stops working. Move the whole Memory_OB folder somewhere permanent "
+              "(for example Documents) and run install.ps1 again from there.")
     pointer = home / "plugins" / "memory_ob" / ".memory_ob_home"
     try:
         pointer.write_text(str(project), encoding="utf-8")

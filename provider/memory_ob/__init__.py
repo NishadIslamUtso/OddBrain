@@ -188,9 +188,9 @@ STATS_SCHEMA = _schema(
 ANONYMOUS_SCHEMA = _schema(
     "memory_ob_anonymous",
     "Anonymous mode: no recall is injected and nothing is saved as personal "
-    "memory. Check the state, turn it on, or turn it off. Off restores normal "
-    "memory immediately.",
-    ("action", "'status', 'on' or 'off'."),
+    "memory. Check the state or turn it on. Only the owner can turn it off, in "
+    "Memory_OB (Settings, Pause memory); this tool cannot.",
+    ("action", "'status' or 'on'."),
 )
 
 
@@ -487,6 +487,10 @@ class MemoryOBProvider(MemoryProvider):
                         model_call=call, vault=vault, guardrails=guard,
                         actor=manager.AI, log_activity_name="capture",
                     )
+                    # If the owner asked for it, Hermes's own notes follow what was just saved.
+                    from memory_ob import nightshift  # noqa: PLC0415
+
+                    nightshift.refresh_hermes_notes(store, vault)
                 finally:
                     store.close()
             except Exception as exc:
@@ -512,7 +516,7 @@ class MemoryOBProvider(MemoryProvider):
             if tool_name in ("memory_ob_search", "memory_ob_capture", "memory_ob_review") and self._anonymous():
                 return tool_error(
                     "Anonymous mode is on, so Memory_OB is not recalling or saving anything. "
-                    "Tell the user. Turn it off only if the user themselves asks you to.")
+                    "Tell the user. Only the user can turn it off, in Memory_OB Settings.")
             if tool_name == "memory_ob_search":
                 query = str(args.get("query", "")).strip()
                 if not query:
@@ -587,9 +591,13 @@ class MemoryOBProvider(MemoryProvider):
         if action in {"on", "enable", "true"}:
             anonymous.set_anonymous(vault, True)
         elif action in {"off", "disable", "false"}:
-            anonymous.set_anonymous(vault, False)
+            # Pausing is the owner's switch. The assistant may offer it, never undo it.
+            return tool_error(
+                "Only the owner can turn anonymous mode off: Memory_OB, Settings, Pause memory. "
+                "Tell them so if they ask."
+            )
         elif action != "status":
-            return tool_error("action must be 'status', 'on' or 'off'")
+            return tool_error("action must be 'status' or 'on'")
         return json.dumps(
             {"anonymous": anonymous.is_anonymous(vault), "state": anonymous.describe(vault)}
         )
@@ -622,7 +630,8 @@ class MemoryOBProvider(MemoryProvider):
                 "# Memory_OB\n"
                 "ANONYMOUS MODE IS ON at the owner's request. No memory is recalled and nothing "
                 "is captured. Answer from the current conversation only — do not use "
-                "memory_ob_search, and do not mention that memory exists."
+                "memory_ob_search, and do not mention that memory exists. Only the owner can end this, "
+                "in Memory_OB Settings; you cannot."
             )
         return base + self._reminders_note()
 

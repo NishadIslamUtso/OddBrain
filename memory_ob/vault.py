@@ -5,17 +5,23 @@ truth. It is laid out the way Obsidian expects, so you can open the folder in
 Obsidian and use its graph, search and backlinks directly::
 
     <vault>/
-      .obsidian/            Obsidian's own settings (graph colours, plugins)
-      .brain/               Memory_OB's private data (database, token, backups)
-      Me.md                 what is true about you right now
-      Health/ Plans/ ...    one folder per category, one note per memory
-      People/               one note per person
-      Journal/              Biography.md and dated entries
-      Sources/              the raw evidence: conversations and files, unchanged
+      .obsidian/                 Obsidian's own settings (graph colours, plugins)
+      .brain/                    Memory_OB's private data (database, token, backups)
+      Health/ Plans/ Life/ ...   one folder per kind of thing, a few notes in each
+        Health/Health.md           the general note for that folder
+        Health/Peanut allergy.md   a note on one subject, made by the AI librarian
+        Plans/To-do.md             open and finished to-dos
+      Projects & Ideas/<Project>/<Project>.md   one note per project, whole story in order
+      People/                    one note per person
+      Journal/                   Biography.md and one note per month
+      Sources/                   the raw evidence: imported files and imported chats, unchanged
 
-Notes use YAML frontmatter, nested ``#tags`` and ``[[wikilinks]]``. Law 2:
-neverSend records are never written. Law 4: this is a render — deleting a note
-here changes nothing in the store.
+A note is written the way a person would keep it: a title and a list of dated
+lines, oldest first. Every line ends with a block id (``^id``), so a memory in
+the app and its line in the note are the same thing. Notes use YAML
+frontmatter, nested ``#tags`` and ``[[wikilinks]]``. Law 2: neverSend records
+are never written. Law 4: this is a render — deleting a note here changes
+nothing in the store.
 """
 
 from __future__ import annotations
@@ -36,8 +42,14 @@ from .records import ACTIVE, JOURNAL, NOTE, STORY
 logger = logging.getLogger(__name__)
 
 INDEX_FILE = ".brain/vault-index.json"
+LAYOUT_FILE = ".brain/vault-layout.json"
+LAYOUT = 2                      # 1 = a note per memory, 2 = notes by subject
 BIOGRAPHY_NOTE = "Journal/Biography.md"
-ME_NOTE = "Me.md"
+ME_NOTE = "Me.md"                # no longer written; an old copy is cleaned up
+MONTHS = ("", "January", "February", "March", "April", "May", "June", "July", "August",
+          "September", "October", "November", "December")
+# Chats typed or spoken into Hermes live in the app, not as files. Imported chats are kept as source notes.
+LIVE_ORIGINS = frozenset({"hermes", "tell", "api", "browser", "app", ""})
 
 _FRONTMATTER_RE = re.compile(r"\A---\s*\n(.*?)\n---\s*\n?", re.DOTALL)
 _BAD_NAME_CHARS = re.compile(r'[\\/:*?"<>|#^\[\]\n\r\t]+')
@@ -110,68 +122,115 @@ def parse_frontmatter(text: str) -> tuple[dict[str, str], str]:
 # -- rendering -------------------------------------------------------------
 
 
+def note_target(record: Any) -> tuple[str, str]:
+    """The (folder, title) of the note a record is written in.
+
+    Journal moments go in a note for their month, a project's memories in the
+    project's note, to-dos in one to-do list, and everything else in the note
+    the librarian named — or, with no name, the general note of its folder.
+    """
+    tags = list(record.tags or [])
+    if record.kind in (JOURNAL, STORY):
+        day = _day(record.event_time or record.created)
+        if len(day) >= 7 and day[5:7].isdigit() and 1 <= int(day[5:7]) <= 12:
+            return "Journal", f"{day[:7]} {MONTHS[int(day[5:7])]}"
+        return "Journal", "Undated"
+    project = topics.thread_of_tags(tags)
+    if project:
+        name = note_name(project, fallback="Project")
+        return f"{topics.IDEAS}/{name}", name
+    category = topics.category_of(tags, record.body or record.title)
+    if topics.TODO_TAG in tags or topics.DONE_TAG in tags:
+        return topics.PLANS, "To-do"
+    title = topics.note_of_tags(tags)
+    if title:
+        return category, note_name(title, fallback=category)
+    return category, category
+
+
 def folder_for(record: Any) -> str:
     """The vault folder a record's note lives in."""
-    if record.kind in (JOURNAL, STORY):
-        return "Journal"
-    project = topics.thread_of_tags(record.tags)
-    if project:
-        return f"{topics.IDEAS}/{note_name(project, fallback='Project')}"     # all of a project in one place
-    return topics.category_of(record.tags, record.body or record.title)
+    return note_target(record)[0]
 
 
-def render_record(
-    record: Any,
-    *,
-    people: list[str] | None = None,
-    related: list[str] | None = None,
-) -> str:
-    """Render one record as an Obsidian note."""
-    category = topics.category_of(record.tags, record.body or record.title)
-    free_tags = [t for t in record.tags if not str(t).startswith(topics.TAG_PREFIX)]
-    project = topics.thread_of_tags(record.tags)
-    lines = ["---"]
-    lines.append(f"id: {record.id}")
-    lines.append(f"kind: {record.kind}")
-    lines.append(f"category: {_yaml_scalar(category)}")
-    lines.append(f"status: {record.status}")
-    lines.append(f"trust: {record.trust}")
-    lines.append(f"title: {_yaml_scalar(record.title)}")
-    lines.append(f"subject: {_yaml_scalar(record.subject)}")
-    lines.append(f"speaker: {_yaml_scalar(record.speaker)}")
-    lines.append("tags: " + _yaml_list([topics.tag_for(category), *free_tags]))
-    if record.event_time:
-        lines.append(f"event_time: {record.event_time}")
-    if record.created:
-        lines.append(f"created: {record.created}")
-    if record.modified:
-        lines.append(f"updated: {record.modified}")
-    if record.confirmed_by:
-        lines.append(f"confirmed_by: {_yaml_scalar(record.confirmed_by)}")
-    origin = (record.source or {}).get("origin")
-    if origin:
-        lines.append(f"origin: {_yaml_scalar(origin)}")
-    revisit = topics.revisit_of(record.source)
-    if revisit:
-        lines.append(f"revisit: {revisit}")
-    project = topics.thread_of_tags(record.tags)
+def _one_line(text: str) -> str:
+    return " ".join(str(text or "").split())
+
+
+def render_line(record: Any, *, known_people: set[str] | None = None, anchor: bool = True,
+                check: bool = False, extra: str = "") -> str:
+    """One memory as one line of a note: ``- 2026-10-02 — I am allergic to peanuts. [[Mim]] ^id``."""
+    day = _day(record.event_time or record.created)
+    box = ""
+    if check:
+        box = "[x] " if topics.DONE_TAG in (record.tags or []) else "[ ] "
+    text = _one_line(record.body or record.title)
+    line = f"- {box}{day + ' — ' if day else ''}{text}"
+    if extra:
+        line += f" {extra}"
+    names = [p for p in _record_people(record) if known_people is None or note_name(p).lower() in known_people]
+    if names:
+        line += " · " + ", ".join(f"[[{note_name(p, fallback='Person')}]]" for p in dict.fromkeys(names))
+    if anchor:
+        line += f" ^{record.id}"
+    return line
+
+
+def render_topic(rel: str, members: list[Any], *, known_people: set[str] | None = None) -> str:
+    """The text of one subject note from the memories filed in it."""
+    folder, _, fname = rel.rpartition("/")
+    title = fname[:-3] if fname.endswith(".md") else fname
+    recs = sorted(members, key=lambda r: (r.event_time or r.created or "", r.created or "", r.id))
+    top = folder.split("/")[0]
+    project = topics.thread_of_tags(recs[0].tags) if top == topics.IDEAS and "/" in folder else ""
+    is_todo = rel == f"{topics.PLANS}/To-do.md"
+    kind = "project" if project else "journal" if top == "Journal" else "todo" if is_todo else "topic"
+    category = topics.IDEAS if top == topics.IDEAS else top if top in topics.CATEGORIES else "Journal"
+    tags = [topics.tag_for(category)] if category in topics.CATEGORIES else ["journal"]
     if project:
-        lines.append(f"project: {_yaml_scalar(project)}")
-    if record.never_send:
-        lines.append("never_send: true")
-    for label, targets in (record.links or {}).items():
-        if targets:
-            lines.append(f"{label}: " + _yaml_list(list(targets)))
-    lines.append("---")
-    lines.append("")
-    lines.append(record.body or record.title or "")
-    if project:
-        lines += ["", f"Part of: [[{note_name(project, fallback='Project')}]]"]
-    if people:
-        lines += ["", "People: " + ", ".join(f"[[{p}]]" for p in people)]
-    if related:
-        lines += ["", "Related: " + ", ".join(f"[[{r}]]" for r in related)]
-    lines.append("")
+        tags.append(topics.thread_tag(project))
+    updated = max((r.modified or r.created or "" for r in recs), default="")
+    lines = ["---", f"kind: {kind}", f"title: {_yaml_scalar(title)}", f"category: {_yaml_scalar(category)}",
+             "tags: " + _yaml_list(tags)]
+    if updated:
+        lines.append(f"updated: {updated}")
+    lines += ["---", "", f"# {title}", ""]
+
+    def lined(rs: list[Any], **kw: Any) -> list[str]:
+        return [render_line(r, known_people=known_people, **kw) for r in rs]
+
+    if is_todo:
+        open_ = [r for r in recs if topics.DONE_TAG not in (r.tags or [])]
+        done = [r for r in recs if topics.DONE_TAG in (r.tags or [])]
+        if open_:
+            lines += ["## Open", "", *[render_line(r, known_people=known_people, check=True,
+                                                    extra=f"(come back {topics.revisit_of(r.source)})"
+                                                    if topics.revisit_of(r.source) else "") for r in open_], ""]
+        if done:
+            lines += ["## Done", "", *lined(done, check=True), ""]
+    elif project:
+        newest = list(reversed(recs))[:3]
+        lines += ["## Where it stands", "", *lined(newest, anchor=False), ""]
+        later = [r for r in recs if topics.revisit_of(r.source)]
+        if later:
+            lines += ["## Come back to", "", *[
+                f"- {topics.revisit_of(r.source)} — {_one_line(r.body or r.title)}" for r in later], ""]
+        todo = [r for r in recs if topics.TODO_TAG in (r.tags or []) and topics.DONE_TAG not in (r.tags or [])]
+        if todo:
+            lines += ["## To do", "", *[f"- [ ] {_one_line(r.body or r.title)}" for r in todo], ""]
+        lines += ["## Timeline", "", *lined(recs), ""]
+    elif len(recs) > 30 and top != "Journal":
+        month = ""
+        for r in recs:
+            m = _day(r.event_time or r.created)[:7] or "Undated"
+            if m != month:
+                month = m
+                lines += ["", f"## {m}", ""]
+            lines.append(render_line(r, known_people=known_people))
+        lines.append("")
+    else:
+        lines += lined(recs)
+        lines.append("")
     return "\n".join(lines)
 
 
@@ -196,21 +255,19 @@ def _save_index(vault: Path, index: dict[str, str]) -> None:
     path.write_text(json.dumps(index, indent=1, sort_keys=True), encoding="utf-8")
 
 
-def _free_path(vault: Path, folder: str, name: str, owner_id: str, index: dict[str, str]) -> str:
-    """A note path inside *folder* that no other record uses."""
-    taken = {rel.lower() for rid, rel in index.items() if rid != owner_id}
-    n = 1
-    while True:
-        suffix = "" if n == 1 else f" {n}"
-        rel = f"{folder}/{name}{suffix}.md"
-        if rel.lower() not in taken:
-            return rel
-        n += 1
-
-
 def vault_path_for(record: Any) -> Path:
     """The default vault file path for a record (before collisions)."""
-    return Path(folder_for(record)) / f"{note_name(record.title or record.body, fallback=record.id)}.md"
+    folder, title = note_target(record)
+    return Path(folder) / f"{title}.md"
+
+
+def _is_record_key(key: str) -> bool:
+    """Index keys that are memories (people, projects and chats have a prefix with a colon)."""
+    return ":" not in key
+
+
+def _person_stems(idx: dict[str, str]) -> set[str]:
+    return {Path(v).stem.lower() for k, v in idx.items() if k.startswith("person:")}
 
 
 # -- writing notes -----------------------------------------------------------
@@ -263,63 +320,103 @@ def _record_people(record: Any) -> list[str]:
     return [str(p) for p in (record.source or {}).get("people", []) if str(p).strip()]
 
 
-def write_record(store: Any, vault: Path, record: Any, *, index: dict[str, str] | None = None) -> Path | None:
-    """Write (or move, or remove) the note for one record.
+def write_record(
+    store: Any, vault: Path, record: Any, *, index: dict[str, str] | None = None,
+    dirty: set[str] | None = None, cache: dict[str, Any] | None = None,
+) -> str | None:
+    """File one record in its note (moving it, or taking it out, as needed).
 
-    Active records get a note. Records that are trashed, retracted, superseded
-    or neverSend have no note: if one exists it is removed (it is only a render).
-    Returns the note path, or None when there is no note.
+    Active records get a line in a note. Records that are trashed, retracted,
+    superseded or neverSend have none: if one exists it is taken out (it is
+    only a render). Returns the note's path (relative), or None when the record
+    has no note.
+
+    The notes touched are written straight away, or — when *dirty* is given —
+    only noted in it, so a caller filing many records writes each note once
+    with :func:`render_notes`.
     """
     vault = Path(vault)
     own_index = index is None
     idx = _load_index(vault) if own_index else index
     assert idx is not None
-    existing_rel = idx.get(record.id)
+    mine = dirty if dirty is not None else set()
+    old_rel = idx.get(record.id)
 
     if record.never_send or record.demo or record.status != ACTIVE:
-        if existing_rel:
-            _remove(vault / existing_rel)
+        if old_rel:
             idx.pop(record.id, None)
-            if own_index:
-                _save_index(vault, idx)
-        return None
-
-    folder = folder_for(record)
-    name = note_name(record.title or record.body, fallback=record.id)
-    wanted_prefix = f"{folder}/"
-    if existing_rel and existing_rel.startswith(wanted_prefix) and Path(existing_rel).stem.startswith(name):
-        rel = existing_rel
+            mine.add(old_rel)
+        rel = None
     else:
-        rel = _free_path(vault, folder, name, record.id, idx)
-    target = vault / rel
-    target.parent.mkdir(parents=True, exist_ok=True)
-    related = _related_notes(store, record, idx)
-    target.write_text(
-        render_record(record, people=_record_people(record), related=related),
-        encoding="utf-8",
-    )
-    if existing_rel and existing_rel != rel:
-        _remove(vault / existing_rel)
-    idx[record.id] = rel
+        folder, title = note_target(record)
+        rel = f"{folder}/{title}.md"
+        same = {v.lower(): v for k, v in idx.items() if _is_record_key(k)}
+        rel = same.get(rel.lower(), rel)                    # one file per name, whatever the letter case
+        idx[record.id] = rel
+        mine.add(rel)
+        if old_rel and old_rel != rel:
+            mine.add(old_rel)
+    if cache is not None:
+        cache[record.id] = record
+    if dirty is None:
+        render_notes(store, vault, mine, idx, cache=cache)
     if own_index:
         _save_index(vault, idx)
-    return target
+    return rel
 
 
-def _related_notes(store: Any, record: Any, idx: dict[str, str]) -> list[str]:
-    """Notes this record is linked to (curated links only), by note name."""
-    out: list[str] = []
+def render_notes(store: Any, vault: Path, rels: set[str] | list[str], idx: dict[str, str], *,
+                 cache: dict[str, Any] | None = None) -> int:
+    """Write each of the given notes from the records the index files in it. Returns how many exist."""
+    vault = Path(vault)
+    cache = cache if cache is not None else {}
+    stems = _person_stems(idx)
+    made = 0
+    for rel in sorted(set(rels)):
+        if not rel or rel.startswith("person:") or rel.startswith("project:"):
+            continue
+        members: list[Any] = []
+        for rid in [k for k, v in idx.items() if v == rel and _is_record_key(k)]:
+            rec = cache.get(rid)
+            if rec is None:
+                rec = cache[rid] = store.get_record(rid)
+            if rec is not None and rec.status == ACTIVE and not rec.never_send and not rec.demo:
+                members.append(rec)
+            else:
+                idx.pop(rid, None)
+        target = vault / rel
+        project_key = ""
+        if members and rel.startswith(f"{topics.IDEAS}/") and rel.count("/") == 2:
+            slug = topics.thread_of_tags(members[0].tags)
+            project_key = f"project:{topics.thread_slug(slug)}" if slug else ""
+        if not members:
+            _remove(target)
+            for k in [k for k, v in idx.items() if v == rel and not _is_record_key(k) and k.startswith("project:")]:
+                idx.pop(k, None)
+            _remove_empty_folder(vault, target.parent)
+            continue
+        text = render_topic(rel, members, known_people=stems)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            unchanged = target.is_file() and target.read_text(encoding="utf-8") == text
+        except OSError:
+            unchanged = False
+        if not unchanged:
+            target.write_text(text, encoding="utf-8")
+        if project_key:
+            idx[project_key] = rel
+        made += 1
+    return made
+
+
+def _remove_empty_folder(vault: Path, folder: Path) -> None:
+    """Tidy away a project folder that no longer holds anything (never a top-level folder)."""
     try:
-        for src, dst, label in store.edges(record.id):
-            if label == "shares_tag":
-                continue
-            other = dst if src == record.id else src
-            rel = idx.get(other)
-            if rel:
-                out.append(Path(rel).stem)
-    except Exception:  # noqa: BLE001
-        return []
-    return list(dict.fromkeys(out))
+        rel = folder.relative_to(vault)
+        if len(rel.parts) >= 2 and not any(folder.iterdir()):
+            folder.rmdir()
+    except (OSError, ValueError):
+        pass
 
 
 def _remove(path: Path) -> None:
@@ -329,8 +426,9 @@ def _remove(path: Path) -> None:
         pass
 
 
-def write_person(store: Any, vault: Path, person: dict[str, Any]) -> Path:
-    """Write one person's note in People/."""
+def write_person(store: Any, vault: Path, person: dict[str, Any], *,
+                 records: list[Any] | None = None) -> Path:
+    """Write one person's note in People/: who they are and every line that mentions them."""
     vault = Path(vault)
     name = note_name(person["name"], fallback="Person")
     folder = vault / "People"
@@ -351,15 +449,12 @@ def write_person(store: Any, vault: Path, person: dict[str, Any]) -> Path:
     lines += ["tags: [people]", "---", ""]
     if person.get("notes"):
         lines += [person["notes"], ""]
-    mentions: list[str] = []
-    days: list[str] = []
     names = {person["name"].lower(), *(a.lower() for a in person.get("aliases", []))}
-    for rec in store.list_records(status=ACTIVE, limit=10000):
-        rel_rec = idx.get(rec.id)
-        if rel_rec and {p.lower() for p in _record_people(rec)} & names:
-            mentions.append(f"- [[{Path(rel_rec).stem}]]")
-            days.append(_day(rec.event_time or rec.created))
-    days = sorted(d for d in days if d)
+    pool = records if records is not None else store.list_records(status=ACTIVE, limit=10000)
+    mentions = sorted(
+        (r for r in pool if r.status == ACTIVE and idx.get(r.id) and {p.lower() for p in _record_people(r)} & names),
+        key=lambda r: (r.event_time or r.created or "", r.id))
+    days = sorted(d for d in (_day(r.event_time or r.created) for r in mentions) if d)
     summary = [person["relation"]] if person.get("relation") else []
     if mentions:
         summary.append(f"mentioned {len(mentions)} time{'s' if len(mentions) != 1 else ''}")
@@ -368,8 +463,14 @@ def write_person(store: Any, vault: Path, person: dict[str, Any]) -> Path:
     if summary:
         lines += ["**" + " · ".join(summary) + "**", ""]
     if mentions:
-        lines += ["## What I know", "", *mentions, ""]
-    convs = store.person_conversations(person)
+        lines += ["## What I know", ""]
+        for r in mentions:
+            where = idx[r.id]
+            day = _day(r.event_time or r.created)
+            lines.append(f"- {day + ' — ' if day else ''}{_one_line(r.body or r.title)}"
+                         f" (in [[{where[:-3]}|{Path(where).stem}]])")
+        lines.append("")
+    convs = [c for c in store.person_conversations(person) if (c.get("origin") or "").lower() not in LIVE_ORIGINS]
     if convs:
         lines += ["## Conversations", ""]
         for conv in convs:
@@ -398,65 +499,30 @@ def project_threads(store: Any) -> dict[str, list[Any]]:
 
 
 def write_projects(store: Any, vault: Path) -> int:
-    """One hub note per project: where it stands, what is next, and the whole story in order.
+    """Write every project's note again. A project's note is the one place its whole story lives.
 
-    The hub is generated; the notes it links to are where details are edited.
+    Project notes are written like any subject note (see :func:`write_record`);
+    this only brings them all up to date and forgets projects with nothing left.
     """
     vault = Path(vault)
     idx = _load_index(vault)
-    threads = project_threads(store)
-    written = 0
-    live = set()
-    for tag, recs in threads.items():
-        title = topics.thread_title(tag)
-        key = f"project:{tag[len(topics.THREAD_PREFIX):]}"
-        live.add(key)
-        recs = sorted(recs, key=lambda r: (r.event_time or r.created or "", r.created or ""))
-        folder = f"{topics.IDEAS}/{note_name(title, fallback='Project')}"
-        rel = f"{folder}/{note_name(title, fallback='Project')}.md"
-        old = idx.get(key)
-
-        def line(r: Any) -> str:
-            stem = Path(idx[r.id]).stem if r.id in idx else ""
-            link = f" ([[{stem}]])" if stem else ""
-            return f"- {_day(r.event_time or r.created)} — {(r.body or r.title).strip()}{link}"
-
-        lines = ["---", f"id: {key}", "kind: project", f"title: {_yaml_scalar(title)}",
-                 f"tags: [{_yaml_scalar(tag)}]", "---", "", f"# {title}", "",
-                 "_Kept up to date automatically. Edit the notes it links to._", ""]
-        newest = list(reversed(recs))[:3]
-        lines += ["## Where it stands", "", *[line(r) for r in newest], ""]
-        later = [r for r in recs if topics.revisit_of(r.source)]
-        if later:
-            lines += ["## Come back to", "", *[
-                f"- {topics.revisit_of(r.source)} — {(r.body or r.title).strip()}" for r in later], ""]
-        todo = [r for r in recs if topics.TODO_TAG in r.tags and topics.DONE_TAG not in r.tags]
-        if todo:
-            lines += ["## To do", "", *[f"- [ ] {(r.body or r.title).strip()}" for r in todo], ""]
-        lines += ["## Timeline", "", *[line(r) for r in recs], ""]
-        convs = list(dict.fromkeys(
-            str((r.source or {}).get("conversation_id") or "") for r in recs))
-        convs = [c for c in convs if c]
-        if convs:
-            lines += ["## Where this came from", ""]
-            seen_stems: set[str] = set()
-            for cid in convs:
-                conv = store.get_conversation(cid)
-                if conv and conversation_note_stem(conv) not in seen_stems:
-                    seen_stems.add(conversation_note_stem(conv))
-                    lines.append(f"- [[{conversation_note_stem(conv)}]] ({conv.get('origin') or 'chat'})")
-            lines.append("")
-        target = vault / rel
-        target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text("\n".join(lines), encoding="utf-8")
-        if old and old != rel:
-            _remove(vault / old)
-        idx[key] = rel
-        written += 1
-    for key in [k for k in idx if k.startswith("project:") and k not in live]:
-        _remove(vault / idx.pop(key))
+    rels = {v for k, v in idx.items() if k.startswith("project:")}
+    for rec in project_member_records(store):
+        rel = idx.get(rec.id)
+        if rel:
+            rels.add(rel)
+    made = render_notes(store, vault, rels, idx)
+    for key in [k for k in idx if k.startswith("project:") and not (vault / idx[k]).is_file()]:
+        idx.pop(key, None)
     _save_index(vault, idx)
-    return written
+    return made
+
+
+def project_member_records(store: Any) -> list[Any]:
+    from . import exit as exit_gate
+
+    return [r for r in store.list_records(status=ACTIVE, limit=100000)
+            if not (r.never_send or r.demo) and exit_gate.keep(r) and topics.thread_of_tags(r.tags)]
 
 
 def conversation_note_stem(conv: dict[str, Any]) -> str:
@@ -466,8 +532,8 @@ def conversation_note_stem(conv: dict[str, Any]) -> str:
     return f"{_day(conv.get('created'))} {note_name(conv.get('origin') or 'chat', limit=20)} {str(conv['id']).split('-')[-1][:6]}"
 
 
-def write_conversation(vault: Path, conv: dict[str, Any], hide: list[str] | None = None) -> Path:
-    """Write a stored conversation, verbatim, as a source note.
+def write_conversation(vault: Path, conv: dict[str, Any], hide: list[str] | None = None) -> Path | None:
+    """Write an imported conversation, verbatim, as a source note (chats with Hermes are not written).
 
     *hide* lists sentences the owner made private; they are blanked in the note.
     """
@@ -475,8 +541,11 @@ def write_conversation(vault: Path, conv: dict[str, Any], hide: list[str] | None
 
     vault = Path(vault)
     folder = vault / "Sources" / "Conversations"
-    folder.mkdir(parents=True, exist_ok=True)
     path = folder / f"{conversation_note_stem(conv)}.md"
+    if (conv.get("origin") or "").strip().lower() in LIVE_ORIGINS:
+        _remove(path)                      # chats with Hermes live in the app, not as one file per message
+        return None
+    folder.mkdir(parents=True, exist_ok=True)
     people = conv.get("people") or []
     lines = [
         "---", f"id: {conv['id']}", "kind: conversation",
@@ -495,14 +564,9 @@ def write_conversation(vault: Path, conv: dict[str, Any], hide: list[str] | None
 
 def write_summary_notes(store: Any, vault: Path, *, me_data: dict[str, Any] | None = None,
                         biography: str | None = None) -> None:
-    """Write Me.md and Journal/Biography.md."""
-    from . import me as me_mod
-
+    """Write Journal/Biography.md. (There is no Me.md: the Me screen is where that lives.)"""
     vault = Path(vault)
-    (vault / ME_NOTE).write_text(
-        me_mod.render_markdown(me_data if me_data is not None else me_mod.build(store, vault=vault)),
-        encoding="utf-8",
-    )
+    _remove(vault / ME_NOTE)                               # written by older versions
     if biography:
         path = vault / BIOGRAPHY_NOTE
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -514,31 +578,77 @@ def rebuild(store: Any, vault: Path) -> dict[str, int]:
     vault = Path(vault)
     ensure_layout(vault)
     idx = _load_index(vault)
+    records = store.list_records(include_private=True, include_demo=True, limit=100000)
+    cache = {r.id: r for r in records}
+    dirty: set[str] = {v for k, v in idx.items() if _is_record_key(k)}        # notes from before: re-checked
     written = removed = 0
-    for rec in store.list_records(include_private=True, include_demo=True, limit=100000):
-        if write_record(store, vault, rec, index=idx):
+    for rec in records:
+        if write_record(store, vault, rec, index=idx, dirty=dirty, cache=cache):
             written += 1
         else:
             removed += 1
+    for rid in [k for k in idx if _is_record_key(k) and k not in cache]:       # records that no longer exist
+        dirty.add(idx.pop(rid))
     _save_index(vault, idx)
+    # People first: a line only links to a person who has a note.
     people = store.list_people(limit=10000)
+    live = [r for r in records if r.status == ACTIVE and not r.never_send and not r.demo]
     for person in people:
-        write_person(store, vault, store.get_person(person["id"]))
+        write_person(store, vault, store.get_person(person["id"]), records=live)
+    idx = _load_index(vault)
+    notes = render_notes(store, vault, dirty, idx, cache=cache)
+    _save_index(vault, idx)
     convs = 0
     stems: set[str] = set()
     hide = store.private_phrases()
     for row in store.list_conversations(limit=100000):
         conv = store.get_conversation(row["id"])
-        if conv:
-            write_conversation(vault, conv, hide)
+        if conv and write_conversation(vault, conv, hide):
             stems.add(conversation_note_stem(conv))
             convs += 1
     for old in (vault / "Sources" / "Conversations").glob("*.md"):     # renders from an older naming
         if old.stem not in stems:
             _remove(old)
-    write_summary_notes(store, vault)
-    write_projects(store, vault)
-    return {"notes": written, "people": len(people), "conversations": convs}
+    from . import biography
+
+    write_summary_notes(store, vault, biography=biography.load(vault)["text"] or None)
+    _mark_layout(vault)
+    return {"notes": written, "files": notes, "people": len(people), "conversations": convs}
+
+
+def _mark_layout(vault: Path) -> None:
+    path = Path(vault) / LAYOUT_FILE
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"layout": LAYOUT}), encoding="utf-8")
+
+
+def layout_version(vault: Path) -> int:
+    try:
+        return int(json.loads((Path(vault) / LAYOUT_FILE).read_text(encoding="utf-8")).get("layout", 1))
+    except (OSError, ValueError, TypeError):
+        return 1
+
+
+def needs_subject_layout(vault: Path) -> bool:
+    """True for a vault written the old way (a note per memory) that has not been moved yet."""
+    vault = Path(vault)
+    return (vault / INDEX_FILE).is_file() and layout_version(vault) < LAYOUT
+
+
+def migrate_to_subject_notes(store: Any, vault: Path) -> dict[str, Any]:
+    """Move a vault with one note per memory to notes by subject. Loses nothing.
+
+    A verified zip of the whole vault is written first; if it cannot be
+    verified, nothing is touched. Then every note is written again, which
+    takes the old one-note-per-memory files away (they are only a render of
+    the store) and writes the subject notes, people and projects.
+    """
+    vault = Path(vault)
+    if not needs_subject_layout(vault):
+        return {"migrated": False}
+    backup = _backup(vault, name="before-notes-by-subject")
+    done = rebuild(store, vault)
+    return {"migrated": True, "backup": backup.name, **done}
 
 
 def export_all(store: Any, vault: Path, *, include_private: bool = False) -> int:
@@ -546,12 +656,32 @@ def export_all(store: Any, vault: Path, *, include_private: bool = False) -> int
     return rebuild(store, vault)["notes"]
 
 
-def import_vault(vault: Path, store: Any) -> int:
-    """Add records for notes in the vault that the store does not know.
+_LINE_RE = re.compile(r"^- (?:\[([ xX])\] )?(?:(\d{4}-\d{2}-\d{2}) — )?(.*?)(?: · ((?:\[\[[^\]]+\]\](?:, )?)+))? \^([A-Za-z0-9-]+)\s*$")
 
-    Only notes with an ``id`` in their frontmatter count. Existing ids are
-    left alone. Nothing here can sign anything: imported notes arrive as
-    unconfirmed records.
+
+def parse_lines(rel: str, text: str) -> list[dict[str, Any]]:
+    """The memories written as lines in a subject note: id, words, date, people, to-do state."""
+    meta, body = parse_frontmatter(text)
+    out = []
+    for line in body.splitlines():
+        m = _LINE_RE.match(line.strip())
+        if not m:
+            continue
+        box, day, words, people, rid = m.groups()
+        out.append({
+            "id": rid, "text": words.strip(), "date": day or "", "check": box,
+            "people": re.findall(r"\[\[([^\]]+)\]\]", people or ""),
+        })
+    return out
+
+
+def import_vault(vault: Path, store: Any) -> int:
+    """Add records for memories in the vault that the store does not know.
+
+    A subject note counts line by line (a line ending in ``^id``); a note from
+    the older one-note-per-memory layout counts when it has an ``id`` in its
+    frontmatter. Existing ids are left alone. Nothing here can sign anything:
+    imported memories arrive as unconfirmed records.
     """
     from .records import Record
 
@@ -561,8 +691,36 @@ def import_vault(vault: Path, store: Any) -> int:
         parts = path.relative_to(vault).parts
         if parts[0].startswith(".") or parts[0] == "Sources":
             continue
-        meta, body = parse_frontmatter(path.read_text(encoding="utf-8"))
-        if not meta.get("id") or meta.get("kind") in ("person", "conversation"):
+        rel = path.relative_to(vault).as_posix()
+        text = path.read_text(encoding="utf-8")
+        meta, body = parse_frontmatter(text)
+        kind = meta.get("kind", "")
+        if kind in ("topic", "journal", "todo", "project"):
+            top = parts[0]
+            category = meta.get("category") or top
+            for item in parse_lines(rel, text):
+                if store.get_record(item["id"]) is not None:
+                    continue
+                tags = []
+                if category in topics.CATEGORIES:
+                    tags.append(topics.tag_for(category))
+                if kind == "project" and len(parts) >= 2:
+                    tags.append(topics.thread_tag(parts[1]))
+                title = Path(rel).stem
+                if kind == "topic" and title != category:
+                    tags.append(topics.note_tag(title))
+                if kind == "todo" or item["check"] is not None:
+                    tags.append(topics.TODO_TAG)
+                    if (item["check"] or "").lower() == "x":
+                        tags.append(topics.DONE_TAG)
+                store.add_record(Record(
+                    id=item["id"], kind=JOURNAL if kind == "journal" else NOTE, subject="self",
+                    speaker="source:import", status="active", trust=0.3, title=item["text"][:120],
+                    body=item["text"], tags=tags, source={"people": item["people"], "origin": "vault"},
+                ), changed_by="import")
+                count += 1
+            continue
+        if not meta.get("id") or kind in ("person", "conversation"):
             continue
         if store.get_record(meta["id"]) is not None:
             continue
@@ -592,12 +750,12 @@ def is_legacy(vault: Path) -> bool:
     return any((vault / name).is_dir() for name in LEGACY_FOLDER_NAMES)
 
 
-def _backup(vault: Path) -> Path:
+def _backup(vault: Path, *, name: str = "before-new-layout") -> Path:
     """A full zip of the vault (database included) before anything moves."""
     vault = Path(vault)
     target_dir = vault / ".brain" / "backups"
     target_dir.mkdir(parents=True, exist_ok=True)
-    target = target_dir / f"before-new-layout-{_now_stamp()}.zip"
+    target = target_dir / f"{name}-{_now_stamp()}.zip"
     count = 0
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in sorted(vault.rglob("*")):

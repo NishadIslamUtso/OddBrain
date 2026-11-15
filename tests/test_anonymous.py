@@ -135,11 +135,13 @@ class TestAnonymousTool(AnonymousCase):
         out = self.provider.handle_tool_call("memory_ob_anonymous", {"action": "status"})
         self.assertIn('"anonymous": false', out)
 
-    def test_on_and_off(self) -> None:
+    def test_the_assistant_can_turn_it_on_but_never_off(self) -> None:
         self.provider.handle_tool_call("memory_ob_anonymous", {"action": "on"})
         self.assertTrue(self.anonymous.is_anonymous(self.vault))
-        self.provider.handle_tool_call("memory_ob_anonymous", {"action": "off"})
-        self.assertFalse(self.anonymous.is_anonymous(self.vault))
+        for word in ("off", "disable", "false"):
+            out = self.provider.handle_tool_call("memory_ob_anonymous", {"action": word})
+            self.assertIn("Only the owner", out)
+            self.assertTrue(self.anonymous.is_anonymous(self.vault), word)
 
     def test_bad_action(self) -> None:
         out = self.provider.handle_tool_call("memory_ob_anonymous", {"action": "sideways"})
@@ -164,6 +166,15 @@ class TestApi(AnonymousCase):
         self.assertTrue(self.anonymous.is_anonymous(self.vault))
         client.post("/api/anonymous", json={"anonymous": False})
         self.assertFalse(self.anonymous.is_anonymous(self.vault))
+
+    def test_search_is_closed_to_the_assistant_while_paused_but_not_to_the_owner(self) -> None:
+        client = self._client()
+        client.post("/api/tell", json={"text": "I always drink black coffee"})
+        self.anonymous.set_anonymous(self.vault, True)
+        agent = client.get("/api/search", params={"q": "coffee"}, headers={"X-Memory-OB-Actor": "agent"}).json()
+        self.assertEqual((agent["count"], agent.get("paused")), (0, True))
+        owner = client.get("/api/search", params={"q": "coffee"}, headers={"X-Memory-OB-Actor": "owner"}).json()
+        self.assertGreaterEqual(owner["count"], 1)
 
 
 if __name__ == "__main__":

@@ -27,6 +27,8 @@ from datetime import datetime, timezone
 from typing import Any
 
 MAX_FILE_BYTES = 200 * 1024 * 1024
+# A zip may hold far more than it weighs. Refuse one that would unpack to more than this.
+MAX_UNZIPPED_BYTES = 600 * 1024 * 1024
 _MAX_ENTRY_CHARS = 1000
 
 
@@ -416,6 +418,8 @@ def parse(name: str, data: bytes, *, me: str = "") -> Parsed:
         except zipfile.BadZipFile as exc:
             raise ImportError_("I could not open that zip file.") from exc
         with zf:
+            if sum(i.file_size for i in zf.infolist()) > MAX_UNZIPPED_BYTES:
+                raise ImportError_("That zip is far too large once opened, so I will not open it.")
             names_in = zf.namelist()
             meta_files = [n for n in names_in if re.search(r"(?:^|/)message_\d+\.json$", n.lower())]
             if meta_files:

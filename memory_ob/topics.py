@@ -39,9 +39,13 @@ _RULES: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"surgery|hospital|blood|diabet\w*|asthma|therap\w*|prescri\w*|"
         r"vitamin\w*|supplement\w*|sleep\w*|diet|calorie\w*|body fat|"
         r"workout\w*|gym|exercis\w*|fitness|protein|migraine|infection|"
+        r"lift(?:ing|s|ed)?|weights?|bench press|squats?|deadlift\w*|"
         r"anxiety|depress\w*|dentist|clinic|vaccin\w*|yoga|cardio|push-?ups?|marathon|stretch\w*)\b|"
         r"\b(?:run|ran|running|jog\w*|walk\w*|cycl\w*|swim\w*)\b[^.!?]{0,20}"
         r"\b\d+(?:\.\d+)?\s?(?:km|kms|k|miles?|laps?|minutes?|mins?)\b", re.I)),
+    (LIFE, re.compile(
+        r"\b(?:i (?:live|stay|grew up|was born|am from|come from|moved)\b|my name is|my birthday|"
+        r"i(?:'m| am) \d+ years old|i(?:'m| am) from)", re.I)),
     (MONEY, re.compile(
         r"\b(salary|income|rent|budget\w*|loan|debt|savings?|invest\w*|"
         r"stocks?|crypto\w*|tax(es)?|expenses?|bills?|mortgage|"
@@ -108,6 +112,24 @@ def with_category(tags: list[str] | None, category: str) -> list[str]:
         category = LIFE
     kept = [t for t in (tags or []) if not str(t).startswith(TAG_PREFIX)]
     return [tag_for(category), *kept]
+
+
+# -- which note a memory is written in ----------------------------------------------
+
+NOTE_PREFIX = "note/"
+
+
+def note_tag(title: str) -> str:
+    """The tag that says which note (inside its category folder) a memory belongs to."""
+    return NOTE_PREFIX + re.sub(r"\s+", " ", (title or "").strip())
+
+
+def note_of_tags(tags: list[str] | None) -> str:
+    """The note title recorded in *tags*, or ''."""
+    for tag in tags or []:
+        if str(tag).startswith(NOTE_PREFIX):
+            return str(tag)[len(NOTE_PREFIX):].strip()
+    return ""
 
 
 # -- "come back to this later" -------------------------------------------------

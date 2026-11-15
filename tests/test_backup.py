@@ -57,6 +57,43 @@ class Backup(unittest.TestCase):
         finally:
             con.close()
 
+    def _zip(self, members: dict[str, bytes]) -> Path:
+        path = self.tmp / "made.zip"
+        with zipfile.ZipFile(path, "w") as zf:
+            for name, data in members.items():
+                zf.writestr(name, data)
+        return path
+
+    def test_a_backup_that_points_outside_its_folder_is_refused(self) -> None:
+        for bad in ("../evil.txt", "/etc/evil.txt", "vault/../../evil.txt", "C:/evil.txt"):
+            out = self.tmp / "r1"
+            with self.assertRaises(backup.BackupError, msg=bad):
+                backup.restore_backup(self._zip({"ledger.sqlite": b"x", bad: b"x"}), out)
+            self.assertFalse((self.tmp / "evil.txt").exists())
+
+    def test_a_backup_with_a_shortcut_is_refused(self) -> None:
+        path = self.tmp / "link.zip"
+        with zipfile.ZipFile(path, "w") as zf:
+            info = zipfile.ZipInfo("vault/link")
+            info.external_attr = (0o120777 << 16)
+            zf.writestr(info, "/etc/passwd")
+        with self.assertRaises(backup.BackupError):
+            backup.restore_backup(path, self.tmp / "r2")
+
+    def test_a_file_that_is_not_a_backup_is_refused_in_plain_words(self) -> None:
+        with self.assertRaises(backup.BackupError) as cm:
+            backup.restore_backup(self._zip({"holiday.jpg": b"x"}), self.tmp / "r3")
+        self.assertIn("does not look like a Memory_OB backup", str(cm.exception))
+        junk = self.tmp / "junk.zip"
+        junk.write_bytes(b"not a zip at all")
+        with self.assertRaises(backup.BackupError):
+            backup.restore_backup(junk, self.tmp / "r4")
+
+    def test_a_damaged_memory_file_is_reported(self) -> None:
+        with self.assertRaises(backup.BackupError) as cm:
+            backup.restore_backup(self._zip({"ledger.sqlite": b"this is not a database" * 50}), self.tmp / "r5")
+        self.assertIn("damaged", str(cm.exception))
+
     def test_a_biography_you_wrote_is_saved(self) -> None:
         self.assertIn("vault/.brain/biography.json", self.names())
 
