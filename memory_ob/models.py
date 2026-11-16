@@ -57,7 +57,24 @@ DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434"
 
 SLOTS: tuple[str, ...] = ("extract", "embed")
 
-_LOCAL_PROVIDERS = ("local", "custom", "lmstudio", "vllm", "llamacpp")
+_LOCAL_PROVIDERS = ("local", "custom", "lmstudio", "vllm", "llamacpp", "openai-compatible")
+# Servers that speak the OpenAI shape (/v1/chat/completions): llama.cpp's llama-server, LM Studio, vLLM.
+_OPENAI_PROVIDERS = ("openai", "openai-compatible", "lmstudio", "vllm", "llamacpp", "llama.cpp", "llama-server")
+
+
+def _port_of(address: str) -> int | None:
+    from urllib.parse import urlparse
+
+    try:
+        return urlparse(address if "://" in address else "http://" + address).port
+    except ValueError:
+        return None
+
+
+def _v1(base_url: str) -> str:
+    """An OpenAI-style server's base address, always ending in ``/v1``."""
+    base = (base_url or "").rstrip("/")
+    return base if base.endswith("/v1") else base + "/v1"
 
 
 def _is_this_computer(address: str) -> bool:
@@ -109,6 +126,23 @@ class ModelSlot:
             model=self.model or main.model,
             base_url=self.base_url or main.base_url,
         )
+
+    @property
+    def api_kind(self) -> str:
+        """``ollama`` or ``openai``: which language the server at this slot speaks.
+
+        Ollama has its own (``/api/chat``); llama.cpp's llama-server, LM Studio and vLLM
+        speak the OpenAI one (``/v1/chat/completions``). With no better hint, an address
+        that is not Ollama's usual port is taken to be an OpenAI-style server.
+        """
+        provider = self.provider.lower()
+        if "ollama" in provider:
+            return "ollama"
+        if provider in _OPENAI_PROVIDERS:
+            return "openai"
+        if not self.base_url or _port_of(self.base_url) == 11434:
+            return "ollama"
+        return "openai"
 
     @property
     def is_local(self) -> bool:
@@ -349,22 +383,26 @@ class LocalBackend:
         return slot.model or default
 
     def chat(self, slot: ModelSlot, messages: list[dict[str, str]]) -> str:
-        if slot.is_local:
+        if slot.api_kind == "ollama" and (slot.is_local or "ollama" in slot.provider.lower()):
             return _ollama_chat(self._ollama(slot), self._model(slot, "llama3.2"), messages)
         base = slot.base_url or os.environ.get("OPENAI_BASE_URL", "")
         if not base:
             raise ModelError("no base_url configured for a non-local model")
+        if slot.is_local:
+            base = _v1(base)          # llama.cpp / LM Studio / vLLM on this computer
         key = os.environ.get("OPENAI_API_KEY", "")
         return _openai_chat(base, slot.model or "default", messages, api_key=key)
 
     def embed(self, slot: ModelSlot, text: str) -> list[float]:
         model = self._model(slot, "nomic-embed-text")
-        if "ollama" in slot.provider.lower():
+        if slot.api_kind == "ollama":
             return _ollama_embed(self._ollama(slot), model, text)
         # llama.cpp / LM Studio / vLLM and other OpenAI-compatible servers.
         base = slot.base_url or os.environ.get("OPENAI_BASE_URL", "")
         if not base:
             raise ModelError("no base_url configured for the embedding model")
+        if slot.is_local:
+            base = _v1(base)
         return _openai_embed(
             base, model, text, api_key=os.environ.get("OPENAI_API_KEY", "")
         )
@@ -500,6 +538,8 @@ def is_available(slot: ModelSlot, *, timeout: float = 3.0) -> bool:
     from . import probe
 
     base = (slot.base_url or DEFAULT_OLLAMA_URL).rstrip("/")
+    if slot.api_kind == "openai":
+        return probe.remembered("openai:" + base, lambda: _openai_server_up(base, timeout))
     return probe.remembered("ollama:" + base, lambda: _server_up(base, timeout))
 
 
@@ -510,6 +550,43 @@ def _server_up(base: str, timeout: float) -> bool:
             return True
     except (urllib.error.URLError, OSError, ValueError):
         return False
+
+
+def _openai_server_up(base: str, timeout: float) -> bool:
+    return bool(_get_json(_v1(base) + "/models", timeout) is not None)
+
+
+def _get_json(url: str, timeout: float) -> Any:
+    """The JSON a GET returns, or None when the server cannot be reached or does not answer in JSON."""
+    try:
+        req = urllib.request.Request(url, method="GET", headers={"Authorization": "Bearer none"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, OSError, ValueError):
+        return None
+
+
+def openai_models(base_url: str, *, timeout: float = 3.0) -> list[str]:
+    """The model names an OpenAI-style server (llama.cpp, LM Studio, vLLM) offers."""
+    data = _get_json(_v1(base_url or "") + "/models", timeout)
+    items = data.get("data", []) if isinstance(data, dict) else []
+    return sorted(str(m.get("id", "")) for m in items if isinstance(m, dict) and m.get("id"))
+
+
+def server_models(address: str = "", *, timeout: float = 3.0) -> tuple[str, list[str]]:
+    """What kind of AI server is at *address*, and which models it has: ``("ollama" | "openai" | "", names)``.
+
+    At most two quick requests: Ollama's own list first, then the OpenAI-style one.
+    """
+    base = (address or DEFAULT_OLLAMA_URL).rstrip("/")
+    tags = _get_json(base + "/api/tags", timeout)
+    if isinstance(tags, dict) and isinstance(tags.get("models"), list):
+        return "ollama", sorted(str(m.get("name", "")) for m in tags["models"] if isinstance(m, dict) and m.get("name"))
+    data = _get_json(_v1(base) + "/models", timeout)
+    if isinstance(data, dict):
+        items = data.get("data") if isinstance(data.get("data"), list) else []
+        return "openai", sorted(str(m.get("id", "")) for m in items if isinstance(m, dict) and m.get("id"))
+    return "", []
 
 
 def ollama_models(base_url: str = "", *, timeout: float = 3.0) -> list[str]:

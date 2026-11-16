@@ -299,6 +299,30 @@ def cmd_tidy(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_sweep(args: argparse.Namespace) -> int:
+    """The check-up: what disagrees, repeats or went stale, and whether the notes match."""
+    from . import audit, startup
+    from .store import Store
+
+    s = _settings(args)
+    startup.prepare(s)
+    with Store(s.db) as st:
+        report = audit.run(st, s.vault, fix=not args.no_fix)
+    for c in report["checks"]:
+        print(f"  {'ok  ' if c['ok'] else 'LOOK'} {c['title']}: {c['detail']}")
+    findings = report["findings"]
+    extra = sum(report["more"].values())
+    print(f"{len(findings)} thing(s) to look at" + (f" (and {extra} more)" if extra else "") + ".")
+    for f in findings:
+        print(f"\n  [{f['kind']}] {f['title']}  ({f['id']})")
+        for line in f["detail"].splitlines():
+            print(f"      {line}")
+        print("      answers: " + ", ".join(a["key"] for a in f["actions"]))
+    if report["lonely"]["count"]:
+        print(f"\n{report['lonely']['count']} note(s) are not linked to anything.")
+    return 0 if all(c["ok"] for c in report["checks"]) else 1
+
+
 def cmd_embed(args: argparse.Namespace) -> int:
     """Compute and cache embeddings for records that lack them."""
     from .embedder import ensure_embeddings
@@ -501,6 +525,10 @@ def build_parser() -> argparse.ArgumentParser:
     ti = sub.add_parser("tidy", help="run the nightly clean-up now")
     ti.add_argument("--dry-run", action="store_true")
     ti.set_defaults(fn=cmd_tidy)
+
+    sw = sub.add_parser("sweep", help="check-up: memories that disagree or repeat, old to-dos, drifted notes")
+    sw.add_argument("--no-fix", action="store_true", help="only report; do not repair the notes")
+    sw.set_defaults(fn=cmd_sweep)
 
     em = sub.add_parser("embed", help="compute and cache meaning-search data")
     em.add_argument("--limit", type=int, default=200)

@@ -6,8 +6,11 @@ search (embeddings), refreshes the
 integrity manifest and, if the owner turned that on, updates Hermes's own
 memory notes. Each step stands alone: one failing does not stop the rest.
 
-It never opens a question about old memories. The only questions Memory_OB
-asks come from something the owner has just said.
+It never puts a question about old memories in the owner's queue. The only
+questions Memory_OB asks come from something the owner has just said. The one
+exception is the check-up (``audit``), which keeps its own short report in Review:
+it fixes only the notes and lists the rest, and nothing in it changes what the
+owner said until the owner answers.
 """
 
 from __future__ import annotations
@@ -128,6 +131,17 @@ def run(settings: Settings, *, dry_run: bool = False, skip: tuple[str, ...] = ()
         bad = len(check["changed"]) + len(check["missing"])
         return "all originals unchanged" if not bad else f"{bad} original file(s) changed or missing"
 
+    def checkup() -> str:
+        from . import audit
+
+        if not app.audit:
+            return "off"
+        with Store(settings.db) as st:
+            report = audit.run(st, settings.vault)
+        s = report["summary"]
+        return f"{s['needs_you']} to look at; {s['checks_ok']}/{s['checks_total']} checks fine" + (
+            f"; put {s['fixed']} note line(s) right" if s["fixed"] else "")
+
     def hermes_sync() -> str:
         if not app.sync_hermes:
             return "off"
@@ -136,7 +150,8 @@ def run(settings: Settings, *, dry_run: bool = False, skip: tuple[str, ...] = ()
         return "Hermes memory files not found" if report is None else f"{report['synced']} memories"
 
     steps = [("read", read_waiting), ("people", same_people), ("biography", bio),
-             ("embed", embed), ("notes", notes), ("manifest", manifest), ("hermes", hermes_sync)]
+             ("embed", embed), ("notes", notes), ("manifest", manifest), ("audit", checkup),
+             ("hermes", hermes_sync)]
     steps = [(n, f) for n, f in steps if n not in skip]
     if dry_run:
         return [{"step": n, "ok": "dry", "detail": "would run"} for n, _ in steps]

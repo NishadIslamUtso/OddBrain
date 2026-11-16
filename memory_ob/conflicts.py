@@ -102,7 +102,8 @@ class Reading:
 
 _SLOT_PATTERNS: tuple[tuple[str, re.Pattern[str], bool], ...] = (
     ("lives", re.compile(
-        r"\b(?:i|we)\s+(?:currently\s+|now\s+)?(?:live|stay|reside)\s+in\s+" + _VALUE), False),
+        r"\b(?:(?:i|we)\s+(?:currently\s+|now\s+)?(?:live|stay|reside)"
+        r"|(?:i\s*am|im|we\s*are|were)\s+(?:currently\s+|now\s+)?(?:living|staying|residing|based))\s+in\s+" + _VALUE), False),
     ("lives", re.compile(
         r"\b(?:i|we)\s+(?:have\s+|just\s+|recently\s+)?(?:moved|relocated|shifted)\s+to\s+" + _VALUE), True),
     ("works", re.compile(
@@ -118,7 +119,7 @@ _MY_X_IS_Y = re.compile(
     r"\bmy\s+(?P<x>[a-z]{3,20}(?:\s+[a-z]{3,20}){0,2}?)\s+(?:is|are|was)\s+" + _VALUE)
 
 _SLOT_TRAILING = re.compile(
-    r"\b(and|but|because|so|which|who|where|when|since|now|currently|anymore|too)\b.*$")
+    r"\b(and|but|because|so|which|who|where|when|since|now|currently|anymore|too|with|near|after|before)\b.*$")
 
 
 def _clean_value(value: str) -> str:
@@ -160,6 +161,23 @@ def _plain_words(reading: Reading) -> frozenset[str]:
     return frozenset(w for w in reading.stems if not any(ch.isdigit() for ch in w))
 
 
+def _alike(x: str, y: str) -> bool:
+    """Two word stems that are the same word in another form ("month" / "monthly")."""
+    return len(x) >= 4 and len(y) >= 4 and x[:4] == y[:4]
+
+
+def _same_thing(a: frozenset[str], b: frozenset[str]) -> bool:
+    """True when one statement only adds words to the other, or the words that differ are the same words.
+
+    "my salary" / "my monthly salary" is the same thing; "budget for food" / "budget for rent" is not.
+    """
+    only_a, only_b = a - b, b - a
+    if not only_a or not only_b:
+        return True
+    return (all(any(_alike(x, y) for y in only_b) for x in only_a)
+            and all(any(_alike(x, y) for x in only_a) for y in only_b))
+
+
 def compare(new_text: str, old_text: str) -> str | None:
     """``"duplicate"``, ``"conflict"`` or None for *new_text* against *old_text*."""
     a, b = read(new_text), read(old_text)
@@ -173,7 +191,9 @@ def compare(new_text: str, old_text: str) -> str | None:
     if a.numbers and b.numbers and a.numbers != b.numbers and not a.negated and not b.negated:
         wa, wb = _plain_words(a), _plain_words(b)
         smaller = min(len(wa), len(wb))
-        if smaller >= 2 and len(wa & wb) / smaller >= 0.6:
+        # One side may say more ("my salary" / "my monthly salary"), but neither may name a
+        # different thing: "budget for food 5000" and "budget for rent 12000" can both be true.
+        if smaller >= 2 and len(wa & wb) / smaller >= 0.6 and _same_thing(wa, wb):
             return CONFLICT
     shared = a.stems & b.stems
     smaller = min(len(a.stems), len(b.stems))
@@ -182,6 +202,10 @@ def compare(new_text: str, old_text: str) -> str | None:
     if smaller > 1 and len(shared) < 2:
         return None
     if a.negated != b.negated:
+        # Opposite polarity only contradicts when it is about the same thing: "I eat rice for
+        # lunch" next to "I don't eat rice for dinner" is two different statements.
+        if not _same_thing(a.stems, b.stems):
+            return None
         return CONFLICT
     # Same polarity: it is a repeat only when it adds nothing new.
     if len(shared) / len(a.stems) >= 0.85:

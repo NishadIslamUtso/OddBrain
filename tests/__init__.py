@@ -48,8 +48,9 @@ def _no_ai_on_this_machine() -> None:
     """
     import tempfile
 
-    if "HERMES_HOME" not in os.environ:
-        os.environ["HERMES_HOME"] = tempfile.mkdtemp(prefix="no-hermes-")
+    # Always, even when the machine already has HERMES_HOME set (a real Hermes install often does):
+    # a test that wants a Hermes folder points at its own with mock.patch.
+    os.environ["HERMES_HOME"] = tempfile.mkdtemp(prefix="no-hermes-")
     os.environ.pop("HERMES_EXE", None)
     os.environ.setdefault("MEMORY_OB_NO_PROXY_PROBE", "1")
     try:

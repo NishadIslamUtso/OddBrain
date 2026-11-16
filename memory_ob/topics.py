@@ -243,6 +243,20 @@ _THREAD_PATTERNS = (
 )
 
 
+# "my app called StudyBuddy": the name is given, so use it (read from the original capitals).
+_NAMED_THREAD = re.compile(
+    r"\b(?i:a|an|my|our|the)\s+(?:(?i:new|small|little|side|personal|mobile|web|online)\s+)*"
+    r"(?i:" + _THREAD_NOUNS + r")\s+(?i:called|named)\s+([A-Z][A-Za-z0-9]{2,}(?:\s[A-Z][A-Za-z0-9]{2,})?)")
+
+
+def _named_thread(text: str) -> str:
+    m = _NAMED_THREAD.search(text or "")
+    if not m:
+        return ""
+    name = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", " ", m.group(1))        # StudyBuddy -> Study Buddy
+    return name if name.split()[0].lower() not in _GENERIC_HEAD else ""
+
+
 def thread_slug(name: str) -> str:
     return re.sub(r"[^a-z0-9]+", "-", (name or "").lower()).strip("-")
 
@@ -281,10 +295,16 @@ def thread_of(text: str, known: list[str] | None = None) -> str:
     """
     low = (text or "").lower()
     words = {_root(w) for w in re.findall(r"[a-z][a-z-]+", low)}
+    squashed = {w.replace("-", "") for w in words}
     for tag in known or []:
         slug = tag[len(THREAD_PREFIX):] if tag.startswith(THREAD_PREFIX) else tag
-        if slug and _root(slug) in words:
+        parts = [p for p in slug.split("-") if p]
+        if slug and (_root(slug) in words or slug.replace("-", "") in squashed
+                     or (len(parts) >= 2 and all(_root(p) in words for p in parts))):
             return thread_title(slug)
+    named = _named_thread(text)
+    if named:
+        return named
     for pattern in _THREAD_PATTERNS:
         # Every match is tried: "for the bakery business" must not be lost to "the bakery".
         # The first pattern is "<name> <kind of thing>", which can overlap, so it is

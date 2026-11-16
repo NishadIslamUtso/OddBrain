@@ -186,6 +186,13 @@ select { appearance: auto; }
 .feed-item .when { color: var(--text-2); font-size: .85rem; margin-left: auto; }
 .feed-item .was { color: var(--text-2); font-size: .9rem; }
 .feed-item .was s { color: var(--text-3); }
+.feed-group { display: block; padding: 0; }
+.feed-group .grp-head { padding: 12px 16px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
+.feed-group .grp-head .top { grid-column: 1 / -1; }
+.feed-group .grp-cats { display: flex; gap: 6px; flex-wrap: wrap; }
+.feed-group .grp-actions { display: flex; gap: 8px; align-items: center; }
+.feed-group .grp-body { border-top: 1px solid var(--stroke); background: var(--bg); }
+.feed-group .grp-body .feed-item { padding-left: 28px; }
 
 /* ---- memories ----------------------------------------------------------- */
 .mem { padding: 11px 16px; }
@@ -741,7 +748,7 @@ const state = {
   tab: 'review', categories: [], status: null, home: null,
   v: null,
   people: [], person: null, personId: null, peopleQ: '',
-  settings: null, mem: {},
+  settings: null, mem: {}, openGroups: {},
 };
 const TABS = [['review', 'Review'], ['vault', 'Vault'], ['people', 'People'], ['journal', 'Journal'], ['me', 'Me'], ['settings', 'Settings']];
 
@@ -758,6 +765,9 @@ function renderBanners() {
   if (s.paused) {
     out.push(`<div class="banner warn"><span><b>Memory is paused.</b> Nothing new is being saved and nothing is being brought up in chats.</span>
       <button class="btn sm" data-act="resume">Turn memory back on</button></div>`);
+  }
+  if (s.notice) {
+    out.push(`<div class="banner"><span>${esc(s.notice)}</span><button class="btn sm" data-act="dismiss-notice">Got it</button></div>`);
   }
   if (!s.helper.ready && s.waiting > 0) {
     out.push(`<div class="banner"><span><b>${plural(s.waiting, 'thing')} waiting.</b> I cannot reach an AI helper right now, so I will read ${s.waiting === 1 ? 'it' : 'them'} as soon as one is available.</span>
@@ -889,7 +899,18 @@ function unsureCard(u) {
     <div class="row"><button class="btn primary" data-act="unsure-keep" data-id="${esc(u.id)}">Yes, keep it</button>
     <button class="btn" data-act="unsure-skip" data-id="${esc(u.id)}">No, forget it</button></div></article>`;
 }
+function feedGroup(g) {
+  const open = !!state.openGroups[g.seq];
+  const cats = (g.categories || []).map(c => `<span class="chip" style="border-color:${catColor(c.name)}">${esc(c.name)} ${c.count}</span>`).join('');
+  return `<li class="feed-item feed-group${g.undone ? ' undone' : ''}">
+    <div class="grp-head"><div class="top"><span class="verb">${esc(g.verb)}</span><span class="faint">by AI</span><span class="when">${esc(when(g.at))}</span></div>
+      <div class="grp-cats">${cats}</div>
+      <div class="grp-actions"><button class="btn sm" data-act="toggle-group" data-seq="${g.seq}" aria-expanded="${open}">${open ? 'Hide' : 'See what was saved'}</button>
+      ${g.undone ? '<span class="chip">Undone</span>' : g.undo_seqs.length ? `<button class="btn sm" data-act="undo-group" data-seqs="${g.undo_seqs.join(',')}">Undo all</button>` : ''}</div></div>
+    ${open ? `<ul class="list grp-body">${g.items.map(feedItem).join('')}</ul>` : ''}</li>`;
+}
 function feedItem(f) {
+  if (f.group) return feedGroup(f);
   const cat = f.category;
   return `<li class="feed-item${f.undone ? ' undone' : ''}">
     <div class="top"><span class="verb">${esc(f.verb)}</span>
@@ -897,6 +918,22 @@ function feedItem(f) {
       <span class="faint">${f.by === 'AI' ? 'by AI' : 'by you'}</span><span class="when">${esc(when(f.at))}</span></div>
     <div><p class="text">${esc(f.text)}</p>${f.was ? `<p class="was">Before: <s>${esc(f.was)}</s></p>` : ''}</div>
     <div>${f.undone ? '<span class="chip">Undone</span>' : f.can_undo ? `<button class="btn sm" data-act="undo" data-seq="${f.seq}">Undo</button>` : ''}</div></li>`;
+}
+function auditCard(f) {
+  const lines = String(f.detail || '').split('\n').map(l => `<p class="text">${esc(l)}</p>`).join('');
+  return `<article class="card" data-finding="${esc(f.id)}"><div class="eyebrow">${esc(f.title)}</div>${lines}
+    <div class="row">${f.actions.map(a => `<button class="btn" data-act="audit" data-id="${esc(f.id)}" data-choice="${esc(a.key)}">${esc(a.label)}</button>`).join('')}</div></article>`;
+}
+function auditFooter(a) {
+  if (!a) return '';
+  const needs = a.summary.needs_you;
+  const status = !a.ran ? 'I have not done a check-up yet. I do one every night, or you can start one now.'
+    : `Last check-up: ${esc(when(a.last_run))}. ${needs ? `${plural(needs, 'thing')} to look at${a.findings.length ? ' above' : ''}.` : 'Nothing needs your attention.'}`;
+  const checks = a.checks.map(c => `<li class="mem"><div class="t">${esc(c.title)}</div><div class="meta"><span class="chip${c.ok ? '' : ' warn'}">${c.ok ? 'OK' : 'Look'}</span><span class="faint">${esc(c.detail)}</span></div></li>`).join('');
+  const lone = a.lonely && a.lonely.count ? `<p class="faint">${plural(a.lonely.count, 'note')} not linked to anything${a.lonely.notes.length ? ': ' + esc(a.lonely.notes.join(', ')) + (a.lonely.count > a.lonely.notes.length ? '…' : '') : ''}. <button class="chip" data-act="audit-lonely">Show in Vault</button></p>` : '';
+  return `<section class="card" id="audit-card"><h2>Check-up</h2><p class="muted">${status}</p>
+    ${checks ? `<ul class="list">${checks}</ul>` : ''}${lone}
+    <div class="row"><button class="btn" data-act="audit-run">Check now</button><span class="msg" id="audit-msg"></span></div></section>`;
 }
 function renderReviewBody() {
   if (state.rq) return;
@@ -908,11 +945,17 @@ function renderReviewBody() {
     parts.push(section('Time to come back to', h.due.length, `<div class="card pad0"><ul class="list">${h.due.map(i =>
       `<li class="mem"><div class="t">${esc(i.text)}</div><div class="meta"><span class="chip warn">Due ${esc(day(i.revisit_at))}</span></div></li>`).join('')}</ul></div>`));
   }
+  if (h.audit && h.audit.findings.length) {
+    const more = Object.values(h.audit.more || {}).reduce((x, y) => x + y, 0);
+    parts.push(section('Worth a look', h.audit.summary.needs_you, `<div class="stack">${h.audit.findings.map(auditCard).join('')}</div>` +
+      (more ? `<p class="faint">${plural(more, 'more thing')} to look at after these.</p>` : '')));
+  }
   if (h.feed.length) {
     parts.push(section('Recently remembered', null, `<div class="card pad0"><ul class="list">${h.feed.map(feedItem).join('')}</ul></div>`));
   } else if (!h.doubts.length && !h.unsure.length) {
     parts.push(emptyBox('Nothing here yet', 'Tell me something above, or just chat as you normally do. I will remember what matters and list it here.'));
   }
+  parts.push(auditFooter(h.audit));
   body.innerHTML = parts.join('');
 }
 async function runSearch() {
@@ -1628,7 +1671,7 @@ SCREENS.settings = async function (soft) {
     <label class="radio${ai.mode === 'auto' ? ' on' : ''}"><input type="radio" name="aimode" value="auto"${ai.mode === 'auto' ? ' checked' : ''}><span><b>Automatic</b><span>${ai.hermes_found ? 'Use the AI that Hermes already uses.' : 'Hermes was not found, so I will look for a model running on this computer.'}</span></span></label>
     <label class="radio${ai.mode === 'custom' ? ' on' : ''}"><input type="radio" name="aimode" value="custom"${ai.mode === 'custom' ? ' checked' : ''}><span><b>A model on this computer</b><span>Choose a model you run yourself with Ollama.</span></span></label>
     <div id="ai-custom" class="stack" ${ai.mode === 'custom' ? '' : 'hidden'}>
-      <div class="field"><label for="ai-addr">Where Ollama is running</label><input type="text" id="ai-addr" value="${esc(ai.address)}"></div>
+      <div class="field"><label for="ai-addr">Where your AI server is running</label><input type="text" id="ai-addr" value="${esc(ai.address)}"><p class="hint">Works with Ollama, llama.cpp (llama-server), LM Studio and vLLM.</p></div>
       <div class="field"><label for="ai-model">Model</label><div class="row"><input type="text" id="ai-model" class="grow" list="ollama-models" value="${esc(ai.reading_model)}" placeholder="for example llama3.2"><button class="btn" data-act="check-models">Find models</button></div>
         <datalist id="ollama-models"></datalist><p class="hint" id="ai-models-msg"></p></div></div>
     <div class="field"><label for="ai-embed">Model for meaning search (optional)</label><input type="text" id="ai-embed" value="${esc(ai.meaning_model)}" placeholder="nomic-embed-text">
@@ -1668,6 +1711,7 @@ SCREENS.settings = async function (soft) {
     ${s.integrity.changed.length || s.integrity.missing.length ? `<div class="banner danger"><span><b>Some original files are not what I saved.</b> ${esc([...s.integrity.changed.map(n => n + ' (changed)'), ...s.integrity.missing.map(n => n + ' (missing)')].join(', '))}. Anything I learned from them may be wrong.</span>
       <button class="btn sm" data-act="accept-originals">I checked, they are fine</button></div>` : ''}
     <p class="muted">I tidy my notes every night on my own. You can also do it now, or save a backup copy.</p>
+    ${sw('audit', 'Look over everything each night', 'Finds memories that disagree or repeat, to-dos that have sat for weeks, and notes that drifted. It fixes only your notes. Anything about what you said waits for your answer in Review.', o.audit)}
     <div class="row"><button class="btn" data-act="backup">Back up now</button><button class="btn" data-act="tidy">Tidy now</button><span class="msg" id="bk-msg"></span></div>
     ${s.backups.length ? `<p class="faint">Latest backups: ${s.backups.map(esc).join(', ')}</p>` : ''}
     <p class="faint">Your notes live in: ${esc(s.vault)}</p></section>
@@ -1736,7 +1780,27 @@ document.addEventListener('click', async (e) => {
     });
     case 'unsure-keep': return busy(el, async () => { await api(`/api/unsure/${enc(id)}/keep`, { method: 'POST' }); toast('Kept.'); await SCREENS.review(true); });
     case 'unsure-skip': return busy(el, async () => { await api(`/api/unsure/${enc(id)}/skip`, { method: 'POST' }); toast('Dropped.'); await SCREENS.review(true); });
-    case 'undo': return busy(el, async () => { await api('/api/undo/' + enc(el.dataset.seq), { method: 'POST' }); toast('Put back.'); await SCREENS.review(true); });
+    case 'undo': return busy(el, async () => {
+      const r = await api('/api/undo/' + enc(el.dataset.seq), { method: 'POST' });
+      toast(r.result === 'changed_since' ? 'That was changed after this, so I left it as it is.' : 'Put back.');
+      await SCREENS.review(true); });
+    case 'audit': return busy(el, async () => {
+      const r = await api(`/api/audit/${enc(el.dataset.id)}/${enc(el.dataset.choice)}`, { method: 'POST' });
+      toast(r.result === 'gone' ? 'That changed in the meantime, so I left it alone.' : ({ keep_new: 'Kept the newer one.', keep_old: 'Kept the older one.', keep_both: 'Kept both.', join: 'Kept just one.', done: 'Ticked off.', still: 'Okay, I will ask again later.', remove: 'Removed.', keep: 'Kept.', forget: 'Forgotten.' })[el.dataset.choice] || 'Done.');
+      await SCREENS.review(true); });
+    case 'dismiss-notice': return busy(el, async () => { await api('/api/notice/dismiss', { method: 'POST' }); await refreshStatus(); });
+    case 'audit-run': return busy(el, async () => {
+      const m = $('#audit-msg'); if (m) m.textContent = 'Looking…';
+      const r = await api('/api/audit/run', { method: 'POST' });
+      toast(r.summary.needs_you ? `Done. ${plural(r.summary.needs_you, 'thing')} to look at.` : 'Done. Everything looks fine.');
+      await SCREENS.review(true); });
+    case 'audit-lonely': { vstate().view = 'note'; await go('vault'); return setQ('is:orphan'); }
+    case 'undo-group': return busy(el, async () => {
+      const seqs = String(el.dataset.seqs || '').split(',').map(Number).filter(Boolean);
+      const r = await api('/api/undo-many', { method: 'POST', body: { seqs } });
+      toast(r.skipped ? `Put back ${plural(r.undone, 'thing')}. ${plural(r.skipped, 'other')} changed since, so I left ${r.skipped === 1 ? 'it' : 'them'}.` : `Put back ${plural(r.undone, 'thing')}.`);
+      await SCREENS.review(true); });
+    case 'toggle-group': { const k = el.dataset.seq; state.openGroups[k] = !state.openGroups[k]; return renderReviewBody(); }
 
     case 'mem-edit': { const li = el.closest('[data-mem]'); return memEditor(li, state.mem[id]); }
     case 'mem-cancel': return refreshHere();
@@ -1826,7 +1890,7 @@ document.addEventListener('click', async (e) => {
     case 'check-models': return busy(el, async () => {
       const r = await api('/api/settings/ai/models?address=' + enc($('#ai-addr').value.trim()));
       $('#ollama-models').innerHTML = r.models.map(m => `<option value="${esc(m)}">`).join('');
-      $('#ai-models-msg').textContent = r.reachable ? `Found ${plural(r.models.length, 'model')}. Pick one from the list.` : 'I could not reach Ollama there. Check that it is running and the address is right.';
+      $('#ai-models-msg').textContent = !r.reachable ? 'I could not reach an AI server there. Check that it is running and the address is right.' : r.models.length ? `Found ${plural(r.models.length, 'model')} on ${r.kind === 'ollama' ? 'Ollama' : 'an OpenAI-style server (llama.cpp, LM Studio or vLLM)'}. Pick one from the list.` : 'The server is there but lists no models yet. Type the model name yourself.';
     });
     case 'save-ai': return busy(el, async () => {
       const mode = ($('input[name=aimode]:checked') || {}).value || 'auto';

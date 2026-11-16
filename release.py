@@ -13,7 +13,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
 MANIFEST = "RELEASE_FILES.txt"
-SKIP_DIRS = {"__pycache__", ".git", ".brain", "vault", "_retired", ".venv", "venv", "node_modules"}
+SKIP_DIRS = {"__pycache__", ".git", ".brain", "vault", "_retired", ".venv", "venv", "node_modules", "shots"}
 SKIP_SUFFIXES = (".pyc", ".db", ".db-wal", ".db-shm", ".bak", ".mob-tmp")
 
 

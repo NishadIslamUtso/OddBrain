@@ -36,6 +36,7 @@ class AppSettings:
     guardrails: list[str] = field(default_factory=list)
     sync_hermes: bool = False
     bio_sensitive: bool = False
+    audit: bool = True          # the nightly check-up (memory_ob.audit)
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> AppSettings:

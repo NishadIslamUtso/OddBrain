@@ -22,6 +22,7 @@ from fastapi import Depends, FastAPI, File, HTTPException, Query, Request, Uploa
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from . import (
+    audit as audit_mod,
     biography as bio_mod,
     doubts as doubts_mod,
     exit,
@@ -203,6 +204,7 @@ def _status(st: Store) -> dict[str, Any]:
         "categories": list(topics.CATEGORIES),
         "memories": stats["active"],
         "people": len(st.list_people(limit=100000)),
+        "notice": startup.notice(settings.vault),
     }
 
 
@@ -345,6 +347,7 @@ def create_app() -> FastAPI:
             "unsure": _unsure(st),
             "feed": feed_mod.build(st, limit=40),
             "due": due,
+            "audit": audit_mod.public(settings.vault),
             "status": _status(st),
         }
 
@@ -391,6 +394,56 @@ def create_app() -> FastAPI:
             raise _fail(404, "That change no longer exists.")
         _after_change(st)
         return result
+
+    # -- the check-up ----------------------------------------------------------------
+
+    @app.post("/api/notice/dismiss")
+    def notice_dismiss() -> dict[str, Any]:
+        startup.dismiss_notice(settings.vault)
+        return {"ok": True}
+
+    @app.get("/api/audit")
+    def audit_report() -> dict[str, Any]:
+        return audit_mod.public(settings.vault)
+
+    @app.post("/api/audit/run")
+    def audit_run(st: Store = Depends(get_store)) -> dict[str, Any]:
+        """Look over everything now (the same check-up that runs every night)."""
+        report = audit_mod.run(st, settings.vault)
+        _after_change(st)
+        return report
+
+    @app.post("/api/audit/{finding_id}/{action}")
+    def audit_answer(finding_id: str, action: str, st: Store = Depends(get_store)) -> dict[str, Any]:
+        """The owner's answer to one thing the check-up found."""
+        try:
+            result = audit_mod.act(st, settings.vault, finding_id, action)
+        except LookupError as exc:
+            raise _fail(404, str(exc))
+        except ValueError as exc:
+            raise _fail(400, str(exc))
+        _after_change(st)
+        return {**result, "audit": audit_mod.public(settings.vault)}
+
+    @app.post("/api/undo-many")
+    def undo_many(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
+        """"Undo all" on a summary card: put back every listed change that can still be put back."""
+        raw = payload.get("seqs")
+        if not isinstance(raw, list) or not raw or len(raw) > 500 or not all(isinstance(x, int) for x in raw):
+            raise _fail(400, "Tell me which changes to put back.")
+        done = skipped = 0
+        for seq in sorted(set(raw), reverse=True):
+            try:
+                result = manager.undo(st, seq, vault=settings.vault)
+            except LookupError:
+                skipped += 1
+                continue
+            if result.get("result") == "undone":
+                done += 1
+            else:
+                skipped += 1
+        _after_change(st)
+        return {"undone": done, "skipped": skipped}
 
     # -- telling Memory_OB things --------------------------------------------------
 
@@ -876,7 +929,7 @@ def create_app() -> FastAPI:
             "integrity": {"changed": check.get("changed", []), "missing": check.get("missing", [])},
             "ai": _ai_settings(),
             "options": {
-                "semantic": app_s.semantic, "local_only": app_s.local_only,
+                "semantic": app_s.semantic, "local_only": app_s.local_only, "audit": app_s.audit,
                 "sync_hermes": app_s.sync_hermes, "bio_sensitive": app_s.bio_sensitive,
             },
             "never_remember": app_s.guardrails,
@@ -896,7 +949,7 @@ def create_app() -> FastAPI:
         from .nightshift import sync_hermes
 
         changes: dict[str, Any] = {}
-        for key in ("semantic", "local_only", "bio_sensitive"):
+        for key in ("semantic", "local_only", "bio_sensitive", "audit"):
             if key in payload:
                 changes[key] = bool(payload[key])
         if "never_remember" in payload:
@@ -929,9 +982,10 @@ def create_app() -> FastAPI:
 
     @app.get("/api/settings/ai/models")
     def ai_models(address: str = "") -> dict[str, Any]:
-        """The models installed on an Ollama server, so they can be picked rather than typed."""
-        found = models.ollama_models(address.strip())
-        return {"address": address.strip() or models.DEFAULT_OLLAMA_URL, "reachable": bool(found), "models": found}
+        """The models on the AI server at *address* (Ollama, llama.cpp, LM Studio or vLLM), so they can be picked."""
+        kind, found = models.server_models(address.strip())
+        return {"address": address.strip() or models.DEFAULT_OLLAMA_URL, "reachable": bool(kind),
+                "kind": kind, "models": found}
 
     @app.post("/api/settings/ai")
     def save_ai(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -949,8 +1003,14 @@ def create_app() -> FastAPI:
                 raise _fail(400, "Pick which model to use.")
             if not address.startswith(("http://", "https://")):
                 raise _fail(400, "The address should start with http:// or https://")
-            cfg.main = ModelSlot(provider="ollama", model=model, base_url=address)
-            cfg.auxiliary["embed"] = ModelSlot(provider="ollama", model=str(payload.get("meaning_model") or "").strip(),
+            kind, _found = models.server_models(address)
+            if not kind:        # not running right now: guess from the address, the owner may start it later
+                kind = ModelSlot(provider="custom", base_url=address).api_kind
+            provider = "ollama" if kind == "ollama" else "openai-compatible"
+            if kind == "openai":
+                address = models._v1(address)       # noqa: SLF001
+            cfg.main = ModelSlot(provider=provider, model=model, base_url=address)
+            cfg.auxiliary["embed"] = ModelSlot(provider=provider, model=str(payload.get("meaning_model") or "").strip(),
                                                base_url=address)
         else:
             raise _fail(400, "Unknown choice.")

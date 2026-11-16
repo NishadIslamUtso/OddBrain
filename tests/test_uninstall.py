@@ -18,6 +18,7 @@ sys.path.insert(0, str(PROJECT))
 sys.path.insert(0, str(PROJECT / "host"))
 
 import install as installer  # noqa: E402
+import retire  # noqa: E402
 import uninstall  # noqa: E402
 
 from memory_ob import manager, sync  # noqa: E402
@@ -32,7 +33,12 @@ class UninstallCase(unittest.TestCase):
         self.home.mkdir()
         (self.home / "skills" / "someone-elses-skill").mkdir(parents=True)
         (self.home / "skills" / "someone-elses-skill" / "SKILL.md").write_text("theirs", encoding="utf-8")
-        with mock.patch.dict(os.environ, {"HERMES_HOME": str(self.home)}), contextlib.redirect_stdout(io.StringIO()):
+        # install() also tidies old files out of the project folder it runs from, using
+        # RELEASE_FILES.txt. Here that folder is the real project, whose list is stale while
+        # files are being added, so a test run would move new files into _retired/. Not here.
+        with mock.patch.dict(os.environ, {"HERMES_HOME": str(self.home)}), \
+                mock.patch.object(retire, "sweep", return_value=[]), \
+                contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(installer.install(enable=False, startup=False), 0)
 
         self.vault = self.tmp / "Documents" / "Memory_OB"

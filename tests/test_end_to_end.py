@@ -206,9 +206,14 @@ class CliCase(unittest.TestCase):
         self.assertIn("capture", r.stdout)
 
     def test_the_old_commands_are_gone(self) -> None:
-        for gone in ("sweep", "dream", "chapter", "approve", "deny", "review"):
+        for gone in ("dream", "chapter", "approve", "deny", "review"):
             r = run_cli([gone], env=self.env)
             self.assertNotEqual(r.returncode, 0, gone)
+
+    def test_sweep_is_the_check_up(self) -> None:
+        # "sweep" used to be a retired command; it is back as the check-up.
+        r = run_cli(["sweep", "--no-fix"], env=self.env)
+        self.assertEqual(r.returncode, 0, r.stderr)
 
 
 class ApiCase(unittest.TestCase):

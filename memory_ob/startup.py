@@ -43,6 +43,18 @@ def _save_state(vault: Path, data: dict[str, Any]) -> None:
     p.write_text(json.dumps(data, indent=2), encoding="utf-8")
 
 
+def notice(vault: Path) -> str:
+    """A one-time note for the owner about something the upgrade did, until they dismiss it ("" if none)."""
+    text = _state(Path(vault)).get("notice")
+    return text if isinstance(text, str) else ""
+
+
+def dismiss_notice(vault: Path) -> None:
+    state = _state(Path(vault))
+    if state.pop("notice", None) is not None:
+        _save_state(Path(vault), state)
+
+
 def retire_old_cards(store: Store) -> int:
     """Close pending questions the old version left that are not real conflicts."""
     from .review import CardStore
@@ -84,6 +96,12 @@ def prepare(settings: Settings) -> dict[str, Any]:
             if not state.get("cards_retired"):
                 report["retired_cards"] = retire_old_cards(st)
                 state["cards_retired"] = True
+                if report["retired_cards"]:
+                    n = report["retired_cards"]
+                    state["notice"] = (
+                        f"I closed {n} old question{'s' if n != 1 else ''} left over from the earlier version. "
+                        "I now only ask when something you say clashes with what I already know. "
+                        "Nothing you saved was changed.")
                 _save_state(vault, state)
             vault_mod.ensure_layout(vault)
             if vault_mod.needs_subject_layout(vault):

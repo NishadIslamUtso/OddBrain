@@ -4,9 +4,16 @@ Memory for Hermes that runs itself. **Tell it anything, in any order. It files
 it, checks it against what it already knows, and only interrupts you when two
 things really disagree.**
 
-Everything stays on your computer: no cloud, no accounts. Your memories are
-plain markdown files in an Obsidian-style folder, so you can open them in
-Obsidian (or anything else) at any time.
+Your memories live on your computer: no cloud service, no accounts, no
+tracking. They are plain markdown files in an Obsidian-style folder, so you can
+open them in Obsidian (or anything else) at any time.
+
+One honest exception: the AI helper that reads what you say. In **automatic**
+mode it uses Hermes's own model, and if that model is an online one, your words
+go there, exactly as they do when you chat with Hermes. To keep every word on
+this computer, either pick your own local model in Settings or turn on **Keep
+everything on this computer** (off by default). With that switch on and no local
+model, Memory_OB still works, using simple rules instead of an AI.
 
 ---
 
@@ -19,7 +26,7 @@ remembered. Open the Memory_OB tab only when you want to look, fix or search.
 
 | Screen | What it is |
 |---|---|
-| **Review** | The only screen that ever needs you. Shows what was just remembered (with **Undo**), questions where something you said now disagrees with something remembered ("Your answer changed": keep new / keep old / keep both), and a few "not sure" items. A box at the top lets you tell it something directly, and search covers everything. You can also say "forget that I like mangoes" there, or in a chat. |
+| **Review** | The only screen that ever needs you. Shows what was just remembered (one card per message you sent, with the list of what it filed; **Undo** one line or the whole card), questions where something you said now disagrees with something remembered ("Your answer changed": keep new / keep old / keep both), a few "not sure" items, and **Worth a look** (what the check-up found, see below). A box at the top lets you tell it something directly, and search covers everything. You can also say "forget that I like mangoes" there, or in a chat. |
 | **Vault** | Your notes laid out like Obsidian. A folder tree on the left that opens and closes (the open/closed state is remembered, there is a collapse-all button, and **Ctrl+O** jumps to any note by name). Click a note to read it; hover a line to edit or delete just that line. A graph view shows how notes link (drag, zoom, show only what's around the open note, sliders for the forces, hide loose notes). Search takes Obsidian-style filters (`tag:#topic/health`, `path:Health`, `by:ai`, `-word`, `"exact phrase"`, `after:2026-01-01`, `has:revisit`, `is:orphan`, `type:memory`, `person:Riya`) and shows the matching lines, not just the file. Notes are by subject, not one file per sentence. The AI makes the folders, titles and links; you can edit anything. |
 | **People** | A profile for everyone you talk about or talked to, on any platform, linked to the raw conversations. Two profiles that are the same person can be joined with one click (and un-joined from the feed). Removing a person asks whether their chats go too (group chats with other people always stay); undo brings everything back. |
 | **Journal** | A professional biography of you, written from what is remembered (health and money are left out unless you allow them in Settings), plus dated journal entries. Edit it yourself and it is locked against AI rewrites until you unlock it. |
@@ -58,7 +65,50 @@ remembered. Open the Memory_OB tab only when you want to look, fix or search.
   always goes into that project's note.
 * People named in a message get a profile. Profiles are **never** joined by the
   AI; only you can say two are the same.
+* Something is only filed if **one real sentence of yours** backs it. A claim
+  that mixes words from several sentences, takes a fact you said about someone
+  else ("my sister lives in Rome") as a fact about you, or turns a wish ("I want
+  to move to Rome") into a present-tense fact is dropped, and the log says why.
+* A long message you send in one go ("info dump") shows up as **one summary card**
+  ("Saved 7 things from your message"), not seven separate cards. The summary is
+  only for display: everything in the message is still read, checked and filed
+  one fact at a time, and Undo works on a single line or on the whole card.
+* The **check-up** looks over what is saved and asks you only about what needs a
+  human (see below).
+* Say you did something and the matching to-do is **ticked off** ("I submitted my
+  thesis proposal" closes "I need to submit my thesis proposal"). It only does
+  this when exactly one open to-do fits; a "no", a plan or a maybe never ticks
+  anything, and Undo is in the feed.
+* Small talk ("thanks, that's all for now") is ignored, and two statements that can
+  both be true ("budget for food 5000", "budget for rent 12000") do not trigger a
+  question. "I'm based in Dhaka" next to "I live in Dhaka" is the same fact.
 * The AI never answers your questions for you.
+
+## The check-up
+
+Review's **Worth a look** list and `memory-ob sweep` run the same check-up. It
+looks for:
+
+* two memories that **disagree** (that slipped past the rules at the time),
+* the same thing said **twice**,
+* a to-do that has been open for **more than 45 days**,
+* a saved quote that no longer matches the sentence it came from.
+
+Each finding is one plain question with one-click answers ("Keep the newer one /
+the older one / Both are right"; "Keep just one / Keep both"; "Done / Still to
+do / Not needed any more"; "Keep it / Forget it"). Nothing is changed until you
+answer, and every answer that changes a memory can be undone from the feed. It also lists notes that
+are not linked to anything (click to see them in the Vault with `is:orphan`);
+that is only a list, never a question.
+
+It also fixes **by itself**, and only tells you if something was wrong, these
+things that have one right answer: notes that differ from the database (they are
+rebuilt), a private memory that leaked into a note, a damaged database, and
+original files that changed since import (verify only; it never rewrites a
+fingerprint).
+
+You can press **Check now** in Review, or let the nightly run do it (Settings, "Look over everything each night", on by default). If you already said "both are
+true" to a question when it came up, the check-up will not ask again.
 
 ## Bringing old things in
 
@@ -107,8 +157,10 @@ install, it warns you instead of installing into the wrong place.
 memory-ob init | capture "text" | search "words" | list | show <id>
 memory-ob feed | doubts | answer <id> <new|old|both> | undo <number>
 memory-ob import <file> | tidy | graph | embed | export
-memory-ob stats | activity | models | doctor | serve | proxy
+memory-ob stats | activity | models | doctor | sweep | serve | proxy
 ```
+
+`sweep` runs the check-up from the terminal (`--no-fix` only reports).
 
 ## Honest limits
 
@@ -130,6 +182,15 @@ memory-ob stats | activity | models | doctor | serve | proxy
   night), and never mixes numbers from two models.
 * A memory you keep private is blanked in the saved conversations too, wherever
   they are shown. The raw database still holds it (that is how you bring it back).
+* The AI helper can be Hermes's model, Ollama, or any server that speaks the
+  OpenAI way (llama.cpp's `llama-server`, LM Studio, vLLM). Memory_OB works out
+  which kind an address is by itself.
+* Reads on `localhost` are open (no key); only writing needs the key. Anyone who
+  can run programs on your computer can read your memories through the app.
+* A new memory is signed by the AI by design (it shows in the feed with Undo);
+  there is no "ask me before saving" switch.
+* On the first start after an upgrade, questions made by an older version are
+  retired once, and a notice says so.
 * Model-dependent parts (the AI judge, the librarian, biography) are tested with
   stand-ins here, not with a real model. The screens were tested in a real
   browser (Chromium), and the whole thing has not yet been run inside Hermes on
@@ -168,5 +229,9 @@ installer, uninstaller, nightly run), `skills/` (agent skills), `tests/`.
 python run_tests.py        # everything, one command
 python release.py ../Memory_OB-update-N.zip   # build a release zip + RELEASE_FILES.txt
 ```
+
+`tests/browser/` holds the browser checks (Chromium through Playwright:
+light and dark, narrow screens, contrast, Vault, summary card, check-up). They
+are not part of `run_tests.py`; see `tests/browser/README.md`.
 
 `DESIGN.md` records the rules the engine will not bend and why.

@@ -50,8 +50,10 @@ _RELATIONS = (
     "grandmother", "grandfather", "grandma", "grandpa", "fiance", "fiancee",
 )
 _NAME = r"([A-Z][a-z]{2,}(?:\s[A-Z][a-z]{2,})?)"
+# "my younger brother Tanvir": a word or two between "my" and the relation.
+_REL_MODS = r"(?:(?i:younger|older|elder|little|big|youngest|oldest|old|dear|step|half|twin|favou?rite|close|new)\s+)?"
 _RELATION_RE = re.compile(
-    r"\b(?i:my|our)\s+((?i:" + "|".join(sorted(_RELATIONS, key=len, reverse=True))
+    r"\b(?i:my|our)\s+" + _REL_MODS + r"((?i:" + "|".join(sorted(_RELATIONS, key=len, reverse=True))
     + r"))\s+(?:(?i:named|called)\s+)?" + _NAME
 )
 _VERB_RE = re.compile(
@@ -134,7 +136,9 @@ class Outcome:
     forgotten: int = 0
     forget_unclear: int = 0
     ungrounded: int = 0
+    finished: int = 0
     record_ids: list[str] = field(default_factory=list)
+    finished_ids: list[str] = field(default_factory=list)
     card_ids: list[str] = field(default_factory=list)
     people: list[str] = field(default_factory=list)
     conversation_id: str | None = None
@@ -145,7 +149,7 @@ class Outcome:
             "saved": self.saved, "duplicates": self.duplicates, "asked": self.asked,
             "unsure": self.unsure, "waiting": self.waiting, "blocked": self.blocked,
             "secret": self.secret, "forgotten": self.forgotten, "forget_unclear": self.forget_unclear,
-            "ungrounded": self.ungrounded,
+            "ungrounded": self.ungrounded, "finished": self.finished,
             "record_ids": self.record_ids, "card_ids": self.card_ids,
             "people": self.people, "conversation_id": self.conversation_id,
             "read": self.read,
@@ -232,6 +236,8 @@ def describe(out: Outcome) -> str:
     bits: list[str] = []
     if out.saved:
         bits.append(f"Remembered {things(out.saved)}.")
+    if out.finished:
+        bits.append("Ticked off 1 to-do." if out.finished == 1 else f"Ticked off {out.finished} to-dos.")
     if out.duplicates:
         bits.append(f"Already knew {out.duplicates}.")
     if out.asked:
@@ -563,19 +569,21 @@ def _settle_all(
     actor: str, reason: str, conv_id: str | None, ignore: set[str] | None = None,
     judge: Any | None = None, owner_text: str | None = None, source_text: str = "",
 ) -> None:
-    from .extract import support
+    from .extract import evidence_for
 
     people_seen: list[str] = []
     for c in cands:
+        said_unsure = False
         if owner_text is not None:
-            grounded, evidence = support(c.text, owner_text)
-            if not grounded:
-                store.log_activity("not-grounded", c.text[:80], actor="memory_ob")
+            found = evidence_for(c.text, owner_text, forward_ok=bool(c.todo))
+            if not found.grounded:
+                store.log_activity("not-grounded", f"{c.text[:80]} ({found.reason})", actor="memory_ob")
                 out.ungrounded += 1
                 continue
-            if evidence:
-                c.source = {**c.source, "quote": evidence,
-                            "quote_hash": quotes.hash_quote(evidence, source_text)}
+            said_unsure = found.hedged
+            if found.quote:
+                c.source = {**c.source, "quote": found.quote,
+                            "quote_hash": quotes.hash_quote(found.quote, source_text)}
         blocked = blocked_by_guardrails(guardrails, c.text)
         if blocked:
             store.log_activity("guardrail-block", f"{c.text[:80]} (~ {blocked})", actor="memory_ob")
@@ -597,11 +605,87 @@ def _settle_all(
         settle_fact(store, fid, c.text, kind=c.kind_hint or "note",
                     source={**c.source, "filed_by": "ai" if filing else "rules"}, out=out,
                     model_used=model_used, people=[n for n, _ in named], actor=actor, reason=reason,
-                    judge=judge, filing=filing)
+                    judge=judge, filing=filing, hedged=said_unsure)
     out.people = people_seen
     if conv_id and people_seen:
         store.set_conversation_people(conv_id, people_seen)
         store.link_conversation(conv_id)
+
+
+# -- saying you did it ticks the to-do off ------------------------------------------------
+
+_DID_RE = re.compile(
+    r"^\W*(?:i|we)(?:'ve|\s+have|\s+had)?\s+(?:(?:just|already|finally|also|then|now)\s+)*([a-z]+)\s+(.+)$", re.I)
+_IRREGULAR = {
+    "did": "do", "done": "do", "paid": "pay", "bought": "buy", "sent": "send", "got": "get", "made": "make",
+    "wrote": "write", "written": "write", "took": "take", "taken": "take", "gave": "give", "given": "give",
+    "went": "go", "saw": "see", "met": "meet", "found": "find", "told": "tell", "brought": "bring",
+    "held": "hold", "kept": "keep", "left": "leave", "ran": "run", "read": "read", "put": "put", "set": "set",
+}
+_NOT_PAST = frozenset("need indeed proceed succeed exceed feed speed bleed breed".split())
+# Finishing words fit any to-do about the same thing; other verbs must be the same verb.
+_FINISHING = frozenset("finish complete do handle sort clear wrap".split())
+_TODO_NOISE = frozenset("need must should gotta remind forget todo".split())
+
+
+def _lemma(verb: str) -> str:
+    v = verb.lower()
+    if v in _IRREGULAR:
+        return _IRREGULAR[v]
+    if v.endswith("ied") and len(v) > 4:
+        return v[:-3] + "y"
+    if v.endswith("ed") and len(v) > 4:
+        v = v[:-2]
+        if len(v) > 3 and v[-1] == v[-2] and v[-1] not in "lsz":
+            v = v[:-1]
+    return v
+
+
+def _same_verb(lemma: str, word: str) -> bool:
+    w = conflicts.stem(word)
+    a, b = lemma.rstrip("e"), w.rstrip("e")
+    return len(a) >= 3 and len(b) >= 3 and (a == b or a.startswith(b) or b.startswith(a))
+
+
+def _finish_todo(store: Any, text: str, *, actor: str = AI) -> Record | None:
+    """The one open to-do that *text* says is now done, ticked off. None when unsure.
+
+    Only a plain first-person "I submitted / paid / finished ..." counts. A negation, a wish
+    or a plan never does, and when two to-dos could match nothing is touched (it is then
+    saved as an ordinary memory).
+    """
+    low = (text or "").replace("\u2019", "'").strip()
+    m = _DID_RE.match(low)
+    if not m or topics.is_todo(low) or conflicts.is_hedged(low):
+        return None
+    verb = m.group(1).lower()
+    past = verb in _IRREGULAR or (verb.endswith("ed") and len(verb) > 4 and verb not in _NOT_PAST)
+    if not past or any(w in conflicts._NEGATORS for w in conflicts._WORD_RE.findall(conflicts._normalise(low))):
+        return None
+    lemma = _lemma(verb)
+    objects = {conflicts.stem(w) for w in conflicts._WORD_RE.findall(conflicts._normalise(m.group(2)))
+               if w not in conflicts._STOP and not any(ch.isdigit() for ch in w) and len(w) > 2}
+    if not objects:
+        return None
+    best: list[tuple[float, Record]] = []
+    for rec in store.list_records(status=ACTIVE, limit=20000):
+        if topics.TODO_TAG not in rec.tags or topics.DONE_TAG in rec.tags or rec.never_send:
+            continue
+        words = conflicts._WORD_RE.findall(conflicts._normalise(_text_of_record(rec)))
+        stems = {conflicts.stem(w) for w in words if w not in conflicts._STOP and w not in _TODO_NOISE}
+        if lemma not in _FINISHING and not any(_same_verb(lemma, w) for w in words):
+            continue
+        shared = len(objects & stems) / len(objects)
+        if shared >= 0.6:
+            best.append((shared, rec))
+    if len(best) != 1:
+        return None
+    return mark_done(store, best[0][1].id, done=True, vault=None, actor=actor,
+                     reason="you said you did it")
+
+
+def _text_of_record(rec: Record) -> str:
+    return rec.body or rec.title or ""
 
 
 def settle_fact(
@@ -609,6 +693,7 @@ def settle_fact(
     model_used: bool, people: list[str], actor: str = AI,
     reason: str = "remembered from what you said", force: bool = False,
     log: bool = True, judge: Any | None = None, filing: dict[str, Any] | None = None,
+    hedged: bool = False,
 ) -> str:
     """Decide what happens to one statement. Returns what was done.
 
@@ -623,7 +708,8 @@ def settle_fact(
     ``asked`` (a question is waiting), ``unsure`` (the owner sounded unsure) or
     ``waiting`` (to be read when an AI helper is available).
     """
-    if not force and conflicts.is_hedged(text):
+    if not force and (hedged or conflicts.is_hedged(text)):
+        # `hedged`: the owner's own words sounded unsure even if the AI's wording does not.
         store.set_fact_status(fact_id, "unsure")
         out.unsure += 1
         return "unsure"
@@ -638,6 +724,14 @@ def settle_fact(
     moment = filing.get("moment")
     if moment is None:
         moment = topics.is_moment(text)
+    if not moment and not force and log and not filing.get("todo"):
+        closed = _finish_todo(store, text, actor=actor)
+        if closed is not None:
+            # "I submitted my thesis proposal" ticks off "I need to submit my thesis proposal".
+            store.set_fact_status(fact_id, "duplicate")
+            out.finished += 1
+            out.finished_ids.append(closed.id)
+            return "finished"
     if moment:
         # A passing moment is kept, dated, in the Journal. It is only checked for repeats.
         found = conflicts.find(text, _comparable(store, moments=True))
@@ -763,7 +857,7 @@ def _tidy(store: Any, vault: Path | None, out: Outcome | None = None, *, record_
     if vault is None:
         return
     try:
-        ids = record_ids if record_ids is not None else (out.record_ids if out else [])
+        ids = record_ids if record_ids is not None else ((out.record_ids + out.finished_ids) if out else [])
         vault_mod.ensure_layout(vault)
         idx = vault_mod._load_index(vault)  # noqa: SLF001
         dirty: set[str] = set()
@@ -833,6 +927,10 @@ def answer_conflict(
             log_record_change(store, action="create", before=None, after=new_rec, actor=OWNER,
                               reason="you said both are true")
             touched.append(new_rec.id)
+            if vault is not None and card.record_id:
+                from . import audit
+
+                audit.pair_answered(vault, card.record_id, new_rec.id)      # the check-up must not ask again
     elif answer == "old":
         store.log_change(entity="doubt", entity_id=card_id, action="keep_old", before=None,
                          after={"text": (card.new or {}).get("body", "")}, actor=OWNER,
@@ -889,18 +987,22 @@ def edit_record(
     return saved
 
 
-def mark_done(store: Any, record_id: str, *, done: bool = True, vault: Path | None = None) -> Record | None:
-    """Tick a to-do off (or put it back). Logged, so Undo works."""
+def mark_done(store: Any, record_id: str, *, done: bool = True, vault: Path | None = None,
+              actor: str = OWNER, reason: str | None = None) -> Record | None:
+    """Tick a to-do off (or put it back). Logged, so Undo works.
+
+    *actor* is the owner for a tick in the app; the AI when the owner said in their own
+    words that they did it ("I submitted my thesis proposal").
+    """
     rec = store.get_record(record_id)
     if rec is None:
         return None
     before = Record.from_dict(rec.to_dict())
     rec.tags = [t for t in rec.tags if t not in (topics.TODO_TAG, topics.DONE_TAG)]
     rec.tags.append(topics.DONE_TAG if done else topics.TODO_TAG)
-    saved = store.sign_record(rec, card_id=OWNER, changed_by=OWNER,
-                              reason="you ticked it off" if done else "you put it back on the list")
-    log_record_change(store, action="update", before=before, after=saved, actor=OWNER,
-                      reason="you ticked it off" if done else "you put it back on the list")
+    why = reason or ("you ticked it off" if done else "you put it back on the list")
+    saved = store.sign_record(rec, card_id=AI_CARD if actor == AI else OWNER, changed_by=actor, reason=why)
+    log_record_change(store, action="update", before=before, after=saved, actor=actor, reason=why)
     _tidy(store, vault, None, record_ids=[record_id])
     return saved
 

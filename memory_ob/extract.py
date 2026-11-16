@@ -19,9 +19,12 @@ _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
 
 # Chatter that never becomes a fact: greetings, thanks, filler, one-word ack.
 _CHATTER_RE = re.compile(
-    r"^(?:hi|hello|hey|yo|ok|okay|yes|no|nope|thanks|thank you|thx|sure|"
-    r"cool|nice|great|done|next|continue|go|bye|goodbye|hm{1,3}|lol|lmao|"
-    r"sorry|please|wow|ah|oh|uh|um+)\b[.!\s]*$",
+    r"^(?:(?:hi|hello|hey|yo|ok|okay|yes|yep|yeah|no|nope|thanks|thank you|thx|cheers|sure|"
+    r"cool|nice|great|awesome|perfect|alright|fine|done|next|continue|go|bye|goodbye|hm{1,3}|lol|lmao|"
+    r"sorry|please|wow|ah|oh|uh|um+|got it|all good|never ?mind|nvm|"
+    r"that['\u2019]?s (?:all|it)|that is (?:all|it)|for now|for today|for the moment|"
+    r"a lot|so much|very much|again|see you(?: later)?|talk (?:to you )?later|"
+    r"good (?:morning|afternoon|evening|night))\b[\s,.!]*)+$",
     re.IGNORECASE,
 )
 
@@ -476,32 +479,136 @@ def _invented_names(claim: str, owner_text: str) -> list[str]:
     return [w for w in _NAME_WORD_RE.findall(claim or "") if w.lower() not in low]
 
 
-def support(claim: str, owner_text: str) -> tuple[bool, str]:
-    """Is *claim* backed by what the owner actually said?
+_REL_WORDS = (
+    "sister", "brother", "mother", "mom", "mum", "father", "dad", "wife", "husband",
+    "best friend", "friend", "cousin", "uncle", "aunt", "boss", "manager", "teacher",
+    "professor", "roommate", "girlfriend", "boyfriend", "partner", "colleague",
+    "coworker", "neighbor", "neighbour", "classmate", "mentor", "son", "daughter",
+    "grandmother", "grandfather", "grandma", "grandpa", "fiance", "fiancee",
+)
+_REL_ALT = "|".join(sorted(_REL_WORDS, key=len, reverse=True))
+_LEAD_RE = re.compile(r"^\W*(?:(?:and|but|also|so|well|oh|then|plus|ok|okay|yeah|actually)\b[\s,]*)+", re.I)
+_ME_RE = re.compile(r"^\W*(?:i|i'm|im|i've|ive|i'd|i'll|me|we|we're|we've|us|our)\b", re.I)
+_REL_SUBJECT_RE = re.compile(
+    r"^\W*(?i:my|our)\s+(?:(?i:younger|older|elder|little|big|youngest|oldest|old|dear|step|half|twin|favou?rite|close|new)\s+)?((?i:" + _REL_ALT + r"))\b(?:\s+(?i:named|called))?(?:\s+([A-Z][a-z]{2,}))?")
+_REL_AND_ME_RE = re.compile(
+    r"^\W*(?i:my|our)\s+(?:(?i:younger|older|elder|little|big|youngest|oldest|old|dear|step|half|twin|favou?rite|close|new)\s+)?(?i:" + _REL_ALT + r")(?:\s+[A-Z][a-z]{2,})?\s+(?i:and)\s+(?i:i|me)\b")
+_NAME_AND_ME_RE = re.compile(r"^\W*[A-Z][a-z]{2,}\s+and\s+(?:i|me)\b")
+_PRONOUN_RE = re.compile(r"^\W*(he|she|they|his|her|their)\b", re.I)
+_NAME_SUBJECT_RE = re.compile(
+    r"^\W*([A-Z][a-z]{2,}(?:\s[A-Z][a-z]{2,})?)\s+"
+    r"(?:is|was|has|had|will|can|paid|said|got|went|did|owes|[a-z]{3,}s|[a-z]{3,}ed)\b")
+_NOT_NAMES = frozenset({
+    "the", "this", "that", "there", "these", "those", "its", "when", "while", "after", "before",
+    "today", "tomorrow", "yesterday", "maybe", "also", "then", "now", "here", "sometimes", "always",
+    "never", "every", "some", "many", "one", "last", "next", "you", "your", "what", "why", "how",
+    "who", "please", "most", "both", "each", "just", "still", "even", "since", "because", "although",
+    "though", "if", "once", "soon", "later", "recently", "currently", "usually", "mostly", "almost",
+})
+# Wishes and plans: "I want to work at Google someday" is not "I work at Google".
+_WISH_RE = re.compile(
+    r"\b(want(?:s|ed)?\s+to|wanna|wish(?:es|ed)?|hope(?:s|d)?\s+to|hoping\s+to|dream(?:s|ed)?\s+(?:of|about)|"
+    r"someday|one\s+day|would\s+(?:like|love)\s+to|plan(?:s|ned|ning)?\s+to|going\s+to|gonna|"
+    r"intend(?:s|ed)?\s+to|aim(?:s|ed|ing)?\s+to|thinking\s+(?:of|about)|considering)\b", re.I)
+_CONTRAST_RE = re.compile(r"\s*(?:[,;:]|\b(?:but|though|although|however|while)\b)\s*", re.I)
 
-    Returns ``(grounded, evidence)``, where *evidence* is the owner's own
-    sentence that backs it best. A claim is grounded when most of its content
-    words (and every number in it) appear in the owner's words. This stops an
-    AI helper from inventing or garbling a memory that is then saved silently.
+
+@dataclass(slots=True)
+class Evidence:
+    """Whether a claim is backed by the owner's own words, and by which sentence."""
+
+    grounded: bool
+    quote: str = ""
+    hedged: bool = False        # the owner sounded unsure in the very words that back it
+    reason: str = ""
+
+
+def _subject_of(sentence: str) -> tuple[str, frozenset[str]]:
+    """Who a sentence is about: ``("me", ...)``, ``("other", {tokens})`` or ``("unknown", ...)``."""
+    s = _LEAD_RE.sub("", sentence or "").strip()
+    if not s:
+        return "unknown", frozenset()
+    if _ME_RE.match(s) or _REL_AND_ME_RE.match(s) or _NAME_AND_ME_RE.match(s):
+        return "me", frozenset()
+    m = _REL_SUBJECT_RE.match(s)
+    if m:
+        return "other", frozenset(t.lower() for t in m.groups() if t)
+    m = _PRONOUN_RE.match(s)
+    if m:
+        return "other", frozenset({m.group(1).lower()})
+    m = _NAME_SUBJECT_RE.match(s)
+    if m and m.group(1).split()[0].lower() not in _NOT_NAMES:
+        return "other", frozenset(w.lower() for w in m.group(1).split())
+    return "unknown", frozenset()
+
+
+def subject_of(sentence: str) -> tuple[str, frozenset[str]]:
+    """Who a sentence is about: ``("me" | "other" | "unknown", tokens naming the other person)``."""
+    return _subject_of(sentence)
+
+
+def _mentions(claim: str, tokens: frozenset[str]) -> bool:
+    """Does the claim name the person (or relation) a sentence is about?"""
+    from . import conflicts
+
+    have = {conflicts.stem(w) for w in re.findall(r"[a-z']+", (claim or "").lower())}
+    return any(conflicts.stem(t) in have for t in tokens)
+
+
+def evidence_for(claim: str, owner_text: str, *, forward_ok: bool = False) -> Evidence:
+    """Is *claim* backed by what the owner actually said? And by which of their sentences?
+
+    A claim is grounded only when **one real sentence** of the owner's backs most
+    of it (at least 60% of its content words, every number in it). Words may come
+    from other sentences only to fill in what the owner left unsaid ("It makes 50k"
+    after "I started a bakery called Sweet Rise") and only from sentences that are
+    about the owner, or about the person the claim names. So "I live in Dhaka" is
+    not backed by "My sister lives in Dhaka", and "I work at Google" is not backed
+    by "I want to work at Google someday" (a wish is not a fact; ``forward_ok``
+    lets a to-do or plan keep its wish wording).
     """
     from . import conflicts
 
     wanted = {w for w in conflicts.read(claim).stems if w not in _META_WORDS}
     if not wanted:
-        return True, ""
+        return Evidence(True)
+    if _invented_names(claim, owner_text):
+        return Evidence(False, reason="a name the owner never wrote")
     sentences = [x.strip() for x in _SENTENCE_RE.split(owner_text or "") if x.strip()]
-    have = conflicts.read(owner_text or "").stems
-    coverage = len(wanted & have) / len(wanted)
-    claim_numbers = set(conflicts._NUMBER_RE.findall(claim.lower()))      # noqa: SLF001
-    owner_numbers = set(conflicts._NUMBER_RE.findall((owner_text or "").lower()))      # noqa: SLF001
-    best, best_cover = "", 0.0
+    pool: list[tuple[str, frozenset[str]]] = []
     for sent in sentences:
-        cover = len(wanted & conflicts.read(sent).stems) / len(wanted)
+        kind, tokens = _subject_of(sent)
+        if kind == "other" and not _mentions(claim, tokens):
+            continue            # about somebody the claim does not mention: not evidence for it
+        pool.append((sent, conflicts.read(sent).stems))
+    if not pool:
+        return Evidence(False, reason="no sentence of the owner's is about this")
+    best, best_stems, best_cover = "", frozenset(), 0.0
+    for sent, stems in pool:
+        cover = len(wanted & stems) / len(wanted)
         if cover > best_cover:
-            best, best_cover = sent, cover
-    grounded = (coverage >= 0.6 and claim_numbers <= owner_numbers
-                and not _invented_names(claim, owner_text))
-    return grounded, best[:300]
+            best, best_stems, best_cover = sent, stems, cover
+    union = frozenset().union(*(stems for _, stems in pool))
+    pool_cover = len(wanted & union) / len(wanted)
+    if not (best_cover >= 0.6 or (best_cover >= 0.34 and pool_cover >= 0.85)):
+        return Evidence(False, reason="not backed by one of the owner's sentences")
+    claim_numbers = set(conflicts._NUMBER_RE.findall(claim.lower()))          # noqa: SLF001
+    pool_numbers: set[str] = set()
+    for sent, _ in pool:
+        pool_numbers |= set(conflicts._NUMBER_RE.findall(sent.lower()))       # noqa: SLF001
+    if not claim_numbers <= pool_numbers:
+        return Evidence(False, reason="a number the owner did not say about this")
+    if _WISH_RE.search(best) and not _WISH_RE.search(claim) and not forward_ok:
+        return Evidence(False, reason="the owner said they wish or plan this, not that it is so")
+    clauses = [c for c in _CONTRAST_RE.split(best) if c and c.strip()] or [best]
+    clause = max(clauses, key=lambda c: len(wanted & conflicts.read(c).stems))
+    return Evidence(True, best[:300], hedged=conflicts.is_hedged(clause))
+
+
+def support(claim: str, owner_text: str) -> tuple[bool, str]:
+    """``(grounded, evidence)`` for *claim*; see :func:`evidence_for`."""
+    ev = evidence_for(claim, owner_text)
+    return ev.grounded, ev.quote
 
 
 def make_quote(text: str, source_text: str) -> dict[str, str]:

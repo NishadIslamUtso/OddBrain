@@ -53,21 +53,33 @@ what you said
     the AI also picks the category, an optional note title and the people, and is shown
     existing note titles so it files into them (`extract.py`, `manager.librarian_context`)
   → clauses containing [hidden] dropped; the rest of the message continues
-  → grounding: a claim must be supported by the owner's own words (quote hash-checked;
-    ≥60% of its stems, its numbers are a subset, and it may not introduce a capitalised
-    name the owner never wrote)
+  → grounding (`extract.evidence_for`): ONE sentence of the owner's own words must back
+    the claim (quote hash-checked): ≥60% of its content stems (or ≥34% when the rest of
+    the claim is covered by the whole message, for "he/she/it" coreference); its numbers
+    must come from a sentence that is not about someone else; it may not introduce a
+    capitalised name the owner never wrote; a sentence about someone else ("my sister
+    lives in Rome") cannot back a fact about the owner; a wish or plan ("I want to
+    move") cannot back a present-tense fact (a to-do may be forward-looking); a hedged
+    clause marks the claim "not sure". Dropped claims are logged with the reason.
   → for each claim:
       hazard / "never remember" word       → dropped
       hedged ("maybe", "I might")          → kept as "not sure"
       no helper, not first person, not
         about a known project              → kept raw, read later
       passing mood / one-off event         → Journal, dated; only checked for repeats
+      "I did <a to-do>" (one open to-do fits) → that to-do is ticked off (feed: "Ticked off", with Undo);
+                                             the sentence itself is not kept as a second memory
       duplicate of something known         → skipped
       contradicts a saved memory           → one question (new / old / both);
                                              rules first, AI judge for borderline cases
       otherwise                            → saved, filed in a category (tags: todo,
                                              project/<name>), in the feed
 ```
+
+The feed groups what one message filed into **one summary card** (`feed.build`:
+a `group` item with its lines). The card is display only; the pipeline above
+ran on every claim separately. `POST /api/undo-many` takes back a card's lines
+in one go, each still checked on its own.
 
 Every change writes a change-log entry with the old and new text, so the feed
 can show it and **Undo** can take it back — unless the memory has been changed
@@ -120,7 +132,11 @@ both re-embed in the background.
 ## 8. The AI helper
 
 `auto` uses Hermes's own model setup (its config and the local `hermes proxy`),
-resolved per call. `custom` is a local Ollama address and model. Embeddings stay
+resolved per call; that model may be an online one, so the `local_only` switch
+(off by default) skips it and uses only a model on this computer, or simple
+rules. `custom` is a local address and model: Ollama, or any OpenAI-style server
+(llama.cpp, LM Studio, vLLM; `models.server_models` tells which in at most two
+requests, and chat/embeddings go to `/api/…` or `/v1/…` accordingly). Embeddings stay
 local. Two slots exist, `extract` (reading what you say, the biography) and
 `embed` (meaning search); no other model setting exists.
 
@@ -130,7 +146,25 @@ Reads conversations still waiting for a helper · suggests people who may be the
 same · refreshes the biography (unless locked) · prepares meaning search
 (embeddings) · rewrites the notes (including project folders) · checks the
 originals against the manifest (verify only — it never rewrites a fingerprint) ·
-updates Hermes's own notes if that switch is on.
+runs the check-up (if its switch is on, default on) · updates Hermes's own notes
+if that switch is on.
+
+### The check-up (`audit.py`)
+
+One engine behind Review's "Worth a look", the **Check now** button, the nightly
+step and `memory-ob sweep`. It writes `.brain/audit.json`.
+
+* **Findings** (need the owner; nothing changes until answered): two active memories
+  that disagree (`conflicts.compare`), the same thing twice, a to-do open for more
+  than 45 days, a quote whose hash no longer matches. At most 8 per kind are shown;
+  the rest are counted. Answers that change a memory (forget, done, keep one) go
+  through the change log, so they can be undone; "keep both" / "keep it" mute that
+  finding for good, and "Still to do" asks again after 45 days.
+* **Checks** (one right answer, fixed on the spot): notes vs database (`vault.rebuild`),
+  private text found in a note, database integrity, originals vs manifest (verify only).
+* A "both are true" answer given at capture time is recorded (`audit.pair_answered`)
+  so the check-up never raises the same pair again.
+* The check-up never makes a memory and never answers a question for the owner.
 
 ### Hermes's own notes (the optional switch)
 

@@ -45,7 +45,13 @@ def describe(change: dict[str, Any]) -> dict[str, Any]:
         if action == "create":
             item.update(verb="Remembered", text=_text_of(after))
         elif action == "update":
-            item.update(verb="Updated", text=_text_of(after), was=_text_of(before))
+            was_tags, now_tags = before.get("tags") or [], after.get("tags") or []
+            if _text_of(before) == _text_of(after) and topics.DONE_TAG in now_tags and topics.DONE_TAG not in was_tags:
+                item.update(verb="Ticked off", text=_text_of(after))
+            elif _text_of(before) == _text_of(after) and topics.TODO_TAG in now_tags and topics.DONE_TAG in was_tags:
+                item.update(verb="Put back on your list", text=_text_of(after))
+            else:
+                item.update(verb="Updated", text=_text_of(after), was=_text_of(before))
         elif action in ("remove", "retire", "retract"):
             item.update(verb="Removed", text=_text_of(before or after))
         else:
@@ -78,11 +84,44 @@ def describe(change: dict[str, Any]) -> dict[str, Any]:
     return item
 
 
+def _message_of(change: dict[str, Any]) -> str:
+    """The message a change came from, for the AI's new memories ("" for anything else)."""
+    if change["entity"] != "record" or change["action"] != "create" or not str(change.get("actor") or "").startswith("memory_ob"):
+        return ""
+    after = change.get("after") or {}
+    source = after.get("source") if isinstance(after, dict) else None
+    return str(source.get("conversation_id") or "") if isinstance(source, dict) else ""
+
+
+def _group(run: list[dict[str, Any]]) -> dict[str, Any]:
+    """Several memories the AI took from one message, as one card. *run* is newest first."""
+    n = len(run)
+    cats: dict[str, int] = {}
+    for item in run:
+        if item["category"]:
+            cats[item["category"]] = cats.get(item["category"], 0) + 1
+    return {
+        "group": True, "entity": "group", "entity_id": "", "seq": run[0]["seq"], "at": run[0]["at"],
+        "by": "AI", "category": "", "text": "", "was": "", "note": "",
+        "verb": f"Saved {n} things from your message",
+        "count": n,
+        "categories": [{"name": k, "count": v} for k, v in sorted(cats.items(), key=lambda kv: -kv[1])],
+        "items": run,
+        "undone": all(i["undone"] for i in run),
+        "can_undo": any(i["can_undo"] for i in run),
+        "undo_seqs": [i["seq"] for i in run if i["can_undo"]],
+    }
+
+
 def build(store: Any, *, limit: int = 60) -> list[dict[str, Any]]:
-    """The most recent changes, newest first, each marked undoable or not."""
+    """The most recent changes, newest first, each marked undoable or not.
+
+    Memories the AI took from one message are shown as one card (with the list inside).
+    """
     items: list[dict[str, Any]] = []
+    keys: list[str] = []
     private = store.private_ids()          # made private after the change was logged
-    for change in store.list_changes(limit=limit):
+    for change in store.list_changes(limit=limit * 4):
         if change["entity"] == "record" and change["entity_id"] in private:
             continue
         if change["entity"] == "record" and not all(
@@ -99,4 +138,14 @@ def build(store: Any, *, limit: int = 60) -> list[dict[str, Any]]:
             and not store.has_later_change(change["entity_id"], change["seq"])
         )
         items.append(item)
-    return items
+        keys.append(_message_of(change))
+    out: list[dict[str, Any]] = []
+    i = 0
+    while i < len(items):
+        j = i + 1
+        if keys[i]:
+            while j < len(items) and keys[j] == keys[i]:
+                j += 1
+        out.append(_group(items[i:j]) if j - i >= 2 else items[i])
+        i = j
+    return out[:limit]
