@@ -72,7 +72,7 @@ and visible, mistakes get corrected in one click. Rules never lead.
 | B8 | **Meaning search unconfirmed on the owner's machine** ("isn't it semantic?? why still weak") | Owner + me |
 | B9 | **Update-6 never reached GitHub** — work exists only as a zip somewhere — ✅ **closed by A11**: the work was on GitHub all along (update-5→7 diff on the `claude--made` branch) and nothing unique was lost; see `release/UPDATE-6-RECOVERY.md` | Me |
 | B10 | Second opinion covers disagreements/repeats only — not stale to-dos or broken-proof findings | Other judge |
-| B11 | Test kit trips on a renamed test package on fresh machines (builder pain) | Me |
+| B11 | Test kit trips on a renamed test package on fresh machines (builder pain) — ✅ **fixed in update-15** (A12): both package names with working ranges in the test extra; fresh setup = one command | Me |
 | B12 | Filing accuracy with the free Hermes model is the real gap vs Claude/ChatGPT memory | Owner + Claude |
 
 ---

@@ -63,9 +63,11 @@ produces **update-8**.*
   extended, never dropped); its one known fix (B5 "review clears after
   answering") confirmed present and tested. No re-upload needed — see
   `release/UPDATE-6-RECOVERY.md`.
-- [ ] **A12 · Test-kit fresh-install fix.** pyproject test extra must include
-  the renamed test package (`httpx2`) or pin starlette — fresh machines trip
-  on it every time.
+- [x] **A12 · Test-kit fresh-install fix.** ✅ DONE — the test extra now
+  carries both package names with working ranges (`httpx2` + `httpx<0.29`);
+  one `pip install -e ".[test]"` sets up a fresh machine completely
+  (verified: fresh venv, 49 suites green, zero manual steps) — **shipped in
+  update-15**.
 
 ## B. OWNER ACTIONS (small, one paste each)
 
