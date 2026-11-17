@@ -57,9 +57,12 @@ produces **update-8**.*
   stale to-dos and broken-proof findings too (not just disagreements/
   repeats) — false alarms set aside, rules' word stands with no answer —
   **shipped in update-14**.
-- [ ] **A11 · Update-6 recovery.** Find out what update-6 was (zip exists
-  only on the owner's machine per P1: extracted folders for update-2/5/7
-  only) — confirm nothing unique was lost between 5 and 7, or re-upload it.
+- [x] **A11 · Update-6 recovery.** ✅ CLOSED — the lost work was on GitHub
+  all along (update-5→7 diff on the `claude--made` branch); every source
+  line and test of that window survives in today's program (or was later
+  extended, never dropped); its one known fix (B5 "review clears after
+  answering") confirmed present and tested. No re-upload needed — see
+  `release/UPDATE-6-RECOVERY.md`.
 - [ ] **A12 · Test-kit fresh-install fix.** pyproject test extra must include
   the renamed test package (`httpx2`) or pin starlette — fresh machines trip
   on it every time.

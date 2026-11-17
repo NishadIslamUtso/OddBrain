@@ -66,11 +66,11 @@ and visible, mistakes get corrected in one click. Rules never lead.
 | B2 | **Splitting is unstable.** The same run-on dump files as 1 memory one time and 4 memories another time (reproduced on update-5 AND update-7 — not a regression, it is inconsistency) | Other judge |
 | B3 | **Undo does not clear.** A greyed "Undone" row stays on the feed | Owner + other judge |
 | B4 | **Dumb doubts.** Questions fire from loose word rules (any different number, any opposite word) about fragments; not real conflicts | Owner |
-| B5 | **Review does not clear after answering** (owner says; update-6 claimed a fix — must be re-checked on the real machine) | Owner |
+| B5 | **Review does not clear after answering** (owner says; update-6 claimed a fix) — the fix is confirmed present in the current program and locked by tests (A11, `release/UPDATE-6-RECOVERY.md`); real-machine glance remains a C-section verify | Owner |
 | B6 | **Never run inside real Hermes on Windows.** Installer untested there. Every "green" so far is workshop testing | All |
 | B7 | **Engine lives in `Downloads\Memory_OB-update-2`.** Clean Downloads → Memory_OB dies | Other judge |
 | B8 | **Meaning search unconfirmed on the owner's machine** ("isn't it semantic?? why still weak") | Owner + me |
-| B9 | **Update-6 never reached GitHub** — work exists only as a zip somewhere | Me |
+| B9 | **Update-6 never reached GitHub** — work exists only as a zip somewhere — ✅ **closed by A11**: the work was on GitHub all along (update-5→7 diff on the `claude--made` branch) and nothing unique was lost; see `release/UPDATE-6-RECOVERY.md` | Me |
 | B10 | Second opinion covers disagreements/repeats only — not stale to-dos or broken-proof findings | Other judge |
 | B11 | Test kit trips on a renamed test package on fresh machines (builder pain) | Me |
 | B12 | Filing accuracy with the free Hermes model is the real gap vs Claude/ChatGPT memory | Owner + Claude |
@@ -99,8 +99,8 @@ and visible, mistakes get corrected in one click. Rules never lead.
    discard the new statement and put the old one aside as disputed).
 5. **Clearing (B3, B5) — owner decision D2b.** A "Got it" clear button on
    cards, AND a "clear all at once" option for the feed. No greyed leftovers.
-   Repro on the real machine first (it may already be fixed in update-6/7
-   which the owner may not have installed).
+   Shipped in update-10; the "clears after answering" half is confirmed fixed
+   and tested in the current program (A11, `release/UPDATE-6-RECOVERY.md`).
 6. **Test button in Settings (B12).** Sends one sample message through the real
    Hermes model and shows exactly what came back (answered? filed right? raw
    reply). This tells the truth about whether the free model can do this job.
