@@ -78,10 +78,12 @@ and visible, mistakes get corrected in one click. Rules never lead.
 
 ## 4. THE PLAN (build in this order)
 
-1. **Kill the silent fallback (B1).** If the helper does not answer properly,
-   NOTHING is cut into pieces. The message is kept whole and unread, shown as
-   *"The AI helper did not answer properly, so I kept this aside"*, and read
-   later (when the model returns, or on "Tidy now"). → needs Decision D1.
+1. **Kill the silent fallback (B1). — APPROVED (D1: wait).** If the helper
+   does not answer properly, NOTHING is cut into pieces. The message is kept
+   whole and unread, shown as *"The AI helper did not answer properly, so I
+   kept this aside"*, and read later (when the model returns, or on "Tidy
+   now"). Rules never decide what to save again (they keep only their safety
+   jobs: secrets, quote-backing, private/never-send).
 2. **AI-first filing (B12).** The model reads every message and decides: who is
    it about, what is lasting, what is a moment, what conflicts. Rules keep only
    the safety jobs: secrets, quote-backing ("your own sentence must back it"),
@@ -91,9 +93,13 @@ and visible, mistakes get corrected in one click. Rules never lead.
    value ("I live in Dhaka" / "I live in Sylhet") — and, when a helper is up,
    only when the helper agrees. The card shows your ORIGINAL sentences, never
    fragments. Loose guesses stay silent; both memories are kept.
-5. **Clear-on-answer + a "Got it" clear button (B3, B5).** No greyed leftovers
-   on the feed. Repro on the real machine first (it may already be fixed in
-   update-6/7 which the owner may not have installed).
+   **Conflict cards get FOUR answers** (owner decision D2a): Keep new ·
+   Keep old · Keep both · **Neither / none of these** (both are wrong —
+   discard the new statement and put the old one aside as disputed).
+5. **Clearing (B3, B5) — owner decision D2b.** A "Got it" clear button on
+   cards, AND a "clear all at once" option for the feed. No greyed leftovers.
+   Repro on the real machine first (it may already be fixed in update-6/7
+   which the owner may not have installed).
 6. **Test button in Settings (B12).** Sends one sample message through the real
    Hermes model and shows exactly what came back (answered? filed right? raw
    reply). This tells the truth about whether the free model can do this job.
@@ -105,18 +111,26 @@ and visible, mistakes get corrected in one click. Rules never lead.
 
 ---
 
-## 5. Decisions only the owner makes
+## 5. Decisions — mostly SETTLED by the owner (2026-11)
 
-- **D1 — when the AI is down:** WAIT and read later (Claude's recommendation —
-  the old "save with simple rules" choice is what made the mess in B1) or keep
-  saving with rules? *Recommendation: wait.*
-- **D2 — clearing style:** clear automatically when you answer/undo, or a
-  "Got it" button, or both?
-- **D3 — restore `Documents\Hermes\Workspace\.git`?** (a judge asked; it is a
-  git repair, the owner handles those personally.)
-- **D4 — confirm the two "no need" items stay out:** an "ask me before saving"
-  switch, and keeping other people's chats out of the AI prompt. (Owner said
-  "no need for those" — recorded here so nobody re-adds them.)
+- **D1 — when the AI is down: WAIT. ✅ DECIDED.** "It takes all and keeps it,
+  then waits for the AI." Nothing is chopped by rules ever again. The message
+  is kept whole and unread until the AI can read it (or "Tidy now" is pressed).
+- **D2 — clearing: ✅ DECIDED.** A "Got it" clear button **plus** a
+  "clear all at once" option. And conflict cards answer with **four** buttons:
+  Keep new · Keep old · Keep both · **Neither / none of these**.
+- **D3 — restore `Documents\Hermes\Workspace\.git`? ❓ STILL OPEN** (the owner
+  asked what this means — re-asked in plain words on 2026-11-18: it is ONLY
+  about replacing a code-copy folder with a fresh download; no memories
+  involved. Waiting for yes/no.)
+- **D4 — ✅ CONFIRMED.** No "ask me before saving" switch; no hiding other
+  people's chats from the AI. **"What I decided with Claude stays"** — all
+  owner decisions made in the Claude sessions stand.
+
+**Backup location (owner question, answered from code):** clicking
+**Make backup** writes a zip into `Memory_OB\.brain\backups\` — a hidden
+folder INSIDE the memories folder. Settings shows the last 5. Nothing is
+deleted; a restore always unpacks into a fresh folder.
 
 ---
 
