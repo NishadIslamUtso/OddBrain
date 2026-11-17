@@ -129,6 +129,12 @@ and visible, mistakes get corrected in one click. Rules never lead.
   people's chats from the AI. **"What I decided with Claude stays"** — all
   owner decisions made in the Claude sessions stand.
 
+- **D5 — PR #12's two red security checks: ✅ DECIDED — ACCEPT as
+  known-legacy (2026-11-18).** The CodeQL alerts and the npm-audit failure
+  are debt of the **retired old app** (`apps/03_oddbrain`) — zero findings
+  touch the Memory_OB engine. They stay red and documented; Memory_OB stays
+  the focus. Full write-up: `release/PR12-SECURITY-FINDINGS.md`.
+
 **Backup location (owner question, answered from code):** clicking
 **Make backup** writes a zip into `Memory_OB\.brain\backups\` — a hidden
 folder INSIDE the memories folder. Settings shows the last 5. Nothing is

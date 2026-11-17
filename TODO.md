@@ -96,6 +96,10 @@ A1–A12 build list is COMPLETE.***
 
 ## D. STANDING RULES (never do these)
 
+- PR #12's two red security checks (CodeQL + npm audit) are the **retired
+  old app's** debt, accepted by the owner (decision D5) — expected red, do
+  not "fix" them; details in `release/PR12-SECURITY-FINDINGS.md`.
+
 - No ask-before-save switch · no approval-card queues · no batch/retry chores ·
   no conversation-project linking · no Monthly Audit PAGE · no 12-folder
   shelf · no chapter-approval flow. (Old rulebook = retired.)
