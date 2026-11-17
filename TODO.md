@@ -22,11 +22,12 @@ produces **update-8**.*
   valid_thread_title()` — report words (From/What/With/Note/Notes/Windows/
   Macos/Application/Imports/Independent/…) can never be project names, on
   both the AI-filing path and the word-matcher path. Real names pass.
-- [ ] **A3 · Wait-for-AI (owner decision D1).** Kill the silent rules fallback:
-  if the AI helper fails/unreadable, the message is kept whole + shown as
-  "The AI helper did not answer properly, so I kept this aside", re-read later
-  (helper returns / Tidy now). Rules keep ONLY safety jobs (secrets,
-  quote-backing, private/never-send). Never chop into fragments.
+- [x] **A3 · Wait-for-AI (owner decision D1).** ✅ DONE in update-9: the
+  silent rules fallback is dead. A helper that fails/blank/refuses/unreadable
+  → the message is kept WHOLE + the plain line "The AI helper did not answer
+  properly, so I kept this aside", re-read when a helper returns or via Tidy
+  now. Rules keep ONLY safety jobs (secret-hiding, forget commands). 9 new
+  contract tests; 3 old fallback tests rewritten; 21 suites aligned.
 - [ ] **A4 · Feed clearing + 4th answer (owner decision D2).**
   (a) "Got it" clear button on cards; (b) "clear all at once" for the
   "Recently remembered" feed; (c) conflict cards answer with FOUR buttons:
