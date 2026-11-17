@@ -20,13 +20,13 @@ class TestOnThisComputer(unittest.TestCase):
         return ModelSlot(provider="openai", model="m", base_url=address).is_local
 
     def test_real_local_addresses(self) -> None:
-        for address in ("http://localhost:11434", "http://127.0.0.1:8080/v1", "http://[::1]:8080", "localhost:8080",
-                        "http://llama.localhost:9000"):
+        for address in ("http://localhost:11434", "http://127.0.0.1:8080/v1", "http://[::1]:8080", "localhost:8080"):
             self.assertTrue(self.local(address), address)
 
     def test_look_alikes_are_not_local(self) -> None:
         for address in ("https://localhost.example.com/v1", "https://example.com/?127.0.0.1",
-                        "https://127.0.0.1.evil.net", "https://api.openai.com/v1", "https://example.com/localhost"):
+                        "https://127.0.0.1.evil.net", "https://api.openai.com/v1", "https://example.com/localhost",
+                        "http://llama.localhost:9000"):      # a name, not loopback: only the name "localhost" and loopback numbers count
             self.assertFalse(self.local(address), address)
 
     def test_local_only_does_not_let_a_look_alike_through(self) -> None:

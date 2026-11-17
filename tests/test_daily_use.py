@@ -145,6 +145,38 @@ class ProjectNames(Case):
         self.assertEqual(topics.thread_of("I want to start a bakery business"), "Bakery")
 
 
+class PassingMoments(Case):
+    """Without an AI helper the simple rules must still tell "how I am right now" from "how I am"."""
+
+    PASSING = [
+        "I'm so tired today.", "I'm hungry.", "I'm at the library right now.", "I have a headache.", "I'm watching Netflix.",
+        "I feel sad.", "I'm bored.", "I slept late last night.", "I had biryani for lunch.", "I'm in a meeting.",
+        "I'm feeling anxious right now.", "I'm heading to the gym.", "I just woke up.", "I'm in a bad mood",
+        "I'm eating dinner", "I'm on the bus", "I'm sick today", "I don't feel like studying", "I'm waiting for my friend",
+        "I'm kind of annoyed at my roommate", "I'm free this evening", "I'm busy", "I'm so happy right now", "I'm cold",
+        "I feel like crying", "I'm done with exams today", "I'm fine", "I'm at the gym",
+    ]
+    LASTING = [
+        "I live in Dhaka.", "I'm allergic to peanuts.", "I feel anxious in crowds.", "I'm tired of my job and want to switch.",
+        "I usually sleep at 11.", "I'm studying CSE at BRAC University.", "I'm working at Google.", "I'm at BRAC University.",
+        "I'm happy with my job.", "I'm good at math.", "I'm busy with my startup this semester.", "I'm in the CSE department.",
+        "I always feel tired in the afternoon.", "I have a cold shower every morning.", "I'm ready to start my thesis.",
+        "I'm proud of my sister.", "I have diabetes.",
+    ]
+
+    def test_passing_things_are_moments(self) -> None:
+        self.assertEqual([t for t in self.PASSING if not topics.is_moment(t)], [])
+
+    def test_lasting_things_are_not(self) -> None:
+        self.assertEqual([t for t in self.LASTING if topics.is_moment(t)], [])
+
+    def test_a_passing_thing_goes_to_the_journal_not_the_facts(self) -> None:
+        out = self.say("I'm in a meeting right now.")
+        self.assertEqual(out.saved, 1)
+        rec = next(iter(self.store.list_records(status="active")))
+        self.assertIn(topics.MOMENT_TAG, rec.tags)
+
+
 class NoFalseAlarms(unittest.TestCase):
     """Two things that can both be true must not interrupt you; real changes still must."""
 

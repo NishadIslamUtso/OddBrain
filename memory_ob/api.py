@@ -262,6 +262,7 @@ def _person_card(entry: dict[str, Any]) -> dict[str, Any]:
     return {
         "id": entry["id"], "name": entry["name"], "aliases": entry["aliases"],
         "relation": entry["relation"], "notes": entry["notes"],
+        "is_me": manager.OWNER_TAG in (entry.get("tags") or []),
         "conversations": len(entry["conversations"]), "memories": len(entry["memories"]),
         "platforms": sorted({_platform(c["origin"]) for c in entry["conversations"]}),
         "last": max(dates) if dates else (entry.get("modified") or ""),
@@ -345,9 +346,9 @@ def create_app() -> FastAPI:
         return {
             "doubts": doubts_mod.list_doubts(st),
             "unsure": _unsure(st),
-            "feed": feed_mod.build(st, limit=40),
+            "feed": feed_mod.build(st, limit=40, hide_undone=True),
             "due": due,
-            "audit": audit_mod.public(settings.vault),
+            "audit": audit_mod.public(settings.vault, st),
             "status": _status(st),
         }
 
@@ -384,7 +385,7 @@ def create_app() -> FastAPI:
 
     @app.get("/api/feed")
     def feed(limit: int = 60, st: Store = Depends(get_store)) -> dict[str, Any]:
-        return {"feed": feed_mod.build(st, limit=max(1, min(limit, 500)))}
+        return {"feed": feed_mod.build(st, limit=max(1, min(limit, 500)), hide_undone=True)}
 
     @app.post("/api/undo/{seq}")
     def undo(seq: int, st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -403,13 +404,13 @@ def create_app() -> FastAPI:
         return {"ok": True}
 
     @app.get("/api/audit")
-    def audit_report() -> dict[str, Any]:
-        return audit_mod.public(settings.vault)
+    def audit_report(st: Store = Depends(get_store)) -> dict[str, Any]:
+        return audit_mod.public(settings.vault, st)
 
     @app.post("/api/audit/run")
     def audit_run(st: Store = Depends(get_store)) -> dict[str, Any]:
         """Look over everything now (the same check-up that runs every night)."""
-        report = audit_mod.run(st, settings.vault)
+        report = audit_mod.run(st, settings.vault, judge=_helper())
         _after_change(st)
         return report
 
@@ -423,7 +424,7 @@ def create_app() -> FastAPI:
         except ValueError as exc:
             raise _fail(400, str(exc))
         _after_change(st)
-        return {**result, "audit": audit_mod.public(settings.vault)}
+        return {**result, "audit": audit_mod.public(settings.vault, st)}
 
     @app.post("/api/undo-many")
     def undo_many(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -704,7 +705,31 @@ def create_app() -> FastAPI:
     @app.get("/api/people")
     def list_people(st: Store = Depends(get_store)) -> dict[str, Any]:
         cards = sorted((_person_card(e) for e in _people_index(st)), key=lambda c: c["last"], reverse=True)
+        cards.sort(key=lambda c: not c["is_me"])                # "you" first, the rest newest first
         return {"people": cards}
+
+    @app.post("/api/people/me")
+    def add_myself(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
+        """"Add yourself": the profile with this name becomes you (it is made first if it is not there)."""
+        name = str(payload.get("name") or "").strip()
+        if not name:
+            raise _fail(400, "Type your name.")
+        try:
+            person = manager.add_myself(st, name, vault=settings.vault)
+        except ValueError as err:
+            raise _fail(409, str(err)) from err
+        return person
+
+    @app.post("/api/people/{person_id}/me")
+    def mark_me(person_id: str, payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
+        """Say a profile is you (``is_me`` true) or is not (false)."""
+        try:
+            person = manager.set_owner(st, person_id, bool(payload.get("is_me", True)), vault=settings.vault)
+        except LookupError as err:
+            raise _fail(404, str(err)) from err
+        except ValueError as err:
+            raise _fail(409, str(err)) from err
+        return person
 
     @app.post("/api/people")
     def add_person(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -956,6 +981,12 @@ def create_app() -> FastAPI:
             if not isinstance(payload["never_remember"], list):
                 raise _fail(400, "That is not a list of words.")
             changes["guardrails"] = payload["never_remember"]
+        if changes.get("local_only"):
+            cfg = ModelConfig.load(settings.models_path)
+            for slot in (cfg.main, cfg.auxiliary.get("embed", ModelSlot())):
+                if slot.base_url and not models.is_this_computer(slot.base_url):
+                    raise _fail(400, f"Your own AI is set to {slot.base_url}, which is not on this computer. "
+                                     "Choose an AI on this computer under “The AI helper” first, then turn this on.")
         warning = ""
         message = ""
         if "sync_hermes" in payload:
@@ -983,9 +1014,12 @@ def create_app() -> FastAPI:
     @app.get("/api/settings/ai/models")
     def ai_models(address: str = "") -> dict[str, Any]:
         """The models on the AI server at *address* (Ollama, llama.cpp, LM Studio or vLLM), so they can be picked."""
+        shown = address.strip() or models.DEFAULT_OLLAMA_URL
+        if _app_settings().local_only and not models.is_this_computer(shown):
+            return {"address": shown, "reachable": False, "kind": "", "models": [],
+                    "message": "“Keep everything on this computer” is on, so I will not look at an address that is not on this computer."}
         kind, found = models.server_models(address.strip())
-        return {"address": address.strip() or models.DEFAULT_OLLAMA_URL, "reachable": bool(kind),
-                "kind": kind, "models": found}
+        return {"address": shown, "reachable": bool(kind), "kind": kind, "models": found}
 
     @app.post("/api/settings/ai")
     def save_ai(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -1003,6 +1037,9 @@ def create_app() -> FastAPI:
                 raise _fail(400, "Pick which model to use.")
             if not address.startswith(("http://", "https://")):
                 raise _fail(400, "The address should start with http:// or https://")
+            if _app_settings().local_only and not models.is_this_computer(address):
+                raise _fail(400, "“Keep everything on this computer” is on, so the address must be on this computer "
+                                 "(for example http://127.0.0.1:11434). Turn that switch off if you want an AI somewhere else.")
             kind, _found = models.server_models(address)
             if not kind:        # not running right now: guess from the address, the owner may start it later
                 kind = ModelSlot(provider="custom", base_url=address).api_kind

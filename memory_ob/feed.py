@@ -30,6 +30,10 @@ def _by(actor: str) -> str:
     return "you" if actor in ("owner", "you") or actor.startswith("owner") else "AI"
 
 
+def _owner_flag(person: dict[str, Any] | None) -> bool:
+    return "this-is-me" in ((person or {}).get("tags") or [])
+
+
 def describe(change: dict[str, Any]) -> dict[str, Any]:
     """One change as a plain-language feed item (without the undo flags)."""
     entity, action = change["entity"], change["action"]
@@ -66,6 +70,9 @@ def describe(change: dict[str, Any]) -> dict[str, Any]:
             item.update(verb="Added a person", text=str(after.get("name", "")), category="People")
         elif action == "remove":
             item.update(verb="Removed a profile", text=str(before.get("name", "")), category="People")
+        elif _owner_flag(after) != _owner_flag(before):
+            item.update(verb="Marked as you" if _owner_flag(after) else "Taken off as you",
+                        text=str(after.get("name", "")), category="People")
         else:
             item.update(verb="Edited a profile", text=str(after.get("name", "")), category="People")
     elif entity == "import":
@@ -113,10 +120,12 @@ def _group(run: list[dict[str, Any]]) -> dict[str, Any]:
     }
 
 
-def build(store: Any, *, limit: int = 60) -> list[dict[str, Any]]:
+def build(store: Any, *, limit: int = 60, hide_undone: bool = False) -> list[dict[str, Any]]:
     """The most recent changes, newest first, each marked undoable or not.
 
     Memories the AI took from one message are shown as one card (with the list inside).
+    With *hide_undone* a change you have already put back is left out, so the screen clears as
+    you undo; the history (the command line, tests) keeps them.
     """
     items: list[dict[str, Any]] = []
     keys: list[str] = []
@@ -128,8 +137,10 @@ def build(store: Any, *, limit: int = 60) -> list[dict[str, Any]]:
             exit_gate.keep(snap) for snap in (change.get("before"), change.get("after")) if isinstance(snap, dict)
         ):
             continue          # law 2: a withheld record never shows up in the feed either
-        item = describe(change)
         undone = bool(change.get("undone_at"))
+        if undone and hide_undone:
+            continue
+        item = describe(change)
         item["undone"] = undone
         item["can_undo"] = (
             not undone

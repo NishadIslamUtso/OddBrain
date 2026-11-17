@@ -875,6 +875,10 @@ SCREENS.review = async function (soft) {
   if (state.rq) return runSearch(); else renderReviewBody();
 };
 
+function foundBy(w) {
+  const t = { rules: 'Noticed by simple word rules.', ai: 'Noticed by the AI helper.', both: 'Noticed by simple word rules and agreed by the AI helper.' }[w];
+  return t ? `<p class="faint who">${t}</p>` : '';
+}
 function doubtCard(d) {
   const buttons = d.options.map((o, i) =>
     `<button class="btn${i === 0 ? ' primary' : ''}" data-act="doubt" data-id="${esc(d.id)}" data-choice="${esc(o.key)}">${esc(o.label)}</button>`).join('');
@@ -883,7 +887,7 @@ function doubtCard(d) {
       <p class="muted">What you just said does not match something I already had.</p>
       <div class="compare"><div><div class="lbl">Before${d.before_when ? ' · ' + esc(when(d.before_when)) : ''}</div><p>${esc(d.before)}</p></div>
       <div class="new"><div class="lbl">Now${d.after_when ? ' · ' + esc(when(d.after_when)) : ''}</div><p>${esc(d.after)}</p></div></div>
-      <div class="row">${buttons}</div></article>`;
+      <div class="row">${buttons}</div>${foundBy(d.found_by)}</article>`;
   }
   if (d.kind === 'same_person') {
     const tiles = (d.people || []).map(p => `<div><div class="lbl">${esc(p.relation || 'Person')}</div><p><b>${esc(p.name)}</b></p></div>`).join('');
@@ -900,12 +904,13 @@ function unsureCard(u) {
     <button class="btn" data-act="unsure-skip" data-id="${esc(u.id)}">No, forget it</button></div></article>`;
 }
 function feedGroup(g) {
-  const open = !!state.openGroups[g.seq];
+  const ids = g.items.map(i => i.seq);
+  const open = ids.some(k => state.openGroups[k]);          /* any line's number will do: the card's own number changes when its newest line is put back */
   const cats = (g.categories || []).map(c => `<span class="chip" style="border-color:${catColor(c.name)}">${esc(c.name)} ${c.count}</span>`).join('');
   return `<li class="feed-item feed-group${g.undone ? ' undone' : ''}">
     <div class="grp-head"><div class="top"><span class="verb">${esc(g.verb)}</span><span class="faint">by AI</span><span class="when">${esc(when(g.at))}</span></div>
       <div class="grp-cats">${cats}</div>
-      <div class="grp-actions"><button class="btn sm" data-act="toggle-group" data-seq="${g.seq}" aria-expanded="${open}">${open ? 'Hide' : 'See what was saved'}</button>
+      <div class="grp-actions"><button class="btn sm" data-act="toggle-group" data-seqs="${ids.join(',')}" aria-expanded="${open}">${open ? 'Hide' : 'See what was saved'}</button>
       ${g.undone ? '<span class="chip">Undone</span>' : g.undo_seqs.length ? `<button class="btn sm" data-act="undo-group" data-seqs="${g.undo_seqs.join(',')}">Undo all</button>` : ''}</div></div>
     ${open ? `<ul class="list grp-body">${g.items.map(feedItem).join('')}</ul>` : ''}</li>`;
 }
@@ -922,13 +927,13 @@ function feedItem(f) {
 function auditCard(f) {
   const lines = String(f.detail || '').split('\n').map(l => `<p class="text">${esc(l)}</p>`).join('');
   return `<article class="card" data-finding="${esc(f.id)}"><div class="eyebrow">${esc(f.title)}</div>${lines}
-    <div class="row">${f.actions.map(a => `<button class="btn" data-act="audit" data-id="${esc(f.id)}" data-choice="${esc(a.key)}">${esc(a.label)}</button>`).join('')}</div></article>`;
+    <div class="row">${f.actions.map(a => `<button class="btn" data-act="audit" data-id="${esc(f.id)}" data-choice="${esc(a.key)}">${esc(a.label)}</button>`).join('')}</div>${foundBy(f.found_by)}</article>`;
 }
 function auditFooter(a) {
   if (!a) return '';
   const needs = a.summary.needs_you;
   const status = !a.ran ? 'I have not done a check-up yet. I do one every night, or you can start one now.'
-    : `Last check-up: ${esc(when(a.last_run))}. ${needs ? `${plural(needs, 'thing')} to look at${a.findings.length ? ' above' : ''}.` : 'Nothing needs your attention.'}`;
+    : `Last check-up: ${esc(when(a.last_run))}. ${needs ? `${plural(needs, 'thing')} to look at${a.findings.length ? ' above' : ''}.` : 'Nothing needs your attention.'}${a.ai && a.ai.looked ? ` The AI helper looked at ${plural(a.ai.looked, 'pair')} of memories too${a.ai.dropped ? ` and set aside ${plural(a.ai.dropped, 'false alarm')}` : ''}.` : ''}`;
   const checks = a.checks.map(c => `<li class="mem"><div class="t">${esc(c.title)}</div><div class="meta"><span class="chip${c.ok ? '' : ' warn'}">${c.ok ? 'OK' : 'Look'}</span><span class="faint">${esc(c.detail)}</span></div></li>`).join('');
   const lone = a.lonely && a.lonely.count ? `<p class="faint">${plural(a.lonely.count, 'note')} not linked to anything${a.lonely.notes.length ? ': ' + esc(a.lonely.notes.join(', ')) + (a.lonely.count > a.lonely.notes.length ? '…' : '') : ''}. <button class="chip" data-act="audit-lonely">Show in Vault</button></p>` : '';
   return `<section class="card" id="audit-card"><h2>Check-up</h2><p class="muted">${status}</p>
@@ -1541,6 +1546,7 @@ SCREENS.people = async function (soft) {
   const r = await api('/api/people'); state.people = r.people;
   if (!soft || !$('#pl')) {
     $('#main').innerHTML = `<div class="screen"><div class="head"><h1>People</h1><p>Everyone you have talked about or talked with, on any app.</p></div>
+      <div id="me-slot"></div>
       <div class="split${state.personId ? ' sel' : ''}" id="split"><div class="plist card pad0">
         <div class="row" style="padding:12px 14px 8px"><input type="search" id="pl-q" class="grow" placeholder="Find a person" aria-label="Find a person" value="${esc(state.peopleQ)}">
           <button class="btn sm" data-act="add-person">Add</button></div><div id="pl"></div></div>
@@ -1550,11 +1556,18 @@ SCREENS.people = async function (soft) {
   if (state.personId && state.people.some(p => p.id === state.personId)) await showPerson(state.personId);
   else { state.personId = null; $('#split').classList.remove('sel'); $('#pd').innerHTML = state.people.length ? emptyBox('Pick someone', 'Choose a person on the left to see everything I know about them.') : emptyBox('No one yet', 'People appear here when you talk about them, or you can add someone yourself.'); }
 };
+function renderMeSlot() {
+  const slot = $('#me-slot'); if (!slot) return;
+  slot.innerHTML = state.people.some(p => p.is_me) ? '' : `<div class="card"><h3>Which one is you?</h3>
+    <p class="muted">Tell me which profile is you, and what is said under your own name is understood as being about you. Open a profile and choose “This is me”, or add yourself here.</p>
+    <div class="row"><button class="btn" data-act="add-myself">Add yourself</button></div></div>`;
+}
 function renderPeopleList() {
+  renderMeSlot();
   const q = state.peopleQ.toLowerCase();
   const list = state.people.filter(p => !q || p.name.toLowerCase().includes(q) || p.aliases.some(a => a.toLowerCase().includes(q)));
   $('#pl').innerHTML = list.length ? `<ul class="list">${list.map(p => `<li><button class="person-row" data-act="pick-person" data-id="${esc(p.id)}"${p.id === state.personId ? ' aria-current="true"' : ''}>
-    <div class="name">${esc(p.name)}</div><div class="sub">${esc([p.relation, plural(p.conversations, 'conversation'), p.platforms.join(', ')].filter(Boolean).join(' · '))}</div></button></li>`).join('')}</ul>`
+    <div class="name">${esc(p.name)}${p.is_me ? ' <span class="chip">You</span>' : ''}</div><div class="sub">${esc([p.is_me ? 'this is you' : p.relation, plural(p.conversations, 'conversation'), p.platforms.join(', ')].filter(Boolean).join(' · '))}</div></button></li>`).join('')}</ul>`
     : `<p class="faint" style="padding:0 14px 14px">${state.people.length ? 'No one matches.' : 'No one yet.'}</p>`;
 }
 async function showPerson(id, editing) {
@@ -1569,7 +1582,7 @@ async function showPerson(id, editing) {
       <div class="field"><label for="pe-alias">Also known as</label><input type="text" id="pe-alias" value="${esc(p.aliases.join(', '))}" placeholder="other names or nicknames, separated by commas"></div>
       <div class="field"><label for="pe-notes">Notes</label><textarea id="pe-notes" rows="4">${esc(p.notes)}</textarea></div>
       <div class="row end"><button class="btn" data-act="cancel-person">Cancel</button><button class="btn primary" data-act="save-person">Save</button></div></div>`
-    : `<div class="row between"><div><h2>${esc(p.name)}</h2><p class="muted">${esc(p.relation || 'No relationship noted')}${p.aliases.length ? ' · also known as ' + esc(p.aliases.join(', ')) : ''}</p></div>
+    : `<div class="row between"><div><h2>${esc(p.name)}${p.is_me ? ' <span class="chip">You</span>' : ''}</h2><p class="muted">${esc(p.is_me ? 'This is you' : (p.relation || 'No relationship noted'))}${p.aliases.length ? ' · also known as ' + esc(p.aliases.join(', ')) : ''}</p></div>
       <button class="btn sm" data-act="edit-person">Edit</button></div>
       <div class="row">${p.platforms.map(x => `<span class="chip">${esc(x)}</span>`).join('')}</div>
       ${p.notes ? `<p>${esc(p.notes)}</p>` : '<p class="faint">No notes yet. Use Edit to add what matters about them.</p>'}`;
@@ -1583,6 +1596,12 @@ async function showPerson(id, editing) {
       ${mems ? `<ul class="list">${mems}</ul>` : '<p class="faint" style="padding:0 16px 14px">Nothing yet. When you tell me about them, it shows up here.</p>'}</div>
     <div class="card pad0"><div class="sec" style="padding:14px 16px 0"><h3>Conversations</h3><span class="count">${p.conversation_list.length}</span></div>
       ${convs ? `<ul class="list">${convs}</ul>` : '<p class="faint" style="padding:0 16px 14px">No saved conversations with or about them yet.</p>'}</div>
+    ${p.is_me ? `<div class="card"><h3>This is you</h3>
+      <p class="muted">Anything said under ${esc(p.name)}${p.aliases.length ? ' or ' + esc(p.aliases.join(', ')) : ''} is understood as being about you, when I save it and when I check for things that do not agree. If this is not you, take it off. You can undo it from Review.</p>
+      <div class="row"><button class="btn" data-act="unmark-me">This is not me</button></div></div>`
+      : (state.people.some(x => x.is_me) ? '' : `<div class="card"><h3>Is this you?</h3>
+      <p class="muted">If this profile is you, I will understand what is said under this name as being about you, instead of about someone else. You can undo it from Review.</p>
+      <div class="row"><button class="btn" data-act="mark-me">This is me</button></div></div>`)}
     ${others ? `<div class="card"><h3>Is this the same person as someone else?</h3>
       <p class="muted">If ${esc(p.name)} also appears under another name, join the two profiles. Their notes and conversations are brought together. You can undo it from Review.</p>
       <div class="row"><select id="merge-with" style="flex:1 1 200px" aria-label="Same person as">${others}</select>
@@ -1684,7 +1703,7 @@ SCREENS.settings = async function (soft) {
 
   <section class="card"><h2>Privacy</h2>
     ${sw('paused', 'Pause memory', 'Stop saving anything new and stop bringing memories into chats, until you turn this off.', s.paused)}
-    ${sw('local_only', 'Keep everything on this computer', 'Only use an AI that runs on this computer. Hermes’s AI, which may be online, is not used.', o.local_only)}
+    ${sw('local_only', 'Keep everything on this computer', 'Only use an AI that runs on this computer. Hermes’s AI, which may be online, is not used, and an AI at any other address is refused.', o.local_only)}
     ${sw('bio_sensitive', 'Include health and money in my biography', 'Off by default, because a biography is the thing you are most likely to share.', o.bio_sensitive)}
     <div class="field"><label for="never">Never remember</label><textarea id="never" rows="3" placeholder="One word or phrase per line">${esc(s.never_remember.join('\n'))}</textarea>
       <p class="hint">If something you say contains one of these, I will not keep it. Passwords and keys are never kept either.</p></div>
@@ -1800,7 +1819,7 @@ document.addEventListener('click', async (e) => {
       const r = await api('/api/undo-many', { method: 'POST', body: { seqs } });
       toast(r.skipped ? `Put back ${plural(r.undone, 'thing')}. ${plural(r.skipped, 'other')} changed since, so I left ${r.skipped === 1 ? 'it' : 'them'}.` : `Put back ${plural(r.undone, 'thing')}.`);
       await SCREENS.review(true); });
-    case 'toggle-group': { const k = el.dataset.seq; state.openGroups[k] = !state.openGroups[k]; return renderReviewBody(); }
+    case 'toggle-group': { const ks = String(el.dataset.seqs || '').split(','); const now = ks.some(k => state.openGroups[k]); ks.forEach(k => { state.openGroups[k] = !now; }); return renderReviewBody(); }
 
     case 'mem-edit': { const li = el.closest('[data-mem]'); return memEditor(li, state.mem[id]); }
     case 'mem-cancel': return refreshHere();
@@ -1841,6 +1860,18 @@ document.addEventListener('click', async (e) => {
       try { const p = await api('/api/people', { method: 'POST', body: v }); state.personId = p.id; toast('Added.'); await SCREENS.people(true); } catch (err) { toast(err.message, true); }
       return;
     }
+    case 'add-myself': {
+      const v = await promptForm({ title: 'Add yourself', yes: 'Add', fields: [{ id: 'name', label: 'Your name', ph: 'the name others call you' }] });
+      if (!v) return; if (!v.name) { toast('Type your name.', true); return; }
+      try { const p = await api('/api/people/me', { method: 'POST', body: v }); state.personId = p.id; toast('Marked as you. You can undo it from Review.'); await SCREENS.people(true); } catch (err) { toast(err.message, true); }
+      return;
+    }
+    case 'mark-me': case 'unmark-me': return busy(el, async () => {
+      try {
+        await api('/api/people/' + enc(state.personId) + '/me', { method: 'POST', body: { is_me: act === 'mark-me' } });
+        toast(act === 'mark-me' ? 'Marked as you. You can undo it from Review.' : 'Taken off. You can undo it from Review.'); await SCREENS.people(true);
+      } catch (err) { toast(err.message, true); }
+    });
     case 'edit-person': return showPerson(state.personId, true);
     case 'cancel-person': return showPerson(state.personId);
     case 'save-person': return busy(el, async () => {
@@ -1890,7 +1921,7 @@ document.addEventListener('click', async (e) => {
     case 'check-models': return busy(el, async () => {
       const r = await api('/api/settings/ai/models?address=' + enc($('#ai-addr').value.trim()));
       $('#ollama-models').innerHTML = r.models.map(m => `<option value="${esc(m)}">`).join('');
-      $('#ai-models-msg').textContent = !r.reachable ? 'I could not reach an AI server there. Check that it is running and the address is right.' : r.models.length ? `Found ${plural(r.models.length, 'model')} on ${r.kind === 'ollama' ? 'Ollama' : 'an OpenAI-style server (llama.cpp, LM Studio or vLLM)'}. Pick one from the list.` : 'The server is there but lists no models yet. Type the model name yourself.';
+      $('#ai-models-msg').textContent = !r.reachable ? (r.message || 'I could not reach an AI server there. Check that it is running and the address is right.') : r.models.length ? `Found ${plural(r.models.length, 'model')} on ${r.kind === 'ollama' ? 'Ollama' : 'an OpenAI-style server (llama.cpp, LM Studio or vLLM)'}. Pick one from the list.` : 'The server is there but lists no models yet. Type the model name yourself.';
     });
     case 'save-ai': return busy(el, async () => {
       const mode = ($('input[name=aimode]:checked') || {}).value || 'auto';

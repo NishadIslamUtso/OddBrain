@@ -13,7 +13,11 @@ mode it uses Hermes's own model, and if that model is an online one, your words
 go there, exactly as they do when you chat with Hermes. To keep every word on
 this computer, either pick your own local model in Settings or turn on **Keep
 everything on this computer** (off by default). With that switch on and no local
-model, Memory_OB still works, using simple rules instead of an AI.
+model, Memory_OB still works, using simple rules instead of an AI. The switch is
+enforced where the request is made: the only addresses that count as "this
+computer" are `localhost` and loopback (`127.x`, `::1`), a name that merely points
+somewhere else does not, a redirect to another host is refused, and Settings will
+not save a non-local address while the switch is on (it says why).
 
 ---
 
@@ -26,9 +30,9 @@ remembered. Open the Memory_OB tab only when you want to look, fix or search.
 
 | Screen | What it is |
 |---|---|
-| **Review** | The only screen that ever needs you. Shows what was just remembered (one card per message you sent, with the list of what it filed; **Undo** one line or the whole card), questions where something you said now disagrees with something remembered ("Your answer changed": keep new / keep old / keep both), a few "not sure" items, and **Worth a look** (what the check-up found, see below). A box at the top lets you tell it something directly, and search covers everything. You can also say "forget that I like mangoes" there, or in a chat. |
+| **Review** | The only screen that ever needs you. Shows what was just remembered (one card per message you sent, with the list of what it filed; **Undo** one line or the whole card; a line you put back leaves the list, nothing greyed-out is left behind), questions where something you said now disagrees with something remembered ("Your answer changed": keep new / keep old / keep both), a few "not sure" items, and **Worth a look** (what the check-up found, see below). A box at the top lets you tell it something directly, and search covers everything. You can also say "forget that I like mangoes" there, or in a chat. |
 | **Vault** | Your notes laid out like Obsidian. A folder tree on the left that opens and closes (the open/closed state is remembered, there is a collapse-all button, and **Ctrl+O** jumps to any note by name). Click a note to read it; hover a line to edit or delete just that line. A graph view shows how notes link (drag, zoom, show only what's around the open note, sliders for the forces, hide loose notes). Search takes Obsidian-style filters (`tag:#topic/health`, `path:Health`, `by:ai`, `-word`, `"exact phrase"`, `after:2026-01-01`, `has:revisit`, `is:orphan`, `type:memory`, `person:Riya`) and shows the matching lines, not just the file. Notes are by subject, not one file per sentence. The AI makes the folders, titles and links; you can edit anything. |
-| **People** | A profile for everyone you talk about or talked to, on any platform, linked to the raw conversations. Two profiles that are the same person can be joined with one click (and un-joined from the feed). Removing a person asks whether their chats go too (group chats with other people always stay); undo brings everything back. |
+| **People** | A profile for everyone you talk about or talked to, on any platform, linked to the raw conversations. Two profiles that are the same person can be joined with one click (and un-joined from the feed). One profile can be marked **This is me** (or use **Add yourself**): it is pinned at the top as *You*, and anything said under your own name is understood as being about you. Removing a person asks whether their chats go too (group chats with other people always stay); undo brings everything back. |
 | **Journal** | A professional biography of you, written from what is remembered (health and money are left out unless you allow them in Settings), plus dated journal entries. Edit it yourself and it is locked against AI rewrites until you unlock it. |
 | **Me** | What is current: your **to-do list** (tick things off; they move to "Earlier"), **projects** (each with its own folder and a note that opens from here), what you're doing, things you said you'd come back to (with the date), work and study, about you, and (collapsed) health and money. Every memory has **Keep private**: it disappears from every screen and every AI and can only be brought back from Settings. |
 | **Settings** | The AI helper (automatic, or your own local model), meaning search, privacy switches, words never to remember, pause memory, **private memories** (listed by id only; bring one back), import, backup and tidy, and how to uninstall. Look and feel always follow the app: there is nothing to pick. |
@@ -86,13 +90,27 @@ remembered. Open the Memory_OB tab only when you want to look, fix or search.
 
 ## The check-up
 
-Review's **Worth a look** list and `memory-ob sweep` run the same check-up. It
+Review's **Worth a look** list and `memory-ob sweep` run the same check-up. The
+word rules always do the looking. When an AI helper is available it gives a
+**second opinion** on top: it can set aside a finding the rules got wrong, put a
+finding in the right box ("the same thing twice" rather than "do not agree"), and
+notice a pair the words missed (it looks at up to 30 new pairs per check-up and
+remembers its answers, so it does not ask twice). It never changes a memory and
+never answers a question for you, and every finding says who noticed it: simple
+word rules, the AI helper, or both. `memory-ob sweep --no-ai` skips the helper. It
 looks for:
 
 * two memories that **disagree** (that slipped past the rules at the time),
 * the same thing said **twice**,
 * a to-do that has been open for **more than 45 days**,
 * a saved quote that no longer matches the sentence it came from.
+
+Private memories are never part of it: they are left out of the findings before
+anything is written or shown, so the check-up cannot show their text on Review,
+in the saved report or in the nightly output. If the memory behind a question
+changed since the check-up ran (you edited it, forgot it, or answered it on
+another screen), your click does nothing and says so, rather than acting on an
+old answer.
 
 Each finding is one plain question with one-click answers ("Keep the newer one /
 the older one / Both are right"; "Keep just one / Keep both"; "Done / Still to
@@ -164,6 +182,28 @@ memory-ob stats | activity | models | doctor | sweep | serve | proxy
 
 ## Honest limits
 
+* **Who checks what.** The word rules always run first. A contradiction of the
+  same fact with another value ("I live in Dhaka" / "I live in Sylhet") is
+  settled by the rules. Anything else the rules flag (a changed number, opposite
+  wording) is a guess, and when an AI helper is available it is asked about it
+  too, with the closest saved memories: it can drop a false alarm, call it a
+  repeat, or find a contradiction the words missed. If the helper fails or answers
+  badly, the rules' answer stands, so a real contradiction is never lost. The
+  question you see says who noticed. The check-up gets the same helper's second
+  opinion (above). It does not read the whole vault. "Not sure" comes from wording
+  ("maybe", "I think"), not from the AI doubting itself. Whether something is a
+  passing moment ("I'm tired today"), a to-do or a finished to-do, and whether a
+  line is about you or somebody else, is the AI helper's call when there is one
+  and rules otherwise. The AI can only make the "is it backed by your own words"
+  check stricter, never looser.
+* **People and you.** Until you mark a profile as you, your own name is just a
+  name: a line under it is read as being about someone else. Mark it (People →
+  **This is me**, or **Add yourself**) and the name, its other names and your
+  first name are read as "I" when saving and in the check-up, no second profile
+  is made from your name, and the AI helper is told who is talking. Only one
+  profile can be you; take it off first to move it. "My doctor lives in Dhaka" is
+  about the doctor and never backs "I live in Dhaka", and your "I live in Dhaka"
+  never backs "Rahim lives in Dhaka".
 * Conflicts are found by word and number rules ("I live in X" vs "I no longer
   live in X", 5 lakh vs 8 lakh); when an AI helper is available it also judges
   borderline cases. Without one, subtle contradictions can slip past. Nothing
@@ -231,7 +271,7 @@ python release.py ../Memory_OB-update-N.zip   # build a release zip + RELEASE_FI
 ```
 
 `tests/browser/` holds the browser checks (Chromium through Playwright:
-light and dark, narrow screens, contrast, Vault, summary card, check-up). They
+light and dark, narrow screens, contrast, Vault, summary card, check-up, owner card). They
 are not part of `run_tests.py`; see `tests/browser/README.md`.
 
 `DESIGN.md` records the rules the engine will not bend and why.

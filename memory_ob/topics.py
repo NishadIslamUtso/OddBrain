@@ -180,13 +180,37 @@ def revisit_of(source: dict[str, Any] | None) -> str | None:
 
 # -- moments: what happened or how you felt, not who you are --------------------
 
+_FEELING = (r"tired|sleepy|exhausted|bored|hungry|thirsty|sad|angry|stressed|annoyed|anxious|excited|sick|"
+            r"down|nervous|lonely|relieved|cold|hot|late|awake|upset|worried|scared|nauseous|dizzy|sore|unwell|"
+            r"back|home|away|offline|online|sorry|confused|frustrated|overwhelmed|restless|cranky|grumpy|moody|"
+            r"jealous|calm|energetic|lazy|sleepless|jet-?lagged|hungover")
+# Words that are a feeling on their own ("I'm happy") but a trait or a state of things with
+# "with / at / of / in..." ("I'm happy with my job", "I'm good at math", "I'm busy with my startup").
+_TRAITLIKE = r"great|good|bad|fine|happy|busy|free|okay|ok|ready|done|proud"
+_MOOD = _FEELING + r"|(?:" + _TRAITLIKE + r")(?!\s+(?:with|at|of|in|for|to|from)\b)"
+_DOING = (r"watching|eating|drinking|waiting|heading|walking|driving|cooking|sitting|lying|standing|queuing|queueing|"
+          r"resting|napping|sleeping|showering|texting|chatting|commuting|leaving|arriving|reaching|travelling|traveling|"
+          r"stuck|running late|getting ready|on my way|having (?:breakfast|lunch|dinner|tea|coffee|a break)")
 _MOMENT = re.compile(
-    r"\b(today|tonight|this (?:morning|afternoon|evening)|yesterday|last night|just now|right now)\b"
+    r"\b(today|tonight|this (?:morning|afternoon|evening)|yesterday|last night|just now|right now|at the moment)\b"
     r"|\b(?:i|we)\s+(?:had|ate|drank|cooked)\b[^.!?]{0,40}\b(?:breakfast|lunch|dinner|supper|snack)\b"
     r"|^\s*(?:ugh|argh|omg|wow|damn|yay|haha|lol|phew)\b"
-    r"|\b(?:i(?:'|\u2019)?m|i am|i feel|i felt|feeling)\s+(?:so |really |very |a bit |kind of |too )?"
-    r"(?:tired|sleepy|exhausted|bored|hungry|sad|happy|angry|stressed|annoyed|anxious|excited|sick|"
-    r"down|great|good|bad|fine|nervous|lonely|relieved)\b", re.I)
+    r"|\b(?:i(?:'|\u2019)?m|i am|i feel|i felt|feeling)\s+(?:so |really |very |a bit |a little |kind of |too |super |pretty |quite )?"
+    r"(?:" + _MOOD + r")\b"
+    r"|\b(?:i(?:'|\u2019)?m|i am)\s+(?:" + _DOING + r")\b"
+    r"|\b(?:i(?:'|\u2019)?m|i am)\s+(?:in|at|on)\s+(?:a|an|the|my)\s+(?:meeting|class|lecture|traffic|queue|line|car|bus|train|"
+    r"rickshaw|library|cafe|gym|office|mall|market|hospital|clinic|airport|station|lab|bad mood|good mood|hurry|rush)\b"
+    r"|\bi\s+just\s+(?:woke up|got up|got home|got back|came back|arrived|reached|landed|left|finished|ate|had|woke)\b"
+    r"|\bi\s+(?:have|got)\s+(?:a|an)\s+(?:headache|fever|cold|cough|stomach ?ache|sore throat|toothache|migraine|cramp)\b"
+    r"|\bi\s+(?:don(?:'|\u2019)?t|do not|didn(?:'|\u2019)?t)\s+feel\s+(?:like|well|good)\b"
+    r"|\bi\s+(?:feel|felt)\s+like\b"
+    r"|\bi\s+(?:slept|woke up)\s+(?:late|early|badly|poorly|well)\b"
+    r"|\bit(?:'|\u2019)?s\s+(?:raining|snowing|sunny|cloudy|foggy|windy|hot|cold)\b", re.I)
+
+# A feeling that comes with "usually", "in crowds", "whenever..." is how the person is, not how they are right now.
+_LASTING_FEELING = re.compile(
+    r"\b(usually|always|often|every\s+\w+|whenever|when(?:ever)? i|in (?:crowds|public|general|groups|the (?:morning|evening))|"
+    r"around (?:people|strangers|crowds)|most days|these days|lately|since)\b", re.I)
 
 # A moment that is really a decision or a plan is not just a mood.
 _MOMENT_BUT_LASTING = re.compile(
@@ -201,7 +225,13 @@ def is_moment(text: str) -> bool:
     so they never overwrite or contradict what is true about you.
     """
     t = text or ""
-    return bool(_MOMENT.search(t)) and not _MOMENT_BUT_LASTING.search(t) and not _INTENT.search(t)
+    if not _MOMENT.search(t) or _MOMENT_BUT_LASTING.search(t) or _INTENT.search(t):
+        return False
+    # "today" / "right now" make it a moment whatever else it says; a bare feeling that is
+    # tied to "usually" or "in crowds" is a lasting trait.
+    if _LASTING_FEELING.search(t) and not re.search(r"\b(today|tonight|right now|just now|at the moment|this (?:morning|afternoon|evening))\b", t, re.I):
+        return False
+    return True
 
 
 # -- to-dos ------------------------------------------------------------------------
@@ -240,6 +270,29 @@ _THREAD_PATTERNS = (
                r"(?:new\s+)?([a-z][a-z-]{2,18})\b"),
     re.compile(r"\b(?:starting|opening|launching|building|creating)\s+(?:a|an|my|our)\s+(?:new\s+)?"
                r"(" + _THREAD_NOUNS + r")\b"),
+)
+
+
+# The words for a person who is in the owner's life ("my doctor Rahman"). One list, used to
+# make a profile for them (manager) and to know a sentence is about them, not about the owner (extract).
+PEOPLE_ROLES = (
+    "sister", "brother", "mother", "mom", "mum", "father", "dad", "wife", "husband",
+    "best friend", "friend", "cousin", "uncle", "aunt", "boss", "manager", "teacher",
+    "professor", "roommate", "girlfriend", "boyfriend", "partner", "colleague",
+    "coworker", "neighbor", "neighbour", "classmate", "mentor", "son", "daughter",
+    "grandmother", "grandfather", "grandma", "grandpa", "fiance", "fiancee",
+    "doctor", "dentist", "nurse", "therapist", "counselor", "counsellor", "psychologist", "psychiatrist",
+    "coach", "trainer", "tutor", "lecturer", "instructor", "supervisor", "advisor", "adviser",
+    "principal", "dean", "headmaster", "landlord", "landlady", "lawyer", "barber", "driver",
+    "teammate", "batchmate", "schoolmate", "flatmate", "housemate", "employer", "client",
+    "nephew", "niece", "grandson", "granddaughter", "stepmother", "stepfather", "stepbrother",
+    "stepsister", "mother-in-law", "father-in-law", "brother-in-law", "sister-in-law",
+    "godfather", "godmother", "ex", "crush", "senior", "junior",
+)
+# Other things a sentence can be about that are not the owner (no profile is made for them).
+OTHER_SUBJECTS = (
+    "family", "parents", "parent", "relatives", "kids", "children", "child", "baby", "siblings",
+    "grandparents", "in-laws", "dog", "cat", "pet", "pets", "twin",
 )
 
 

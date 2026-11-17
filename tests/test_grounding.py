@@ -93,5 +93,62 @@ class InThePipeline(unittest.TestCase):
         self.assertEqual(out.unsure, 1)
 
 
+class SomeoneElseInTheOwnersLife(unittest.TestCase):
+    """"My doctor lives in Dhaka" is about the doctor. It must never back "I live in Dhaka"."""
+
+    ABOUT_OTHERS = [
+        "My doctor lives in Dhaka.", "My coach said I should rest.", "My dentist works at a clinic.",
+        "My landlord lives in Sylhet.", "My parents live in Sylhet.", "My family lives in Dhaka.",
+        "My friends live in Rome.", "My new supervisor works at BRAC.", "My mother-in-law lives in Rome.",
+        "My physio lives in Dhaka.",            # a word nobody listed: the general rule catches it
+        "My cat lives in Dhaka.", "My tutor studies at BUET.",
+    ]
+
+    def test_none_of_them_is_the_owner(self) -> None:
+        for said in self.ABOUT_OTHERS:
+            self.assertEqual(extract.subject_of(said)[0], "other", said)
+
+    def test_none_of_them_backs_a_fact_about_the_owner(self) -> None:
+        for said in self.ABOUT_OTHERS:
+            for claim in ("I live in Dhaka", "I work at a clinic", "I study at BUET"):
+                if extract.evidence_for(claim, said).grounded:
+                    # only allowed when the claim has nothing to do with the sentence at all
+                    self.assertFalse(set(claim.lower().split()) & {"dhaka", "clinic", "buet"} & set(said.lower().replace(".", "").split()), (said, claim))
+
+    def test_and_the_other_way_round_the_owners_own_sentence_cannot_back_somebody_elses_fact(self) -> None:
+        for claim in ("Rahim lives in Dhaka", "Karim works at Google", "He lives in Dhaka"):
+            self.assertFalse(extract.evidence_for(claim, "I live in Dhaka. I work at Google.").grounded, claim)
+        self.assertTrue(extract.evidence_for("Rahim lives in Dhaka", "Rahim lives in Dhaka.").grounded)
+
+    def test_the_same_sentence_still_backs_a_claim_about_that_person(self) -> None:
+        self.assertTrue(extract.evidence_for("My doctor lives in Dhaka", "My doctor lives in Dhaka.").grounded)
+
+    def test_you_and_them_together_is_you(self) -> None:
+        for said in ("My doctor and I live in Dhaka.", "My parents and I live in Dhaka."):
+            self.assertEqual(extract.subject_of(said)[0], "me", said)
+            self.assertTrue(extract.evidence_for("I live in Dhaka", said).grounded, said)
+
+    def test_things_that_are_the_owners_are_still_the_owners(self) -> None:
+        for said in ("My laptop is a ThinkPad.", "My budget is 15000 taka a month.", "My laptop works fine."):
+            self.assertNotEqual(extract.subject_of(said)[0], "me")           # unknown, never "other" by the verb rule
+        self.assertTrue(extract.evidence_for("My budget is 15000 taka a month", "My budget is 15000 taka a month.").grounded)
+
+    def test_the_mixed_message_keeps_only_what_is_true(self) -> None:
+        tmp = Path(tempfile.mkdtemp())
+        vault, db = tmp / "v", tmp / "m.db"
+        Settings.resolve(vault=vault, db=db).ensure_dirs()
+        store = Store(db)
+        self.addCleanup(store.close)
+        out = manager.capture(store, text="My doctor lives in Dhaka. I study CSE at BRAC University.", vault=vault,
+                              model_call=lambda _p: "\n".join(json.dumps(c) for c in ({"text": "I live in Dhaka"}, {"text": "I study CSE at BRAC University"})))
+        self.assertEqual(out.ungrounded, 1)
+        self.assertEqual([r.body for r in store.list_records(status="active")], ["I study CSE at BRAC University"])
+
+    def test_a_profile_is_made_for_the_new_roles_but_not_for_pets(self) -> None:
+        self.assertEqual(manager.people_in("My doctor Rahman lives in Dhaka."), [("Rahman", "doctor")])
+        self.assertEqual(manager.people_in("My coach Karim said hello."), [("Karim", "coach")])
+        self.assertEqual(manager.people_in("My dog Max is two."), [])
+
+
 if __name__ == "__main__":
     unittest.main()

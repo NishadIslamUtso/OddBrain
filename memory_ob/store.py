@@ -89,7 +89,6 @@ CREATE TABLE IF NOT EXISTS facts (
     status TEXT NOT NULL DEFAULT 'candidate',
     source TEXT NOT NULL DEFAULT '{}',
     meta TEXT NOT NULL DEFAULT '{}',
-    corroborated INTEGER NOT NULL DEFAULT 0,
     demo INTEGER NOT NULL DEFAULT 0,
     created TEXT NOT NULL
 );
@@ -316,10 +315,13 @@ class Store:
             self.conn.execute(
                 "ALTER TABLE facts ADD COLUMN meta TEXT NOT NULL DEFAULT '{}'"
             )
-        if "corroborated" not in facts_have:
-            self.conn.execute(
-                "ALTER TABLE facts ADD COLUMN corroborated INTEGER NOT NULL DEFAULT 0"
-            )
+        if "corroborated" in facts_have:
+            # An old idea ("trust grows when a fact is said again") that nothing ever used. Dropped.
+            # A very old SQLite cannot drop a column; it is harmless there (it has a default).
+            try:
+                self.conn.execute("ALTER TABLE facts DROP COLUMN corroborated")
+            except sqlite3.OperationalError:
+                pass
         conv_have = {
             row["name"]
             for row in self.conn.execute("PRAGMA table_info(conversations)").fetchall()
@@ -1160,6 +1162,7 @@ class Store:
         aliases: list[str] | None = None,
         relation: str | None = None,
         notes: str | None = None,
+        tags: list[str] | None = None,
     ) -> dict | None:
         """Change a profile's own fields. Only what is given is changed."""
         person = self.get_person(person_id)
@@ -1169,11 +1172,12 @@ class Store:
         new_aliases = [a.strip() for a in (aliases if aliases is not None else person["aliases"]) if a.strip()]
         new_aliases = [a for a in dict.fromkeys(new_aliases) if a.lower() != new_name.lower()]
         self.conn.execute(
-            "UPDATE people SET name=?, aliases=?, relation=?, notes=?, modified=? WHERE id=?",
+            "UPDATE people SET name=?, aliases=?, relation=?, notes=?, tags=?, modified=? WHERE id=?",
             (
                 new_name, json.dumps(new_aliases),
                 person["relation"] if relation is None else relation,
                 person["notes"] if notes is None else notes,
+                json.dumps(person["tags"] if tags is None else sorted(set(tags))),
                 _now(), person_id,
             ),
         )

@@ -137,10 +137,12 @@ def run(settings: Settings, *, dry_run: bool = False, skip: tuple[str, ...] = ()
         if not app.audit:
             return "off"
         with Store(settings.db) as st:
-            report = audit.run(st, settings.vault)
+            report = audit.run(st, settings.vault, judge=call)
         s = report["summary"]
+        ai = report.get("ai") or {}
         return f"{s['needs_you']} to look at; {s['checks_ok']}/{s['checks_total']} checks fine" + (
-            f"; put {s['fixed']} note line(s) right" if s["fixed"] else "")
+            f"; put {s['fixed']} note line(s) right" if s["fixed"] else "") + (
+            f"; AI helper looked at {ai['looked']} pair(s)" if ai.get("looked") else "")
 
     def hermes_sync() -> str:
         if not app.sync_hermes:

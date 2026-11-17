@@ -39,6 +39,7 @@ def _card_doubt(store: Any, card: Any) -> dict[str, Any]:
             "before": _text(card.old), "before_when": (old_rec.modified or old_rec.created) if old_rec else "",
             "after": new_text, "after_when": card.created,
             "category": topics.category_of((card.new or {}).get("tags"), new_text),
+            "found_by": ((card.new or {}).get("source") or {}).get("found_by", ""),
             "options": [
                 {"key": "new", "label": "Use the new one"},
                 {"key": "old", "label": "Keep the old one"},

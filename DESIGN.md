@@ -58,7 +58,9 @@ what you said
     the claim is covered by the whole message, for "he/she/it" coreference); its numbers
     must come from a sentence that is not about someone else; it may not introduce a
     capitalised name the owner never wrote; a sentence about someone else ("my sister
-    lives in Rome") cannot back a fact about the owner; a wish or plan ("I want to
+    lives in Rome") cannot back a fact about the owner (`extract.subject_of`: the people
+    and things in `topics.PEOPLE_ROLES` / `OTHER_SUBJECTS`, and any other "my <thing>
+    <verb>" clause, count as someone else; one vocabulary for `extract` and `manager`); a wish or plan ("I want to
     move") cannot back a present-tense fact (a to-do may be forward-looking); a hedged
     clause marks the claim "not sure". Dropped claims are logged with the reason.
   → for each claim:
@@ -83,7 +85,15 @@ in one go, each still checked on its own.
 
 Every change writes a change-log entry with the old and new text, so the feed
 can show it and **Undo** can take it back — unless the memory has been changed
-again since, in which case it says so instead of guessing.
+again since, in which case it says so instead of guessing. The screens leave out changes
+that were already put back (`feed.build(hide_undone=True)`), so a row clears when you
+undo it; the command-line history (`memory-ob feed`) still lists them as "(undone)".
+
+Passing moments ("I'm tired today", "I'm at the library") are told apart from lasting facts
+by the librarian's `moment` flag when there is a helper, and by `topics.is_moment` otherwise.
+Traits and lasting feelings ("I'm good at math", "I'm happy with my job") are not moments.
+The old `facts.corroborated` column was never read, so it is gone (dropped on old databases
+where SQLite allows it, ignored where it does not).
 
 ## 5. Questions
 
@@ -102,6 +112,28 @@ Every record remembers who said it. People are found by relation ("my sister
 Riya"), by verbs ("met Karim"), and by imported chats. A profile links to its
 memories and its raw conversations from every platform. **Profiles are never
 merged or renamed by the AI**; a merge is the owner's, and it can be undone.
+
+**Conflicts while saving.** `conflicts.decide(new, records, judge, me)` returns the verdict, the
+record and who settled it (`rules`, `ai`, `both`); `find` keeps the old two-value shape. A
+same-fact-different-value hit (`compare_how` → `slot`) is final and the helper is not asked. Any other
+rule hit is put to the helper together with the closest saved memories; if it answers, it decides
+(drop, repeat, or contradiction); if it fails or rambles, the rules' answer stands. The question
+shown to the owner says who noticed it (`found_by`).
+
+**The owner card.** One profile can carry the tag `this-is-me` (`manager.set_owner`, logged and
+undoable like any profile edit; only one at a time, and a second one is refused, never silently
+switched). `manager.owner_names` gives its name, other names and first name. Those names are
+the owner's: `extract.subject_of(..., me)` reads a sentence starting with one as "me",
+`conflicts.as_me` turns it into "I ..." for comparing only (nothing saved is rewritten), the
+owner's name is not an "invented name" in a claim, `people_in` does not make a second profile
+from it, rules-only mode does not park such a line as "not about you", and the check-up compares
+it with what the owner said as "I". The librarian prompt names who is talking. Without a marked
+profile none of this applies and nothing changes.
+
+**Who a line is about.** The librarian may return `about: "me" | "other"`. It is stored on the
+candidate and used for one thing: `evidence_for(..., about_other=True)` leaves the owner's own
+"I ..." sentences out of what can back the line. A claim that plainly starts with another person
+("Rahim lives in Dhaka") gets the same treatment without any AI. It can only tighten grounding.
 
 ## 7. Recall and the exit
 
@@ -134,7 +166,11 @@ both re-embed in the background.
 `auto` uses Hermes's own model setup (its config and the local `hermes proxy`),
 resolved per call; that model may be an online one, so the `local_only` switch
 (off by default) skips it and uses only a model on this computer, or simple
-rules. `custom` is a local address and model: Ollama, or any OpenAI-style server
+rules. "This computer" means loopback only (`models._is_this_computer`; a hostname
+that resolves elsewhere does not count). It is enforced in `models._urlopen`, which
+every network call in `models.py` goes through, and which refuses redirects to
+another host; `api.save_settings` / `save_ai` refuse a non-local address while the
+switch is on, and `ai_models` does not probe one. `custom` is a local address and model: Ollama, or any OpenAI-style server
 (llama.cpp, LM Studio, vLLM; `models.server_models` tells which in at most two
 requests, and chat/embeddings go to `/api/…` or `/v1/…` accordingly). Embeddings stay
 local. Two slots exist, `extract` (reading what you say, the biography) and
@@ -165,6 +201,17 @@ step and `memory-ob sweep`. It writes `.brain/audit.json`.
 * A "both are true" answer given at capture time is recorded (`audit.pair_answered`)
   so the check-up never raises the same pair again.
 * The check-up never makes a memory and never answers a question for the owner.
+* **A second opinion, not a verdict.** With a helper, `audit._second_opinion` may drop a finding,
+  move it between `disagree` and `twice`, or add a pair the rules had no opinion on (at most
+  `AI_PAIRS_PER_RUN` new pairs per run, `AI_BATCH` per question, answers cached by a hash of the two
+  texts in `audit.json`). It only changes the list of findings; a helper that fails changes
+  nothing; every finding carries `found_by` (`rules`, `ai`, `both`).
+* **Private stays private here too.** `audit.run` drops every finding that touches a
+  record the exit gate withholds (`audit._may_show`), and `audit.public` filters a
+  report that was saved earlier, so an old `audit.json` cannot leak either.
+* **No stale answers.** A finding id is a hash of its kind and, for each record, `id`
+  plus a hash of its text. `act()` rebuilds the id from the live records; if it no
+  longer matches, the result is `gone` and nothing changes.
 
 ### Hermes's own notes (the optional switch)
 

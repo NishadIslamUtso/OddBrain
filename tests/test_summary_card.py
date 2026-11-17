@@ -108,6 +108,21 @@ class UndoAll(Case):
         self.assertEqual(len(self.active()), 3)
         self.assertEqual(len(feed.build(self.store)[0]["undo_seqs"]), 3)
 
+    def test_the_screen_clears_as_you_undo(self) -> None:
+        """Put something back and it leaves the list; nothing greyed-out is left behind."""
+        self.tell(DUMP, CLAIMS)
+        card = feed.build(self.store)[0]
+        one = card["items"][0]["seq"]
+        self.client.post(f"/api/undo/{one}")
+        shown = self.client.get("/api/home").json()["feed"][0]
+        self.assertEqual(shown["count"], 3)
+        self.assertEqual(len(shown["items"]), 3)
+        self.assertTrue(all(not i["undone"] for i in shown["items"]))
+        self.client.post("/api/undo-many", json={"seqs": shown["undo_seqs"]})
+        self.assertEqual(self.client.get("/api/home").json()["feed"], [])
+        self.assertEqual(self.client.get("/api/feed").json()["feed"], [])
+        self.assertTrue(feed.build(self.store)[0]["undone"])           # the history still has it
+
     def test_a_changed_one_is_left_alone_and_counted(self) -> None:
         self.tell(DUMP, CLAIMS)
         card = feed.build(self.store)[0]

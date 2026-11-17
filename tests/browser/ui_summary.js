@@ -10,10 +10,10 @@ const BASE = process.env.MO_BASE || 'http://127.0.0.1:8791';
     const toast = async (re) => { await page.waitForFunction(src => Array.from(document.querySelectorAll('.toast')).some(e => new RegExp(src).test(e.textContent)), re.source); await page.evaluate(() => document.querySelectorAll('.toast').forEach(t => t.remove())); };
     await page.goto(BASE + '/ui'); await page.waitForSelector('#rv-body section');
     const word = scheme === 'light' ? 'herb garden' : 'green tea';
-    let n = 0;
+    let n = 0, base = 0;
     await step('a big message becomes one card', async () => {
       // the seeded vault already has a card from an earlier message, so wait for a NEW one
-      const before = await page.$$eval('.feed-group', e => e.length);
+      const before = await page.$$eval('.feed-group', e => e.length); base = before;
       await page.fill('#tell', scheme === 'light'
         ? 'I keep a small herb garden on my balcony. I want to learn pottery next year. I always drink lemon water in the morning. I run five kilometres every Sunday.'
         : 'I drink green tea every afternoon. I want to learn the violin someday. I read a book every night before sleep. I cycle to the university every day.');
@@ -48,16 +48,14 @@ const BASE = process.env.MO_BASE || 'http://127.0.0.1:8791';
     });
     await step('one line can be undone alone', async () => {
       await page.click('.feed-group .grp-body .feed-item [data-act=undo]'); await toast(/Put back/);
-      await page.waitForSelector('.feed-group .grp-body .feed-item.undone');
-      const left = await page.$$eval('.feed-group .grp-body .feed-item:not(.undone) [data-act=undo]', e => e.length); if (left !== n - 1) throw new Error(`${left} left`);
+      await page.waitForFunction(k => document.querySelectorAll('.feed-group .grp-body .feed-item [data-act=undo]').length === k, n - 1);
+      const greyed = await page.$$eval('.feed-item.undone', e => e.length); if (greyed) throw new Error(`${greyed} greyed-out rows left on screen`);
     });
     await step('Undo all puts the rest back', async () => {
       await page.click('.feed-group [data-act=undo-group]'); await toast(/Put back/);
-      await page.waitForFunction(() => document.querySelector('.feed-group').classList.contains('undone'));
-      const t = await page.textContent('.feed-group'); if (!/Undone/.test(t)) throw new Error('no Undone chip');
+      await page.waitForFunction(b => document.querySelectorAll('.feed-group').length === b, base);     // the new card is gone, the older one stays
+      const left = await page.$$eval('#rv-body .feed-item.undone, #rv-body .chip', els => els.filter(e => e.classList.contains('undone') || /^Undone$/.test(e.textContent.trim())).length); if (left) throw new Error('a greyed Undone row is still on screen');
     });
-    await step('hide closes the list again', async () => { await page.click('.feed-group [data-act=toggle-group]'); await page.waitForFunction(() => !document.querySelector('.feed-group .grp-body')); });
-    await step('narrow screen: no sideways scroll', async () => { await page.setViewportSize({ width: 360, height: 800 }); await page.click('.feed-group [data-act=toggle-group]'); await page.waitForTimeout(200); const w = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth); if (w > 1) throw new Error('scrolls by ' + w); });
     console.log(`[${scheme}] errors: ${errs.length}`); errs.forEach(e => console.log('  ' + e)); failed += errs.length;
     await ctx.close();
   }

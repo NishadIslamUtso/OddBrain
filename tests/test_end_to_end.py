@@ -303,7 +303,7 @@ class ApiCase(unittest.TestCase):
         r = self.client.post(f"/api/undo/{feed[0]['seq']}")
         self.assertEqual(r.status_code, 200, r.text)
         self.assertEqual(self.client.get("/api/records").json(), [])
-        self.assertTrue(self.client.get("/api/feed").json()["feed"][0]["undone"])
+        self.assertEqual(self.client.get("/api/feed").json()["feed"], [])      # an undone row clears off the screen
 
     def test_search_excludes_private(self) -> None:
         from tests.test_laws import make_record

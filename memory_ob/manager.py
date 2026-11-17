@@ -42,13 +42,7 @@ AI_CARD = "ai"
 
 _FIRST_PERSON = re.compile(r"\b(i|i'm|im|i've|ive|i'd|i'll|my|me|we|our|we're)\b", re.I)
 
-_RELATIONS = (
-    "sister", "brother", "mother", "mom", "mum", "father", "dad", "wife", "husband",
-    "friend", "best friend", "cousin", "uncle", "aunt", "boss", "manager", "teacher",
-    "professor", "roommate", "girlfriend", "boyfriend", "partner", "colleague",
-    "coworker", "neighbor", "neighbour", "classmate", "mentor", "son", "daughter",
-    "grandmother", "grandfather", "grandma", "grandpa", "fiance", "fiancee",
-)
+_RELATIONS = topics.PEOPLE_ROLES
 _NAME = r"([A-Z][a-z]{2,}(?:\s[A-Z][a-z]{2,})?)"
 # "my younger brother Tanvir": a word or two between "my" and the relation.
 _REL_MODS = r"(?:(?i:younger|older|elder|little|big|youngest|oldest|old|dear|step|half|twin|favou?rite|close|new)\s+)?"
@@ -177,6 +171,73 @@ def _save_ignored(vault: Path, names: set[str]) -> None:
     path = Path(vault) / IGNORED_PEOPLE_FILE
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(sorted(names)), encoding="utf-8")
+
+
+OWNER_TAG = "this-is-me"
+
+
+def owner_person(store: Any) -> dict[str, Any] | None:
+    """The profile the owner marked "this is me", if there is one."""
+    for person in store.list_people(limit=100000):
+        if OWNER_TAG in person.get("tags", []):
+            return person
+    return None
+
+
+def owner_names(store: Any) -> frozenset[str]:
+    """Every name the owner goes by, lower case: the profile name, its other names, and the first name.
+
+    Empty when nobody is marked as "me". A sentence that starts with one of these is a
+    sentence about the owner.
+    """
+    person = owner_person(store)
+    if person is None:
+        return frozenset()
+    names = {person["name"], *person.get("aliases", [])}
+    words = person["name"].split()
+    if len(words) > 1 and len(words[0]) >= 3:
+        names.add(words[0])
+    return frozenset(n.strip().lower() for n in names if n and n.strip())
+
+
+def _under_owner_name(store: Any, text: str) -> bool:
+    """Does the line start with the owner's own name (so it is about them, like a line starting "I")?"""
+    from .extract import starts_with_name
+
+    return starts_with_name(text, owner_names(store))
+
+
+def set_owner(store: Any, person_id: str, mine: bool, *, vault: Path | None = None) -> dict[str, Any]:
+    """The owner says a profile is them (or is not). Only one profile can be "me" at a time.
+
+    Raises ``LookupError`` for a profile that is gone and ``ValueError`` when another profile
+    is already marked: it must be unmarked first, so nothing switches silently.
+    """
+    before = store.get_person(person_id)
+    if before is None:
+        raise LookupError("That person no longer exists.")
+    current = owner_person(store)
+    if mine and current is not None and current["id"] != person_id:
+        raise ValueError(f"{current['name']} is already marked as you. Take that off first.")
+    tags = [t for t in before["tags"] if t != OWNER_TAG] + ([OWNER_TAG] if mine else [])
+    after = store.update_person(person_id, tags=tags)
+    assert after is not None
+    if before != after:
+        store.log_change(entity="person", entity_id=person_id, action="update", before=before, after=after,
+                         actor=OWNER, reason="you said this profile is you" if mine else "you said this profile is not you")
+    if vault is not None:
+        try:
+            vault_mod.write_person(store, vault, after)
+        except Exception:  # noqa: BLE001
+            logger.warning("could not update person note", exc_info=True)
+    return after
+
+
+def add_myself(store: Any, name: str, *, vault: Path | None = None) -> dict[str, Any]:
+    """"Add yourself": mark the profile with this name as you, making it first if it is not there yet."""
+    existing = store.find_person(name)
+    person = existing if existing is not None else add_person(store, name, vault=vault)
+    return set_owner(store, person["id"], True, vault=vault)
 
 
 def people_in(text: str, hinted: list[str] | None = None, ignore: set[str] | None = None) -> list[tuple[str, str]]:
@@ -515,6 +576,12 @@ def librarian_context(store: Any) -> str:
                 if title:
                     notes.setdefault(topics.category_of(r.tags, r.body or r.title), Counter())[title] += 1
         lines: list[str] = []
+        me_person = owner_person(store)
+        if me_person is not None:
+            also = [n for n in me_person.get("aliases", []) if n]
+            lines.append(f"The person talking is {me_person['name']}"
+                         + (f" (also called {', '.join(also)})" if also else "")
+                         + ". A line about that name is a line about the person themself.")
         for category in topics.CATEGORIES:
             if category in notes:
                 lines.append(f"{category}: " + ", ".join(
@@ -572,10 +639,12 @@ def _settle_all(
     from .extract import evidence_for
 
     people_seen: list[str] = []
+    me = owner_names(store)
     for c in cands:
         said_unsure = False
         if owner_text is not None:
-            found = evidence_for(c.text, owner_text, forward_ok=bool(c.todo))
+            found = evidence_for(c.text, owner_text, forward_ok=bool(c.todo), me=me,
+                                 about_other=(c.about == "other" and model_used))
             if not found.grounded:
                 store.log_activity("not-grounded", f"{c.text[:80]} ({found.reason})", actor="memory_ob")
                 out.ungrounded += 1
@@ -589,7 +658,7 @@ def _settle_all(
             store.log_activity("guardrail-block", f"{c.text[:80]} (~ {blocked})", actor="memory_ob")
             out.blocked += 1
             continue
-        named = people_in(c.text, c.people if model_used else None, ignore)
+        named = people_in(c.text, c.people if model_used else None, (ignore or set()) | me)
         fid = store.add_fact(
             c.text, trust=c.trust, source=c.source,
             meta={"context": c.context, "sentiment": c.sentiment, "people": [n for n, _ in named]},
@@ -714,6 +783,7 @@ def settle_fact(
         out.unsure += 1
         return "unsure"
     if (not force and not model_used and not _FIRST_PERSON.search(text)
+            and not _under_owner_name(store, text)
             and not topics.thread_of(text, _known_threads(store))):
         # Not said in the first person and not about one of your projects: read it later.
         store.set_fact_status(fact_id, "waiting")
@@ -734,18 +804,18 @@ def settle_fact(
             return "finished"
     if moment:
         # A passing moment is kept, dated, in the Journal. It is only checked for repeats.
-        found = conflicts.find(text, _comparable(store, moments=True))
+        found = conflicts.decide(text, _comparable(store, moments=True), me=owner_names(store))
         if found is not None and found[0] != conflicts.DUPLICATE:
             found = None
     else:
-        found = conflicts.find(text, _comparable(store), judge)
+        found = conflicts.decide(text, _comparable(store), judge, me=owner_names(store))
     if found is not None:
-        verdict, existing = found
+        verdict, existing, found_by = found
         if verdict == conflicts.DUPLICATE:
             store.set_fact_status(fact_id, "duplicate")
             out.duplicates += 1
             return "duplicate"
-        card = ask_conflict(store, existing, text, source={**source, "fact_id": fact_id})
+        card = ask_conflict(store, existing, text, source={**source, "fact_id": fact_id, "found_by": found_by})
         store.set_fact_status(fact_id, "asked")
         if card.id not in out.card_ids:       # a second clause joins the same question
             out.asked += 1
@@ -795,7 +865,7 @@ def keep_unsure(store: Any, fact_id: str, *, vault: Path | None = None) -> dict[
     out = Outcome()
     from .extract import kind_hint_for
 
-    people = [n for n, _ in people_in(fact["text"])]
+    people = [n for n, _ in people_in(fact["text"], ignore=owner_names(store))]
     verdict = settle_fact(
         store, fact_id, fact["text"], kind=kind_hint_for(fact["text"]),
         source=fact.get("source") or {}, out=out, model_used=True, people=people,
@@ -1317,7 +1387,7 @@ def undo(store: Any, seq: int, *, vault: Path | None = None) -> dict[str, Any]:
         elif action == "update":
             b = change["before"]
             store.update_person(change["entity_id"], name=b["name"], aliases=b["aliases"],
-                                relation=b["relation"], notes=b["notes"])
+                                relation=b["relation"], notes=b["notes"], tags=b.get("tags", []))
         elif action == "remove":
             store.restore_person(change["before"])
             for saved in change["before"].get("conversations", []):
@@ -1399,7 +1469,7 @@ def import_notes(
             continue
         fid = store.add_fact(text, trust=0.5, source={"origin": "import", "file": source_name})
         settle_fact(store, fid, text, kind="note", source={"origin": "import", "file": source_name},
-                    out=out, model_used=True, people=[n for n, _ in people_in(text)],
+                    out=out, model_used=True, people=[n for n, _ in people_in(text, ignore=owner_names(store))],
                     actor=OWNER, reason=f"imported from {source_name}", force=True, log=False)
     summary = {"count": out.saved, "source": source_name, "record_ids": out.record_ids}
     if out.saved:

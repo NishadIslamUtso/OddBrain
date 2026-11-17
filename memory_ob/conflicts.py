@@ -180,13 +180,19 @@ def _same_thing(a: frozenset[str], b: frozenset[str]) -> bool:
 
 def compare(new_text: str, old_text: str) -> str | None:
     """``"duplicate"``, ``"conflict"`` or None for *new_text* against *old_text*."""
+    return compare_how(new_text, old_text)[0]
+
+
+def compare_how(new_text: str, old_text: str) -> tuple[str | None, str]:
+    """Like :func:`compare`, and how the rules got there: ``"slot"`` (the same fact, e.g. where
+    you live, with another value: firm) or ``"words"`` (numbers or opposite wording: a guess)."""
     a, b = read(new_text), read(old_text)
     if not a.stems or not b.stems:
-        return None
+        return None, ""
     if a.slot and b.slot and a.slot[0] == b.slot[0]:
         # "I quit X and joined Y" is negated as a whole but its slot is still the new job.
         if (not a.negated and not b.negated) or (a.event and not b.negated):
-            return DUPLICATE if a.slot[1] == b.slot[1] else CONFLICT
+            return (DUPLICATE if a.slot[1] == b.slot[1] else CONFLICT), "slot"
     # The same thing said with a different number: 72 kg, then 68 kg.
     if a.numbers and b.numbers and a.numbers != b.numbers and not a.negated and not b.negated:
         wa, wb = _plain_words(a), _plain_words(b)
@@ -194,23 +200,23 @@ def compare(new_text: str, old_text: str) -> str | None:
         # One side may say more ("my salary" / "my monthly salary"), but neither may name a
         # different thing: "budget for food 5000" and "budget for rent 12000" can both be true.
         if smaller >= 2 and len(wa & wb) / smaller >= 0.6 and _same_thing(wa, wb):
-            return CONFLICT
+            return CONFLICT, "words"
     shared = a.stems & b.stems
     smaller = min(len(a.stems), len(b.stems))
     if not shared or len(shared) / smaller < 0.6:
-        return None
+        return None, ""
     if smaller > 1 and len(shared) < 2:
-        return None
+        return None, ""
     if a.negated != b.negated:
         # Opposite polarity only contradicts when it is about the same thing: "I eat rice for
         # lunch" next to "I don't eat rice for dinner" is two different statements.
         if not _same_thing(a.stems, b.stems):
-            return None
-        return CONFLICT
+            return None, ""
+        return CONFLICT, "words"
     # Same polarity: it is a repeat only when it adds nothing new.
     if len(shared) / len(a.stems) >= 0.85:
-        return DUPLICATE
-    return None
+        return DUPLICATE, "words"
+    return None, ""
 
 
 def _text_of(rec: Any) -> str:
@@ -273,38 +279,103 @@ def parse_judgement(raw: str, count: int) -> dict[int, str] | None:
     return out or None
 
 
-def find(new_text: str, records: list[Any], judge: Any | None = None) -> tuple[str, Any] | None:
-    """The first existing record the new statement repeats or contradicts.
+_THIRD = {"is": "am", "has": "have", "does": "do", "goes": "go", "was": "was"}
+_ADVERBS = frozenset("also still now always never usually just currently really only often sometimes".split())
 
-    The word rules go first. When they find nothing definite and an AI helper
-    (*judge*, a function taking a prompt and returning text) is available, it is
-    asked about the closest remembered statements; its answer then decides, so
-    "I weigh 68 kg" next to "I weigh 72 kg" or a changed job is not missed.
-    A contradiction outranks a repeat: if the statement matches one record as a
-    duplicate and another as a conflict, the owner must hear about the conflict.
+
+def _first_person_verb(word: str) -> str:
+    low = word.lower()
+    if low in _THIRD:
+        return _THIRD[low]
+    if low.endswith("ies") and len(low) > 4:
+        return word[:-3] + "y"
+    if low.endswith(("sses", "shes", "ches", "xes", "zes")):
+        return word[:-2]
+    if low.endswith("s") and not low.endswith("ss") and len(low) > 3:
+        return word[:-1]
+    return word
+
+
+def as_me(text: str, me: frozenset[str]) -> str:
+    """*text* with the owner's own name at its start turned into "I" (or "my"), for comparing only.
+
+    "Nishad lives in Dhaka" becomes "I live in Dhaka", so it is checked against what the owner said
+    about themself. Nothing is rewritten in what is saved. Without *me* the text is unchanged.
+    """
+    if not me or not text:
+        return text
+    alt = "|".join(re.escape(n) for n in sorted(me, key=len, reverse=True))
+    m = re.match(r"^(\W*)(?:" + alt + r")(?P<poss>'s)?\b(?P<rest>.*)$", text, re.I | re.S)
+    if m is None:
+        return text
+    rest = m.group("rest")
+    if m.group("poss"):
+        return f"{m.group(1)}my{rest}"
+    words = rest.split(" ")
+    for i, word in enumerate(w for w in words):
+        if not word:
+            continue
+        if word.lower() in _ADVERBS:
+            continue
+        words[i] = _first_person_verb(word)
+        break
+    return f"{m.group(1)}I{' '.join(words)}"
+
+
+def find(new_text: str, records: list[Any], judge: Any | None = None) -> tuple[str, Any] | None:
+    """The first existing record the new statement repeats or contradicts (see :func:`decide`)."""
+    found = decide(new_text, records, judge)
+    return None if found is None else (found[0], found[1])
+
+
+def decide(new_text: str, records: list[Any], judge: Any | None = None,
+           me: frozenset[str] = frozenset()) -> tuple[str, Any, str] | None:
+    """``(verdict, record, who)`` for the first record the new statement repeats or contradicts.
+
+    *who* is ``"rules"``, ``"ai"`` or ``"both"`` (the rules flagged it and the helper agreed): whoever settled it, so the owner is told honestly.
+
+    The word rules go first. A contradiction of the same fact with another value ("I live in
+    Dhaka" / "I live in Sylhet") is firm: the rules settle it. Everything else the rules flag
+    (a changed number, opposite wording) is a guess, and when an AI helper (*judge*, a function
+    taking a prompt and returning text) is available it is asked about it too, together with the
+    closest remembered statements, and its answer decides: it can drop a false alarm, call a
+    repeat, or find a contradiction the words missed ("I weigh 68 kg" next to "I weigh 72 kg",
+    a changed job). *me* is the owner's own names, so "Nishad lives in Sylhet" is read as "I live in
+    Sylhet". If the helper fails or answers badly, the rules' answer stands, so a real
+    contradiction is never lost to a bad answer. A contradiction outranks a repeat.
     """
     duplicate: Any = None
+    guesses: list[Any] = []
+    new_text = as_me(new_text, me)          # the owner's own name counts as "I" (see as_me)
     for rec in records:
-        verdict = compare(new_text, _text_of(rec))
+        verdict, how = compare_how(new_text, as_me(_text_of(rec), me))
         if verdict == CONFLICT:
-            return CONFLICT, rec
-        if verdict == DUPLICATE and duplicate is None:
+            if how == "slot":
+                return CONFLICT, rec, "rules"
+            guesses.append(rec)
+        elif verdict == DUPLICATE and duplicate is None:
             duplicate = rec
     if judge is not None:
-        related = _related(new_text, records)
-        if related:
+        asked = _related(new_text, records)
+        for rec in guesses:                        # the rules' own suspects are always put to the helper
+            if all(rec is not other for other in asked):
+                asked.append(rec)
+        if asked:
             try:
-                answer = parse_judgement(judge(judge_prompt(new_text, related)), len(related))
+                answer = parse_judgement(judge(judge_prompt(new_text, asked)), len(asked))
             except Exception:  # noqa: BLE001 - the helper failing must never block saving
                 answer = None
             if answer is not None:
-                for i, rec in enumerate(related, 1):
-                    if answer.get(i) == "update":
-                        return CONFLICT, rec
-                for i, rec in enumerate(related, 1):
+                updates = [rec for i, rec in enumerate(asked, 1) if answer.get(i) == "update"]
+                if updates:
+                    flagged = next((r for r in updates if any(r is g for g in guesses)), None)
+                    return CONFLICT, flagged or updates[0], ("both" if flagged else "ai")
+                for i, rec in enumerate(asked, 1):
                     if answer.get(i) == "same":
-                        return DUPLICATE, rec
+                        return DUPLICATE, rec, "ai"
                 return None
+    if guesses:
+        return CONFLICT, guesses[0], "rules"
     if duplicate is not None:
-        return DUPLICATE, duplicate
+        return DUPLICATE, duplicate, "rules"
     return None

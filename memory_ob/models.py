@@ -77,20 +77,42 @@ def _v1(base_url: str) -> str:
     return base if base.endswith("/v1") else base + "/v1"
 
 
-def _is_this_computer(address: str) -> bool:
-    """True when *address* really points at this computer.
-
-    Looks at the host itself. A substring check would call
-    ``https://localhost.example.com`` or ``https://example.com/?127.0.0.1``
-    local, and "local only" would then let the owner's words go online.
-    """
+def _host_of(address: str) -> str:
     from urllib.parse import urlparse
 
     try:
-        host = (urlparse(address if "://" in address else "http://" + address).hostname or "").lower()
+        return (urlparse(address if "://" in address else "http://" + address).hostname or "").lower()
+    except ValueError:
+        return ""
+
+
+def _is_this_computer(address: str) -> bool:
+    """True when *address* really points at this computer (and nowhere else).
+
+    Looks at the host itself, never at a substring: ``https://localhost.example.com`` and
+    ``https://example.com/?127.0.0.1`` are not this computer. Only ``localhost`` and a loopback
+    address count. A LAN address (192.168.x.x), a machine name and a public name do not: the
+    words would leave this computer.
+    """
+    import ipaddress
+
+    host = _host_of(address)
+    if not host:
+        return False
+    if host == "localhost":
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
     except ValueError:
         return False
-    return host in ("localhost", "127.0.0.1", "::1", "0.0.0.0") or host.endswith(".localhost")
+    if getattr(ip, "ipv4_mapped", None) is not None:
+        ip = ip.ipv4_mapped
+    return ip.is_loopback or str(ip) == "0.0.0.0"
+
+
+def is_this_computer(address: str) -> bool:
+    """Public name for the check above, for the screens' settings."""
+    return _is_this_computer(address)
 
 
 @dataclass(slots=True)
@@ -152,11 +174,9 @@ class ModelSlot:
         Ollama at its usual address; ``auto`` with an online address does not.
         """
         provider = self.provider.lower()
-        if "ollama" in provider or provider in _LOCAL_PROVIDERS:
-            return True
         if self.base_url:
-            return _is_this_computer(self.base_url)
-        return provider in ("auto", "")
+            return _is_this_computer(self.base_url)       # the address decides, whatever the provider is called
+        return "ollama" in provider or provider in _LOCAL_PROVIDERS or provider in ("auto", "")
 
 
 @dataclass(slots=True)
@@ -235,6 +255,53 @@ class ModelBackend(Protocol):
     def embed(self, slot: ModelSlot, text: str) -> list[float]: ...
 
 
+# -- "Keep everything on this computer" ------------------------------------------------------
+#
+# With the switch on, no request to an AI leaves this computer. This is checked where the
+# request is made (every call below goes through ``_urlopen``), not only where the model is
+# chosen, so no setting, saved choice or environment variable can get around it.
+
+
+def local_only_active() -> bool:
+    """True when the owner chose "Keep everything on this computer" (or the matching environment variable)."""
+    import os
+
+    if _LOCAL_ONLY or os.environ.get("MEMORY_OB_LOCAL_ONLY", "").lower() in ("1", "true", "yes"):
+        return True
+    if _VAULT is not None:
+        try:
+            from .settings import load
+
+            return bool(load(_VAULT).local_only)
+        except Exception:  # noqa: BLE001, S110
+            return False
+    return False
+
+
+def blocked_by_local_only(address: str) -> bool:
+    """True when *address* must not be contacted because the switch is on and it is not this computer."""
+    return local_only_active() and not _is_this_computer(address)
+
+
+class _NoRemoteRedirect(urllib.request.HTTPRedirectHandler):
+    """A local server must not be able to send a request on to somewhere else."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # noqa: ANN001
+        if not _is_this_computer(newurl):
+            raise urllib.error.URLError(f"redirect to {_host_of(newurl) or 'another address'} refused (kept on this computer)")
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
+
+
+def _urlopen(req: urllib.request.Request, timeout: float):
+    """``urlopen`` that refuses any address off this computer while the owner keeps everything local."""
+    if local_only_active():
+        if not _is_this_computer(req.full_url):
+            raise urllib.error.URLError(
+                f"“Keep everything on this computer” is on, so I did not contact {_host_of(req.full_url) or 'that address'}")
+        return urllib.request.build_opener(_NoRemoteRedirect).open(req, timeout=timeout)
+    return urllib.request.urlopen(req, timeout=timeout)
+
+
 def _post_json(
     url: str,
     payload: dict[str, Any],
@@ -247,7 +314,7 @@ def _post_json(
         hdrs.update(headers)
     req = urllib.request.Request(url, data=body, headers=hdrs, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen(req, timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except urllib.error.URLError as exc:
         raise ModelError(f"model call failed: {url}: {exc}") from exc
@@ -429,16 +496,7 @@ def resolve_backend(config: ModelConfig | None = None) -> ModelBackend:
     When local-only mode is on (the owner's "offline AI only" choice),
     Hermes is never used even if it is installed — memory text stays local.
     """
-    import os
-
-    local_only = _LOCAL_ONLY or os.environ.get("MEMORY_OB_LOCAL_ONLY", "").lower() in ("1", "true", "yes")
-    if _VAULT is not None:
-        try:
-            from .settings import load
-
-            local_only = local_only or bool(load(_VAULT).local_only)
-        except Exception:  # noqa: BLE001, S110
-            pass
+    local_only = local_only_active()
     cfg = config or ModelConfig()
     if cfg.main.provider not in ("auto", "", "hermes"):
         # The owner chose a model of their own: honour it, Hermes or not.
@@ -487,7 +545,7 @@ def helper_state(config: ModelConfig | None = None, slot_name: str = "extract") 
         return {"kind": "hermes", "ready": "yes"}
     if is_available(slot):
         return {"kind": "local", "ready": "yes"}
-    if slot.base_url and not slot.is_local:
+    if slot.base_url and not slot.is_local and not blocked_by_local_only(slot.base_url):
         return {"kind": "online", "ready": "yes"}
     return {"kind": "none", "ready": "no"}
 
@@ -546,7 +604,7 @@ def is_available(slot: ModelSlot, *, timeout: float = 3.0) -> bool:
 def _server_up(base: str, timeout: float) -> bool:
     try:
         req = urllib.request.Request(base + "/api/tags", method="GET")
-        with urllib.request.urlopen(req, timeout=timeout):
+        with _urlopen(req, timeout):
             return True
     except (urllib.error.URLError, OSError, ValueError):
         return False
@@ -560,7 +618,7 @@ def _get_json(url: str, timeout: float) -> Any:
     """The JSON a GET returns, or None when the server cannot be reached or does not answer in JSON."""
     try:
         req = urllib.request.Request(url, method="GET", headers={"Authorization": "Bearer none"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen(req, timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
     except (urllib.error.URLError, OSError, ValueError):
         return None
@@ -595,7 +653,7 @@ def ollama_models(base_url: str = "", *, timeout: float = 3.0) -> list[str]:
         req = urllib.request.Request(
             (base_url or DEFAULT_OLLAMA_URL).rstrip("/") + "/api/tags", method="GET"
         )
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen(req, timeout) as resp:
             data = json.loads(resp.read().decode("utf-8"))
         return sorted(str(m.get("name", "")) for m in data.get("models", []) if m.get("name"))
     except (urllib.error.URLError, OSError, ValueError):

@@ -304,10 +304,14 @@ def cmd_sweep(args: argparse.Namespace) -> int:
     from . import audit, startup
     from .store import Store
 
+    from . import models
+    from .models import ModelConfig
+
     s = _settings(args)
     startup.prepare(s)
+    judge = None if getattr(args, "no_ai", False) else models.helper(ModelConfig.load(s.models_path), "extract")
     with Store(s.db) as st:
-        report = audit.run(st, s.vault, fix=not args.no_fix)
+        report = audit.run(st, s.vault, fix=not args.no_fix, judge=judge)
     for c in report["checks"]:
         print(f"  {'ok  ' if c['ok'] else 'LOOK'} {c['title']}: {c['detail']}")
     findings = report["findings"]
@@ -528,6 +532,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     sw = sub.add_parser("sweep", help="check-up: memories that disagree or repeat, old to-dos, drifted notes")
     sw.add_argument("--no-fix", action="store_true", help="only report; do not repair the notes")
+    sw.add_argument("--no-ai", action="store_true", help="word rules only; do not ask the AI helper for a second look")
     sw.set_defaults(fn=cmd_sweep)
 
     em = sub.add_parser("embed", help="compute and cache meaning-search data")

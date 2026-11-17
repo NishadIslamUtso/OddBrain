@@ -12,7 +12,7 @@ import re
 from dataclasses import dataclass, field
 from typing import Any
 
-from . import hazards, ids, quotes
+from . import hazards, ids, quotes, topics
 from .records import CANDIDATE_MAX, CANDIDATE_MIN, NOTE, PROFILE
 
 _SENTENCE_RE = re.compile(r"(?<=[.!?])\s+|\n+")
@@ -108,6 +108,8 @@ class Candidate:
     todo: bool | None = None
     moment: bool | None = None
     filed_by: str = ""
+    # The AI's word on who the line is about: "me", "other", or "" when it did not say.
+    about: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         from dataclasses import asdict
@@ -313,9 +315,11 @@ def _candidates_from(raw: str, source: dict[str, Any] | None) -> list[Candidate]
     out: list[Candidate] = []
     for item in _read_items(raw):
         filing: dict[str, Any] = {}
-        context = sentiment = ""
+        context = sentiment = about = ""
         people: list[str] = []
         if isinstance(item, dict):
+            about = str(item.get("about") or "").strip().lower()
+            about = about if about in ("me", "other") else ""
             s = str(item.get("text") or item.get("fact") or item.get("claim") or "").strip()
             context = str(item.get("context") or "").strip()
             sentiment = str(item.get("sentiment") or "").strip()
@@ -341,7 +345,7 @@ def _candidates_from(raw: str, source: dict[str, Any] | None) -> list[Candidate]
         out.append(Candidate(
             id=ids.new_id(), text=s, trust=score_claim(s), kind_hint=kind_hint_for(s),
             source=source or {}, created=_now(), context=context, sentiment=sentiment,
-            people=people, **filing,
+            people=people, about=about, **filing,
         ))
     return out
 
@@ -367,6 +371,7 @@ def _librarian_prompt(intro: str, rules: str, body: str, hint: str) -> str:
         '"project": "<name of the person\'s own project or idea it is about, or empty>", '
         '"todo": <true if it is something they still have to do>, '
         '"moment": <true if it is only how they feel or what is happening right now>, '
+        '"about": "<me if the line is about the person themself, other if it is about somebody else>", '
         '"people": ["names of people it mentions"], "sentiment": "...", "context": "..."}\n'
         "- If there is nothing worth keeping, answer exactly: none\n"
         + (f"\nWhat the person already has (reuse these names):\n{hint}\n" if hint.strip() else "")
@@ -468,31 +473,33 @@ _META_WORDS = frozenset({"owner", "user", "person", "speaker", "author", "they",
 _NAME_WORD_RE = re.compile(r"(?<![.!?]\s)(?<!^)\b[A-Z][a-z]{2,}\b")
 
 
-def _invented_names(claim: str, owner_text: str) -> list[str]:
+def _invented_names(claim: str, owner_text: str, me: frozenset[str] = frozenset()) -> list[str]:
     """Capitalised names in *claim* that the owner never wrote.
 
     A librarian that rewrites "it" into a real name must take that name from
     the owner's own words. A name that appears nowhere in them came from
-    the assistant (or was made up), and is not the owner's fact.
+    the assistant (or was made up), and is not the owner's fact. The owner's own name
+    (*me*, when they marked their profile) is never an invented name.
     """
     low = (owner_text or "").lower()
-    return [w for w in _NAME_WORD_RE.findall(claim or "") if w.lower() not in low]
+    return [w for w in _NAME_WORD_RE.findall(claim or "") if w.lower() not in low and w.lower() not in me]
 
 
-_REL_WORDS = (
-    "sister", "brother", "mother", "mom", "mum", "father", "dad", "wife", "husband",
-    "best friend", "friend", "cousin", "uncle", "aunt", "boss", "manager", "teacher",
-    "professor", "roommate", "girlfriend", "boyfriend", "partner", "colleague",
-    "coworker", "neighbor", "neighbour", "classmate", "mentor", "son", "daughter",
-    "grandmother", "grandfather", "grandma", "grandpa", "fiance", "fiancee",
-)
-_REL_ALT = "|".join(sorted(_REL_WORDS, key=len, reverse=True))
+_REL_WORDS = topics.PEOPLE_ROLES + topics.OTHER_SUBJECTS
+_REL_ALT = "|".join(sorted((re.escape(w) for w in _REL_WORDS), key=len, reverse=True))
 _LEAD_RE = re.compile(r"^\W*(?:(?:and|but|also|so|well|oh|then|plus|ok|okay|yeah|actually)\b[\s,]*)+", re.I)
 _ME_RE = re.compile(r"^\W*(?:i|i'm|im|i've|ive|i'd|i'll|me|we|we're|we've|us|our)\b", re.I)
 _REL_SUBJECT_RE = re.compile(
-    r"^\W*(?i:my|our)\s+(?:(?i:younger|older|elder|little|big|youngest|oldest|old|dear|step|half|twin|favou?rite|close|new)\s+)?((?i:" + _REL_ALT + r"))\b(?:\s+(?i:named|called))?(?:\s+([A-Z][a-z]{2,}))?")
+    r"^\W*(?i:my|our)\s+(?:(?i:younger|older|elder|little|big|youngest|oldest|old|dear|step|half|twin|favou?rite|close|new)\s+)?((?i:" + _REL_ALT + r"))(?i:s|es)?\b(?:\s+(?i:named|called))?(?:\s+([A-Z][a-z]{2,}))?")
 _REL_AND_ME_RE = re.compile(
-    r"^\W*(?i:my|our)\s+(?:(?i:younger|older|elder|little|big|youngest|oldest|old|dear|step|half|twin|favou?rite|close|new)\s+)?(?i:" + _REL_ALT + r")(?:\s+[A-Z][a-z]{2,})?\s+(?i:and)\s+(?i:i|me)\b")
+    r"^\W*(?i:my|our)\s+(?:(?i:younger|older|elder|little|big|youngest|oldest|old|dear|step|half|twin|favou?rite|close|new)\s+)?(?i:" + _REL_ALT + r")(?i:s|es)?(?:\s+[A-Z][a-z]{2,})?\s+(?i:and)\s+(?i:i|me)\b")
+# "My <anything> lives in / studies at / said ...": whatever it is, it is not the owner. A word
+# the list above does not know ("my physio lives in Dhaka") must not turn into "I live in Dhaka".
+_MY_THING_DOES_RE = re.compile(
+    r"^\W*(?i:my|our)\s+((?:[A-Za-z'-]+\s+){0,2}[A-Za-z'-]+)\s+"
+    r"(?i:(?:lives?|lived|living|studies|studied|teaches|taught|married|graduated|retired|"
+    r"said|says|told|tells|asked|asks|moved|moves|speaks|spoke|visited|visits|born|"
+    r"works?\s+(?:at|for|in|as))\b)")
 _NAME_AND_ME_RE = re.compile(r"^\W*[A-Z][a-z]{2,}\s+and\s+(?:i|me)\b")
 _PRONOUN_RE = re.compile(r"^\W*(he|she|they|his|her|their)\b", re.I)
 _NAME_SUBJECT_RE = re.compile(
@@ -523,16 +530,31 @@ class Evidence:
     reason: str = ""
 
 
-def _subject_of(sentence: str) -> tuple[str, frozenset[str]]:
-    """Who a sentence is about: ``("me", ...)``, ``("other", {tokens})`` or ``("unknown", ...)``."""
+def starts_with_name(sentence: str, names: frozenset[str]) -> bool:
+    """Does the sentence start with one of *names* (the owner's own), as a whole word?"""
+    if not names:
+        return False
+    alt = "|".join(re.escape(n) for n in sorted(names, key=len, reverse=True))
+    return re.match(r"^\W*(?:" + alt + r")(?:'s)?\b", sentence, re.I) is not None
+
+
+def _subject_of(sentence: str, me: frozenset[str] = frozenset()) -> tuple[str, frozenset[str]]:
+    """Who a sentence is about: ``("me", ...)``, ``("other", {tokens})`` or ``("unknown", ...)``.
+
+    *me* is the owner's own names (when they marked their profile): a sentence that starts with
+    one of them is about the owner, like one that starts with "I".
+    """
     s = _LEAD_RE.sub("", sentence or "").strip()
     if not s:
         return "unknown", frozenset()
-    if _ME_RE.match(s) or _REL_AND_ME_RE.match(s) or _NAME_AND_ME_RE.match(s):
+    if _ME_RE.match(s) or _REL_AND_ME_RE.match(s) or _NAME_AND_ME_RE.match(s) or starts_with_name(s, me):
         return "me", frozenset()
     m = _REL_SUBJECT_RE.match(s)
     if m:
         return "other", frozenset(t.lower() for t in m.groups() if t)
+    m = _MY_THING_DOES_RE.match(s)
+    if m and not re.search(r"\b(?:and|&)\s+(?:i|me|we)\b", m.group(1), re.I):
+        return "other", frozenset(w.lower() for w in re.findall(r"[A-Za-z]{3,}", m.group(1)))
     m = _PRONOUN_RE.match(s)
     if m:
         return "other", frozenset({m.group(1).lower()})
@@ -542,9 +564,9 @@ def _subject_of(sentence: str) -> tuple[str, frozenset[str]]:
     return "unknown", frozenset()
 
 
-def subject_of(sentence: str) -> tuple[str, frozenset[str]]:
+def subject_of(sentence: str, me: frozenset[str] = frozenset()) -> tuple[str, frozenset[str]]:
     """Who a sentence is about: ``("me" | "other" | "unknown", tokens naming the other person)``."""
-    return _subject_of(sentence)
+    return _subject_of(sentence, me)
 
 
 def _mentions(claim: str, tokens: frozenset[str]) -> bool:
@@ -555,7 +577,8 @@ def _mentions(claim: str, tokens: frozenset[str]) -> bool:
     return any(conflicts.stem(t) in have for t in tokens)
 
 
-def evidence_for(claim: str, owner_text: str, *, forward_ok: bool = False) -> Evidence:
+def evidence_for(claim: str, owner_text: str, *, forward_ok: bool = False, me: frozenset[str] = frozenset(),
+                 about_other: bool = False) -> Evidence:
     """Is *claim* backed by what the owner actually said? And by which of their sentences?
 
     A claim is grounded only when **one real sentence** of the owner's backs most
@@ -566,20 +589,29 @@ def evidence_for(claim: str, owner_text: str, *, forward_ok: bool = False) -> Ev
     not backed by "My sister lives in Dhaka", and "I work at Google" is not backed
     by "I want to work at Google someday" (a wish is not a fact; ``forward_ok``
     lets a to-do or plan keep its wish wording).
+
+    *me* is the owner's own names: a sentence about "Nishad" is a sentence about the owner when
+    that is who they are. *about_other* is the AI helper's word that the claim is about somebody
+    else (a claim that plainly starts with another person, "Rahim lives in Dhaka", counts too):
+    then the owner's sentences about themself cannot back it either.
     """
     from . import conflicts
 
     wanted = {w for w in conflicts.read(claim).stems if w not in _META_WORDS}
     if not wanted:
         return Evidence(True)
-    if _invented_names(claim, owner_text):
+    if _invented_names(claim, owner_text, me):
         return Evidence(False, reason="a name the owner never wrote")
     sentences = [x.strip() for x in _SENTENCE_RE.split(owner_text or "") if x.strip()]
+    if _subject_of(claim, me)[0] == "other":
+        about_other = True      # "Rahim lives in Dhaka" is not backed by the owner's own "I live in Dhaka"
     pool: list[tuple[str, frozenset[str]]] = []
     for sent in sentences:
-        kind, tokens = _subject_of(sent)
+        kind, tokens = _subject_of(sent, me)
         if kind == "other" and not _mentions(claim, tokens):
             continue            # about somebody the claim does not mention: not evidence for it
+        if kind == "me" and about_other:
+            continue            # the helper says the claim is about somebody else, so "I ..." is not evidence
         pool.append((sent, conflicts.read(sent).stems))
     if not pool:
         return Evidence(False, reason="no sentence of the owner's is about this")

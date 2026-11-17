@@ -121,7 +121,7 @@ class Answers(Case):
         self.new = self.say("I live in Sylhet", age=1)
 
     def answer(self, action: str, index: int = 0, **kw):
-        report = audit.public(self.vault)
+        report = audit.public(self.vault, self.store)
         return audit.act(self.store, self.vault, report["findings"][index]["id"], action, **kw)
 
     def active(self) -> set[str]:
@@ -184,7 +184,7 @@ class Answers(Case):
 
     def test_bad_requests(self) -> None:
         self.run_audit()
-        fid = audit.public(self.vault)["findings"][0]["id"]
+        fid = audit.public(self.vault, self.store)["findings"][0]["id"]
         with self.assertRaises(ValueError):
             audit.act(self.store, self.vault, fid, "explode")
         with self.assertRaises(LookupError):
@@ -195,6 +195,24 @@ class Answers(Case):
         manager.forget_record(self.store, self.old.id, vault=self.vault)
         self.assertEqual(self.answer("keep_old"), {"result": "gone"})
         self.assertEqual(self.active(), {"I live in Sylhet"})
+
+
+    def test_a_memory_edited_since_the_report_is_left_alone(self) -> None:
+        self.run_audit()
+        # the owner reworded the older memory after the report was made: same record, new words
+        manager.edit_record(self.store, self.old.id, body="I live in Sylhet and I like it", vault=self.vault)
+        self.assertTrue(self.store.get_record(self.old.id).status == "active")
+        before = self.active()
+        self.assertEqual(self.answer("keep_new"), {"result": "gone"})
+        self.assertEqual(self.active(), before)               # nothing was forgotten
+
+    def test_a_to_do_reworded_since_the_report_is_not_forgotten(self) -> None:
+        rec = self.say("I need to renew my passport", tags=[topics.TODO_TAG], age=80)
+        report = self.run_audit()
+        todo = next(f for f in report["findings"] if f["kind"] == "old-todo")
+        manager.edit_record(self.store, rec.id, body="I need to renew my passport and my visa", vault=self.vault)
+        self.assertEqual(audit.act(self.store, self.vault, todo["id"], "remove"), {"result": "gone"})
+        self.assertEqual(self.store.get_record(rec.id).status, "active")
 
 
 class AlreadyAnswered(Case):
@@ -256,9 +274,9 @@ class Checks(Case):
         self.assertFalse(next(c for c in report["checks"] if c["key"] == "private")["ok"])
 
     def test_the_report_is_saved_and_readable_without_running(self) -> None:
-        self.assertFalse(audit.public(self.vault)["ran"])
+        self.assertFalse(audit.public(self.vault, self.store)["ran"])
         self.run_audit()
-        again = audit.public(self.vault)
+        again = audit.public(self.vault, self.store)
         self.assertTrue(again["ran"])
         self.assertNotIn("dismissed", again)
 
@@ -313,7 +331,7 @@ class ThroughTheApp(Case):
         cfg = Settings.resolve(vault=self.vault, db=self.db, models_path=self.tmp / "models.json")
         steps = {r["step"]: r for r in nightshift.run(cfg, skip=("read", "people", "biography", "embed", "hermes"))}
         self.assertEqual(steps["audit"]["ok"], "yes", steps["audit"])
-        self.assertTrue(audit.public(self.vault)["ran"])
+        self.assertTrue(audit.public(self.vault, self.store)["ran"])
         r = self.client.post("/api/settings", json={"audit": False})
         self.assertFalse(r.json()["options"]["audit"])
         self.assertFalse(settings_mod.load(self.vault).audit)
@@ -338,6 +356,58 @@ class FromTheCommandLine(Case):
         self.assertIn("1 thing(s) to look at", out)
         self.assertIn("Sylhet", out)
         self.assertIn("answers: keep_new, keep_old, keep_both", out)
+
+
+class PrivateStaysPrivate(Case):
+    """Law 2 on the check-up screen: what is marked private is never read into the report or shown from it."""
+
+    def secret_pair(self):
+        old = self.say("I live in Dhaka", age=30)
+        new = self.say("I live in Sylhet", age=1)
+        return old, new
+
+    def test_a_private_memory_is_not_in_the_report(self) -> None:
+        old, new = self.secret_pair()
+        manager.make_private(self.store, new.id, vault=self.vault)
+        report = self.run_audit()
+        self.assertEqual(report["findings"], [])
+        raw = audit.path_for(self.vault).read_text(encoding="utf-8")
+        self.assertNotIn("Sylhet", raw)                    # not even in the saved file
+
+    def test_private_after_the_report_was_made_disappears_at_once(self) -> None:
+        old, new = self.secret_pair()
+        report = self.run_audit()
+        self.assertEqual(self.kinds(report), ["disagree"])
+        manager.make_private(self.store, old.id, vault=self.vault)
+        shown = audit.public(self.vault, self.store)
+        self.assertEqual(shown["findings"], [])
+        self.assertNotIn("Dhaka", json.dumps(shown))
+        self.assertEqual(shown["summary"]["needs_you"], 0)
+
+    def test_two_private_memories_are_not_compared_either(self) -> None:
+        old, new = self.secret_pair()
+        for rec in (old, new):
+            manager.make_private(self.store, rec.id, vault=self.vault)
+        report = self.run_audit()
+        self.assertNotIn("Dhaka", json.dumps(report))
+        self.assertNotIn("Sylhet", json.dumps(report))
+
+    def test_a_private_old_to_do_and_a_private_quote_stay_out(self) -> None:
+        rec = self.say("I need to renew my secret passport", tags=[topics.TODO_TAG], age=80)
+        manager.make_private(self.store, rec.id, vault=self.vault)
+        self.assertNotIn("passport", json.dumps(self.run_audit()))
+
+    def test_the_web_report_hides_it_too(self) -> None:
+        from memory_ob import api
+        from tests.helpers import AuthedClient
+
+        old, new = self.secret_pair()
+        api.settings = api.Settings.resolve(vault=self.vault, db=self.db, models_path=self.tmp / "models.json")
+        client = AuthedClient.create(api.create_app(), self.vault)
+        client.post("/api/audit/run")
+        manager.make_private(self.store, new.id, vault=self.vault)
+        for path in ("/api/audit", "/api/home"):
+            self.assertNotIn("Sylhet", client.get(path).text, path)
 
 
 if __name__ == "__main__":
