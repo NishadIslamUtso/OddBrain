@@ -37,9 +37,10 @@ produces **update-8**.*
   every time (currently 1 memory vs 4 between runs — reproduced on update-5
   and update-7). Deterministic clause-splitting when the AI result is
   empty/unstable.
-- [ ] **A6 · One-time vault junk clean-up.** Sweep the junk lines (same
-  classifier as A1) out of existing notes: listed first, `--apply` removes
-  with an undo log. Owner presses the button; nothing permanent.
+- [x] **A6 · One-time vault junk clean-up.** ✅ DONE in update-11: Settings
+  → "Clean up old junk" (shows count, asks first) — the not-life junk moves
+  to the trash (undoable, never deleted); stray-word folder names ("From",
+  "What"…) cleaned while the memories inside stay; real projects untouched.
 - [x] **A7 · Settings honesty fix.** ✅ DONE in update-8: automatic mode no
   longer shows the fake `11434` default; the meaning-search model shows its
   real address (18435 llama.cpp); and the hidden bug is fixed — saving
