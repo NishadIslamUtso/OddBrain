@@ -28,10 +28,11 @@ produces **update-8**.*
   properly, so I kept this aside", re-read when a helper returns or via Tidy
   now. Rules keep ONLY safety jobs (secret-hiding, forget commands). 9 new
   contract tests; 3 old fallback tests rewritten; 21 suites aligned.
-- [ ] **A4 · Feed clearing + 4th answer (owner decision D2).**
-  (a) "Got it" clear button on cards; (b) "clear all at once" for the
-  "Recently remembered" feed; (c) conflict cards answer with FOUR buttons:
-  Keep new · Keep old · Keep both · **Neither / none of these**.
+- [x] **A4 · Feed clearing + 4th answer (owner decision D2).** ✅ DONE in
+  update-10: "Got it" on every feed card + "Clear all" for the "Recently
+  remembered" list (list only — memories and history untouched); conflict
+  cards answer with FOUR buttons incl. **"Neither / none of these"** (both
+  versions go away, old one trashed = undoable). 6 new tests.
 - [ ] **A5 · Stable splitting.** The same run-on dump must file the same way
   every time (currently 1 memory vs 4 between runs — reproduced on update-5
   and update-7). Deterministic clause-splitting when the AI result is
