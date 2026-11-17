@@ -120,10 +120,11 @@ and visible, mistakes get corrected in one click. Rules never lead.
 - **D2 — clearing: ✅ DECIDED.** A "Got it" clear button **plus** a
   "clear all at once" option. And conflict cards answer with **four** buttons:
   Keep new · Keep old · Keep both · **Neither / none of these**.
-- **D3 — restore `Documents\Hermes\Workspace\.git`? ❓ STILL OPEN** (the owner
-  asked what this means — re-asked in plain words on 2026-11-18: it is ONLY
-  about replacing a code-copy folder with a fresh download; no memories
-  involved. Waiting for yes/no.)
+- **D3 — replace the `Documents\Hermes\Workspace` code copy with a fresh
+  download? ✅ DECIDED — YES (2026-11-18).** The owner approved
+  re-downloading the code copy into `Documents\Hermes\Workspace`. It is only
+  about a code-copy folder — no memories are involved. This unblocks the
+  judge/audit workflow that reads the code from there.
 - **D4 — ✅ CONFIRMED.** No "ask me before saving" switch; no hiding other
   people's chats from the AI. **"What I decided with Claude stays"** — all
   owner decisions made in the Claude sessions stand.
