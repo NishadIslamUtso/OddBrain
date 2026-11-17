@@ -53,9 +53,10 @@ produces **update-8**.*
   `Downloads\Memory_OB-update-7` — clean Downloads = death.)*
 - [ ] **A9 · Monthly check-up summary.** Nightly check-up exists; add the
   monthly roll-up (what was found/fixed/asked that month).
-- [ ] **A10 · Second opinion coverage.** Extend the AI second opinion to
-  stale to-dos and broken-proof findings (now covers disagreements/repeats
-  only).
+- [x] **A10 · Second opinion coverage.** The AI second opinion now covers
+  stale to-dos and broken-proof findings too (not just disagreements/
+  repeats) — false alarms set aside, rules' word stands with no answer —
+  **shipped in update-14**.
 - [ ] **A11 · Update-6 recovery.** Find out what update-6 was (zip exists
   only on the owner's machine per P1: extracted folders for update-2/5/7
   only) — confirm nothing unique was lost between 5 and 7, or re-upload it.
