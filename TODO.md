@@ -12,20 +12,16 @@ produces **update-8**.*
 
 ## A. CODE FIXES (build update-8 from `claude--made` @ 4d644ba)
 
-- [ ] **A1 · Not-life filter (TOP PRIORITY).** Tool-talk, agent instructions,
-  pasted reports, documentation text, server logs (`INFO: 127.0.0.1:…`), and
-  system notices ("do not treat as user input") must NEVER become memories.
-  High-precision patterns first: HTTP/terminal log lines · explicit internal
-  notices · code/terminal lines (`git grep`, `pip install`, `def test_`, …) ·
-  markdown table rows · agent instruction boilerplate ("Change nothing.",
-  "Report exactly…", "Screenshot →", "Copy-paste") · system tags
-  (`vision_analyze`, `[INTERNAL NOTIFICATION`). Raw conversations in Sources
-  are untouched (nothing is lost). *(Found by owner's P5 vault dump 2026-11:
-  my own audit text in Health, drafts in To-do, server logs in Notes.)*
-- [ ] **A2 · Junk-project guard.** A project starts ONLY from clear project
-  wording ("my … business/project/idea", "an app/site/game called X"). Never
-  from stray nouns. Plus a stopword-title guard (never a project named From,
-  What, With, Note(s), Windows, Macos, Application, Imports, Independent).
+- [x] **A1 · Not-life filter (TOP PRIORITY).** ✅ DONE in update-8
+  (`release/Memory_OB-update-8.zip`): tool-talk, agent instructions, pasted
+  reports, documentation text, server logs, internal notices, markdown
+  tables/headings, review-marker lines, quoted-example prose, pasted note
+  lines, underscore code identifiers — never memories. Raw conversations in
+  Sources untouched. 3 new test suites (18 checks incl. real P5 junk).
+- [x] **A2 · Junk-project guard.** ✅ DONE in update-8: `topics.
+  valid_thread_title()` — report words (From/What/With/Note/Notes/Windows/
+  Macos/Application/Imports/Independent/…) can never be project names, on
+  both the AI-filing path and the word-matcher path. Real names pass.
 - [ ] **A3 · Wait-for-AI (owner decision D1).** Kill the silent rules fallback:
   if the AI helper fails/unreadable, the message is kept whole + shown as
   "The AI helper did not answer properly, so I kept this aside", re-read later
@@ -42,10 +38,11 @@ produces **update-8**.*
 - [ ] **A6 · One-time vault junk clean-up.** Sweep the junk lines (same
   classifier as A1) out of existing notes: listed first, `--apply` removes
   with an undo log. Owner presses the button; nothing permanent.
-- [ ] **A7 · Settings honesty fix.** "Where your AI server is running" shows
-  `http://127.0.0.1:11434` (Ollama default) while the embed model actually
-  uses `http://127.0.0.1:18435/v1` (llama.cpp). Show the address actually in
-  use, per slot.
+- [x] **A7 · Settings honesty fix.** ✅ DONE in update-8: automatic mode no
+  longer shows the fake `11434` default; the meaning-search model shows its
+  real address (18435 llama.cpp); and the hidden bug is fixed — saving
+  Settings used to ERASE the meaning model's server address (that is how the
+  wrong address appeared).
 - [ ] **A8 · Engine install to a permanent home.** install.ps1 must place the
   engine in `Documents\Hermes\Memory_OB-engine` (not Downloads), re-point
   `plugins\memory_ob\.memory_ob_home`, and retire Downloads copies into
