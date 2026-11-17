@@ -8,7 +8,8 @@ retired. Do not build its queues.*
 **Status:** owner vision confirmed 2026-11 · builds live on branch `claude--made`
 (the one the owner actually uses) and branch `hermes` (older parallel build).
 Latest build: update-7 (`4d644ba`), 40 test suites green. Update-6 never reached
-GitHub — ask where it went.
+GitHub — ask where it went. **Live checklist: `TODO.md` — read it first; it is
+the top-of-mind list that survives context compaction.**
 
 ---
 
