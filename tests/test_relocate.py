@@ -52,6 +52,15 @@ class Relocate(unittest.TestCase):
         p = self.home / "plugins" / "memory_ob" / ".memory_ob_home"
         return p.read_text(encoding="utf-8") if p.exists() else ""
 
+    def _same(self, a: str, b: str) -> bool:
+        """Same folder, whatever Windows calls it.
+
+        A temp path under a long user name comes back as an 8.3 short name
+        (``NISHAD~1``) from one side and the long name from the other, so the
+        comparison is on resolved paths.
+        """
+        return bool(a) and Path(a).resolve() == Path(b).resolve()
+
     def test_the_engine_in_downloads_moves_to_the_permanent_home(self) -> None:
         engine = make_engine(self.tmp / "Downloads")
         r = self._install(engine)
@@ -59,8 +68,8 @@ class Relocate(unittest.TestCase):
         permanent = self.tmp / "Documents" / "Hermes" / "Memory_OB-engine"
         self.assertTrue((permanent / "memory_ob" / "__init__.py").exists(), r.stdout)
         self.assertTrue((permanent / "MARKER.txt").exists(), r.stdout)
-        self.assertEqual(self._pointer(), str(permanent),
-                         "the installed plugin must point at the permanent home")
+        self.assertTrue(self._same(self._pointer(), str(permanent)),
+                        "the installed plugin must point at the permanent home")
         self.assertFalse(engine.exists(), "the Downloads copy is moved away")
         retired = list((permanent / "_retired").glob("Memory_OB-update-7-*"))
         self.assertTrue(retired, "the old copy is retired, never deleted")
@@ -71,7 +80,7 @@ class Relocate(unittest.TestCase):
         r = self._install(engine)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         self.assertTrue(engine.exists(), "a good home stays where it is")
-        self.assertEqual(self._pointer(), str(engine))
+        self.assertTrue(self._same(self._pointer(), str(engine)))
         permanent = self.tmp / "Documents" / "Hermes" / "Memory_OB-engine"
         self.assertFalse(permanent.exists(), "nothing is moved when nothing is wrong")
 
@@ -79,7 +88,7 @@ class Relocate(unittest.TestCase):
         engine = make_engine(self.tmp / "Documents" / "Hermes" / "Memory_OB-engine")
         r = self._install(engine)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
-        self.assertEqual(self._pointer(), str(engine))
+        self.assertTrue(self._same(self._pointer(), str(engine)))
         self.assertFalse((engine / "_retired").exists())
 
 

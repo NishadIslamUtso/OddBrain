@@ -141,13 +141,23 @@ def retire_old_home(project: Path, home: Path, *, reason: str) -> None:
     """Move the old copy out of harm's way - never deleted (owner list item A8)."""
     import time as _time
 
+    dest = home / "_retired" / f"{project.name}-{_time.strftime('%Y%m%d-%H%M%S')}"
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    # Windows refuses to move (or delete) the folder a process is standing in, and
+    # the installer is usually run from inside the old engine folder. Step out
+    # first, then move.
+    prev = os.getcwd()
     try:
-        dest = home / "_retired" / f"{project.name}-{_time.strftime('%Y%m%d-%H%M%S')}"
-        dest.parent.mkdir(parents=True, exist_ok=True)
+        os.chdir(str(home))
         shutil.move(str(project), str(dest))
         print(f"  the old copy (was in {reason}) is retired at {dest} - never deleted")
     except OSError as exc:
         print(f"  could not move the old copy out of {reason}: {exc} (it is still there)")
+    finally:
+        try:
+            os.chdir(prev)
+        except OSError:
+            pass
 
 
 def install(*, enable: bool = True, startup: bool = True,

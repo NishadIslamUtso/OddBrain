@@ -27,6 +27,7 @@ class Checkup(unittest.TestCase):
         self.addCleanup(self.tmp.cleanup)
         self.vault = Path(self.tmp.name) / "V"
         self.store = Store(Path(self.tmp.name) / "s.db")
+        self.addCleanup(self.store.close)   # an open SQLite handle blocks the temp dir on Windows
 
     def _capture(self, *texts: str) -> None:
         manager.capture(self.store, text=" ".join(texts),
@@ -98,6 +99,7 @@ class CheckupApi(unittest.TestCase):
         api_uses_reading_helper(api)
 
         store = Store(Path(self.tmp.name) / "s.db")
+        self.addCleanup(store.close)        # an open SQLite handle blocks the temp dir on Windows
         manager.capture(store, text="My knee hurts when I run.",
                         model_call=lambda p: json.dumps([{"text": "My knee hurts when I run."}]),
                         vault=self.vault)

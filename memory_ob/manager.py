@@ -509,6 +509,39 @@ def _owner_text(parts: list[dict[str, Any]] | None, conv_text: str) -> str:
     return conv_text
 
 
+_OWNER_SPEAKERS = ("user:", "you:", "me:", "owner:", "human:", "nishad:", "i said:")
+_AGENT_SPEAKERS = (
+    "assistant:", "claude:", "chatgpt:", "hermes:", "ai:", "bot:", "model:", "agent:",
+    "tool:", "system:", "memory_ob:",
+)
+
+
+def owner_only(text: str) -> str:
+    """A pasted transcript keeps only the owner's lines.
+
+    When a paste carries speaker labels it is somebody's transcript, not the
+    owner's own words. Lines labelled as an assistant or a tool are dropped;
+    the owner's labelled lines are kept without the label. A paste with no
+    labels at all is left exactly as it was.
+    """
+    lines = str(text or "").splitlines()
+    labelled = any(
+        ln.lower().lstrip().startswith(_OWNER_SPEAKERS + _AGENT_SPEAKERS) for ln in lines
+    )
+    if not labelled:
+        return text
+    out: list[str] = []
+    for ln in lines:
+        low = ln.lower().lstrip()
+        if low.startswith(_AGENT_SPEAKERS):
+            continue
+        if low.startswith(_OWNER_SPEAKERS):
+            out.append(ln.split(":", 1)[1].strip() if ":" in ln else ln)
+            continue
+        out.append(ln)
+    return "\n".join(out)
+
+
 def _run_forget_commands(
     store: Any, parts: list[dict[str, Any]] | None, text: str, out: Outcome, vault: Path | None,
 ) -> None:
@@ -651,7 +684,7 @@ def _extract(
         return found
     if model_call is None:
         return None              # D1: no helper read it - rules never lead, the message waits whole
-    return extract_claims(conv_text, source=source, model_call=model_call, hint=hint)
+    return extract_claims(owner_only(conv_text), source=source, model_call=model_call, hint=hint)
 
 
 def _settle_all(

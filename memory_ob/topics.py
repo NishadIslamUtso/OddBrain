@@ -280,6 +280,9 @@ firefox update updates build builds test tests change changes fix fixes
 item items step steps button buttons screen screens folder folders session
 sessions model models server servers script scripts command commands prompt
 prompts systems errors logs examples numbers versions today yesterday
+done finish finished screenshot screenshots click clicks drag drag-and-drop
+open opens close closes restart restarts continue back menu sidebar window
+windows tab tabs card cards banner banners switch switches settings setup
 """.split())
 
 
