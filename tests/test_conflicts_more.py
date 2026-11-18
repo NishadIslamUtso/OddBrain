@@ -13,6 +13,10 @@ PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 
 from memory_ob import conflicts, manager  # noqa: E402
+try:
+    from tests.helpers import reading
+except ImportError:      # running as a script from inside tests/
+    from helpers import reading
 from memory_ob.store import Store  # noqa: E402
 
 
@@ -44,7 +48,7 @@ class Judge(unittest.TestCase):
         self.addCleanup(self.store.close)
 
     def test_the_helper_catches_what_the_rules_cannot(self) -> None:
-        manager.capture(self.store, text="I commute to campus by bus every day.", vault=self.tmp / "V")
+        manager.capture(self.store, text="I commute to campus by bus every day.", vault=self.tmp / "V", model_call=reading())
         asked: list[str] = []
 
         def helper(prompt: str) -> str:
@@ -58,7 +62,7 @@ class Judge(unittest.TestCase):
         self.assertTrue(any(p.startswith("You keep") for p in asked))
 
     def test_a_helper_that_says_same_skips_it(self) -> None:
-        manager.capture(self.store, text="I commute to campus by bus every day.", vault=self.tmp / "V")
+        manager.capture(self.store, text="I commute to campus by bus every day.", vault=self.tmp / "V", model_call=reading())
 
         def helper(prompt: str) -> str:
             if prompt.startswith("You keep"):
@@ -70,7 +74,7 @@ class Judge(unittest.TestCase):
         self.assertEqual((out.duplicates, out.saved), (1, 0))
 
     def test_a_helper_that_fails_never_blocks_saving(self) -> None:
-        manager.capture(self.store, text="I commute to campus by bus every day.", vault=self.tmp / "V")
+        manager.capture(self.store, text="I commute to campus by bus every day.", vault=self.tmp / "V", model_call=reading())
 
         def helper(prompt: str) -> str:
             if prompt.startswith("You keep"):

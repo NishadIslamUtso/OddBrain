@@ -15,6 +15,10 @@ PROJECT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PROJECT))
 
 from memory_ob import embedder, importers, manager, models  # noqa: E402
+try:
+    from tests.helpers import reading
+except ImportError:      # running as a script from inside tests/
+    from helpers import reading
 from memory_ob.store import Store  # noqa: E402
 
 
@@ -28,6 +32,7 @@ class Base(unittest.TestCase):
         self.addCleanup(self.store.close)
 
     def say(self, text: str, **kw):
+        kw.setdefault("model_call", reading())
         return manager.capture(self.store, text=text, vault=self.vault, **kw)
 
     def records(self, **kw):

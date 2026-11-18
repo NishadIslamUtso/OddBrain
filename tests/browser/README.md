@@ -15,6 +15,7 @@ python tests/browser/run.py            # all of them
 python tests/browser/run.py ui_vault   # one
 ```
 
-Each script gets its own throw-away vault (no Hermes, no AI helper, simple
-rules), seeded by `seed.py`. Screenshots land in `tests/browser/shots/`.
+Each script gets its own throw-away vault (no Hermes; a stand-in AI helper from
+`fake_ai.py` that a script can switch to `down` or `junk` through its mode file),
+seeded by `seed.py`. Screenshots land in `tests/browser/shots/`.
 Nothing here touches your real memories.

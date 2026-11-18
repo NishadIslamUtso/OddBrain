@@ -11,6 +11,10 @@ from pathlib import Path
 from unittest import mock
 
 from memory_ob import importers, manager, models
+try:
+    from tests.helpers import reading
+except ImportError:      # running as a script from inside tests/
+    from helpers import reading
 from memory_ob.models import ModelSlot
 from memory_ob.store import Store
 
@@ -43,7 +47,7 @@ class TestPrivateNumbers(unittest.TestCase):
             os.environ.pop(key, None)
         store = Store(tmp / "m.db")
         self.addCleanup(store.close)
-        manager.capture(store, parts=[{"role": "user", "content": "I need to renew my passport."}], vault=tmp / "V")
+        manager.capture(store, parts=[{"role": "user", "content": "I need to renew my passport."}], vault=tmp / "V", model_call=reading())
         rid = next(r.id for r in store.list_records() if "passport" in r.body)
         store.set_embedding(rid, [0.1, 0.2, 0.3], model="m")
         self.assertIsNotNone(store.get_embedding(rid))

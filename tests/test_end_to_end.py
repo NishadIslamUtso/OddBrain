@@ -36,6 +36,15 @@ def run_cli(args: list[str], *, env: dict[str, str]) -> subprocess.CompletedProc
     )
 
 
+# D1: with no AI helper these tests would keep captures aside; they exercise
+# filing, so the API gets the stand-in helper.
+from memory_ob import api  # noqa: E402
+try:
+    from tests.helpers import api_uses_reading_helper
+except ImportError:      # running as a script from inside tests/
+    from helpers import api_uses_reading_helper
+api_uses_reading_helper(api)
+
 class CliCase(unittest.TestCase):
     """End-to-end command-line tests against a throwaway vault."""
 
@@ -49,6 +58,20 @@ class CliCase(unittest.TestCase):
             "MEMORY_OB_MODELS": os.path.join(self.tmp, "models.json"),
             "HERMES_HOME": os.path.join(self.tmp, "no-hermes"),
         }
+        # D1: with no AI helper the CLI keeps captures aside, so end-to-end
+        # tests run against a tiny local model server (real HTTP: the CLI is a
+        # real subprocess).
+        try:
+            from tests.helpers import FakeModelServer
+        except ImportError:
+            from helpers import FakeModelServer
+        import json as _json
+
+        self.server = FakeModelServer()
+        self.addCleanup(self.server.close)
+        with open(self.env["MEMORY_OB_MODELS"], "w", encoding="utf-8") as fh:
+            _json.dump({"main": {"provider": "openai-compatible", "model": "fake",
+                                 "base_url": self.server.url}, "auxiliary": {}}, fh)
 
     def test_init_creates_vault_and_store(self) -> None:
         r = run_cli(["init"], env=self.env)
@@ -278,7 +301,7 @@ class ApiCase(unittest.TestCase):
         self.client.post("/api/tell", json={"text": "I moved to Chittagong and I no longer live in Dhaka"})
         doubts = self.client.get("/api/doubts").json()["doubts"]
         self.assertEqual(len(doubts), 1)
-        self.assertEqual({o["key"] for o in doubts[0]["options"]}, {"new", "old", "both"})
+        self.assertEqual({o["key"] for o in doubts[0]["options"]}, {"new", "old", "both", "neither"})
 
         r = self.client.post(f"/api/doubts/{doubts[0]['id']}/answer", json={"answer": "old"})
         self.assertEqual(r.status_code, 200, r.text)

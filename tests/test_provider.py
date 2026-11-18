@@ -29,6 +29,7 @@ class ProviderTestCase(unittest.TestCase):
 
     def setUp(self) -> None:
         import tempfile
+        from unittest import mock
 
         self._tmp = tempfile.TemporaryDirectory()
         root = Path(self._tmp.name)
@@ -36,6 +37,18 @@ class ProviderTestCase(unittest.TestCase):
         os.environ["MEMORY_OB_VAULT"] = str(root / "vault")
         self.vault = root / "vault"
         self.db = root / "test.db"
+        # D1: with no AI helper captures are kept aside; these tests exercise
+        # the provider plumbing, so give it the stand-in helper.
+        try:
+            from tests.helpers import reading
+        except ImportError:
+            from helpers import reading
+        from memory_ob import models as _models
+
+        patcher = mock.patch.object(
+            _models, "helper", lambda cfg=None, slot="extract": reading())
+        patcher.start()
+        self.addCleanup(patcher.stop)
         sys.path.insert(0, str(PROJECT / "provider"))
         sys.path.insert(0, str(PROJECT))
 

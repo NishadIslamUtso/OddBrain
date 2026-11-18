@@ -37,6 +37,24 @@ def _parse(stamp: str | None) -> datetime | None:
     return None
 
 
+def _other_people_words(store: Any, me_names: frozenset[str]) -> frozenset[str]:
+    """The words of every other person's name (and other names), lower case."""
+    words: set[str] = set()
+    for person in store.list_people():
+        names = [person["name"], *(person.get("aliases") or [])]
+        if "this-is-me" in (person.get("tags") or []) or any(n.strip().lower() in me_names for n in names):
+            continue
+        for name in names:
+            words.update(w for w in name.lower().replace("-", " ").split() if len(w) >= 3)
+    return frozenset(words)
+
+
+def _is_about_someone_else(text: str, me_names: frozenset[str], others: frozenset[str], extract: Any) -> bool:
+    """"My sister Aisha is a doctor": about Aisha, and Aisha's page already has it."""
+    who, tokens = extract.subject_of(text, me_names)
+    return who == "other" and bool(tokens & others)
+
+
 def _item(rec: Record) -> dict[str, Any]:
     return {
         "id": rec.id,
@@ -56,12 +74,18 @@ def build(store: Any, *, now: datetime | None = None, vault: Any = None) -> dict
     now = now or datetime.now(timezone.utc)
     quiet_before = now - timedelta(days=QUIET_DAYS)
 
+    from . import extract, manager
+
+    me_names = manager.owner_names(store)
+    others = _other_people_words(store, me_names)
     items: list[dict[str, Any]] = []
     for rec in store.list_records(status=ACTIVE, limit=10000):
         if rec.speaker != "user" or rec.kind in _SKIP_KINDS or rec.subject != "self":
             continue
         if not exit_gate.keep(rec):      # law 2: withheld records never appear on a screen
             continue
+        if others and _is_about_someone_else(rec.body or rec.title, me_names, others, extract):
+            continue                      # it lives on that person's page, not under "About you"
         items.append(_item(rec))
     items.sort(key=lambda i: i["updated"] or "", reverse=True)
 
@@ -71,6 +95,7 @@ def build(store: Any, *, now: datetime | None = None, vault: Any = None) -> dict
          for i in items if i["revisit_at"]),
         key=lambda i: i["revisit_at"],
     )
+    due_all = [i for i in coming if i["due"]]     # Review lists every due item, wherever Me shows it
     coming_ids = {i["id"] for i in coming}
 
     todo = [i for i in items if i["todo"] and not i["done"]]
@@ -100,8 +125,8 @@ def build(store: Any, *, now: datetime | None = None, vault: Any = None) -> dict
         })
     project_entries.sort(key=lambda e: e["updated"] or "", reverse=True)
     in_project = {m["id"] for ms in projects.values() for m in ms}
-    # A project already shows its "come back" date, so it is not listed a second time.
-    coming = [i for i in coming if i["id"] not in in_project]
+    # A project or a to-do already shows its "come back" date, so it is not listed a second time.
+    coming = [i for i in coming if i["id"] not in in_project and i["id"] not in in_todo]
     coming_ids = {i["id"] for i in coming}
 
     candidates = [i for i in items if i["id"] not in coming_ids and i["id"] not in in_todo
@@ -141,6 +166,7 @@ def build(store: Any, *, now: datetime | None = None, vault: Any = None) -> dict
     return {
         "sections": [s for s in sections if s["items"]],
         "total": len(items),
+        "due": [i for i in due_all if i["id"] not in in_project] + [e for e in project_entries if e["due"]],
     }
 
 

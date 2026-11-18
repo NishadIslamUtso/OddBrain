@@ -64,12 +64,12 @@ class TestExtract(unittest.TestCase):
         self.assertFalse(any(hazards.is_hazardous(t) for t in texts))
         self.assertFalse(any(len(t) < 12 for t in texts))
 
-    def test_extract_with_model_falls_back_on_error(self):
+    def test_extract_with_model_keeps_the_text_aside_on_error(self):
         def boom(prompt):
             raise RuntimeError("no model")
 
-        out = extract.extract_with_model("I prefer dark mode", model_call=boom)
-        self.assertTrue(out)
+        # Owner decision D1: no silent rules fallback on helper failure.
+        self.assertIsNone(extract.extract_with_model("I prefer dark mode", model_call=boom))
 
     def test_make_quote(self):
         q = extract.make_quote("sky is blue", "The sky is blue.")

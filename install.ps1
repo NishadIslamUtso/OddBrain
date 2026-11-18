@@ -90,6 +90,16 @@ if (-not $python) {
 & $python (Join-Path $hostDir "install.py")
 if ($LASTEXITCODE -ne 0) { Write-Host "install.py failed ($LASTEXITCODE)" -ForegroundColor Red; exit $LASTEXITCODE }
 
+# The installer moves the engine to its permanent home when it found it in
+# Downloads or TEMP (and retires the old copy - never deleted). The steps
+# below must use wherever the engine lives now.
+$permanent = Join-Path $env:USERPROFILE "Documents\Hermes\Memory_OB-engine"
+if (Test-Path (Join-Path $permanent "memory_ob\__init__.py")) {
+    $engine = $permanent
+    $hostDir = Join-Path $engine "host"
+    Write-Ok "engine moved to the permanent home: $engine"
+}
+
 # --- 3. the private write key -----------------------------------------------
 # The screens send this key back on every change so nothing else on the computer
 # can write to your memories. It is created here once and kept inside the

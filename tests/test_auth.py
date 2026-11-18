@@ -15,6 +15,15 @@ from memory_ob import api
 from memory_ob.auth import TOKEN_HEADER, generate_token, load_or_create, verify
 
 
+# D1: with no AI helper these tests would keep captures aside; they exercise
+# filing, so the API gets the stand-in helper.
+from memory_ob import api  # noqa: E402
+try:
+    from tests.helpers import api_uses_reading_helper
+except ImportError:      # running as a script from inside tests/
+    from helpers import api_uses_reading_helper
+api_uses_reading_helper(api)
+
 class TokenGateCase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp()

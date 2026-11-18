@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from . import notlife
+from . import topics as _topics
 from typing import Any
 
 from . import hazards, ids, quotes, topics
@@ -66,8 +68,69 @@ def _split_clauses(sentence: str) -> list[str]:
         return [sentence]
     return [p if p[-1] in ".!?" else p + "." for p in parts]
 
+
+# A sentence that only continues the one before it ("It started last week").
+_CONTINUATION_RE = re.compile(
+    r"^(?:it|this|that|they|there|he|she|him|her|them|its|their|his|these|those)\b", re.I)
+_SOFT_CONT_RE = re.compile(
+    r"^(?:and|but|so|then|also|later|afterwards|finally|plus)\b", re.I)
+
+
+def _ended(sentence: str) -> str:
+    """The sentence with a full stop, so a joined one never reads as one run-on line."""
+    s = (sentence or "").rstrip()
+    return s if not s or s[-1] in ".!?" else s + "."
+
+
+def is_continuation(sentence: str) -> bool:
+    """True when *sentence* only makes sense next to the one before it."""
+    s = (sentence or "").strip()
+    if not s:
+        return False
+    if _REVISIT_REF_RE.match(s):
+        return True
+    return len(s) < 60 and bool(_CONTINUATION_RE.match(s) or _SOFT_CONT_RE.match(s))
+
+
+def _sentence_pieces(text: str) -> list[str]:
+    return [" ".join(raw.split()) for raw in _SENTENCE_RE.split(text or "") if raw.strip()]
+
+
+def canonical_claims(text: str) -> list[str]:
+    """The one true way to cut text into claims (owner list item A5).
+
+    The same words must always become the same memories, no matter how the AI
+    helper happened to split them (it may hand over one run-on claim one day
+    and four claims the next). Sentences that only continue the previous one
+    stay attached; separate "I … and I …" statements become separate claims.
+    """
+    merged: list[str] = []
+    for s in _sentence_pieces(text):
+        if merged and is_continuation(s):
+            merged[-1] = f"{_ended(merged[-1])} {s}"
+        else:
+            merged.append(s)
+    out: list[str] = []
+    for s in merged:
+        out.extend(_split_clauses(s))
+    return [c for c in out if len(c) >= _MIN_CLAIM]
+
 # The model's own "nothing here" answer. Treating it as a fact is how "ok"/"ok"
 # became a candidate.
+# Model-answer scaffolding ("Here are the facts:") - not a claim. Only used
+# when reading a model's answer, never on the owner's own words.
+_ANSWER_FILLER_RE = re.compile(
+    r"^(?:here (?:are|is)|below (?:are|is)|the following (?:are|is)|sure[ ,!]|certainly[ ,!]|"
+    r"of course[ ,!]|alright[ ,!]|okay[ ,!]|i found \d|i have (?:extracted|found|identified)|"
+    r"i will now|let me|i can see)\b", re.I)
+
+# A refusal or apology is not an answer: the text must be kept aside (D1).
+_ANSWER_REFUSAL_RE = re.compile(
+    r"^\s*(?:i am (?:so |very )?sorry|i['\u2019]?m (?:so |very )?sorry|sorry,|i apologize|i apologise|"
+    r"unfortunately\b|as an ai(?: language model)?\b)|"
+    r"\bi ca(?:nno|['\u2019]?t) (?:do|help|assist|comply|provide|continue|read|process)\b|"
+    r"\bi am (?:not able|unable) to\b", re.I)
+
 _NO_FACTS_RE = re.compile(
     r"(?i)^\(?\s*(no (facts?|memories?|memorable (facts|memories))"
     r"( to extract)?|nothing (worth (keeping|remembering)|memorable)|"
@@ -131,7 +194,7 @@ def split_claims(text: str) -> list[str]:
     instruction-like string ("ignore all previous instructions…") becomes a
     candidate that recall can later hand to a model.
     """
-    out: list[str] = []
+    kept: list[str] = []
     for raw in _SENTENCE_RE.split(text or ""):
         s = " ".join(raw.split())
         if len(s) < 12:
@@ -144,11 +207,10 @@ def split_claims(text: str) -> list[str]:
             continue
         if hazards.is_hazardous(s):
             continue
-        if out and _REVISIT_REF_RE.match(s):
-            out[-1] = f"{out[-1]} {s}"       # "…business. I'll come back to this in a year." is one idea
-            continue
-        out.extend(_split_clauses(s))
-    return out
+        if notlife.is_not_life(s):
+            continue          # tool-talk, logs, docs, instructions: not life
+        kept.append(s)
+    return canonical_claims("\n".join(kept)) if kept else []
 
 
 def score_claim(claim: str) -> float:
@@ -312,7 +374,7 @@ def _candidates_from(raw: str, source: dict[str, Any] | None) -> list[Candidate]
     The answer is untrusted: hazards, chatter and talk about the session are
     dropped, and every claim is re-scored.
     """
-    out: list[Candidate] = []
+    kept: list[tuple[str, dict[str, Any], str, str, list[str], str]] = []
     for item in _read_items(raw):
         filing: dict[str, Any] = {}
         context = sentiment = about = ""
@@ -338,15 +400,40 @@ def _candidates_from(raw: str, source: dict[str, Any] | None) -> list[Candidate]
             s = str(item).strip()
         if _NO_FACTS_RE.match(s):
             return None
-        if len(s) < 12 or _CHATTER_RE.match(s) or _META_RE.search(s):
-            continue
-        if hazards.is_hazardous(s) or _FORGET_RE.match(s):
-            continue
-        out.append(Candidate(
-            id=ids.new_id(), text=s, trust=score_claim(s), kind_hint=kind_hint_for(s),
-            source=source or {}, created=_now(), context=context, sentiment=sentiment,
-            people=people, about=about, **filing,
-        ))
+        if filing.get("project") and not _topics.valid_thread_title(filing["project"]):
+            filing["project"] = ""    # a report word is never a project name
+        for sent in _sentence_pieces(s):
+            if len(sent) < 12 or _CHATTER_RE.match(sent) or _META_RE.search(sent):
+                continue
+            if _ANSWER_FILLER_RE.match(sent):
+                continue
+            if hazards.is_hazardous(sent) or _FORGET_RE.match(sent):
+                continue
+            if notlife.is_not_life(sent):
+                continue          # the model repeated tool-talk/docs; not life
+            kept.append((sent, filing, context, sentiment, people, about))
+
+    # One canonical cut for everything (owner list item A5): a continuation
+    # sentence joins the statement before it, no matter which claim the model
+    # put it in. The same words then become the same memories every time.
+    merged: list[tuple[str, dict[str, Any], str, str, list[str], str]] = []
+    for sent, filing, context, sentiment, people, about in kept:
+        if merged and is_continuation(sent):
+            prev = merged[-1]
+            merged[-1] = (f"{_ended(prev[0])} {sent}", prev[1], prev[2], prev[3], prev[4], prev[5])
+        else:
+            merged.append((sent, filing, context, sentiment, people, about))
+
+    out: list[Candidate] = []
+    for sent, filing, context, sentiment, people, about in merged:
+        for claim in _split_clauses(sent):
+            if len(claim) < _MIN_CLAIM:
+                continue
+            out.append(Candidate(
+                id=ids.new_id(), text=claim, trust=score_claim(claim), kind_hint=kind_hint_for(claim),
+                source=source or {}, created=_now(), context=context, sentiment=sentiment,
+                people=people, about=about, **filing,
+            ))
     return out
 
 
@@ -379,6 +466,79 @@ def _librarian_prompt(intro: str, rules: str, body: str, hint: str) -> str:
     )
 
 
+_CHUNK_LIMIT = 12000
+_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n\s*\n")
+
+
+def _split_long(text: str, limit: int = _CHUNK_LIMIT) -> list[str]:
+    """Pieces of *text* a model can read in one go, cut at sentence ends.
+
+    A pasted report or a long chat can be tens of thousands of characters. One
+    model call for all of it is slow enough to time out, and a timeout means the
+    whole conversation is read as nothing. Cutting it keeps every piece answerable.
+    """
+    if len(text) <= limit:
+        return [text]
+    out: list[str] = []
+    current = ""
+    for piece in _SENT_SPLIT_RE.split(text):
+        if not piece:
+            continue
+        if len(piece) > limit:                 # one huge sentence: cut it whole
+            if current:
+                out.append(current)
+                current = ""
+            out.extend(piece[i:i + limit] for i in range(0, len(piece), limit))
+            continue
+        if current and len(current) + len(piece) > limit:
+            out.append(current)
+            current = piece
+        else:
+            current += piece
+    if current:
+        out.append(current)
+    return out or [text]
+
+
+def _dedupe(cands: list[Candidate]) -> list[Candidate]:
+    """Drop the same claim twice (two pieces can overlap at a cut)."""
+    seen: set[str] = set()
+    out: list[Candidate] = []
+    for c in cands:
+        key = " ".join((c.text or "").lower().split())
+        if key and key not in seen:
+            seen.add(key)
+            out.append(c)
+    return out
+
+
+def _ask_model_once(
+    text: str,
+    *,
+    model_call: Any,
+    source: dict[str, Any] | None = None,
+    hint: str = "",
+) -> list[Candidate] | None:
+    """One model call for one piece of text. ``None`` means it did not read it."""
+    prompt = _librarian_prompt(
+        "Read the text below. It was written by the person whose notes these are.",
+        "- Only facts the person stated about themselves, their plans, their work, or people they know.\n",
+        f"Text:\n{text}", hint,
+    )
+    try:
+        raw = model_call(prompt)
+    except Exception:
+        return None          # D1: the helper did not read it - the caller keeps the text whole
+    if not str(raw).strip():
+        return None          # an empty answer is no answer
+    answer = str(raw).strip()
+    if _ANSWER_REFUSAL_RE.search(answer[:300]) or (
+            not _read_items(raw) and not _NO_FACTS_RE.match(answer)):
+        return None          # unreadable/refused answer - keep the text aside, re-read later
+    found = _candidates_from(raw, source)
+    return [] if found is None else found    # "none" means the model read it and kept nothing
+
+
 def extract_with_model(
     text: str,
     *,
@@ -389,23 +549,58 @@ def extract_with_model(
     """Ask a model to read the text and file each fact, then validate every line.
 
     ``model_call`` is a callable taking a prompt string and returning text.
+
+    When the helper fails or answers unreadably this returns ``None`` (owner
+    decision D1): the text is kept whole by the caller and read again later.
+    Simple rules never fragment and file it as if the AI had read it.
     *hint* lists the notes, projects and people the owner already has, so the
     model files into them instead of inventing new ones. The model's output is
     treated as untrusted (see ``_candidates_from``).
+
+    Text longer than a model can answer in one go is cut at sentence ends and
+    read piece by piece; if any piece cannot be read, the whole text is kept for
+    later, exactly as if the helper had not answered at all.
     """
+    found: list[Candidate] = []
+    for piece in _split_long(text):
+        got = _ask_model_once(piece, model_call=model_call, source=source, hint=hint)
+        if got is None:
+            return None          # one piece unread: keep the whole text whole
+        found.extend(got)
+    return _dedupe(found)
+
+
+def _ask_session_once(
+    transcript: str,
+    *,
+    model_call: Any,
+    source: dict[str, Any] | None = None,
+    hint: str = "",
+) -> list[Candidate] | None:
+    """One model call for one piece of a conversation. ``None``: it did not read it."""
     prompt = _librarian_prompt(
-        "Read the text below. It was written by the person whose notes these are.",
-        "- Only facts the person stated about themselves, their plans, their work, or people they know.\n",
-        f"Text:\n{text}", hint,
+        "Below is a conversation. The speaker labelled 'user' is the OWNER. "
+        "The speaker labelled 'assistant' is an assistant.",
+        "- Only what the OWNER stated about themselves: preferences, habits, their work, their life, "
+        "their plans, people they know.\n"
+        "- Nothing the assistant said, inferred, summarised or assumed. Nothing about the assistant. "
+        "A speaker labelled 'other (Name)' is another person in a group chat: what they say is not "
+        "the OWNER's own statement, though the OWNER's replies to them are.\n"
+        "- No feelings, diagnoses, motives or identities you infer.\n",
+        f"Conversation:\n{transcript}", hint,
     )
     try:
         raw = model_call(prompt)
     except Exception:
-        return extract_claims(text, source=source)
+        return None          # D1: the helper did not read it - the caller keeps the text whole
+    if not str(raw).strip():
+        return None
+    answer = str(raw).strip()
+    if _ANSWER_REFUSAL_RE.search(answer[:300]) or (
+            not _read_items(raw) and not _NO_FACTS_RE.match(answer)):
+        return None          # unreadable/refused answer - keep the text aside, re-read later
     found = _candidates_from(raw, source)
-    if found is None:
-        return []
-    return found or extract_claims(text, source=source)
+    return [] if found is None else found
 
 
 def extract_session(
@@ -424,35 +619,31 @@ def extract_session(
     a candidate about itself.
 
     Falls back to the offline heuristic on the owner's turns when no model is
-    available.
+    available. A long session is read in turn-sized pieces, so one huge
+    conversation cannot time out and be read as nothing.
     """
-    transcript = "\n".join(
-        f"{role}: {text.strip()}"
-        for role, text in parts
-        if (text or "").strip()
-    )
-    if not transcript.strip():
+    turns = [(role, (text or "").strip()) for role, text in parts if (text or "").strip()]
+    if not turns:
         return []
-
-    prompt = _librarian_prompt(
-        "Below is a conversation. The speaker labelled 'user' is the OWNER. "
-        "The speaker labelled 'assistant' is an assistant.",
-        "- Only what the OWNER stated about themselves: preferences, habits, their work, their life, "
-        "their plans, people they know.\n"
-        "- Nothing the assistant said, inferred, summarised or assumed. Nothing about the assistant. "
-        "A speaker labelled 'other (Name)' is another person in a group chat: what they say is not "
-        "the OWNER's own statement, though the OWNER's replies to them are.\n"
-        "- No feelings, diagnoses, motives or identities you infer.\n",
-        f"Conversation:\n{transcript}", hint,
-    )
-    try:
-        raw = model_call(prompt)
-    except Exception:
-        return _heuristic_from_owner(parts, source=source)
-    found = _candidates_from(raw, source)
-    if found is None:
-        return []
-    return found or _heuristic_from_owner(parts, source=source)
+    chunks: list[str] = []
+    current: list[str] = []
+    size = 0
+    for role, text in turns:
+        line = f"{role}: {text}"
+        if current and size + len(line) > _CHUNK_LIMIT:
+            chunks.append("\n".join(current))
+            current, size = [], 0
+        current.append(line)
+        size += len(line)
+    if current:
+        chunks.append("\n".join(current))
+    found = []
+    for chunk in chunks:
+        got = _ask_session_once(chunk, model_call=model_call, source=source, hint=hint)
+        if got is None:
+            return None          # one piece unread: keep the whole session whole
+        found.extend(got)
+    return _dedupe(found)
 
 
 def _heuristic_from_owner(

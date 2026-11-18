@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SCRIPTS = ["ui_flow", "ui_audit", "ui_race", "ui_vault", "ui_summary", "ui_checkup", "ui_owner"]
+SCRIPTS = ["ui_flow", "ui_audit", "ui_race", "ui_vault", "ui_summary", "ui_checkup", "ui_owner", "ui_waiting", "ui_phone"]
 
 
 def free_port() -> int:
@@ -42,8 +42,10 @@ def run_one(name: str) -> bool:
     tmp = tempfile.mkdtemp(prefix="mo_browser_")
     port = free_port()
     base = f"http://127.0.0.1:{port}"
+    mode_file = os.path.join(tmp, "ai-mode")     # a script writes ok / down / junk here to change the stand-in AI
     server = subprocess.Popen([sys.executable, str(HERE / "server.py"), str(port), tmp],
-                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                              stdout=subprocess.DEVNULL, stderr=subprocess.PIPE,
+                              env=dict(os.environ, FAKE_AI_FILE=mode_file))
     try:
         for _ in range(100):
             try:
@@ -58,7 +60,7 @@ def run_one(name: str) -> bool:
         subprocess.run([sys.executable, str(HERE / "seed.py"), token, base], check=True, stdout=subprocess.DEVNULL)
         shots = HERE / "shots"
         shots.mkdir(exist_ok=True)
-        env = dict(os.environ, MO_BASE=base, MO_TOKEN_FILE=token, MO_SHOTS=str(shots), NODE_PATH=node_path())
+        env = dict(os.environ, MO_BASE=base, MO_TOKEN_FILE=token, MO_AI_MODE_FILE=mode_file, MO_SHOTS=str(shots), NODE_PATH=node_path())
         done = subprocess.run(["node", str(HERE / f"{name}.js")], env=env, cwd=HERE, check=False)
         return done.returncode == 0
     finally:

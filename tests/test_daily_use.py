@@ -11,6 +11,10 @@ PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
 
 from memory_ob import conflicts, feed, manager, topics  # noqa: E402
+try:
+    from tests.helpers import reading
+except ImportError:      # running as a script from inside tests/
+    from helpers import reading
 from memory_ob.config import Settings  # noqa: E402
 from memory_ob.store import Store  # noqa: E402
 
@@ -26,7 +30,7 @@ class Case(unittest.TestCase):
         self.store.close()
 
     def say(self, text: str):
-        return manager.capture(self.store, text=text, vault=self.vault)       # simple rules, no AI helper
+        return manager.capture(self.store, text=text, vault=self.vault, model_call=reading())       # simple rules, no AI helper
 
     def todos(self, done: bool = False) -> list[str]:
         tag = topics.DONE_TAG if done else topics.TODO_TAG

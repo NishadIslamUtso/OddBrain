@@ -81,6 +81,15 @@ button, input, select, textarea { font: inherit; color: inherit; }
   display: inline-block; min-width: 1.3em; margin-left: 6px; padding: 0 6px; border-radius: 99px;
   background: var(--accent); color: var(--on-accent); font-size: .78rem; font-weight: 700; text-align: center;
 }
+@media (max-width: 480px) {
+  .tabs { gap: 0; }
+  .tab { padding: 9px 8px; font-size: .92rem; }
+  .tab .badge { margin-left: 4px; padding: 0 5px; font-size: .72rem; }
+}
+@media (max-width: 380px) {
+  .tab { padding: 9px 5px; font-size: .88rem; }
+  .tab .badge { margin-left: 3px; padding: 0 4px; }
+}
 main { padding-top: 20px; }
 .screen > * + *, .gap > * + * { margin-top: 18px; }
 .head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
@@ -136,10 +145,16 @@ button.chip[aria-pressed="true"] { background: var(--accent); color: var(--on-ac
 .btn.danger { background: var(--bg-2); color: var(--danger); border-color: var(--danger); }
 .btn.ghost { background: transparent; border-color: transparent; color: var(--accent-text); padding: 5px 8px; }
 .btn.ghost:hover { background: var(--bg-3); }
-.btn.sm { padding: 3px 10px; font-size: .88rem; }
+.btn.sm { padding: 3px 10px; font-size: .88rem; white-space: nowrap; }
 .btn[disabled] { opacity: .55; cursor: not-allowed; }
 
 /* ---- forms -------------------------------------------------------------- */
+input[type=file] { color: var(--text-2); max-width: 100%; }
+input[type=file]::file-selector-button {
+  appearance: none; cursor: pointer; border-radius: 8px; padding: 7px 14px; margin-right: 10px; font: inherit; font-weight: 600;
+  background: var(--bg-3); color: var(--text); border: 1px solid var(--stroke-2);
+}
+input[type=file]::file-selector-button:hover { border-color: var(--text-3); }
 .field > label, .lbl { display: block; font-weight: 600; font-size: .9rem; margin-bottom: 4px; color: var(--text); }
 .field .hint { color: var(--text-2); font-size: .86rem; margin-top: 4px; }
 input[type=text], input[type=search], input[type=date], input[type=url], select, textarea {
@@ -190,7 +205,13 @@ select { appearance: auto; }
 .feed-group .grp-head { padding: 12px 16px; display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; align-items: center; }
 .feed-group .grp-head .top { grid-column: 1 / -1; }
 .feed-group .grp-cats { display: flex; gap: 6px; flex-wrap: wrap; }
-.feed-group .grp-actions { display: flex; gap: 8px; align-items: center; }
+.feed-group .grp-actions { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.feed-item .row { flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 520px) {
+  .feed-item, .feed-group .grp-head { grid-template-columns: 1fr; }
+  .feed-item .row, .feed-group .grp-actions { justify-content: flex-start; }
+  .feed-item .when { margin-left: 0; }
+}
 .feed-group .grp-body { border-top: 1px solid var(--stroke); background: var(--bg); }
 .feed-group .grp-body .feed-item { padding-left: 28px; }
 
@@ -707,7 +728,7 @@ function ask({ title, body, yes = 'OK', no = 'Cancel', danger = false }) {
     const root = $('#modal-root');
     root.innerHTML = `<div class="modal-back"><div class="modal" role="dialog" aria-modal="true" aria-label="${esc(title)}">
       <h2>${esc(title)}</h2><div class="muted">${body || ''}</div>
-      <div class="row end"><button class="btn" data-no>${esc(no)}</button>
+      <div class="row end">${no === null ? '' : `<button class="btn" data-no>${esc(no)}</button>`}
       <button class="btn ${danger ? 'danger' : 'primary'}" data-yes>${esc(yes)}</button></div></div></div>`;
     const done = (v) => { root.innerHTML = ''; document.removeEventListener('keydown', onKey); resolve(v); };
     const onKey = (e) => { if (e.key === 'Escape') done(false); };
@@ -769,9 +790,18 @@ function renderBanners() {
   if (s.notice) {
     out.push(`<div class="banner"><span>${esc(s.notice)}</span><button class="btn sm" data-act="dismiss-notice">Got it</button></div>`);
   }
-  if (!s.helper.ready && s.waiting > 0) {
+  const onReview = state.tab === 'review';       // Review has its own "Waiting to be read" card
+  if (onReview && s.waiting > 0) { /* shown in the card below */ }
+  else if (s.waiting > 0 && s.reading && s.reading.running) {
+    const r = s.reading, done = r.read ? `${r.read} of ${r.total || s.waiting} read.` : 'Starting…';
+    const bad = r.failed ? ` ${plural(r.failed, 'message')} could not be read (kept whole).` : '';
+    out.push(`<div class="banner ok"><span><b>Reading what was waiting…</b> ${done}${bad}</span></div>`);
+  } else if (s.waiting > 0 && !s.helper.ready) {
     out.push(`<div class="banner"><span><b>${plural(s.waiting, 'thing')} waiting.</b> I cannot reach an AI helper right now, so I will read ${s.waiting === 1 ? 'it' : 'them'} as soon as one is available.</span>
       <button class="btn sm" data-act="tab" data-tab="settings">AI settings</button></div>`);
+  } else if (s.waiting > 0 && s.reading && s.reading.error) {
+    out.push(`<div class="banner"><span><b>${plural(s.waiting, 'thing')} waiting.</b> The AI helper did not answer, so ${s.waiting === 1 ? 'it is' : 'they are'} kept whole until it does.</span>
+      <button class="btn sm" data-act="waiting-read">Read now</button></div>`);
   } else if (s.reading && s.reading.running) {
     out.push(`<div class="banner ok"><span><b>Reading your conversations…</b> ${s.reading.read ? plural(s.reading.read, 'conversation') + ' done so far.' : 'This can take a while.'}</span></div>`);
   }
@@ -784,11 +814,14 @@ async function refreshStatus() {
     if (state.status.categories) state.categories = state.status.categories;
     renderBanners();
     clearTimeout(pollTimer);
-    if (state.status.reading && state.status.reading.running) pollTimer = setTimeout(refreshStatus, 4000);
+    const running = !!(state.status.reading && state.status.reading.running);
+    if (running) pollTimer = setTimeout(refreshStatus, state.tab === 'review' ? 1500 : 4000);
+    else if (state.wasReading && state.tab === 'review' && $('#rv-body') && !state.rq) SCREENS.review(true);
+    state.wasReading = running;
   } catch (e) { /* the screen's own load reports problems */ }
 }
 async function go(tab) {
-  state.tab = tab; renderTabs(); closeDrawer(); stopGraph();
+  state.tab = tab; renderTabs(); renderBanners(); closeDrawer(); stopGraph();
   const main = $('#main'); main.innerHTML = '<p class="skeleton">Loading…</p>';
   window.scrollTo(0, 0);
   try { await SCREENS[tab](); }
@@ -911,7 +944,7 @@ function feedGroup(g) {
     <div class="grp-head"><div class="top"><span class="verb">${esc(g.verb)}</span><span class="faint">by AI</span><span class="when">${esc(when(g.at))}</span></div>
       <div class="grp-cats">${cats}</div>
       <div class="grp-actions"><button class="btn sm" data-act="toggle-group" data-seqs="${ids.join(',')}" aria-expanded="${open}">${open ? 'Hide' : 'See what was saved'}</button>
-      ${g.undone ? '<span class="chip">Undone</span>' : g.undo_seqs.length ? `<button class="btn sm" data-act="undo-group" data-seqs="${g.undo_seqs.join(',')}">Undo all</button>` : ''}</div></div>
+      ${g.undone ? '<span class="chip">Undone</span>' : g.undo_seqs.length ? `<button class="btn sm" data-act="undo-group" data-seqs="${g.undo_seqs.join(',')}">Undo all</button>` : ''}<button class="btn sm" data-act="feed-got-it" data-seqs="${ids.join(',')}">Got it</button></div></div>
     ${open ? `<ul class="list grp-body">${g.items.map(feedItem).join('')}</ul>` : ''}</li>`;
 }
 function feedItem(f) {
@@ -922,7 +955,25 @@ function feedItem(f) {
       ${cat ? `<span class="chip" style="border-color:${catColor(cat)}">${esc(cat)}</span>` : ''}
       <span class="faint">${f.by === 'AI' ? 'by AI' : 'by you'}</span><span class="when">${esc(when(f.at))}</span></div>
     <div><p class="text">${esc(f.text)}</p>${f.was ? `<p class="was">Before: <s>${esc(f.was)}</s></p>` : ''}</div>
-    <div>${f.undone ? '<span class="chip">Undone</span>' : f.can_undo ? `<button class="btn sm" data-act="undo" data-seq="${f.seq}">Undo</button>` : ''}</div></li>`;
+    <div class="row">${f.undone ? '<span class="chip">Undone</span>' : f.can_undo ? `<button class="btn sm" data-act="undo" data-seq="${f.seq}">Undo</button>` : ''}<button class="btn sm" data-act="feed-got-it" data-seqs="${f.seq}">Got it</button></div></li>`;
+}
+const WAIT_WHY = {
+  no_helper: 'I cannot reach an AI helper right now. Nothing is lost: your words are kept whole, and I will read them as soon as one is available.',
+  not_answering: 'The AI helper is connected but did not answer the last time I tried. Your words are kept whole, and I will try again tonight, or when you press Read now.',
+  will_retry: 'Your words are kept whole. I will read them in a moment, or you can press Read now.',
+  reading: 'Reading them now…',
+};
+function waitingCard(w) {
+  if (!w || !w.count) return '';
+  const items = w.items.map(i => `<li class="mem"><div class="t">${esc(i.preview || '(no text)')}</div>
+    <div class="meta"><span class="faint">${esc(when(i.at))}</span>
+    <button class="btn sm" data-act="waiting-skip" data-id="${esc(i.id)}">Skip this one</button></div></li>`).join('');
+  const more = w.count > w.items.length ? `<p class="faint">…and ${plural(w.count - w.items.length, 'more')}.</p>` : '';
+  const busyNow = w.why === 'reading';
+  return section('Waiting to be read', w.count, `<div class="card" id="waiting-card"><p class="muted">${esc(WAIT_WHY[w.why] || WAIT_WHY.will_retry)}</p>
+    <ul class="list">${items}</ul>${more}
+    <div class="row"><button class="btn primary" data-act="waiting-read"${busyNow ? ' disabled' : ''}>${busyNow ? 'Reading…' : 'Read now'}</button>
+    ${w.why === 'no_helper' ? '<button class="btn" data-act="tab" data-tab="settings">AI settings</button>' : ''}</div></div>`);
 }
 function auditCard(f) {
   const lines = String(f.detail || '').split('\n').map(l => `<p class="text">${esc(l)}</p>`).join('');
@@ -944,6 +995,12 @@ function renderReviewBody() {
   if (state.rq) return;
   const h = state.home; const body = $('#rv-body'); if (!body || !h) return;
   const parts = [];
+  if (h.waiting && h.waiting.count) parts.push(waitingCard(h.waiting));
+  if (h.checkup && h.checkup.show) {
+    parts.push(section('How your memory is doing', null,
+      `<div class="card"><div class="eyebrow">Monthly check-up</div>` +
+      (h.checkup.lines || []).map(l => `<p class="text">${esc(l)}</p>`).join('') + `</div>`));
+  }
   if (h.doubts.length) parts.push(section('Needs your answer', h.doubts.length, `<div class="stack">${h.doubts.map(doubtCard).join('')}</div>`));
   if (h.unsure.length) parts.push(section('Not sure about', h.unsure.length, `<div class="stack">${h.unsure.map(unsureCard).join('')}</div>`));
   if (h.due.length) {
@@ -956,8 +1013,8 @@ function renderReviewBody() {
       (more ? `<p class="faint">${plural(more, 'more thing')} to look at after these.</p>` : '')));
   }
   if (h.feed.length) {
-    parts.push(section('Recently remembered', null, `<div class="card pad0"><ul class="list">${h.feed.map(feedItem).join('')}</ul></div>`));
-  } else if (!h.doubts.length && !h.unsure.length) {
+    parts.push(section('Recently remembered', null, `<div class="card pad0"><div class="row" style="justify-content:flex-end;padding:8px 12px 0"><button class="btn sm" data-act="feed-clear">Clear all</button></div><ul class="list">${h.feed.map(feedItem).join('')}</ul></div>`));
+  } else if (!h.doubts.length && !h.unsure.length && !(h.waiting && h.waiting.count)) {
     parts.push(emptyBox('Nothing here yet', 'Tell me something above, or just chat as you normally do. I will remember what matters and list it here.'));
   }
   parts.push(auditFooter(h.audit));
@@ -1045,7 +1102,7 @@ SCREENS.vault = async function (soft) {
 function vShell() {
   const v = vstate();
   $('#main').innerHTML = `<div class="screen">
-    <div class="head"><h1>Vault</h1><p>Your notes, laid out like an Obsidian vault.</p></div>
+    <div class="head"><h1>Vault</h1><p>Everything I remember, as notes you can read and follow.</p></div>
     <div class="vx${v.hideSide ? ' noside' : ''}" id="vx">
       <aside class="vx-side" id="vx-side" aria-label="Your notes">
         <div class="vx-tools">
@@ -1690,15 +1747,16 @@ SCREENS.settings = async function (soft) {
     <label class="radio${ai.mode === 'auto' ? ' on' : ''}"><input type="radio" name="aimode" value="auto"${ai.mode === 'auto' ? ' checked' : ''}><span><b>Automatic</b><span>${ai.hermes_found ? 'Use the AI that Hermes already uses.' : 'Hermes was not found, so I will look for a model running on this computer.'}</span></span></label>
     <label class="radio${ai.mode === 'custom' ? ' on' : ''}"><input type="radio" name="aimode" value="custom"${ai.mode === 'custom' ? ' checked' : ''}><span><b>A model on this computer</b><span>Choose a model you run yourself with Ollama.</span></span></label>
     <div id="ai-custom" class="stack" ${ai.mode === 'custom' ? '' : 'hidden'}>
-      <div class="field"><label for="ai-addr">Where your AI server is running</label><input type="text" id="ai-addr" value="${esc(ai.address)}"><p class="hint">Works with Ollama, llama.cpp (llama-server), LM Studio and vLLM.</p></div>
+      <div class="field"><label for="ai-addr">Where your AI server is running</label><input type="text" id="ai-addr" value="${esc(ai.address)}" placeholder="${ai.mode === 'auto' ? 'automatic — the AI Hermes already uses' : 'http://127.0.0.1:11434'}"><p class="hint">${ai.mode === 'auto' ? 'Left empty: Memory_OB follows the AI Hermes already uses.' : 'Works with Ollama, llama.cpp (llama-server), LM Studio and vLLM.'}</p></div>
       <div class="field"><label for="ai-model">Model</label><div class="row"><input type="text" id="ai-model" class="grow" list="ollama-models" value="${esc(ai.reading_model)}" placeholder="for example llama3.2"><button class="btn" data-act="check-models">Find models</button></div>
         <datalist id="ollama-models"></datalist><p class="hint" id="ai-models-msg"></p></div></div>
     <div class="field"><label for="ai-embed">Model for meaning search (optional)</label><input type="text" id="ai-embed" value="${esc(ai.meaning_model)}" placeholder="nomic-embed-text">
+      ${ai.meaning_address ? `<p class="hint">Running at ${esc(ai.meaning_address)}</p>` : ''}
       <p class="hint">Only used for searching by meaning, and it always runs on this computer. For example nomic-embed-text or nomic-embed-text-v2-moe. If you change it, I prepare search again by myself.</p></div>
-    <div class="row"><button class="btn primary" data-act="save-ai">Save</button></div></section>
+    <div class="row"><button class="btn primary" data-act="save-ai">Save</button><button class="btn" data-act="test-ai">Test the AI helper</button><span class="msg" id="ai-test-msg" role="status"></span></div></section>
 
   <section class="card"><h2>Search</h2><p class="muted">${esc(meanText)}</p>
-    ${sw('semantic', 'Search by meaning as well as words', 'Finds a memory even when you use different words.', o.semantic)}
+    ${sw('semantic', 'Search by meaning as well as words', 'Finds a memory even when you use different words. Used by the search box on Review and when Hermes looks something up.', o.semantic)}
     <div class="row"><button class="btn" data-act="prepare-embed">Prepare now</button><span class="msg" id="embed-msg"></span></div></section>
 
   <section class="card"><h2>Privacy</h2>
@@ -1731,7 +1789,7 @@ SCREENS.settings = async function (soft) {
       <button class="btn sm" data-act="accept-originals">I checked, they are fine</button></div>` : ''}
     <p class="muted">I tidy my notes every night on my own. You can also do it now, or save a backup copy.</p>
     ${sw('audit', 'Look over everything each night', 'Finds memories that disagree or repeat, to-dos that have sat for weeks, and notes that drifted. It fixes only your notes. Anything about what you said waits for your answer in Review.', o.audit)}
-    <div class="row"><button class="btn" data-act="backup">Back up now</button><button class="btn" data-act="tidy">Tidy now</button><span class="msg" id="bk-msg"></span></div>
+    <div class="row"><button class="btn" data-act="backup">Back up now</button><button class="btn" data-act="tidy">Tidy now</button><button class="btn" data-act="sweep">Clean up old junk</button><button class="btn" data-act="checkup">How is my memory doing?</button><span class="msg" id="bk-msg"></span></div>
     ${s.backups.length ? `<p class="faint">Latest backups: ${s.backups.map(esc).join(', ')}</p>` : ''}
     <p class="faint">Your notes live in: ${esc(s.vault)}</p></section>
 
@@ -1742,7 +1800,7 @@ SCREENS.settings = async function (soft) {
 /* ==========================================================================
    Clicks and typing
    ========================================================================== */
-const MSG = { new: 'Saved the new answer.', old: 'Kept what I had.', both: 'Kept both.', yes: 'Done.', no: 'Okay, kept them separate.', merge: 'Joined.', dismiss: 'Dismissed.', approve: 'Added.', deny: 'Skipped.', ok: 'Done.' };
+const MSG = { new: 'Saved the new answer.', old: 'Kept what I had.', both: 'Kept both.', neither: 'Discarded both. You can undo it from Review.', yes: 'Done.', no: 'Okay, kept them separate.', merge: 'Joined.', dismiss: 'Dismissed.', approve: 'Added.', deny: 'Skipped.', ok: 'Done.' };
 
 document.addEventListener('click', async (e) => {
   const el = e.target.closest('[data-act]'); if (!el) return;
@@ -1793,6 +1851,29 @@ document.addEventListener('click', async (e) => {
       if (r.ok) $('#tell').value = '';
       await refreshStatus(); await SCREENS.review(true);
     });
+    case 'test-ai': return busy(el, async () => {
+      const m = $('#ai-test-msg'); m.className = 'msg'; m.textContent = 'Asking it a small question…';
+      const r = await api('/api/settings/ai/test', { method: 'POST' });
+      m.className = 'msg ' + (r.ok ? 'good' : 'err');
+      m.textContent = r.ok ? 'It answered. Anything that was waiting will be read now.'
+        : r.reason === 'no_helper' ? 'I cannot reach an AI helper. Check that Hermes is running, or pick a model above.'
+        : r.reason === 'empty' ? 'It was reached but gave an empty answer. Try again in a moment.'
+        : 'It was reached but did not answer' + (r.detail ? ': ' + r.detail : '.');
+      await refreshStatus();
+    });
+    case 'waiting-read': return busy(el, async () => {
+      const r = await api('/api/waiting/read', { method: 'POST' });
+      if (r.reason === 'no_helper') toast('I still cannot reach an AI helper. Your words stay safe until one is there.', true);
+      else if (r.reason === 'nothing') toast('Nothing is waiting.');
+      else toast('Reading…');
+      await refreshStatus(); if (state.tab === 'review') await SCREENS.review(true);
+    });
+    case 'waiting-skip': return busy(el, async () => {
+      const yes = await ask({ title: 'Skip this one?', body: '<p>I will not make any memories from it. It stays whole in Sources.</p>', yes: 'Skip it', no: 'Keep waiting' });
+      if (!yes) return;
+      await api(`/api/waiting/${enc(el.dataset.id)}/skip`, { method: 'POST' });
+      toast('Skipped. It stays in Sources.'); await refreshStatus(); await SCREENS.review(true);
+    });
     case 'doubt': return busy(el, async () => {
       await api(`/api/doubts/${enc(id)}/answer`, { method: 'POST', body: { answer: el.dataset.choice } });
       toast(MSG[el.dataset.choice] || 'Done.'); await SCREENS.review(true);
@@ -1801,17 +1882,42 @@ document.addEventListener('click', async (e) => {
     case 'unsure-skip': return busy(el, async () => { await api(`/api/unsure/${enc(id)}/skip`, { method: 'POST' }); toast('Dropped.'); await SCREENS.review(true); });
     case 'undo': return busy(el, async () => {
       const r = await api('/api/undo/' + enc(el.dataset.seq), { method: 'POST' });
-      toast(r.result === 'changed_since' ? 'That was changed after this, so I left it as it is.' : 'Put back.');
+      toast(r.result === 'changed_since' ? 'That was changed after this, so I left it as it is.' : r.reopened ? 'Put back. The question is waiting for you again.' : 'Put back.');
       await SCREENS.review(true); });
     case 'audit': return busy(el, async () => {
       const r = await api(`/api/audit/${enc(el.dataset.id)}/${enc(el.dataset.choice)}`, { method: 'POST' });
       toast(r.result === 'gone' ? 'That changed in the meantime, so I left it alone.' : ({ keep_new: 'Kept the newer one.', keep_old: 'Kept the older one.', keep_both: 'Kept both.', join: 'Kept just one.', done: 'Ticked off.', still: 'Okay, I will ask again later.', remove: 'Removed.', keep: 'Kept.', forget: 'Forgotten.' })[el.dataset.choice] || 'Done.');
       await SCREENS.review(true); });
+    case 'feed-got-it': return busy(el, async () => {
+      const seqs = String(el.dataset.seqs || '').split(',').map(Number).filter(Boolean);
+      await api('/api/feed/dismiss', { method: 'POST', body: { seqs } });
+      await SCREENS.review(true); });
+    case 'feed-clear': return busy(el, async () => {
+      await api('/api/feed/dismiss', { method: 'POST', body: { all: true } });
+      toast('Cleared. The memories are all still saved.');
+      await SCREENS.review(true); });
+    case 'checkup': return busy(el, async () => {
+      const r = await api('/api/checkup');
+      const lines = (r.checkup.lines || []).map(l => `<p class="text">${esc(l)}</p>`).join('');
+      await ask({ title: 'How your memory is doing', body: lines, yes: 'Close', no: null });
+    });
+    case 'sweep': return busy(el, async () => {
+      const first = await api('/api/sweep', { method: 'POST', body: { apply: false } });
+      if (!first.found) { toast('I found no old junk. Your notes look clean.'); return; }
+      const ok = await ask({ title: 'Clean up old junk?', danger: true, yes: 'Move to trash',
+        body: `I found ${plural(first.found, 'old line')} that look like server logs, pasted docs or agent text - not your life. Move ${first.found === 1 ? 'it' : 'them'} to the trash? Nothing is deleted, and you can undo this from Review.` });
+      if (!ok) return;
+      const r = await api('/api/sweep', { method: 'POST', body: { apply: true } });
+      toast(`Moved ${plural(r.trashed, 'old junk line')} to the trash${r.tag_stripped ? ` and cleaned ${plural(r.tag_stripped, 'folder name')}` : ''}. Undo from Review if anything looks wrong.`);
+      await SCREENS.review(true); });
     case 'dismiss-notice': return busy(el, async () => { await api('/api/notice/dismiss', { method: 'POST' }); await refreshStatus(); });
     case 'audit-run': return busy(el, async () => {
       const m = $('#audit-msg'); if (m) m.textContent = 'Looking…';
       const r = await api('/api/audit/run', { method: 'POST' });
-      toast(r.summary.needs_you ? `Done. ${plural(r.summary.needs_you, 'thing')} to look at.` : 'Done. Everything looks fine.');
+      const noAi = r.ai && r.ai.used === false;      // the AI's second look was wanted but not had
+      toast(r.summary.needs_you ? `Done. ${plural(r.summary.needs_you, 'thing')} to look at.${noAi ? ' The AI helper could not give a second look, so some may be false alarms.' : ''}`
+        : noAi ? 'Done. My own checks found nothing. The AI helper could not give a second look, so I will check again when it can.'
+        : 'Done. Everything looks fine.');
       await SCREENS.review(true); });
     case 'audit-lonely': { vstate().view = 'note'; await go('vault'); return setQ('is:orphan'); }
     case 'undo-group': return busy(el, async () => {
@@ -1941,7 +2047,10 @@ document.addEventListener('click', async (e) => {
     case 'tidy': return busy(el, async () => {
       $('#bk-msg').textContent = 'Working…'; const r = await api('/api/tidy', { method: 'POST' });
       const bad = r.steps.filter(s => s.ok === 'no').length;
-      $('#bk-msg').textContent = bad ? 'Done, but a part did not finish. I will try again tonight.' : 'All tidy.'; await refreshStatus();
+      await refreshStatus(); const left = state.status ? state.status.waiting : 0;
+      $('#bk-msg').textContent = bad ? 'Done, but a part did not finish. I will try again tonight.'
+        : left && r.reading ? 'All tidy. Now reading what was waiting…'
+        : left ? `All tidy, but ${plural(left, 'message')} still ${left === 1 ? 'waits' : 'wait'} for an AI helper. See Review.` : 'All tidy.';
     });
   }
 });

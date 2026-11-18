@@ -81,12 +81,73 @@ def temporary_home(project: Path) -> str:
     The installed plugin points at the folder the installer ran from. Run from a
     folder that gets cleaned out, it stops working the day that folder does.
     """
-    parts = {p.lower() for p in Path(project).resolve().parts}
+    p = Path(project).resolve()
+    parts = {x.lower() for x in p.parts}
+    near = {p.parent.name.lower(), p.parent.parent.name.lower()}
     if "downloads" in parts:
         return "your Downloads folder"
-    if "temp" in parts or "tmp" in parts:
+    if ("temp" in near or "tmp" in near
+            or any(x.startswith("memory-ob-release-") for x in near)):
         return "a temporary folder"
     return ""
+
+
+# Owner list item A8: the engine gets one permanent home, never left in
+# Downloads or TEMP where a clean-up would delete the running app.
+_SKIP_COPY = frozenset({".git", "__pycache__", "_retired", ".brain", ".venv"})
+
+
+def permanent_home() -> Path:
+    root = Path(os.environ.get("USERPROFILE") or Path.home())
+    return root / "Documents" / "Hermes" / "Memory_OB-engine"
+
+
+def _copy_engine(src: Path, dst: Path) -> None:
+    for path in src.rglob("*"):
+        rel = path.relative_to(src)
+        if any(part in _SKIP_COPY for part in rel.parts):
+            continue
+        target = dst / rel
+        if path.is_dir():
+            target.mkdir(parents=True, exist_ok=True)
+            continue
+        target.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(path, target)
+
+
+def relocate_from_temporary(project: Path) -> Path | None:
+    """Copy the engine to its permanent home. Returns that home, or None.
+
+    Only ever copies: the old folder is left for :func:`retire_old_home`.
+    """
+    dest = permanent_home()
+    try:
+        if dest.resolve() == project.resolve():
+            return None
+    except OSError:
+        pass
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+        _copy_engine(project, dest)
+        if not (dest / "host" / "install.py").exists() or not (dest / "memory_ob" / "__init__.py").exists():
+            raise OSError("the copy is incomplete")
+    except OSError as exc:
+        print(f"  could not copy Memory_OB to {dest}: {exc}")
+        return None
+    return dest
+
+
+def retire_old_home(project: Path, home: Path, *, reason: str) -> None:
+    """Move the old copy out of harm's way - never deleted (owner list item A8)."""
+    import time as _time
+
+    try:
+        dest = home / "_retired" / f"{project.name}-{_time.strftime('%Y%m%d-%H%M%S')}"
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(project), str(dest))
+        print(f"  the old copy (was in {reason}) is retired at {dest} - never deleted")
+    except OSError as exc:
+        print(f"  could not move the old copy out of {reason}: {exc} (it is still there)")
 
 
 def install(*, enable: bool = True, startup: bool = True,
@@ -148,11 +209,12 @@ def install(*, enable: bool = True, startup: bool = True,
     project = SRC.parent
     where = temporary_home(project)
     if where:
-        print(f"  WARNING: Memory_OB is being installed from {where}. If that folder is ever cleaned out, "
-              "Memory_OB stops working. Move the whole Memory_OB folder somewhere permanent "
-              "(for example Documents) and run install.ps1 again from there.")
+        print(f"  WARNING: Memory_OB is still being installed from {where}. If that folder is ever "
+              "cleaned out, Memory_OB stops working. Run install.ps1 again - it moves Memory_OB to "
+              "the permanent home (Documents\\Hermes\\Memory_OB-engine) for you.")
     pointer = home / "plugins" / "memory_ob" / ".memory_ob_home"
     try:
+        pointer.parent.mkdir(parents=True, exist_ok=True)
         pointer.write_text(str(project), encoding="utf-8")
         print(f"  engine path -> {pointer}")
     except OSError as exc:
@@ -243,6 +305,20 @@ def main() -> int:
     ap.add_argument("--remove-startup", action="store_true",
                     help="remove the logon prompt from the Startup folder")
     args = ap.parse_args()
+    where = temporary_home(SRC.parent)
+    if where:
+        # Owner list item A8: never install from Downloads/TEMP - the engine is
+        # copied to its permanent home and the install continues from there.
+        new_home = relocate_from_temporary(SRC.parent)
+        if new_home is not None and new_home != SRC.parent:
+            print(f"  Memory_OB was in {where}. I am moving it to the permanent home {new_home}.")
+            proc = subprocess.run(
+                [sys.executable, str(new_home / "host" / "install.py"), *sys.argv[1:]],
+                cwd=str(new_home),
+            )
+            if proc.returncode == 0:
+                retire_old_home(SRC.parent, new_home, reason=where)
+            return proc.returncode
     return install(enable=not args.no_enable, startup=not args.no_startup,
                    remove_startup=args.remove_startup)
 

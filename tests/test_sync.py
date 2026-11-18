@@ -14,6 +14,15 @@ from memory_ob.records import Record
 from memory_ob.store import Store
 
 
+# D1: with no AI helper these tests would keep captures aside; they exercise
+# filing, so the API gets the stand-in helper.
+from memory_ob import api  # noqa: E402
+try:
+    from tests.helpers import api_uses_reading_helper
+except ImportError:      # running as a script from inside tests/
+    from helpers import api_uses_reading_helper
+api_uses_reading_helper(api)
+
 class SyncCase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = Path(tempfile.mkdtemp())

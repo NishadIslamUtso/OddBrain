@@ -10,10 +10,23 @@ import zipfile
 from pathlib import Path
 
 from memory_ob import manager, vault
+try:
+    from tests.helpers import reading
+except ImportError:      # running as a script from inside tests/
+    from helpers import reading
 from memory_ob.records import Record
 from memory_ob.store import Store
 from tests.helpers import sign
 
+
+# D1: with no AI helper these tests would keep captures aside; they exercise
+# filing, so the API gets the stand-in helper.
+from memory_ob import api  # noqa: E402
+try:
+    from tests.helpers import api_uses_reading_helper
+except ImportError:      # running as a script from inside tests/
+    from helpers import api_uses_reading_helper
+api_uses_reading_helper(api)
 
 class Base(unittest.TestCase):
     def setUp(self) -> None:
@@ -121,7 +134,7 @@ class Filing(Base):
 
     def test_chats_with_hermes_are_not_one_file_each_but_imported_chats_are_kept(self) -> None:
         manager.capture(self.store, parts=[{"role": "user", "content": "I need to renew my passport."}],
-                        vault=self.vault)
+                        vault=self.vault, model_call=reading())
         self.assertEqual(list((self.vault / "Sources" / "Conversations").glob("*.md")), [])
         manager.store_chats(self.store, [{"title": "Chat with Rina", "when": "", "origin": "whatsapp",
                                           "people": ["Rina"], "parts": [{"role": "user", "content": "Hi Rina"},

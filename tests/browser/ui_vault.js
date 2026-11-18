@@ -82,6 +82,10 @@ const BASE = process.env.MO_BASE || 'http://127.0.0.1:8791';
       let minD = Infinity, span = 0; for (let i = 0; i < N; i++) { for (let j = i + 1; j < N; j++) minD = Math.min(minD, Math.hypot(nodes[i].x - nodes[j].x, nodes[i].y - nodes[j].y)); span = Math.max(span, Math.hypot(nodes[i].x, nodes[i].y)); }
       const L = links.map(([a, b]) => Math.hypot(nodes[a].x - nodes[b].x, nodes[a].y - nodes[b].y)); return { ticks: t, minD, span, avgLink: L.reduce((a, b) => a + b, 0) / L.length, finite: nodes.every(n => Number.isFinite(n.x) && Number.isFinite(n.y)) }; });
     console.log('     physics:', JSON.stringify(r)); if (!r.finite) throw new Error('NaN'); if (r.minD < 6) throw new Error('dots on top of each other: ' + r.minD); if (r.span > 900) throw new Error('flew apart: ' + r.span); if (r.ticks >= 2000) throw new Error('never settles'); });
+  await step('the Vault screen does not describe itself as another app', async () => {
+    await page.click('[data-tab=vault]'); await page.waitForSelector('#v-tree');
+    const t = await page.textContent('#main'); if (/obsidian/i.test(t)) throw new Error('mentions Obsidian');
+  });
   await page.setViewportSize({ width: 380, height: 800 });
   await step('narrow: vault has no sideways scroll, in tree, note and graph', async () => {
     await page.click('[data-tab=vault]'); await page.waitForSelector('#v-tree'); for (const view of ['note', 'graph']) { await page.click(`[data-act=v-view][data-view=${view}]`); await page.waitForTimeout(500); const over = await page.evaluate(() => document.documentElement.scrollWidth - document.documentElement.clientWidth); if (over > 2) throw new Error(`${view} overflows by ${over}px`); } });

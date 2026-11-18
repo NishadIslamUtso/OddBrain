@@ -11,6 +11,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from tests.test_screens import ScreenCase  # noqa: E402
 
 
+# D1: with no AI helper these tests would keep captures aside; they exercise
+# filing, so the API gets the stand-in helper.
+from memory_ob import api  # noqa: E402
+try:
+    from tests.helpers import api_uses_reading_helper
+except ImportError:      # running as a script from inside tests/
+    from helpers import api_uses_reading_helper
+api_uses_reading_helper(api)
+
 class PrivateThroughTheApi(ScreenCase):
     def setUp(self) -> None:
         super().setUp()

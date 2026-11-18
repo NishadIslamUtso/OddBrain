@@ -32,7 +32,7 @@ from typing import Any
 
 from . import conflicts, quotes, credentials, topics, vault as vault_mod
 from .records import ACTIVE, Record, importance_for
-from .review import KEEP_BOTH, TAKE_NEW, TAKE_OLD, CardStore
+from .review import KEEP_BOTH, TAKE_NEW, TAKE_NONE, TAKE_OLD, CardStore
 
 logger = logging.getLogger(__name__)
 
@@ -112,7 +112,8 @@ class Helper:
 
     def __call__(self, prompt: str) -> str:
         out = self.call(prompt)
-        self.worked = True
+        if str(out).strip():
+            self.worked = True      # a blank answer is no answer (D1: keep aside)
         return out
 
 
@@ -137,6 +138,9 @@ class Outcome:
     people: list[str] = field(default_factory=list)
     conversation_id: str | None = None
     read: int = 0
+    failed: int = 0               # conversations the helper could not read
+    aside: int = 0
+    no_helper: bool = False       # there was no AI helper at all (not: it answered badly)
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -147,6 +151,7 @@ class Outcome:
             "record_ids": self.record_ids, "card_ids": self.card_ids,
             "people": self.people, "conversation_id": self.conversation_id,
             "read": self.read,
+            "aside": self.aside, "no_helper": self.no_helper,
         }
 
 
@@ -295,6 +300,12 @@ def describe(out: Outcome) -> str:
         return f"{n} thing" if n == 1 else f"{n} things"
 
     bits: list[str] = []
+    if out.aside:
+        bits.append(
+            "No AI helper is connected right now, so I kept this safe, whole, and will read it as soon as one is."
+            if out.no_helper else
+            "The AI helper did not answer properly, so I kept this safe and will try again. "
+            "You can see it under “Waiting to be read” in Review.")
     if out.saved:
         bits.append(f"Remembered {things(out.saved)}.")
     if out.finished:
@@ -459,7 +470,21 @@ def capture(
     csource = {**source, "conversation_id": conv_id}
     cands = []
     hint = librarian_context(store) if helper is not None else ""
-    for c in _extract(conv_text, parts, csource, helper, hint):
+    extracted = _extract(conv_text, parts, csource, helper, hint)
+    if extracted is None:
+        # Owner decision D1: the AI helper did not read this message. It is
+        # kept WHOLE - never chopped into fragments by simple rules - and read
+        # again when a helper answers (the reader) or via Tidy now. The secret
+        # hiding and "forget" commands above already ran: those are the only
+        # jobs rules still do.
+        out.aside = 1
+        out.no_helper = helper is None
+        store.log_activity("kept-aside", "the AI helper did not answer; the message was kept whole",
+                           actor="memory_ob")
+        _tidy(store, vault, out)      # the raw conversation still lands in Sources
+        store.log_activity(log_activity_name, "kept aside for the AI helper", actor=actor)
+        return out
+    for c in extracted:
         if credentials.HIDDEN in c.text:
             c.text = credentials.drop_hidden(c.text)      # only the part that held the secret is lost
             if not c.text:
@@ -616,18 +641,16 @@ def _extract(
     if parts and model_call is not None:
         found: list[Any] = []
         for chunk in _chunks(parts):
-            found.extend(extract_session(
+            got = extract_session(
                 [(_speaker(p), str(p.get("content", ""))) for p in chunk],
                 source={**source, "speaker": "user"}, model_call=model_call, hint=hint,
-            ))
+            )
+            if got is None:
+                return None      # D1: the helper did not read it - keep the whole message
+            found.extend(got)
         return found
-    if parts:
-        # No helper: read only the owner's own words, never the assistant's.
-        owner = "\n".join(
-            str(p.get("content", "")).strip() for p in parts
-            if p.get("role", "user") == "user" and str(p.get("content", "")).strip()
-        )
-        return extract_claims(owner, source={**source, "speaker": "user"}) if owner else []
+    if model_call is None:
+        return None              # D1: no helper read it - rules never lead, the message waits whole
     return extract_claims(conv_text, source=source, model_call=model_call, hint=hint)
 
 
@@ -857,6 +880,54 @@ def settle_fact(
     return "saved"
 
 
+def sweep_junk(store: Any, *, vault: Path | None = None, apply: bool = False) -> dict[str, Any]:
+    """One-time clean-up of junk that older versions let slip into memories.
+
+    Finds saved memories that are not life at all (server logs, pasted docs,
+    agent text - the classes the not-life filter names) and, with *apply*,
+    moves them to the trash (undoable, nothing is ever deleted). Also drops
+    project folders whose names came from stray words ("From", "What").
+    """
+    from . import notlife, topics
+
+    matches: list[dict[str, Any]] = []
+    for rec in store.list_records(status=ACTIVE, limit=50000):
+        reason = notlife.is_not_life(rec.body or rec.title or "")
+        if reason:
+            matches.append({"id": rec.id, "text": (rec.body or rec.title or "")[:160], "reason": reason})
+    tag_stripped = 0
+    if apply:
+        trashed = 0
+        for m in matches:
+            if forget_record(store, m["id"], vault=vault) is not None:
+                trashed += 1
+        for rec in store.list_records(status=ACTIVE, limit=50000):
+            tags = list(rec.tags or [])
+            bad = [t for t in tags if str(t).startswith(topics.THREAD_PREFIX)
+                   and not topics.valid_thread_title(
+                       topics.thread_title(str(t)[len(topics.THREAD_PREFIX):]))]
+            if not bad:
+                continue
+            before = Record.from_dict(rec.to_dict())
+            rec.tags = [t for t in tags if t not in bad]
+            updated = store.update_record(rec, changed_by=OWNER,
+                                          reason="cleaned up a folder name that came from a stray word")
+            log_record_change(store, action="update", before=before, after=updated,
+                              actor=OWNER, reason="cleaned up a folder name")
+            tag_stripped += 1
+        out = {"found": len(matches), "trashed": trashed, "tag_stripped": tag_stripped,
+               "matches": matches[:50]}
+        if vault is not None:
+            try:
+                _tidy(store, vault, None, record_ids=[m["id"] for m in matches])
+            except Exception:  # noqa: BLE001
+                pass
+        store.log_activity("sweep-junk", f"moved {trashed} old junk lines to the trash",
+                           actor=OWNER if apply else "memory_ob")
+        return out
+    return {"found": len(matches), "trashed": 0, "tag_stripped": 0, "matches": matches[:50]}
+
+
 def keep_unsure(store: Any, fact_id: str, *, vault: Path | None = None) -> dict[str, Any]:
     """The owner says an unsure statement is true. It is saved (conflicts still ask)."""
     fact = store.get_fact(fact_id)
@@ -902,8 +973,9 @@ def process_waiting(
         source = {"origin": conv.get("origin") or "api", "session": conv.get("session") or "",
                   "conversation_id": conv["id"]}
         cands = _extract(conv["text"], parts, source, helper, librarian_context(store))
-        if not helper.worked:
-            break  # the helper is not answering; try again later, change nothing
+        if cands is None or not helper.worked:
+            out.failed += 1          # this one could not be read; the next may still be
+            continue
         for fact in store.list_facts(status="waiting", limit=5000):
             if (fact.get("source") or {}).get("conversation_id") == conv["id"]:
                 store.set_fact_status(fact["id"], "reprocessed")
@@ -917,6 +989,26 @@ def process_waiting(
         store.log_activity("process-waiting", f"saved {out.saved}, asked {out.asked}", actor=AI)
     _tidy(store, vault, out)
     return out
+
+
+def waiting_list(store: Any, *, limit: int = 8) -> dict[str, Any]:
+    """What is kept whole and still waiting for an AI helper to read it, for the Review screen."""
+    items = []
+    for conv in store.unprocessed_conversations(limit=limit):
+        said = " ".join(_owner_text(conv.get("parts") or None, conv.get("text") or "").split())
+        items.append({"id": conv["id"], "at": conv.get("created"),
+                      "preview": said[:160] + ("…" if len(said) > 160 else "")})
+    return {"count": store.count_unprocessed_conversations(), "items": items}
+
+
+def skip_waiting(store: Any, conv_id: str) -> dict[str, Any]:
+    """Stop waiting to read one message. It stays whole in Sources; nothing is made from it."""
+    conv = store.get_conversation(conv_id)
+    if conv is None or conv["processed"]:
+        return {"result": "gone"}
+    store.mark_conversation_processed(conv_id)
+    store.log_activity("skip-waiting", "the owner chose not to have one waiting message read", actor="you")
+    return {"result": "skipped"}
 
 
 # -- after any change -----------------------------------------------------------
@@ -966,6 +1058,34 @@ def refresh_vault(store: Any, vault: Path | None, record_ids: list[str] | None =
 # -- answering a question ------------------------------------------------------
 
 
+NEW_RIGHT_REASON = "you said the new answer is right"
+NEITHER_REASON = "you said neither answer is right"
+
+
+def _reopen_question(store: Any, card_id: str, fact_ids: list[str] | None = None) -> bool:
+    """Put a question the owner answered back to "waiting for an answer"."""
+    from .review import PENDING
+
+    cards = CardStore(store)
+    card = cards.get(card_id)
+    if card is None:
+        return False
+    card.status, card.resolution, card.resolved_at, card.resolved_by = PENDING, None, None, None
+    cards._save(card)  # noqa: SLF001
+    for fact_id in fact_ids or []:
+        store.set_fact_status(fact_id, "asked")
+    store.log_activity("card:reopened", f"{card.type} {card_id}", actor=OWNER)
+    return True
+
+
+def _answered_with_new(store: Any, record_id: str) -> Any:
+    """The question that was settled by "the new one is right" on this memory, if any."""
+    row = store.conn.execute(
+        "SELECT id FROM cards WHERE record_id = ? AND type = 'diff' AND status = 'resolved' AND resolution = ? "
+        "ORDER BY resolved_at DESC LIMIT 1", (record_id, TAKE_NEW)).fetchone()
+    return row["id"] if row else None
+
+
 def answer_conflict(
     store: Any, card_id: str, answer: str, *, vault: Path | None = None
 ) -> dict[str, Any]:
@@ -973,10 +1093,11 @@ def answer_conflict(
 
     ``new``: the new statement replaces the old one. ``old``: nothing changes.
     ``both``: both stay (for things that are both true, like two hobbies).
+    ``neither``: none of them is right - both go away (undoable, owner decision D2).
     """
-    actions = {"new": TAKE_NEW, "old": TAKE_OLD, "both": KEEP_BOTH}
+    actions = {"new": TAKE_NEW, "old": TAKE_OLD, "both": KEEP_BOTH, "neither": TAKE_NONE}
     if answer not in actions:
-        raise ValueError("answer must be new, old or both")
+        raise ValueError("answer must be new, old, both or neither")
     cards = CardStore(store)
     card = cards.get(card_id)
     if card is None or card.status != "pending":
@@ -989,7 +1110,7 @@ def answer_conflict(
     fact_ids = list(card_src.get("fact_ids") or ([card_src["fact_id"]] if card_src.get("fact_id") else []))
     if answer == "new" and before is not None and after is not None:
         log_record_change(store, action="update", before=before, after=after, actor=OWNER,
-                          reason="you said the new answer is right")
+                          reason=NEW_RIGHT_REASON)
         touched.append(after.id)
     elif answer == "both":
         new_rec = _find_by_card(store, card_id)
@@ -1002,11 +1123,21 @@ def answer_conflict(
 
                 audit.pair_answered(vault, card.record_id, new_rec.id)      # the check-up must not ask again
     elif answer == "old":
-        store.log_change(entity="doubt", entity_id=card_id, action="keep_old", before=None,
+        store.log_change(entity="doubt", entity_id=card_id, action="keep_old", before={"fact_ids": fact_ids},
                          after={"text": (card.new or {}).get("body", "")}, actor=OWNER,
                          reason="you said the old answer is right")
+    elif answer == "neither":
+        # Owner decision D2: "Discard both" (key: neither). The old memory goes to
+        # the trash (undoable) and the new one is not saved.
+        if before is not None:
+            forget_record(store, before.id, vault=vault, reason=NEITHER_REASON)
+            touched.append(before.id)
+        store.log_change(entity="doubt", entity_id=card_id, action="neither",
+                         before={"record_id": before.id if before is not None else "", "fact_ids": fact_ids},
+                         after={"text": (card.new or {}).get("body", "")}, actor=OWNER,
+                         reason="you said neither answer is right")
     for fact_id in fact_ids:
-        store.set_fact_status(fact_id, "rejected" if answer == "old" else "promoted")
+        store.set_fact_status(fact_id, "rejected" if answer in ("old", "neither") else "promoted")
     _tidy(store, vault, None, record_ids=touched)
     return {"result": "ok", "answer": answer, "resolved": resolved is not None}
 
@@ -1151,7 +1282,8 @@ def bring_back(store: Any, record_id: str, *, vault: Path | None = None) -> bool
     return True
 
 
-def forget_record(store: Any, record_id: str, *, vault: Path | None = None) -> Record | None:
+def forget_record(store: Any, record_id: str, *, vault: Path | None = None,
+                  reason: str = "you removed it") -> Record | None:
     """Remove a memory from use. It goes to the trash; nothing is destroyed."""
     rec = store.get_record(record_id)
     if rec is None:
@@ -1159,7 +1291,7 @@ def forget_record(store: Any, record_id: str, *, vault: Path | None = None) -> R
     before = Record.from_dict(rec.to_dict())
     trashed = store.trash(record_id, reason="the owner removed it", by=OWNER)
     log_record_change(store, action="remove", before=before, after=trashed, actor=OWNER,
-                      reason="you removed it")
+                      reason=reason)
     _tidy(store, vault, None, record_ids=[record_id])
     return trashed
 
@@ -1362,9 +1494,14 @@ def undo(store: Any, seq: int, *, vault: Path | None = None) -> dict[str, Any]:
     if store.has_later_change(change["entity_id"], seq):
         return {"result": "changed_since", "seq": seq}
 
+    reopen: tuple[str, list[str]] | None = None
     if entity == "record":
         rid = change["entity_id"]
         rec = store.get_record(rid)
+        if rec is not None and action == "update" and change.get("reason") == NEW_RIGHT_REASON:
+            asked = _answered_with_new(store, rid)
+            if asked:
+                reopen = (asked, [])          # undoing "the new one is right" asks the question again
         if rec is None:
             result = "gone"
         elif action == "create":
@@ -1431,16 +1568,29 @@ def undo(store: Any, seq: int, *, vault: Path | None = None) -> dict[str, Any]:
                 store.delete_person(person["id"])
                 if vault is not None:
                     _remove_person_note(vault, person["id"])
-    elif entity == "doubt":
-        result = "cannot"  # keeping the old answer changed nothing, so there is nothing to put back
+    elif entity == "doubt" and action in ("keep_old", "neither"):
+        before = change["before"] or {}
+        if action == "neither" and before.get("record_id"):
+            removed = next((c for c in store.list_changes(limit=200)
+                            if c["entity"] == "record" and c["entity_id"] == before["record_id"]
+                            and c["action"] == "remove" and not c.get("undone_at")
+                            and c.get("reason") == NEITHER_REASON), None)
+            if removed is not None:
+                undo(store, removed["seq"], vault=vault)       # the earlier memory comes back first
+                touched.append(before["record_id"])
+        reopen = (change["entity_id"], list(before.get("fact_ids") or []))
     else:
         result = "cannot"
+
+    reopened = False
+    if result == "undone" and reopen is not None:
+        reopened = _reopen_question(store, reopen[0], reopen[1])
 
     if result == "undone":
         store.mark_change_undone(seq)
         store.log_activity("undo", f"change {seq}", actor=OWNER)
     _tidy(store, vault, None, record_ids=touched)
-    return {"result": result, "seq": seq}
+    return {"result": result, "seq": seq, "reopened": reopened}
 
 
 # -- bringing things in from elsewhere ---------------------------------------------

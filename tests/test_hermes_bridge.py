@@ -224,14 +224,15 @@ class TestExtractionUsesTheBackend(unittest.TestCase):
         self.assertTrue(out)
         self.assertIn("dark mode", out[0].text)
 
-    def test_capture_falls_back_when_model_fails(self):
+    def test_the_text_is_kept_aside_when_the_model_fails(self):
         from memory_ob.extract import extract_claims
 
         def boom(prompt):
             raise RuntimeError("no model")
 
-        out = extract_claims("I prefer dark mode on every machine", model_call=boom)
-        self.assertTrue(out)
+        # Owner decision D1: there is no silent rules fallback any more. The
+        # caller keeps the text whole and reads it again when a helper answers.
+        self.assertIsNone(extract_claims("I prefer dark mode on every machine", model_call=boom))
 
     def test_capture_model_output_is_validated(self):
         from memory_ob.extract import extract_claims

@@ -11,6 +11,15 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 
+# D1: with no AI helper these tests would keep captures aside; they exercise
+# filing, so the API gets the stand-in helper.
+from memory_ob import api  # noqa: E402
+try:
+    from tests.helpers import api_uses_reading_helper
+except ImportError:      # running as a script from inside tests/
+    from helpers import api_uses_reading_helper
+api_uses_reading_helper(api)
+
 class ScreenCase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp()
@@ -296,7 +305,7 @@ class Me(ScreenCase):
         self.assertTrue(sections["projects"]["items"][0]["revisit_at"])
 
     def test_an_empty_page_is_empty_not_broken(self) -> None:
-        self.assertEqual(self.client.get("/api/me").json(), {"sections": [], "total": 0})
+        self.assertEqual(self.client.get("/api/me").json(), {"sections": [], "total": 0, "due": []})
 
     def test_there_is_no_me_note_in_the_vault_but_the_memory_is_in_its_subject_note(self) -> None:
         self.tell("I study computer science at BRAC University")

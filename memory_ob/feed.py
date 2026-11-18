@@ -7,9 +7,48 @@ put back with one tap.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
 from typing import Any
 
 from . import exit as exit_gate, topics
+
+# -- clearing the "recently remembered" list (owner decision D2) --------------------
+# Clearing only hides items from that list. Nothing is deleted: the memories
+# and the full history stay exactly as they were.
+
+DISMISSED_FILE = "feed-dismissed.json"
+
+
+def _dismissed_path(vault: Path) -> Path:
+    return Path(vault) / ".brain" / DISMISSED_FILE
+
+
+def dismissed(vault: Path | None) -> set[int]:
+    """Change numbers the owner has cleared from the feed ('Got it')."""
+    if vault is None:
+        return set()
+    try:
+        raw = json.loads(_dismissed_path(vault).read_text(encoding="utf-8"))
+        return {int(s) for s in raw.get("seqs", [])}
+    except Exception:  # noqa: BLE001 - a missing or damaged file just means "nothing cleared"
+        return set()
+
+
+def dismiss(vault: Path | None, seqs: list[int]) -> int:
+    """Hide these changes from the feed. Returns how many were newly hidden."""
+    if vault is None:
+        return 0
+    have = dismissed(vault)
+    want = {int(s) for s in seqs}
+    new = want - have
+    all_seq = have | want
+    if new:
+        path = _dismissed_path(vault)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        keep = sorted(s for s in all_seq if s > max(all_seq) - 500)   # bounded file
+        path.write_text(json.dumps({"seqs": keep}), encoding="utf-8")
+    return len(new)
 
 _CATEGORY_FALLBACK = topics.LIFE
 
@@ -82,8 +121,8 @@ def describe(change: dict[str, Any]) -> dict[str, Any]:
         item.update(verb="Brought in", text=f"{n} {unit} from {after.get('source', 'a file')}",
                     category="Import")
     elif entity == "doubt":
-        item.update(verb="Kept your earlier answer", text=str(after.get("text", "")),
-                    category="")
+        item.update(verb="Discarded both" if action == "neither" else "Kept your earlier answer",
+                    text=str(after.get("text", "")), category="")
     else:
         item.update(verb=action.capitalize(), text=_text_of(after or before))
     if change.get("reason") and item["by"] == "AI":
@@ -114,13 +153,15 @@ def _group(run: list[dict[str, Any]]) -> dict[str, Any]:
         "count": n,
         "categories": [{"name": k, "count": v} for k, v in sorted(cats.items(), key=lambda kv: -kv[1])],
         "items": run,
+        "seqs": [i["seq"] for i in run],
         "undone": all(i["undone"] for i in run),
         "can_undo": any(i["can_undo"] for i in run),
         "undo_seqs": [i["seq"] for i in run if i["can_undo"]],
     }
 
 
-def build(store: Any, *, limit: int = 60, hide_undone: bool = False) -> list[dict[str, Any]]:
+def build(store: Any, *, limit: int = 60, hide_undone: bool = False,
+          dismissed: set[int] | None = None) -> list[dict[str, Any]]:
     """The most recent changes, newest first, each marked undoable or not.
 
     Memories the AI took from one message are shown as one card (with the list inside).
@@ -133,6 +174,8 @@ def build(store: Any, *, limit: int = 60, hide_undone: bool = False) -> list[dic
     for change in store.list_changes(limit=limit * 4):
         if change["entity"] == "record" and change["entity_id"] in private:
             continue
+        if change["entity"] == "record" and change.get("reason") == "you said neither answer is right":
+            continue          # the "Discarded both" line carries this one, with its own Undo
         if change["entity"] == "record" and not all(
             exit_gate.keep(snap) for snap in (change.get("before"), change.get("after")) if isinstance(snap, dict)
         ):
@@ -140,11 +183,14 @@ def build(store: Any, *, limit: int = 60, hide_undone: bool = False) -> list[dic
         undone = bool(change.get("undone_at"))
         if undone and hide_undone:
             continue
+        if dismissed and change["seq"] in dismissed:
+            continue          # the owner cleared this one from the list ("Got it")
         item = describe(change)
         item["undone"] = undone
         item["can_undo"] = (
             not undone
-            and change["entity"] in ("record", "person", "import")
+            and (change["entity"] in ("record", "person", "import")
+                 or (change["entity"] == "doubt" and change["action"] in ("keep_old", "neither")))
             and not (change["entity"] == "person" and change["action"] not in ("merge", "update", "remove", "create"))
             and not store.has_later_change(change["entity_id"], change["seq"])
         )

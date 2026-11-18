@@ -264,6 +264,46 @@ a an the my our your his her their this that these those another other new own s
 good great first next last old online local family mobile web side-hustle real any some every each
 business startup project company idea plan thing one same whole full part time long short
 """.split())
+
+# Single words that can never be a project NAME (they are grammar or common
+# nouns). "From", "What", "With", "Note", "Windows", "Application" are real
+# examples the filing model once produced from pasted report text.
+_THREAD_FUNC_WORDS = frozenset("""
+from what with which where when while why how who whom whose than then thus
+here there this that these those they them their there about into onto upon
+within without through across behind beside between beyond above below under
+note notes report reports line lines list lists text words message messages
+question questions answer answers run runs file files page pages part parts
+one two three four five thing things stuff way ways import imports
+application applications independent windows macos linux mac android chrome
+firefox update updates build builds test tests change changes fix fixes
+item items step steps button buttons screen screens folder folders session
+sessions model models server servers script scripts command commands prompt
+prompts systems errors logs examples numbers versions today yesterday
+""".split())
+
+
+def valid_thread_title(title: str) -> bool:
+    """True when *title* is usable as a project display name.
+
+    Guards the filing model's ``project`` field: a report word ("From",
+    "What") must never become a project folder. Real names ("Bakery",
+    "Study Buddy") pass.
+    """
+    t = " ".join((title or "").split()).strip(" -")
+    if not t or len(t) > 40:
+        return False
+    if not re.match(r"^[A-Za-z][A-Za-z0-9 &'-]*$", t):
+        return False
+    words = t.lower().split()
+    if len(words) == 1:
+        w = words[0]
+        if w in _THREAD_FUNC_WORDS or _root(w) in _THREAD_FUNC_WORDS:
+            return False
+        if w in _GENERIC_HEAD:
+            return False
+    return True
+
 _THREAD_PATTERNS = (
     re.compile(r"\b([a-z][a-z-]{2,18})\s+(?:" + _THREAD_NOUNS + r")\b"),
     re.compile(r"\b(?:idea|plan|plans|dream)\s+(?:for|of|about|to (?:open|start|build|launch))\s+(?:a|an|the|my|our)?\s*"
@@ -371,6 +411,8 @@ def thread_of(text: str, known: list[str] | None = None) -> str:
         for head in heads:
             head = head.strip("-")
             if not head or head in _GENERIC_HEAD:
+                continue
+            if not valid_thread_title(thread_title(head)):
                 continue
             if head in _ABSTRACT and pattern is _THREAD_PATTERNS[0]:
                 continue                  # "app project": not a name

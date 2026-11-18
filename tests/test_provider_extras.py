@@ -3,6 +3,10 @@
 from __future__ import annotations
 
 import json
+try:
+    from tests.helpers import reading
+except ImportError:      # running as a script from inside tests/
+    from helpers import reading
 import sys
 import unittest
 from pathlib import Path
@@ -18,7 +22,7 @@ class Reminders(ProviderTestCase):
 
         store = self.provider._store()
         try:
-            return manager.capture(store, text=text, vault=self.vault)
+            return manager.capture(store, text=text, vault=self.vault, model_call=reading())
         finally:
             store.close()
 

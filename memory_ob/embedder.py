@@ -28,6 +28,28 @@ _WORD_RE = re.compile(r"[a-z0-9]+")
 
 # Below this cosine similarity a "meaning" hit is noise.
 _MIN_SIMILARITY = 0.30
+# Real models give even unrelated lines a middling score (0.4 to 0.5 is common), so a fixed floor
+# alone lets the whole vault through. A match must also be near the best match and clearly above
+# what the typical memory scores for this question.
+_NEAR_BEST = 0.15
+_ABOVE_TYPICAL = 0.10
+_TYPICAL_NEEDS = 5          # memories needed before "typical" means anything
+
+
+def meaning_matches(qv: list[float], vectors: Iterable[tuple[str, list[float]]]) -> dict[str, float]:
+    """The memories whose meaning really matches *qv*, with their similarity."""
+    sims = {rid: _cosine(qv, vec) for rid, vec in vectors}
+    if not sims:
+        return {}
+    best = max(sims.values())
+    floor = max(_MIN_SIMILARITY, best - _NEAR_BEST)
+    if len(sims) >= _TYPICAL_NEEDS:
+        ordered = sorted(sims.values())
+        typical = ordered[len(ordered) // 2]
+        if best - typical < _ABOVE_TYPICAL:
+            return {}                       # nothing stands out from the rest: no real match
+        floor = max(floor, typical + _ABOVE_TYPICAL)
+    return {rid: sim for rid, sim in sims.items() if sim >= floor}
 
 
 def _cosine(a: list[float], b: list[float]) -> float:
@@ -143,10 +165,8 @@ def combined_search(
     if semantic and store.count_embeddings(in_use) > 0:
         qv = _query_vector(query, backend, slot)
         if qv is not None:
-            for rid, vec in _all_embeddings(store, in_use):
-                sim = _cosine(qv, vec)
-                if sim >= _MIN_SIMILARITY:
-                    scores[rid] = scores.get(rid, 0.0) + sim
+            for rid, sim in meaning_matches(qv, _all_embeddings(store, in_use)).items():
+                scores[rid] = scores.get(rid, 0.0) + sim
 
     # Leg 3 — entities (tags / subject / speaker)
     qtokens = _tokens(query)

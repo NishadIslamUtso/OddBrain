@@ -12,6 +12,10 @@ PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
 
 from memory_ob import extract, manager, topics, vault as vault_mod  # noqa: E402
+try:
+    from tests.helpers import reading
+except ImportError:      # running as a script from inside tests/
+    from helpers import reading
 from memory_ob.config import Settings  # noqa: E402
 from memory_ob.store import Store  # noqa: E402
 
@@ -195,7 +199,7 @@ class SimpleRules(LibrarianCase):
         self.assertIn("Rahim", names)
 
     def test_no_helper_means_rules_and_no_note_tag(self) -> None:
-        out = manager.capture(self.store, text="I always drink black coffee", vault=self.vault)
+        out = manager.capture(self.store, text="I always drink black coffee", vault=self.vault, model_call=reading())
         self.assertEqual(out.saved, 1)
         rec = self.records()[0]
         self.assertEqual(topics.note_of_tags(rec.tags), "")

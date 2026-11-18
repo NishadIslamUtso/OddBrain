@@ -18,7 +18,7 @@ from .config import Settings
 logger = logging.getLogger(__name__)
 
 _lock = threading.Lock()
-_state: dict[str, Any] = {"running": False, "read": 0, "error": ""}
+_state: dict[str, Any] = {"running": False, "read": 0, "failed": 0, "total": 0, "error": ""}
 
 
 def progress() -> dict[str, Any]:
@@ -36,6 +36,7 @@ def _run(settings: Settings) -> None:
         cfg = ModelConfig.load(settings.models_path)
         guardrails = list(load(settings.vault).guardrails or [])
         with Store(settings.db) as st:
+            _state["total"] = st.count_unprocessed_conversations()
             while True:
                 call = models.helper(cfg, "extract")
                 if call is None:
@@ -44,10 +45,19 @@ def _run(settings: Settings) -> None:
                 out = manager.process_waiting(
                     st, model_call=call, vault=settings.vault, guardrails=guardrails, limit=5,
                 )
-                if out.read == 0:
-                    break
                 _state["read"] += out.read
+                _state["failed"] += out.failed
                 _state["error"] = ""
+                if out.read == 0:
+                    break                    # nothing left it could read this round
+            left = st.count_unprocessed_conversations()
+            if left and not _state["error"]:
+                # it ran, yet messages are still here
+                _state["error"] = (
+                    f"The AI helper could not read {left} of them."
+                    if _state["read"] == 0 else
+                    f"Read {_state['read']}, but {left} are still waiting."
+                )
             try:
                 manager.suggest_same_person(st)
             except Exception:  # noqa: BLE001
@@ -66,6 +76,9 @@ def kick(settings: Settings) -> bool:
             return False
         _state["running"] = True
         _state["read"] = 0
+        _state["failed"] = 0
+        _state["total"] = 0
+        _state["error"] = ""
         thread = threading.Thread(target=_run, args=(settings,), name="memory-ob-reader", daemon=True)
         thread.start()
         return True

@@ -19,9 +19,22 @@ PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
 
 from memory_ob import doubts, feed, manager  # noqa: E402
+try:
+    from tests.helpers import reading
+except ImportError:      # running as a script from inside tests/
+    from helpers import reading
 from memory_ob.config import Settings  # noqa: E402
 from memory_ob.store import Store  # noqa: E402
 
+
+# D1: with no AI helper these tests would keep captures aside; they exercise
+# filing, so the API gets the stand-in helper.
+from memory_ob import api  # noqa: E402
+try:
+    from tests.helpers import api_uses_reading_helper
+except ImportError:      # running as a script from inside tests/
+    from helpers import api_uses_reading_helper
+api_uses_reading_helper(api)
 
 class FilingCase(unittest.TestCase):
     def setUp(self) -> None:
@@ -36,6 +49,7 @@ class FilingCase(unittest.TestCase):
         self.store.close()
 
     def tell(self, text: str, **kw):
+        kw.setdefault("model_call", reading())
         return manager.capture(self.store, text=text, vault=self.vault, **kw)
 
     def active(self):
@@ -140,15 +154,17 @@ class Unsure(FilingCase):
 
 
 class NoHelper(FilingCase):
-    """With no AI helper, plain first-person statements are filed by simple rules."""
+    """With no AI helper nothing is filed by rules (owner decision D1): the
+    message is kept whole and read when a helper answers."""
 
-    def test_something_it_cannot_judge_waits_for_a_helper(self) -> None:
-        out = self.tell("Riya's brother is a doctor in Sylhet")
-        self.assertEqual((out.saved, out.waiting), (0, 1))
+    def test_a_message_no_helper_read_is_kept_whole(self) -> None:
+        out = self.tell("Riya's brother is a doctor in Sylhet", model_call=None)
+        self.assertEqual((out.saved, out.aside), (0, 1))
         self.assertEqual(self.store.count_unprocessed_conversations(), 1)
+        self.assertEqual(self.store.list_records(), [])
 
     def test_waiting_conversations_are_read_when_a_helper_appears(self) -> None:
-        self.tell("Riya's brother is a doctor in Sylhet")
+        self.tell("Riya's brother is a doctor in Sylhet", model_call=None)
         calls: list[str] = []
 
         def helper(prompt: str) -> str:
@@ -162,7 +178,7 @@ class NoHelper(FilingCase):
         self.assertEqual(self.store.count_unprocessed_conversations(), 0)
 
     def test_a_helper_that_is_not_answering_changes_nothing(self) -> None:
-        self.tell("Riya's brother is a doctor in Sylhet")
+        self.tell("Riya's brother is a doctor in Sylhet", model_call=None)
 
         def broken(prompt: str) -> str:
             raise RuntimeError("down")
@@ -183,7 +199,7 @@ class Conflicts(FilingCase):
         self.assertEqual([r.body for r in self.active()], ["I live in Dhaka"])
         [d] = doubts.list_doubts(self.store)
         self.assertEqual(d["before"], "I live in Dhaka")
-        self.assertEqual({o["key"] for o in d["options"]}, {"new", "old", "both"})
+        self.assertEqual({o["key"] for o in d["options"]}, {"new", "old", "both", "neither"})
 
     def test_new_replaces_the_old_and_can_be_undone(self) -> None:
         self.tell("I no longer live in Dhaka")

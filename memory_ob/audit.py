@@ -82,6 +82,7 @@ def _load(vault: Path) -> dict[str, Any]:
     data.setdefault("more", {})
     data.setdefault("lonely", {"count": 0, "notes": []})
     data.setdefault("ai_pairs", {})          # what the helper said about a pair of memories, so it is not asked again
+    data.setdefault("ai_singles", {})        # ...and about a stale to-do or broken-proof finding
     data.setdefault("ai", {"used": False, "looked": 0, "dropped": 0, "added": 0})
     return data
 
@@ -377,8 +378,119 @@ def _second_opinion(found: list[dict[str, Any]], rest: list[tuple[Record, Record
             out.append(_make_finding("twice" if verdict == "same" else "disagree", old, new, "ai"))
             added += 1
     data["ai_pairs"] = {k: v for k, v in cache.items() if k in live}
-    data["ai"] = {"used": bool(looked) or not todo, "looked": looked, "dropped": dropped, "added": added}
+    out, s_dropped, s_looked, s_todo = _second_opinion_singles(out, data, judge)
+    data["ai"] = {"used": bool(looked + s_looked) or (not todo and not s_todo),
+                  "looked": looked + s_looked,
+                  "dropped": dropped + s_dropped,
+                  "added": added}
     return out
+
+
+# The helper's look at the to-do and proof findings (owner list item A10):
+# each finding is a question - is it real, or a false alarm?
+
+_SINGLE_KINDS = {
+    "old-todo": (
+        "These things have sat on the to-do list for a long time. For each, decide\n"
+        "whether the owner still needs to do it.\n"
+        "- yes: it still needs doing.\n"
+        "- no: it is done already or no longer matters.\n"
+    ),
+    "quote": (
+        "These memories were saved because of a quote from a conversation, but the\n"
+        "conversation no longer reads that way. For each, decide whether the proof\n"
+        "really is broken.\n"
+        "- yes: the proof really does not match any more.\n"
+        "- no: the memory is still properly backed.\n"
+    ),
+}
+
+
+def _single_key(f: dict[str, Any]) -> str:
+    return f"{f['kind']}:{f['id']}"
+
+
+def _one_line(f: dict[str, Any]) -> str:
+    return str(f.get("detail") or f.get("title") or "").replace("\n", " ")
+
+
+def _parse_yesno(raw: str) -> dict[int, str] | None:
+    """The model's answer as {number: yes|no}, or None when unreadable."""
+    m = re.search(r"\{.*\}", raw or "", re.S)
+    if not m:
+        return None
+    try:
+        obj = json.loads(m.group(0))
+    except ValueError:
+        return None
+    if not isinstance(obj, dict):
+        return None
+    out: dict[int, str] = {}
+    for key, value in obj.items():
+        try:
+            n = int(str(key).strip().rstrip("."))
+        except ValueError:
+            continue
+        word = str(value).strip().lower()
+        if word in ("yes", "no"):
+            out[n] = word
+    return out or None
+
+
+def _ask_singles(judge: Any, kind: str, items: list[dict[str, Any]]) -> dict[int, str] | None:
+    lines = [f"{n}. {_short(_one_line(f), 300)}" for n, f in enumerate(items, 1)]
+    prompt = (_SINGLE_KINDS[kind]
+              + 'Reply with only JSON such as {"1": "yes", "2": "no"}.\n\n' + "\n".join(lines))
+    try:
+        raw = judge(prompt)
+    except Exception as exc:  # noqa: BLE001 - a helper that fails changes nothing
+        logger.warning("the AI helper could not look at the check-up %s findings: %s", kind, exc)
+        return None
+    return _parse_yesno(raw)
+
+
+def _second_opinion_singles(found: list[dict[str, Any]], data: dict[str, Any],
+                            judge: Any) -> tuple[list[dict[str, Any]], int, int, int]:
+    """Set aside the to-do/proof false alarms the helper spots. Rules' word stands with no answer."""
+    cache: dict[str, str] = dict(data.get("ai_singles") or {})
+    singles = [f for f in found if f["kind"] in _SINGLE_KINDS]
+    others = [f for f in found if f["kind"] not in _SINGLE_KINDS]
+    live: set[str] = set()
+    todo: list[tuple[str, dict[str, Any]]] = []
+    for kind in _SINGLE_KINDS:
+        mine = sorted((f for f in singles if f["kind"] == kind),
+                      key=lambda f: f.get("sort", ""), reverse=True)
+        for n, f in enumerate(mine):
+            key = _single_key(f)
+            live.add(key)
+            if key not in cache and n < AI_ASK_AT_MOST:     # the newest first; the rest keep the rules' word
+                todo.append((key, f))
+
+    looked = 0
+    for kind in _SINGLE_KINDS:
+        ask = [(key, f) for key, f in todo if f["kind"] == kind]
+        for start in range(0, len(ask), AI_BATCH):
+            chunk = ask[start:start + AI_BATCH]
+            answer = _ask_singles(judge, kind, [f for _, f in chunk])
+            if answer is None:
+                continue                                    # no answer: ask again next time, change nothing now
+            for i, (key, _f) in enumerate(chunk, 1):
+                if i in answer:
+                    cache[key] = answer[i]
+                    looked += 1
+
+    dropped = 0
+    out = list(others)
+    for f in singles:
+        verdict = cache.get(_single_key(f))
+        if verdict == "no":
+            dropped += 1                                    # a false alarm
+        elif verdict == "yes":
+            out.append({**f, "found_by": "both"})           # the helper agrees with the rules
+        else:
+            out.append(f)                                   # the helper had no answer: the rules' word stands
+    data["ai_singles"] = {k: v for k, v in cache.items() if k in live}
+    return out, dropped, looked, len(todo)
 
 
 def _old_todos(recs: list[Record], today: str) -> list[dict[str, Any]]:
@@ -394,7 +506,7 @@ def _old_todos(recs: list[Record], today: str) -> list[dict[str, Any]]:
         age = (datetime.strptime(today, "%Y-%m-%d") - datetime.strptime(_day(rec) or today, "%Y-%m-%d")).days
         out.append({
             "kind": "old-todo", "id": _fid("old-todo", rec), "ids": [rec.id],
-            "title": "Still on your to-do list?",
+            "found_by": "rules", "title": "Still on your to-do list?",
             "detail": f"“{_short(_text(rec))}”\nAdded {age} days ago and not ticked off.",
             "sort": rec.created or "",
         })
@@ -419,7 +531,7 @@ def _lost_proof(store: Any, recs: list[Record]) -> list[dict[str, Any]]:
         if not quotes.verify_quote(quote, said, digest):
             out.append({
                 "kind": "quote", "id": _fid("quote", rec), "ids": [rec.id],
-                "title": "I cannot find the proof for this one any more",
+                "found_by": "rules", "title": "I cannot find the proof for this one any more",
                 "detail": f"I saved “{_short(_text(rec))}” because you said “{_short(quote)}”, "
                           "but the conversation it came from does not read that way now.",
                 "sort": rec.created or "",

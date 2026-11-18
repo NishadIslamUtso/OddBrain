@@ -22,6 +22,10 @@ import retire  # noqa: E402
 import uninstall  # noqa: E402
 
 from memory_ob import manager, sync  # noqa: E402
+try:
+    from tests.helpers import reading
+except ImportError:      # running as a script from inside tests/
+    from helpers import reading
 from memory_ob.config import Settings  # noqa: E402
 from memory_ob.store import Store  # noqa: E402
 
@@ -45,7 +49,7 @@ class UninstallCase(unittest.TestCase):
         self.settings = Settings.resolve(vault=self.vault, db=self.vault / ".brain" / "memory_ob.db")
         self.settings.ensure_dirs()
         store = Store(self.settings.db)
-        manager.capture(store, text="I have a peanut allergy. I study computer science.", vault=self.vault)
+        manager.capture(store, text="I have a peanut allergy. I study computer science.", vault=self.vault, model_call=reading())
         store.close()
 
         # Hermes's own notes: the user's text around our generated block

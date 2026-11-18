@@ -26,6 +26,7 @@ from . import (
     biography as bio_mod,
     doubts as doubts_mod,
     exit,
+    checkup as checkup_mod,
     feed as feed_mod,
     hazards,
     importers,
@@ -178,6 +179,23 @@ def _helper_status(cfg: ModelConfig) -> dict[str, Any]:
         "none": "No AI helper found",
     }[kind]
     return {"kind": kind, "ready": state["ready"] == "yes", "label": label}
+
+
+def _waiting(st: Store) -> dict[str, Any]:
+    """Messages kept whole until an AI helper reads them, and why they are still waiting."""
+    got = manager.waiting_list(st)
+    progress = reader.progress()
+    if got["count"] == 0:
+        why = ""
+    elif progress["running"]:
+        why = "reading"
+    elif _helper() is None:
+        why = "no_helper"
+    elif progress["error"]:
+        why = "not_answering"
+    else:
+        why = "will_retry"
+    return {**got, "why": why, "read": progress["read"] if progress["running"] else 0}
 
 
 def _status(st: Store) -> dict[str, Any]:
@@ -342,15 +360,48 @@ def create_app() -> FastAPI:
     @app.get("/api/home")
     def home(st: Store = Depends(get_store)) -> dict[str, Any]:
         me = me_mod.build(st, vault=settings.vault)
-        due = [i for s in me["sections"] if s["key"] == "coming" for i in s["items"] if i.get("due")]
+        due = me["due"]
+        doubts = doubts_mod.list_doubts(st)
+        checkup_card = checkup_mod.card(st, vault=settings.vault, coming=due,
+                                        waiting=len(doubts))
+        if checkup_card["show"]:
+            # it is being shown now - the next one is due in a month
+            checkup_mod.mark_shown(settings.vault)
         return {
-            "doubts": doubts_mod.list_doubts(st),
+            "doubts": doubts,
             "unsure": _unsure(st),
-            "feed": feed_mod.build(st, limit=40, hide_undone=True),
+            "feed": feed_mod.build(st, limit=40, hide_undone=True,
+                                   dismissed=feed_mod.dismissed(settings.vault)),
             "due": due,
+            "checkup": checkup_card,
             "audit": audit_mod.public(settings.vault, st),
+            "waiting": _waiting(st),
             "status": _status(st),
         }
+
+    @app.post("/api/waiting/read")
+    def waiting_read(st: Store = Depends(get_store)) -> dict[str, Any]:
+        """"Read now": try the AI helper on what is waiting. It reads in the background."""
+        if st.count_unprocessed_conversations() == 0:
+            return {"started": False, "reason": "nothing", "waiting": _waiting(st)}
+        if _helper() is None:
+            return {"started": False, "reason": "no_helper", "waiting": _waiting(st)}
+        started = bool(reader.kick(settings))
+        return {"started": started, "reason": "" if started else "busy", "waiting": _waiting(st)}
+
+    @app.post("/api/waiting/{conv_id}/skip")
+    def waiting_skip(conv_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
+        result = manager.skip_waiting(st, conv_id)
+        _after_change(st)
+        return {**result, "waiting": _waiting(st)}
+
+    @app.get("/api/checkup")
+    def checkup(st: Store = Depends(get_store)) -> dict[str, Any]:
+        """The monthly summary on demand (Settings). Never changes the stamp."""
+        me = me_mod.build(st, vault=settings.vault)
+        due = me["due"]
+        return {"checkup": checkup_mod.summary(st, vault=settings.vault, coming=due,
+                                               waiting=len(doubts_mod.list_doubts(st)))}
 
     @app.get("/api/doubts")
     def list_doubts(st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -385,7 +436,24 @@ def create_app() -> FastAPI:
 
     @app.get("/api/feed")
     def feed(limit: int = 60, st: Store = Depends(get_store)) -> dict[str, Any]:
-        return {"feed": feed_mod.build(st, limit=max(1, min(limit, 500)), hide_undone=True)}
+        return {"feed": feed_mod.build(st, limit=max(1, min(limit, 500)), hide_undone=True,
+                                       dismissed=feed_mod.dismissed(settings.vault))}
+
+    @app.post("/api/feed/dismiss")
+    def feed_dismiss(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
+        """"Got it" clears items off the "recently remembered" list ("Clear all"
+        clears the whole list). Nothing is deleted: only the list is cleared."""
+        if payload.get("all"):
+            current = feed_mod.build(st, limit=500, hide_undone=True,
+                                     dismissed=feed_mod.dismissed(settings.vault))
+            seqs = [s for item in current for s in (item.get("seqs") or [item.get("seq")])]
+        else:
+            raw = payload.get("seqs")
+            if not isinstance(raw, list) or len(raw) > 500 or not all(isinstance(x, int) for x in raw):
+                raise _fail(400, "Tell me which items to clear.")
+            seqs = raw
+        cleared = feed_mod.dismiss(settings.vault, seqs)
+        return {"ok": True, "cleared": cleared}
 
     @app.post("/api/undo/{seq}")
     def undo(seq: int, st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -397,6 +465,15 @@ def create_app() -> FastAPI:
         return result
 
     # -- the check-up ----------------------------------------------------------------
+
+    @app.post("/api/sweep")
+    def sweep(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
+        """One-time clean-up of junk older versions saved (undoable; nothing is
+        deleted). Without "apply" it only reports what it would move."""
+        out = manager.sweep_junk(st, vault=settings.vault, apply=bool(payload.get("apply")))
+        if payload.get("apply"):
+            _after_change(st)
+        return out
 
     @app.post("/api/notice/dismiss")
     def notice_dismiss() -> dict[str, Any]:
@@ -927,11 +1004,16 @@ def create_app() -> FastAPI:
         custom = cfg.main.provider not in ("auto", "", "hermes")
         from . import hermes as hermes_mod
 
+        embed_slot = cfg.auxiliary.get("embed", ModelSlot())
         return {
             "mode": "custom" if custom else "auto",
-            "address": cfg.main.base_url or models.DEFAULT_OLLAMA_URL,
+            # Honest display: an empty address means "automatic (the AI Hermes
+            # uses)". Showing the Ollama default here was a lie whenever the
+            # meaning model ran on a different server (e.g. llama.cpp).
+            "address": cfg.main.base_url or "",
             "reading_model": cfg.main.model if custom else "",
-            "meaning_model": cfg.auxiliary.get("embed", ModelSlot()).model,
+            "meaning_model": embed_slot.model,
+            "meaning_address": embed_slot.base_url or "",
             "hermes_found": hermes_mod.available(),
             "status": _helper_status(cfg),
         }
@@ -1021,6 +1103,22 @@ def create_app() -> FastAPI:
         kind, found = models.server_models(address.strip())
         return {"address": shown, "reachable": bool(kind), "kind": kind, "models": found}
 
+    @app.post("/api/settings/ai/test")
+    def test_ai(st: Store = Depends(get_store)) -> dict[str, Any]:
+        """Ask the AI helper one tiny question, to see that it really answers (not just that it is "connected")."""
+        call = _helper()
+        if call is None:
+            return {"ok": False, "reason": "no_helper"}
+        try:
+            said = models.without_thinking(call("Reply with the single word: OK"))
+        except Exception as exc:  # noqa: BLE001 - whatever went wrong, the owner is told in words
+            return {"ok": False, "reason": "failed", "detail": str(exc)[:160]}
+        if not said:
+            return {"ok": False, "reason": "empty"}
+        if st.count_unprocessed_conversations():
+            reader.kick(settings)            # it answers: read what has been waiting
+        return {"ok": True, "said": said[:60]}
+
     @app.post("/api/settings/ai")
     def save_ai(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:
         """Use Hermes's model automatically, or a model of the owner's own."""
@@ -1029,7 +1127,14 @@ def create_app() -> FastAPI:
         before = models.embed_model_name(cfg.slot("embed"))
         if mode == "auto":
             cfg.main = ModelSlot()
-            cfg.auxiliary["embed"] = ModelSlot(model=str(payload.get("meaning_model") or "").strip())
+            # Keep the meaning model's own server (e.g. llama.cpp on 18435):
+            # only its name may change here, never where it runs.
+            old_embed = cfg.auxiliary.get("embed", ModelSlot())
+            cfg.auxiliary["embed"] = ModelSlot(
+                provider=old_embed.provider,
+                model=str(payload.get("meaning_model") or "").strip(),
+                base_url=old_embed.base_url,
+            )
         elif mode == "custom":
             model = str(payload.get("reading_model") or "").strip()
             address = str(payload.get("address") or "").strip() or models.DEFAULT_OLLAMA_URL

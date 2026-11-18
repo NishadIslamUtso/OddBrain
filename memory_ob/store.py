@@ -202,6 +202,16 @@ def _now() -> str:
 _FTS_TOKEN_RE = re.compile(r"[A-Za-z0-9_]+")
 
 
+# Words that carry no subject. In "what is my budget" only "budget" says what to look for; "is" and "my"
+# would otherwise match (as prefixes, too: "i" starts "island") nearly every memory there is.
+_SEARCH_STOPWORDS = frozenset(
+    "a an the is are was were be been being am do does did i me my mine we us our you your he him his she her "
+    "it its they them their what which who whom whose when where why how of in on at to for with and or but "
+    "that this these those about any some can could should would will shall have has had tell know remember "
+    "please there here as by from into if so than then also just very".split()
+)
+
+
 def _search_terms(query: str) -> list[str]:
     """The words of a query, cut back to their stems.
 
@@ -215,7 +225,8 @@ def _search_terms(query: str) -> list[str]:
         low = raw.lower()
         cut = stem(low) if len(low) > 3 else low
         terms.append(cut or low)
-    return terms
+    meaningful = [t for t, raw in zip(terms, _FTS_TOKEN_RE.findall(query or "")) if raw.lower() not in _SEARCH_STOPWORDS]
+    return meaningful or terms          # a query made only of such words is searched as it is
 
 
 def _fts_query(query: str) -> str:

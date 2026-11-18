@@ -38,6 +38,7 @@ DENY = "deny"
 KEEP_BOTH = "keep_both"
 TAKE_NEW = "take_new"
 TAKE_OLD = "take_old"
+TAKE_NONE = "take_none"      # owner decision D2: "Discard both".
 EDIT = "edit"
 LATER = "later"
 CONFIRM = "confirm"
@@ -50,6 +51,7 @@ ACTIONS: tuple[str, ...] = (
     DENY,
     KEEP_BOTH,
     TAKE_NEW,
+    TAKE_NONE,
     TAKE_OLD,
     EDIT,
     LATER,
@@ -408,7 +410,8 @@ class CardStore:
                 updated, card_id=card.id, changed_by=card.resolved_by,
                 reason="card:approve",
             )
-        # TAKE_OLD / DENY leave the record untouched.
+        # TAKE_OLD / DENY leave the record untouched (the manager removes the
+        # record itself for TAKE_NONE: "neither answer is right").
 
     def _resolve_proposal(
         self, card: Card, action: str, *, edit: dict[str, Any] | None = None

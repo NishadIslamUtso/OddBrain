@@ -71,9 +71,11 @@ class TestExtractSlot(ModelWiringCase):
             raise RuntimeError("model unreachable")
 
         out = manager.capture(self.store, text="I have used git since 2019.", model_call=broken, vault=self.vault)
-        # kept, and either filed by the simple rules or kept to be read later
-        self.assertEqual(out.saved + out.waiting, 1)
+        # Owner decision D1: nothing is filed by rules. The message is kept
+        # whole - not lost - and read when a helper answers.
+        self.assertEqual((out.saved, out.aside), (0, 1))
         self.assertEqual(len(self.store.list_conversations(limit=10)), 1)
+        self.assertEqual(self.store.count_unprocessed_conversations(), 1)
 
 
 class TestEmbedSlot(ModelWiringCase):
@@ -104,11 +106,21 @@ class TestOtherSlots(ModelWiringCase):
         self.assertNotIn("dream", cfg.auxiliary)
 
     def test_capture_uses_the_extract_slot(self) -> None:
-        from tests.helpers import AuthedClient
+        from unittest import mock
 
-        client = AuthedClient.create(api.create_app(), self.vault)
-        r = client.post("/api/capture", json={"text": "I have used git for version control since 2019."})
+        from tests.helpers import AuthedClient, reading
+
+        asked: list[str] = []
+
+        def fake(prompt: str) -> str:
+            asked.append(prompt)
+            return reading()(prompt)
+
+        with mock.patch.object(models, "helper", lambda cfg=None, slot="extract": fake):
+            client = AuthedClient.create(api.create_app(), self.vault)
+            r = client.post("/api/capture", json={"text": "I have used git for version control since 2019."})
         self.assertEqual(r.status_code, 200, r.text)
+        self.assertTrue(asked, "the extract slot's helper was never asked")
         self.assertGreaterEqual(r.json()["candidates"], 1)
 
 

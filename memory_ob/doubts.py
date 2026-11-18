@@ -44,6 +44,7 @@ def _card_doubt(store: Any, card: Any) -> dict[str, Any]:
                 {"key": "new", "label": "Use the new one"},
                 {"key": "old", "label": "Keep the old one"},
                 {"key": "both", "label": "Both are true"},
+                {"key": "neither", "label": "Discard both"},
             ],
         }
     if card.type == MERGE:

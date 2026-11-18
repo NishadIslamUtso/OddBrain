@@ -19,6 +19,7 @@ Backends:
 
 from __future__ import annotations
 
+import re
 import json
 import os
 import urllib.error
@@ -524,11 +525,27 @@ def model_call(slot_name: str, config: ModelConfig | None = None):
     slot = cfg.slot(slot_name)
 
     def call(prompt: str) -> str:
-        return resolve_backend(cfg).chat(
+        return without_thinking(resolve_backend(cfg).chat(
             slot, [{"role": "user", "content": prompt}]
-        )
+        ))
 
     return call
+
+
+_THINK_RE = re.compile(r"<(think|thinking|reasoning)>.*?</\1>", re.IGNORECASE | re.DOTALL)
+
+
+def without_thinking(answer: Any) -> str:
+    """The answer without a reasoning model's "<think>…</think>" notes.
+
+    Free and local reasoning models write their working out before the answer. That
+    is not part of the answer: read as one, "The user says they live in Dhaka…" would
+    be filed as a memory.
+    """
+    text = _THINK_RE.sub("", str(answer or ""))
+    if re.match(r"\s*<(think|thinking|reasoning)>", text, re.IGNORECASE):
+        return ""                   # cut off in the middle of thinking: there is no answer yet
+    return text.strip()
 
 
 def helper_state(config: ModelConfig | None = None, slot_name: str = "extract") -> dict[str, str]:

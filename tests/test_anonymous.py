@@ -24,6 +24,15 @@ def _load_provider():
     return module
 
 
+# D1: with no AI helper these tests would keep captures aside; they exercise
+# filing, so the API gets the stand-in helper.
+from memory_ob import api  # noqa: E402
+try:
+    from tests.helpers import api_uses_reading_helper
+except ImportError:      # running as a script from inside tests/
+    from helpers import api_uses_reading_helper
+api_uses_reading_helper(api)
+
 class AnonymousCase(unittest.TestCase):
     def setUp(self) -> None:
         self.tmp = tempfile.mkdtemp()
@@ -39,6 +48,14 @@ class AnonymousCase(unittest.TestCase):
 
         self._real_model_call = models.model_call
         models.model_call = lambda purpose, config=None: None
+        # D1: with no helper that read the text, captures are kept aside; these
+        # tests assert capture behaviour, so give them the stand-in helper.
+        try:
+            from tests.helpers import reading
+        except ImportError:
+            from helpers import reading
+        self._real_helper = models.helper
+        models.helper = lambda cfg=None, slot="extract": reading()
         self.mod = _load_provider()
         self.provider = self.mod.MemoryOBProvider()
         self.provider.initialize("s")
@@ -65,6 +82,8 @@ class AnonymousCase(unittest.TestCase):
         from memory_ob import models
 
         models.model_call = self._real_model_call
+
+        models.helper = self._real_helper
         self.provider.shutdown()
         self.store.close()
         with warnings.catch_warnings():

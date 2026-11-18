@@ -17,15 +17,21 @@ SKIP_DIRS = {"__pycache__", ".git", ".brain", "vault", "_retired", ".venv", "ven
 SKIP_SUFFIXES = (".pyc", ".db", ".db-wal", ".db-shm", ".bak", ".mob-tmp")
 
 
+def _skip(rel: Path) -> bool:
+    """Build artefacts and private state never belong in a release."""
+    return (
+        any(part in SKIP_DIRS or part.endswith(".egg-info") for part in rel.parts)
+        or rel.name in ("token", ".token", MANIFEST)
+    )
+
+
 def release_files(root: Path = ROOT) -> list[str]:
     out: list[str] = []
     for path in sorted(root.rglob("*")):
         if not path.is_file():
             continue
         rel = path.relative_to(root)
-        if any(part in SKIP_DIRS for part in rel.parts) or path.name.endswith(SKIP_SUFFIXES):
-            continue
-        if path.name in ("token", ".token", MANIFEST):
+        if _skip(rel) or path.name.endswith(SKIP_SUFFIXES):
             continue
         out.append(rel.as_posix())
     return out

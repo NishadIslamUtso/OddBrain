@@ -18,6 +18,10 @@ PROJECT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT))
 
 from memory_ob import audit, conflicts, doubts, manager, topics  # noqa: E402
+try:
+    from tests.helpers import reading
+except ImportError:      # running as a script from inside tests/
+    from helpers import reading
 from memory_ob.config import Settings  # noqa: E402
 from memory_ob.store import Store  # noqa: E402
 from tests.test_audit import Case as AuditCase  # noqa: E402
@@ -96,13 +100,13 @@ class AskedWhileSaving(unittest.TestCase):
         return call
 
     def test_the_question_says_who_noticed(self) -> None:
-        manager.capture(self.store, text="I weigh 72 kg", vault=self.vault)
-        manager.capture(self.store, text="I weigh 68 kg", vault=self.vault)
+        manager.capture(self.store, text="I weigh 72 kg", vault=self.vault, model_call=reading())
+        manager.capture(self.store, text="I weigh 68 kg", vault=self.vault, model_call=reading())
         card = next(d for d in doubts.list_doubts(self.store) if d["kind"] == "changed")
         self.assertEqual(card["found_by"], "rules")
 
     def test_a_false_alarm_is_not_asked_when_the_helper_says_unrelated(self) -> None:
-        manager.capture(self.store, text="I weigh 72 kg", vault=self.vault)
+        manager.capture(self.store, text="I weigh 72 kg", vault=self.vault, model_call=reading())
         out = manager.capture(self.store, text="I weigh 68 kg", vault=self.vault, model_call=self.helper("unrelated"))
         self.assertEqual(out.asked, 0)
         self.assertEqual([d for d in doubts.list_doubts(self.store) if d["kind"] == "changed"], [])
@@ -194,6 +198,72 @@ class InTheCheckUp(AuditCase):
         out = audit.act(self.store, self.vault, f["id"], "join")
         self.assertEqual(out["result"], "done")
         self.assertEqual(len(self.store.list_records(status="active")), 1)
+
+
+class ToDosAndProofs(AuditCase):
+    """Owner list item A10: the second opinion also covers stale to-dos and broken proof."""
+
+    def _break_proof(self) -> None:
+        manager.capture(self.store, text="I live in Dhaka and I study CSE at BRAC University.",
+                        vault=self.vault,
+                        model_call=lambda _p: json.dumps({"text": "I study CSE at BRAC University"}))
+        self.store.conn.execute("UPDATE conversations SET text = ?", ("Something else entirely.",))
+        self.store.conn.commit()
+
+    def test_an_old_to_do_the_helper_says_is_no_longer_needed_is_set_aside(self) -> None:
+        self.say("Renew my passport", tags=[topics.TODO_TAG], age=60)
+        self.assertEqual(self.kinds(self.run_audit()), ["old-todo"])
+        judge = says("no")
+        report = self.run_audit(judge=judge)
+        self.assertEqual(report["findings"], [])
+        self.assertEqual((report["ai"]["dropped"], report["ai"]["looked"]), (1, 1))
+        self.run_audit(judge=judge)
+        self.assertEqual(len(judge.calls), 1, "the same to-do is not asked about twice")
+
+    def test_an_old_to_do_the_helper_agrees_with_is_found_by_both(self) -> None:
+        self.say("Renew my passport", tags=[topics.TODO_TAG], age=60)
+        report = self.run_audit(judge=says("yes"))
+        self.assertEqual([(f["kind"], f["found_by"]) for f in report["findings"]],
+                         [("old-todo", "both")])
+
+    def test_broken_proof_the_helper_calls_a_false_alarm_is_set_aside(self) -> None:
+        self._break_proof()
+        self.assertEqual(self.kinds(self.run_audit()), ["quote"])
+        judge = says("no")
+        report = self.run_audit(judge=judge)
+        self.assertEqual(report["findings"], [])
+        self.assertEqual(report["ai"]["dropped"], 1)
+        self.run_audit(judge=judge)
+        self.assertEqual(len(judge.calls), 1, "the same proof question is not asked twice")
+
+    def test_broken_proof_the_helper_agrees_with_is_found_by_both(self) -> None:
+        self._break_proof()
+        report = self.run_audit(judge=says("yes"))
+        self.assertEqual([(f["kind"], f["found_by"]) for f in report["findings"]],
+                         [("quote", "both")])
+
+    def test_without_a_helper_the_rules_word_stands(self) -> None:
+        self.say("Renew my passport", tags=[topics.TODO_TAG], age=60)
+        report = self.run_audit()
+        self.assertEqual([f["found_by"] for f in report["findings"]], ["rules"])
+        self.assertFalse(report["ai"]["used"])
+
+    def test_a_helper_that_fails_leaves_the_rules_word_standing(self) -> None:
+        self.say("Renew my passport", tags=[topics.TODO_TAG], age=60)
+
+        def broken(prompt: str) -> str:
+            raise RuntimeError("down")
+
+        report = self.run_audit(judge=broken)
+        self.assertEqual([f["kind"] for f in report["findings"]], ["old-todo"])
+        self.assertEqual([f["found_by"] for f in report["findings"]], ["rules"])
+
+    def test_the_helper_never_touches_the_memory_itself(self) -> None:
+        self.say("Renew my passport", tags=[topics.TODO_TAG], age=60)
+        before = self.store.list_records(status="active")[0]
+        self.run_audit(judge=says("no"))
+        after = self.store.list_records(status="active")[0]
+        self.assertEqual((before.body, before.status), (after.body, after.status))
 
 
 if __name__ == "__main__":
