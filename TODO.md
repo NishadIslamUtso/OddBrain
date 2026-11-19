@@ -101,9 +101,13 @@ continuation. Update-18 is done and pushed here (see
   helper's 40s settle (now settle + 45s). The net: `test-runs.log` (next to
   run_tests.py) names every suite's result and duration — if any run fails,
   send that file and the name is right there.
-- [ ] **E5 · One-click corrections on each AI decision** ("not important",
-  "wrong shelf", "not me") — waiting for the owner's go (stages 2–3 of the
-  live AI view).
+- [x] **E5 · One-click corrections — BUILT in update-21 (owner said "go").**
+  Every AI decision in the Review feed now carries "Not important" (trash,
+  never destroy; Undo brings it back), "Wrong shelf" (pick the right shelf),
+  and "Not me" (about someone else — leaves your own facts/truth-checks).
+  All undoable; logged as the owner's words, never as AI self-approval.
+  "Not me" also turns the memory into a profile fact (notes are self-only
+  by the book's rules). Tests: `tests/test_corrections.py` (9). 58/58 green.
 - [ ] **E6 · Windows labels:** update-17's `test_relocate`/`test_checkup`
   fixes and update-18's helper tests have never run on real Windows.
 
