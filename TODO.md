@@ -74,6 +74,27 @@ A1–A12 build list is COMPLETE.***
   (verified: fresh venv, 49 suites green, zero manual steps) — **shipped in
   update-15**.
 
+## A2. CONTINUATION — Claude's update line (claude--made branch)
+
+*2026-11-19: the owner pointed at Claude's shared conversation. Claude's
+line (updates 16–17 on `claude--made`, built ON update-15) is now the live
+continuation. Update-18 is done and pushed here (see
+`release/UPDATE-18-CHANGES.md`). What is left from his list:*
+
+- [ ] **E1 · The 404 / AI helper on the real machine.** Last seen the Hermes
+  proxy was simply not running on 8645. Owner: run the H7 diagnosis from
+  UPDATE-17-CHANGES.md and paste the result.
+- [ ] **E2 · Re-run H3 and H6** on the real machine once the helper works
+  (filing test + "the AI's own narration is never saved as me").
+- [ ] **E3 · Chase the "3 vs 4" split wobble** (same words = 3 memories one
+  time, 4 another).
+- [ ] **E4 · Find the flaky test** (one failure in 9 runs, never reproduced).
+- [ ] **E5 · One-click corrections on each AI decision** ("not important",
+  "wrong shelf", "not me") — waiting for the owner's go (stages 2–3 of the
+  live AI view).
+- [ ] **E6 · Windows labels:** update-17's `test_relocate`/`test_checkup`
+  fixes and update-18's helper tests have never run on real Windows.
+
 ## B. OWNER ACTIONS (small, one paste each)
 
 - [x] **B1 · WSL removal** — owner is uninstalling it (never needed).
