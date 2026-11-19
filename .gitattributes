@@ -1,3 +1,0 @@
-# The shipped bytes are the shipped bytes: this repo pins checksums over
-# committed files, so git must not rewrite line endings on any platform.
-* -text
