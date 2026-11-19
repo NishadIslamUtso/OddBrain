@@ -1,7 +1,0 @@
-{
-  "name": "Cold Slate",
-  "appearance": {
-    "accent": "blue"
-  },
-  "css": ":root { --color-bg: #0b1119; --color-card: #121a26; --color-panel: #16202e; --color-line: #26364a; --color-ink: #e2eaf4; --color-muted: #8298b0; --font-sans: 'Inter', 'Segoe UI', system-ui, sans-serif; } .rounded-xl { border-radius: 8px; } h1, h2 { letter-spacing: -0.01em; } [class*='bg-card'] { box-shadow: 0 1px 2px rgb(0 0 0 / 0.4); }"
-}

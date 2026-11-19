@@ -1,0 +1,160 @@
+"""The night shift: everything Memory_OB does by itself, in one pass.
+
+It reads whatever was left waiting, looks for people who may be the same,
+brings the notes in the vault and the biography up to date, prepares meaning
+search (embeddings), refreshes the
+integrity manifest and, if the owner turned that on, updates Hermes's own
+memory notes. Each step stands alone: one failing does not stop the rest.
+
+It never puts a question about old memories in the owner's queue. The only
+questions Memory_OB asks come from something the owner has just said. The one
+exception is the check-up (``audit``), which keeps its own short report in Review:
+it fixes only the notes and lists the rest, and nothing in it changes what the
+owner said until the owner answers.
+"""
+
+from __future__ import annotations
+
+import logging
+from typing import Any
+
+from . import biography, manager, models
+from .config import Settings
+from .models import ModelConfig
+from .settings import load as load_settings
+from .store import Store
+
+logger = logging.getLogger(__name__)
+
+
+def _step(name: str, fn: Any) -> dict[str, str]:
+    try:
+        return {"step": name, "ok": "yes", "detail": str(fn())[:200]}
+    except Exception as exc:  # noqa: BLE001 - one bad step must not stop the night
+        logger.warning("night shift step %s failed", name, exc_info=True)
+        return {"step": name, "ok": "no", "detail": f"{type(exc).__name__}: {exc}"}
+
+
+def sync_hermes(store: Store, settings: Settings | None, *, enabled: bool) -> dict[str, Any] | None:
+    """Update (or, when switched off, clean up) Hermes's own memory notes.
+
+    Returns ``None`` when Hermes is not on this computer.
+    """
+    from . import sync
+    from .hermes import hermes_memory_paths, memory_limits
+
+    memory_path, user_path = hermes_memory_paths()
+    if not memory_path or not user_path:
+        return None
+    memory_limit, user_limit = memory_limits()
+    return sync.sync_all(store, memory_path=memory_path, user_path=user_path, enabled=enabled,
+                         memory_limit=memory_limit, user_limit=user_limit)
+
+
+def refresh_hermes_notes(store: Store, vault: Any) -> dict[str, Any] | None:
+    """Bring Hermes's notes up to date, but only if the owner switched that on.
+
+    Called after anything that changes what is remembered — a save in the app
+    or a chat that Hermes handed to Memory_OB — so the notes do not wait for
+    the nightly run. Never raises: a notes file must not break a save.
+    """
+    try:
+        if not load_settings(vault).sync_hermes:
+            return None
+        return sync_hermes(store, None, enabled=True)
+    except Exception:  # noqa: BLE001
+        logger.warning("could not update Hermes memory files", exc_info=True)
+        return None
+
+
+def run(settings: Settings, *, dry_run: bool = False, skip: tuple[str, ...] = ()) -> list[dict[str, str]]:
+    """Run every step. Returns one line per step.
+
+    *skip* leaves named steps out (the "Tidy now" button reads waiting
+    conversations in the background instead of making the owner wait).
+    """
+    settings.ensure_dirs()
+    app = load_settings(settings.vault)
+    cfg = ModelConfig.load(settings.models_path)
+    call = models.helper(cfg, "extract")
+
+    def read_waiting() -> str:
+        with Store(settings.db) as st:
+            if call is None:
+                return f"{st.count_unprocessed_conversations()} waiting; no AI helper right now"
+            out = manager.process_waiting(
+                st, model_call=call, vault=settings.vault, guardrails=list(app.guardrails), limit=200,
+            )
+            return f"read {out.read} conversation(s); saved {out.saved}, asked {out.asked}"
+
+    def same_people() -> str:
+        with Store(settings.db) as st:
+            return f"{manager.suggest_same_person(st)} new question(s)"
+
+    def bio() -> str:
+        with Store(settings.db) as st:
+            data = biography.refresh(st, settings.vault, call, include_sensitive=app.bio_sensitive)
+        return data["how"] or "nothing to write yet"
+
+    def embed() -> str:
+        from .embedder import ensure_embeddings
+
+        if not app.semantic:
+            return "off"
+        backend, slot = models.resolve_backend(cfg), cfg.slot("embed")
+        name = models.embed_model_name(slot)
+        total = 0
+        with Store(settings.db) as st:
+            while True:
+                n = ensure_embeddings(st, backend=backend, slot=slot, limit=100)
+                total += n
+                if n == 0:
+                    break
+            left = len(st.missing_embeddings(limit=1, model=name))
+        if left:
+            return f"{total} prepared; the embedding model ({name}) could not be reached for the rest"
+        return f"{total} prepared"
+
+    def notes() -> str:
+        from .vault import rebuild
+
+        with Store(settings.db) as st:
+            st.rebuild_shared_edges()
+            result = rebuild(st, settings.vault)
+        return f"{result['notes']} notes"
+
+    def manifest() -> str:
+        from .manifest import record_new, verify_manifest
+
+        record_new(settings.vault)
+        check = verify_manifest(settings.vault)
+        bad = len(check["changed"]) + len(check["missing"])
+        return "all originals unchanged" if not bad else f"{bad} original file(s) changed or missing"
+
+    def checkup() -> str:
+        from . import audit
+
+        if not app.audit:
+            return "off"
+        with Store(settings.db) as st:
+            report = audit.run(st, settings.vault, judge=call)
+        s = report["summary"]
+        ai = report.get("ai") or {}
+        return f"{s['needs_you']} to look at; {s['checks_ok']}/{s['checks_total']} checks fine" + (
+            f"; put {s['fixed']} note line(s) right" if s["fixed"] else "") + (
+            f"; AI helper looked at {ai['looked']} pair(s)" if ai.get("looked") else "")
+
+    def hermes_sync() -> str:
+        if not app.sync_hermes:
+            return "off"
+        with Store(settings.db) as st:
+            report = sync_hermes(st, settings, enabled=True)
+        return "Hermes memory files not found" if report is None else f"{report['synced']} memories"
+
+    steps = [("read", read_waiting), ("people", same_people), ("biography", bio),
+             ("embed", embed), ("notes", notes), ("manifest", manifest), ("audit", checkup),
+             ("hermes", hermes_sync)]
+    steps = [(n, f) for n, f in steps if n not in skip]
+    if dry_run:
+        return [{"step": n, "ok": "dry", "detail": "would run"} for n, _ in steps]
+    return [_step(n, f) for n, f in steps]

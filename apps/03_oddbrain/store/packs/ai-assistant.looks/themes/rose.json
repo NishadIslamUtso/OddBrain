@@ -1,7 +1,0 @@
-{
-  "name": "Plum Dusk",
-  "appearance": {
-    "accent": "rose"
-  },
-  "css": ":root { --color-bg: #170d13; --color-card: #22141d; --color-panel: #291823; --color-line: #402637; --color-ink: #f6e6ee; --color-muted: #bd93aa; --font-sans: 'Segoe UI', system-ui, sans-serif; } .rounded-xl { border-radius: 16px; } h1, h2 { font-style: italic; } [class*='bg-card'] { box-shadow: inset 0 1px 0 #3a2130; }"
-}
