@@ -93,7 +93,14 @@ continuation. Update-18 is done and pushed here (see
   their sentence — same words make the same memories whole or cut up, in
   every model shape. Tests: `tests/test_stable_splitting.py::PieceWobble`
   (3 new). 57/57 suites green.
-- [ ] **E4 · Find the flaky test** (one failure in 9 runs, never reproduced).
+- [ ] **E4 · The flaky test — HUNTED in update-20, still open on purpose.**
+  Not caught in the act (27 full runs + 75 loaded suite runs here, 8 runs by
+  the previous builder — all green). Two real hazards removed: the runner
+  shared one never-cleaned scratch folder across runs (now a fresh folder
+  per run), and the relocation test had only 5s of margin over the retire
+  helper's 40s settle (now settle + 45s). The net: `test-runs.log` (next to
+  run_tests.py) names every suite's result and duration — if any run fails,
+  send that file and the name is right there.
 - [ ] **E5 · One-click corrections on each AI decision** ("not important",
   "wrong shelf", "not me") — waiting for the owner's go (stages 2–3 of the
   live AI view).
