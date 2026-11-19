@@ -86,8 +86,13 @@ continuation. Update-18 is done and pushed here (see
   UPDATE-17-CHANGES.md and paste the result.
 - [ ] **E2 · Re-run H3 and H6** on the real machine once the helper works
   (filing test + "the AI's own narration is never saved as me").
-- [ ] **E3 · Chase the "3 vs 4" split wobble** (same words = 3 memories one
-  time, 4 another).
+- [x] **E3 · The "3 vs 4" split wobble — FIXED in update-19.** Real cause
+  found and reproduced: long texts are read in pieces, and a cut could fall
+  between a sentence and its continuation ("It started last week."), which
+  then became its own memory. Pieces now never separate continuations from
+  their sentence — same words make the same memories whole or cut up, in
+  every model shape. Tests: `tests/test_stable_splitting.py::PieceWobble`
+  (3 new). 57/57 suites green.
 - [ ] **E4 · Find the flaky test** (one failure in 9 runs, never reproduced).
 - [ ] **E5 · One-click corrections on each AI decision** ("not important",
   "wrong shelf", "not me") — waiting for the owner's go (stages 2–3 of the
