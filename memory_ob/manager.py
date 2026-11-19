@@ -30,7 +30,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from . import conflicts, quotes, credentials, topics, vault as vault_mod
+from . import conflicts, notlife, quotes, credentials, topics, vault as vault_mod
 from .records import ACTIVE, Record, importance_for
 from .review import KEEP_BOTH, TAKE_NEW, TAKE_NONE, TAKE_OLD, CardStore
 
@@ -109,11 +109,18 @@ class Helper:
     def __init__(self, call: Any) -> None:
         self.call = call
         self.worked = False
+        self.why = ""               # the last reason it did not answer, for the screen
 
     def __call__(self, prompt: str) -> str:
-        out = self.call(prompt)
+        try:
+            out = self.call(prompt)
+        except Exception as exc:    # noqa: BLE001 - noted, then raised again for the caller to handle
+            self.why = str(exc) or type(exc).__name__
+            raise
         if str(out).strip():
             self.worked = True      # a blank answer is no answer (D1: keep aside)
+        else:
+            self.why = "The AI helper sent a blank answer."
         return out
 
 
@@ -138,9 +145,9 @@ class Outcome:
     people: list[str] = field(default_factory=list)
     conversation_id: str | None = None
     read: int = 0
-    failed: int = 0               # conversations the helper could not read
     aside: int = 0
     no_helper: bool = False       # there was no AI helper at all (not: it answered badly)
+    failed_ids: list[str] = field(default_factory=list)   # waiting messages the AI helper could not read
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -506,7 +513,7 @@ def _owner_text(parts: list[dict[str, Any]] | None, conv_text: str) -> str:
     """Only what the owner said: the user's side of a conversation, or the text itself."""
     if parts:
         return "\n".join(str(p.get("content", "")) for p in parts if p.get("role", "user") == "user")
-    return conv_text
+    return owner_only(conv_text)
 
 
 _OWNER_SPEAKERS = ("user:", "you:", "me:", "owner:", "human:", "nishad:", "i said:")
@@ -672,16 +679,12 @@ def _extract(
     from .extract import extract_claims, extract_session
 
     if parts and model_call is not None:
-        found: list[Any] = []
-        for chunk in _chunks(parts):
-            got = extract_session(
-                [(_speaker(p), str(p.get("content", ""))) for p in chunk],
-                source={**source, "speaker": "user"}, model_call=model_call, hint=hint,
-            )
-            if got is None:
-                return None      # D1: the helper did not read it - keep the whole message
-            found.extend(got)
-        return found
+        # extract_session cuts a long conversation (and one huge pasted turn) into pieces itself,
+        # and gives up on the whole thing, so it is kept whole, if any piece is not read.
+        return extract_session(
+            [(_speaker(p), str(p.get("content", ""))) for p in parts],
+            source={**source, "speaker": "user"}, model_call=model_call, hint=hint,
+        )
     if model_call is None:
         return None              # D1: no helper read it - rules never lead, the message waits whole
     return extract_claims(owner_only(conv_text), source=source, model_call=model_call, hint=hint)
@@ -691,11 +694,19 @@ def _settle_all(
     store: Any, cands: list[Any], out: Outcome, *, model_used: bool, guardrails: list[str],
     actor: str, reason: str, conv_id: str | None, ignore: set[str] | None = None,
     judge: Any | None = None, owner_text: str | None = None, source_text: str = "",
+    trace: list[dict[str, Any]] | None = None,
 ) -> None:
+    """Settle each candidate. *trace*, when given, gets one plain entry per candidate saying what happened."""
     from .extract import evidence_for
 
     people_seen: list[str] = []
     me = owner_names(store)
+
+    def note(c: Any, decision: str, why: str, record_id: str = "") -> None:
+        if trace is not None:
+            trace.append({"decision": decision, "text": c.text[:160], "why": why, "record_id": record_id,
+                          "category": c.category or "", "about": c.about or "", "project": c.project or ""})
+
     for c in cands:
         said_unsure = False
         if owner_text is not None:
@@ -704,6 +715,7 @@ def _settle_all(
             if not found.grounded:
                 store.log_activity("not-grounded", f"{c.text[:80]} ({found.reason})", actor="memory_ob")
                 out.ungrounded += 1
+                note(c, "left out", "you did not say this yourself")
                 continue
             said_unsure = found.hedged
             if found.quote:
@@ -713,6 +725,7 @@ def _settle_all(
         if blocked:
             store.log_activity("guardrail-block", f"{c.text[:80]} (~ {blocked})", actor="memory_ob")
             out.blocked += 1
+            note(c, "left out", "it matches your Never remember list")
             continue
         named = people_in(c.text, c.people if model_used else None, (ignore or set()) | me)
         fid = store.add_fact(
@@ -727,10 +740,32 @@ def _settle_all(
         if model_used and c.filed_by:
             filing = {"category": c.category, "note": c.note, "project": c.project,
                       "todo": c.todo, "moment": c.moment}
+        counts = (out.saved, out.duplicates, out.asked, out.unsure, out.finished, out.secret)
+        ids_before = len(out.record_ids)
         settle_fact(store, fid, c.text, kind=c.kind_hint or "note",
                     source={**c.source, "filed_by": "ai" if filing else "rules"}, out=out,
                     model_used=model_used, people=[n for n, _ in named], actor=actor, reason=reason,
                     judge=judge, filing=filing, hedged=said_unsure)
+        if trace is not None:
+            after = (out.saved, out.duplicates, out.asked, out.unsure, out.finished, out.secret)
+            rid = out.record_ids[ids_before] if len(out.record_ids) > ids_before else ""
+            shelf = " · ".join(x for x in (c.category, "about someone else" if c.about == "other" else "about you",
+                                           f"project {c.project}" if c.project else "",
+                                           "a to-do" if c.todo else "") if x)
+            if after[0] > counts[0]:
+                note(c, "kept", shelf, rid)
+            elif after[1] > counts[1]:
+                note(c, "already known", "I already had this", rid)
+            elif after[2] > counts[2]:
+                note(c, "asked you", "it may disagree with something I remember")
+            elif after[3] > counts[3]:
+                note(c, "not sure", "I was not sure, so it is waiting for you")
+            elif after[4] > counts[4]:
+                note(c, "ticked off", "you said you did it")
+            elif after[5] > counts[5]:
+                note(c, "left out", "it looked like a secret, so I did not keep it")
+            else:
+                note(c, "set aside", "nothing to file")
     out.people = people_seen
     if conv_id and people_seen:
         store.set_conversation_people(conv_id, people_seen)
@@ -989,39 +1024,99 @@ def skip_unsure(store: Any, fact_id: str) -> dict[str, Any]:
 
 def process_waiting(
     store: Any, *, model_call: Any | None, vault: Path | None = None,
-    guardrails: list[str] | None = None, limit: int = 20,
+    guardrails: list[str] | None = None, limit: int = 20, skip: set[str] | None = None,
+    on_event: Any | None = None, should_stop: Any | None = None,
 ) -> Outcome:
     """Read the conversations that were saved while no AI helper was running.
 
     Their earlier, partial reading is set aside and the whole conversation is
     read again properly. Statements already saved the first time are found as
     duplicates and skipped, so nothing is saved twice.
+
+    * A message the helper cannot read does not hold up the ones behind it: it is listed in
+      ``out.failed_ids`` (and never touched), and the next message is tried. Two messages in a
+      row that fail mean the helper itself is down, and the run ends.
+    * *skip* are ids that already failed in this run. *on_event(kind, data)* is told what happens
+      (start / decision / done / failed) so a screen can show it. *should_stop()* is asked between
+      messages.
     """
     out = Outcome()
     if model_call is None:
         return out
-    for conv in store.unprocessed_conversations(limit=limit):
+    say = on_event or (lambda kind, data: None)
+    skip = skip or set()
+    waiting = [c for c in store.unprocessed_conversations(limit=limit + len(skip)) if c["id"] not in skip][:limit]
+    in_a_row = 0
+    for conv in waiting:
+        if should_stop is not None and should_stop():
+            break
         helper = Helper(model_call)
         parts = conv.get("parts") or None
         source = {"origin": conv.get("origin") or "api", "session": conv.get("session") or "",
                   "conversation_id": conv["id"]}
-        cands = _extract(conv["text"], parts, source, helper, librarian_context(store))
-        if cands is None or not helper.worked:
-            out.failed += 1          # this one could not be read; the next may still be
+        said = " ".join(_owner_text(parts, conv.get("text") or "").split())
+        preview = said[:120] + ("…" if len(said) > 120 else "")
+        say("start", {"id": conv["id"], "preview": preview})
+        try:
+            from . import extract as extract_mod
+
+            with notlife.collecting() as dropped, extract_mod.watching_pieces(
+                    lambda i, n: say("piece", {"id": conv["id"], "part": i, "parts": n})):
+                cands = _extract(conv["text"], parts, source, helper, librarian_context(store))
+        except Exception as exc:  # noqa: BLE001 - one message the helper chokes on must not stop the others
+            if type(exc).__name__ == "Stopped":
+                break
+            logger.warning("reading a waiting message failed", exc_info=True)
+            cands = None
+            helper.worked = False
+            helper.why = str(exc) or type(exc).__name__
+        if cands is None or (cands and not helper.worked):
+            if should_stop is not None and should_stop():
+                break      # stopped by the owner: not a failure of the message
+            in_a_row += 1
+            out.failed_ids.append(conv["id"])
+            say("failed", {"id": conv["id"], "preview": preview,
+                           "why": helper.why or "The AI helper did not answer properly."})
+            if in_a_row >= 2:
+                break      # two in a row: it is the helper that is down, not these messages
             continue
+        in_a_row = 0
         for fact in store.list_facts(status="waiting", limit=5000):
             if (fact.get("source") or {}).get("conversation_id") == conv["id"]:
                 store.set_fact_status(fact["id"], "reprocessed")
+        for text, why in dropped:
+            say("decision", {"id": conv["id"], "decision": "left out", "text": text[:160], "why": _NOT_LIFE_WORDS.get(why, why)})
+        before = (out.saved, out.duplicates, out.asked, out.unsure)
+        trace: list[dict[str, Any]] = []
         _settle_all(store, cands, out, model_used=True, guardrails=guardrails or [],
                     actor=AI, reason="read once the AI helper was available", conv_id=conv["id"],
                     ignore=ignored_people(vault), judge=helper,
-                    owner_text=_owner_text(parts, conv["text"]), source_text=conv["text"])
+                    owner_text=_owner_text(parts, conv["text"]), source_text=conv["text"], trace=trace)
         store.mark_conversation_processed(conv["id"])
         out.read += 1
+        for item in trace:
+            say("decision", {"id": conv["id"], **item})
+        say("done", {"id": conv["id"], "preview": preview, "saved": out.saved - before[0],
+                     "known": out.duplicates - before[1], "asked": out.asked - before[2],
+                     "unsure": out.unsure - before[3], "left_out": len(dropped)})
     if out.saved or out.asked or out.unsure:
         store.log_activity("process-waiting", f"saved {out.saved}, asked {out.asked}", actor=AI)
     _tidy(store, vault, out)
     return out
+
+
+# What the junk filter's short reasons mean, in the owner's words.
+_NOT_LIFE_WORDS = {
+    "server log": "a server log line", "internal notice": "a system notice, not you",
+    "terminal/code": "a command or code", "markdown table": "a table from a document",
+    "markdown heading": "a document heading", "documentation text": "text from a document",
+    "agent instructions": "instructions to an AI agent", "review marker text": "a review checklist line",
+    "session work-talk": "an AI agent's working notes", "vault line id": "a copied note line",
+    "review example": "an example from a review", "pasted note line": "a copied note line",
+    "code identifier": "developer talk", "agent narration": "an AI agent talking about its own work",
+    "markdown text": "text copied from a document", "file name": "a file name (developer talk)",
+    "pasted block": "part of a pasted document or agent notes",
+}
 
 
 def waiting_list(store: Any, *, limit: int = 8) -> dict[str, Any]:

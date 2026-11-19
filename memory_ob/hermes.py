@@ -207,17 +207,50 @@ def proxy_available(timeout: float = 2.0) -> bool:
 
 
 def _proxy_up(timeout: float) -> bool:
-    import urllib.error
+    """True when the proxy answers ``/v1/models`` (the address Hermes documents) like a model server."""
+    return proxy_models(timeout) is not None
+
+
+def proxy_models(timeout: float = 3.0) -> list[str] | None:
+    """The model names the proxy lists, or None when nothing there answers like a model server.
+
+    ``/health`` is not one of the addresses ``hermes proxy`` forwards, so it is not trusted: something
+    else on the same port can answer it and then refuse every real request.
+    """
+    import json
     import urllib.request
 
     try:
-        req = urllib.request.Request(f"http://{PROXY_HOST}:{PROXY_PORT}/health")
-        with urllib.request.urlopen(req, timeout=timeout):
-            return True
-    except urllib.error.URLError:
-        return False
-    except Exception:
-        return False
+        req = urllib.request.Request(f"{PROXY_BASE}/models", headers={"Authorization": "Bearer sk-unused"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+        items = data.get("data") if isinstance(data, dict) else None
+        if not isinstance(items, list):
+            return None
+        return [str(i["id"]) for i in items if isinstance(i, dict) and i.get("id")]
+    except Exception:  # noqa: BLE001 - not reachable, not JSON, not a model server: all the same answer
+        return None
+
+
+_working_model = ""
+
+
+def working_model() -> str:
+    """A model name the proxy has already answered with, so it is not guessed again."""
+    return _working_model
+
+
+def remember_model(name: str) -> None:
+    global _working_model
+    _working_model = name
+
+
+def pick_proxy_model(avoid: str = "") -> str:
+    """A chat model the proxy lists (not the one that just failed, not an embedding model), or ''."""
+    for name in proxy_models() or []:
+        if name != avoid and "embed" not in name.lower():
+            return name
+    return ""
 
 
 def proxy_base() -> str:

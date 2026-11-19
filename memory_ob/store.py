@@ -212,21 +212,37 @@ _SEARCH_STOPWORDS = frozenset(
 )
 
 
+# SQLite refuses a statement whose expression tree is deeper than 1000 nodes,
+# and a long pasted instruction ("execute these steps..." x hundreds of words)
+# turns into one OR branch per word. Recall only needs the distinctive words,
+# so the term list is de-duplicated and capped.
+_MAX_SEARCH_TERMS = 40
+
+
 def _search_terms(query: str) -> list[str]:
     """The words of a query, cut back to their stems.
 
     "allergy" and "allergic" share the stem "allerg", so searching for one
-    finds the other. Short words are left alone.
+    finds the other. Short words are left alone. Repeats are dropped and the
+    list is capped: a long message would otherwise build an OR chain too deep
+    for SQLite to compile, and recall would silently return nothing.
     """
     from .conflicts import stem
 
+    tokens = _FTS_TOKEN_RE.findall(query or "")
     terms: list[str] = []
-    for raw in _FTS_TOKEN_RE.findall(query or ""):
+    seen: set[str] = set()
+    for raw in tokens:
         low = raw.lower()
         cut = stem(low) if len(low) > 3 else low
-        terms.append(cut or low)
-    meaningful = [t for t, raw in zip(terms, _FTS_TOKEN_RE.findall(query or "")) if raw.lower() not in _SEARCH_STOPWORDS]
-    return meaningful or terms          # a query made only of such words is searched as it is
+        term = cut or low
+        if term in seen:
+            continue
+        seen.add(term)
+        terms.append((term, raw))
+    meaningful = [t for t, raw in terms if raw.lower() not in _SEARCH_STOPWORDS]
+    out = meaningful or [t for t, _ in terms]
+    return out[:_MAX_SEARCH_TERMS]
 
 
 def _fts_query(query: str) -> str:

@@ -107,6 +107,21 @@ main { padding-top: 20px; }
 .banner.warn { background: var(--warn-bg); border-color: var(--warn); }
 .banner.danger { background: var(--danger-bg); border-color: var(--danger); }
 .banner.ok { background: var(--ok-bg); border-color: var(--ok); }
+.live progress { width: 100%; height: 8px; accent-color: var(--accent); margin: 6px 0; }
+.live .quote { margin: 4px 0; color: var(--text-2); overflow-wrap: anywhere; }
+.live .beat.stuck { color: var(--warn); font-weight: 600; }
+.activity { list-style: none; margin: 8px 0 0; padding: 0; display: grid; gap: 4px; font-size: .92em; }
+.activity li { padding-left: 1.4em; position: relative; overflow-wrap: anywhere; }
+.activity li::before { position: absolute; left: 0; content: "•"; color: var(--text-3); }
+.activity li.kept::before { content: "✓"; color: var(--ok); }
+.activity li.out::before { content: "✗"; color: var(--text-3); }
+.activity li.ask::before { content: "?"; color: var(--warn); }
+.activity li.bad::before { content: "!"; color: var(--danger); }
+.activity .why { color: var(--text-3); }
+.banner .live { flex: 1; min-width: 0; }
+.live .row { margin-top: 10px; }
+#waiting-card .live { padding-bottom: 12px; margin-bottom: 4px; border-bottom: 1px solid var(--stroke); }
+.banner .live .row { margin-top: 6px; }
 #banners > * + * { margin-top: 8px; }
 
 /* ---- cards & rows ------------------------------------------------------- */
@@ -733,10 +748,11 @@ function ask({ title, body, yes = 'OK', no = 'Cancel', danger = false }) {
     const done = (v) => { root.innerHTML = ''; document.removeEventListener('keydown', onKey); resolve(v); };
     const onKey = (e) => { if (e.key === 'Escape') done(false); };
     document.addEventListener('keydown', onKey);
-    $('[data-yes]', root).onclick = () => done(true);
-    $('[data-no]', root).onclick = () => done(false);
+    const yesBtn = $('[data-yes]', root), noBtn = $('[data-no]', root);     // there is no Cancel when no === null
+    yesBtn.onclick = () => done(true);
+    if (noBtn) noBtn.onclick = () => done(false);
     $('.modal-back', root).addEventListener('mousedown', (e) => { if (e.target.classList.contains('modal-back')) done(false); });
-    $('[data-no]', root).focus();
+    (noBtn || yesBtn).focus();
   });
 }
 function choose({ title, body, options }) {         /* options: [{label, value, danger}] ; resolves to a value or null */
@@ -779,6 +795,59 @@ function renderTabs() {
     `<button class="tab" data-act="tab" data-tab="${k}"${state.tab === k ? ' aria-current="page"' : ''}>${label}` +
     (k === 'review' && n ? `<span class="badge" aria-label="${n} waiting">${n}</span>` : '') + '</button>').join('');
 }
+
+function secs(n) { n = Math.max(0, n | 0); return n < 60 ? n + 's' : Math.floor(n / 60) + 'm ' + String(n % 60).padStart(2, '0') + 's'; }
+function readingBeat(r) {
+  if (r.stopping) return ['Stopping after the message I am on. Nothing is lost.', ''];
+  if (r.stuck) return [`The AI helper has not answered for ${secs(r.asking_for)}. Free models can be slow. If it stays like this, press Stop and try later.`, 'stuck'];
+  if (r.asking_for >= 5) return [`Waiting for the AI helper's answer (${secs(r.asking_for)})…`, ''];
+  if (r.calls) return [`The AI helper has answered ${plural(r.calls, 'time')}${r.last_answer_ago != null ? `, the last one ${secs(r.last_answer_ago)} ago` : ''}.`, ''];
+  return ['Waiting for its first answer…', ''];
+}
+function activityItem(e) {
+  const q = s => `“${esc(s)}”`;
+  if (e.kind === 'decision') {
+    const cls = { 'kept': 'kept', 'left out': 'out', 'asked you': 'ask', 'not sure': 'ask' }[e.decision] || '';
+    const label = { 'kept': 'Kept', 'left out': 'Left out', 'already known': 'Already knew', 'asked you': 'Asked you about', 'not sure': 'Not sure about', 'ticked off': 'Ticked off', 'set aside': 'Set aside' }[e.decision] || esc(e.decision);
+    return `<li class="${cls}"><b>${label}</b> ${q(e.text)}${e.why ? ` <span class="why">- ${esc(e.why)}</span>` : ''}</li>`;
+  }
+  if (e.kind === 'failed') return `<li class="bad"><b>Could not read</b> ${q(e.preview)} <span class="why">- ${esc(e.why || 'the AI helper did not answer')}. It stays waiting.</span></li>`;
+  if (e.kind === 'done' && !(e.saved || e.known || e.asked || e.unsure || e.left_out)) return `<li><b>Nothing to remember</b> in ${q(e.preview)}</li>`;
+  return '';
+}
+function readingLive(r, { compact = false } = {}) {
+  if (!r || !r.running) return '';
+  const known = r.total > 0, total = Math.max(r.total || 0, r.read + 1), at = Math.min(r.read + 1, total);
+  const [beat, cls] = readingBeat(r);
+  const head = known ? `Reading message ${at} of ${total}` : 'Starting to read…';
+  const list = compact ? '' : (r.events || []).map(activityItem).filter(Boolean).join('');
+  // Every part that changes is a "slot" (data-live), updated in place by updateLive. The Stop button and the
+  // progress bar are never rebuilt, so a click on Stop cannot land on a button that was just replaced.
+  return `<div class="live" id="${compact ? 'reading-banner' : 'reading-live'}" data-reading="${compact ? 'banner' : 'card'}"><div data-live="head"><b>${head}</b> <span class="faint">· ${secs(r.elapsed)} so far</span></div>
+    <progress data-live="bar" max="${known ? total : 1}" value="${known ? r.read : 0}" aria-label="${head}"></progress>
+    <div data-live="quote">${r.current ? `<p class="quote">“${esc(r.current)}”</p>` : ''}${r.parts > 1 ? `<p class="muted">This one is long, so I read it in pieces: piece ${r.part} of ${r.parts}.</p>` : ''}</div>
+    <p data-live="beat" class="muted beat ${cls}">${esc(beat)}</p>
+    ${compact ? '' : `<ul data-live="list" class="activity" aria-live="polite">${list}</ul>`}
+    <div class="row"><button class="btn${compact ? ' sm' : ''}" data-act="waiting-stop" data-live="stop"${r.stopping ? ' disabled' : ''}>${r.stopping ? 'Stopping…' : 'Stop'}</button></div></div>`;
+}
+function updateLive() {
+  const r = state.status && state.status.reading;
+  if (!r || !r.running) return;
+  // the banner (other screens) and the card (Review) are separate blocks; each is updated in place
+  for (const el of document.querySelectorAll('[data-reading]')) {
+    const tmp = document.createElement('div'); tmp.innerHTML = readingLive(r, { compact: el.dataset.reading === 'banner' });
+    const fresh = tmp.firstElementChild;
+    if (!el.querySelector('[data-live="head"]')) { if (fresh) el.replaceWith(fresh); continue; }   // the "Starting…" stand-in
+    for (const slot of fresh.querySelectorAll('[data-live]')) {
+      const name = slot.dataset.live, old = el.querySelector(`[data-live="${name}"]`);
+      if (!old) continue;
+      if (name === 'stop') { old.disabled = slot.disabled; if (old.textContent !== slot.textContent) old.textContent = slot.textContent; continue; }
+      if (name === 'bar') { old.max = slot.max; old.value = slot.value; continue; }
+      if (old.innerHTML !== slot.innerHTML) old.innerHTML = slot.innerHTML;
+      if (old.className !== slot.className) old.className = slot.className;
+    }
+  }
+}
 function renderBanners() {
   const s = state.status; const el = $('#banners');
   if (!s) { el.innerHTML = ''; return; }
@@ -791,11 +860,9 @@ function renderBanners() {
     out.push(`<div class="banner"><span>${esc(s.notice)}</span><button class="btn sm" data-act="dismiss-notice">Got it</button></div>`);
   }
   const onReview = state.tab === 'review';       // Review has its own "Waiting to be read" card
-  if (onReview && s.waiting > 0) { /* shown in the card below */ }
+  if (onReview && (s.waiting > 0 || (s.reading && s.reading.running))) { /* shown in the card below */ }
   else if (s.waiting > 0 && s.reading && s.reading.running) {
-    const r = s.reading, done = r.read ? `${r.read} of ${r.total || s.waiting} read.` : 'Starting…';
-    const bad = r.failed ? ` ${plural(r.failed, 'message')} could not be read (kept whole).` : '';
-    out.push(`<div class="banner ok"><span><b>Reading what was waiting…</b> ${done}${bad}</span></div>`);
+    out.push(`<div class="banner ok">${readingLive(s.reading, { compact: true })}</div>`);
   } else if (s.waiting > 0 && !s.helper.ready) {
     out.push(`<div class="banner"><span><b>${plural(s.waiting, 'thing')} waiting.</b> I cannot reach an AI helper right now, so I will read ${s.waiting === 1 ? 'it' : 'them'} as soon as one is available.</span>
       <button class="btn sm" data-act="tab" data-tab="settings">AI settings</button></div>`);
@@ -803,8 +870,13 @@ function renderBanners() {
     out.push(`<div class="banner"><span><b>${plural(s.waiting, 'thing')} waiting.</b> The AI helper did not answer, so ${s.waiting === 1 ? 'it is' : 'they are'} kept whole until it does.</span>
       <button class="btn sm" data-act="waiting-read">Read now</button></div>`);
   } else if (s.reading && s.reading.running) {
-    out.push(`<div class="banner ok"><span><b>Reading your conversations…</b> ${s.reading.read ? plural(s.reading.read, 'conversation') + ' done so far.' : 'This can take a while.'}</span></div>`);
+    out.push(`<div class="banner ok">${readingLive(s.reading, { compact: true })}</div>`);
   }
+  // The reading banner's numbers change every second or two; only those are updated (updateLive), the banner
+  // itself is rebuilt just when something else about it changed. Otherwise a click could land on a new button.
+  const sig = out.map(h => h.includes('id="reading-banner"') ? '\u0001live' : h).join('');
+  if (sig === state.bannerSig && (!sig.includes('\u0001live') || $('#reading-banner', el))) return;
+  state.bannerSig = sig;
   el.innerHTML = out.join('');
 }
 let pollTimer = null;
@@ -812,11 +884,15 @@ async function refreshStatus() {
   try {
     state.status = await api('/api/status', { global: true });
     if (state.status.categories) state.categories = state.status.categories;
-    renderBanners();
+    renderBanners(); updateLive();
     clearTimeout(pollTimer);
     const running = !!(state.status.reading && state.status.reading.running);
-    if (running) pollTimer = setTimeout(refreshStatus, state.tab === 'review' ? 1500 : 4000);
-    else if (state.wasReading && state.tab === 'review' && $('#rv-body') && !state.rq) SCREENS.review(true);
+    if (running) pollTimer = setTimeout(refreshStatus, state.tab === 'review' ? 1500 : 3000);
+    else {
+      if (state.wasReading && state.tab === 'review' && $('#rv-body') && !state.rq) SCREENS.review(true);
+      // not reading: look again now and then, so a read that starts by itself shows up without a reload
+      if (state.status.waiting > 0 && document.visibilityState === 'visible') pollTimer = setTimeout(refreshStatus, 15000);
+    }
     state.wasReading = running;
   } catch (e) { /* the screen's own load reports problems */ }
 }
@@ -961,7 +1037,8 @@ const WAIT_WHY = {
   no_helper: 'I cannot reach an AI helper right now. Nothing is lost: your words are kept whole, and I will read them as soon as one is available.',
   not_answering: 'The AI helper is connected but did not answer the last time I tried. Your words are kept whole, and I will try again tonight, or when you press Read now.',
   will_retry: 'Your words are kept whole. I will read them in a moment, or you can press Read now.',
-  reading: 'Reading them now…',
+  reading: '',
+  stopped: 'You stopped reading. Your words are kept whole. Press Read now when you want me to carry on.',
 };
 function waitingCard(w) {
   if (!w || !w.count) return '';
@@ -970,10 +1047,13 @@ function waitingCard(w) {
     <button class="btn sm" data-act="waiting-skip" data-id="${esc(i.id)}">Skip this one</button></div></li>`).join('');
   const more = w.count > w.items.length ? `<p class="faint">…and ${plural(w.count - w.items.length, 'more')}.</p>` : '';
   const busyNow = w.why === 'reading';
-  return section('Waiting to be read', w.count, `<div class="card" id="waiting-card"><p class="muted">${esc(WAIT_WHY[w.why] || WAIT_WHY.will_retry)}</p>
+  const r = state.status && state.status.reading;
+  const problem = w.why === 'not_answering' && r && r.detail ? `<p class="faint">Last problem: ${esc(r.detail)}</p>` : '';
+  const live = busyNow ? (readingLive(r) || '<div class="live" id="reading-live" data-reading="card"><p class="muted">Starting to read…</p></div>') : '';
+  return section('Waiting to be read', w.count, `<div class="card" id="waiting-card">${busyNow ? '' : `<p class="muted">${esc(WAIT_WHY[w.why] || WAIT_WHY.will_retry)}</p>${problem}`}${live}
     <ul class="list">${items}</ul>${more}
-    <div class="row"><button class="btn primary" data-act="waiting-read"${busyNow ? ' disabled' : ''}>${busyNow ? 'Reading…' : 'Read now'}</button>
-    ${w.why === 'no_helper' ? '<button class="btn" data-act="tab" data-tab="settings">AI settings</button>' : ''}</div></div>`);
+    ${busyNow ? '' : `<div class="row"><button class="btn primary" data-act="waiting-read">Read now</button>
+    ${w.why === 'no_helper' ? '<button class="btn" data-act="tab" data-tab="settings">AI settings</button>' : ''}</div>`}</div>`);
 }
 function auditCard(f) {
   const lines = String(f.detail || '').split('\n').map(l => `<p class="text">${esc(l)}</p>`).join('');
@@ -1858,7 +1938,7 @@ document.addEventListener('click', async (e) => {
       m.textContent = r.ok ? 'It answered. Anything that was waiting will be read now.'
         : r.reason === 'no_helper' ? 'I cannot reach an AI helper. Check that Hermes is running, or pick a model above.'
         : r.reason === 'empty' ? 'It was reached but gave an empty answer. Try again in a moment.'
-        : 'It was reached but did not answer' + (r.detail ? ': ' + r.detail : '.');
+        : 'It was reached but did not answer' + (r.detail ? ': ' + r.detail : '.') + (r.hint ? ' ' + r.hint : '');
       await refreshStatus();
     });
     case 'waiting-read': return busy(el, async () => {
@@ -1866,6 +1946,11 @@ document.addEventListener('click', async (e) => {
       if (r.reason === 'no_helper') toast('I still cannot reach an AI helper. Your words stay safe until one is there.', true);
       else if (r.reason === 'nothing') toast('Nothing is waiting.');
       else toast('Reading…');
+      await refreshStatus(); if (state.tab === 'review') await SCREENS.review(true);
+    });
+    case 'waiting-stop': return busy(el, async () => {
+      const r = await api('/api/waiting/stop', { method: 'POST' });
+      toast(r.stopping ? 'Stopping after the message I am on. Nothing is lost.' : 'It was not reading.');
       await refreshStatus(); if (state.tab === 'review') await SCREENS.review(true);
     });
     case 'waiting-skip': return busy(el, async () => {
@@ -2049,8 +2134,8 @@ document.addEventListener('click', async (e) => {
       const bad = r.steps.filter(s => s.ok === 'no').length;
       await refreshStatus(); const left = state.status ? state.status.waiting : 0;
       $('#bk-msg').textContent = bad ? 'Done, but a part did not finish. I will try again tonight.'
-        : left && r.reading ? 'All tidy. Now reading what was waiting…'
-        : left ? `All tidy, but ${plural(left, 'message')} still ${left === 1 ? 'waits' : 'wait'} for an AI helper. See Review.` : 'All tidy.';
+        : left && r.reading ? `Tidied what I could. Now reading the ${plural(left, 'message')} that ${left === 1 ? 'was' : 'were'} waiting. Watch it on Review.`
+        : left ? `Tidied what I could, but ${plural(left, 'message')} still ${left === 1 ? 'waits' : 'wait'} for an AI helper that is not answering. See Review.` : 'All tidy.';
     });
   }
 });

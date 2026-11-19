@@ -5,7 +5,8 @@ check with no helper at all sees an empty app. This stand-in reads like a very p
 it files every sentence, says who it is about, and answers "same / update / unrelated" by the
 same word rules the app uses. It is only for tests: nothing here ships in the plugin.
 
-``FAKE_AI=down`` makes it fail every call, ``FAKE_AI=junk`` makes it answer with an apology,
+``FAKE_AI=down`` makes it fail every call, ``FAKE_AI=slow`` makes it answer after a pause,
+``FAKE_AI=junk`` makes it answer with an apology,
 so the "AI not available" paths can be looked at too.
 """
 from __future__ import annotations
@@ -61,6 +62,9 @@ def fake(prompt: str) -> str:
         raise RuntimeError("model unavailable")
     if mode == "junk":
         return "I am sorry, but I cannot help with that."
+    if mode == "slow":
+        import time
+        time.sleep(1.2)
     judged = _reads(prompt)
     if judged:
         return judged

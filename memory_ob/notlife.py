@@ -24,6 +24,8 @@ Classes caught (from the 2026-11 vault dump):
 from __future__ import annotations
 
 import re
+import threading
+from contextlib import contextmanager
 
 # Server / access-log lines.
 _LOG_PATTERNS = (
@@ -78,7 +80,6 @@ _INSTRUCT_TOKEN_RE = re.compile(
 )
 
 # Review/audit marker lines: ✅ ❌ ☐ style, unless the line is a life statement.
-_MARK_RE = re.compile(r"[✅❌☐☑🔄]")
 _LIFE_START_RE = re.compile(r"^\s*(?:i\b|i['\u2019]m\b|i['\u2019]ve\b|i['\u2019]ll\b|my\b|we\b|our\b)", re.I)
 
 # Session work-talk: high-precision phrases from agents' own working notes.
@@ -93,124 +94,6 @@ _WORKTALK_RE = re.compile(
 # Vault line-id tails (present when re-reading old notes in the clean-up pass).
 _LINEID_RE = re.compile(r"\^[0-9a-f]{4,}-[0-9a-f]{4,}\s*$")
 
-# --- the agent's own voice -----------------------------------------------------
-# High precision on purpose: the owner really does say "Actually, I prefer tea"
-# and "I must call my mum", so nothing here keys on a first word alone. Every
-# pattern needs the agent's *work* or the *project* in the sentence.
-
-# "Let me fetch/read/run/check ..." with a work object in the same sentence.
-_NARRATE_WORK_RE = re.compile(
-    r"\b(?:let\s+me|let's|let\s+us|i'?ll|i\s+will|i'?m\s+going\s+to|i\s+need\s+to|"
-    r"i\s+must|i\s+should|i\s+can|i\s+could|we'?ll|we\s+need\s+to)\b"
-    r"[^.!?\n]{0,60}\b(?:fetch|read|scan|grep|run|check|review|commit|push|pull|clone|"
-    r"install|build|test|chunk|branch|diff|repo|repository|file|code|tests?|suites?|"
-    r"update|log|page|pull\s+request|setup|the\s+rest|the\s+site|the\s+branch|"
-    r"the\s+build|the\s+suite|the\s+tests|the\s+file|the\s+code|the\s+repo|the\s+diff|"
-    r"the\s+log|the\s+update|the\s+page|the\s+branch)\b",
-    re.I,
-)
-
-# The agent talking about its own artefacts: "the file has 344 lines".
-_ARTEFACT_RE = re.compile(
-    r"\bthe\s+(?:file|code|repo|repository|build|update|branch|diff|log|tests?|suites?|"
-    r"list|plan|rulebook|spec|vault|notes?|engine|patch|commit)\b"
-    r"[^.!?\n]{0,30}\b(?:has|have|had|is|are|was|were|shows?|showed|contains?|contained|"
-    r"lost|gains?|gained|ships?|shipped|includes?|included|fails?|failed|passed|green|"
-    r"runs?|ran|changed|dropped|added|kept)\b",
-    re.I,
-)
-
-# Counts of the agent's own outputs: "I saw 8 tests", "there were 44 lines".
-_COUNT_RE = re.compile(
-    r"\b(?:i\s+(?:saw|found|counted|read)|there\s+(?:is|are|was|were)|"
-    r"it\s+(?:has|had)|with)\s+\d+\s+"
-    r"(?:tests?|suites?|lines?|files?|errors?|failures?|warnings?|commits?|branches?|chunks?)\b",
-    re.I,
-)
-
-# The agent referring to itself or the other builders in the third person.
-_AGENTVOICE_RE = re.compile(
-    r"\b(?:claude|chatgpt|hermes|the\s+other\s+(?:ai|judge|assistant|agent|builder)|"
-    r"the\s+builders?|the\s+judges?|the\s+brain|the\s+body|the\s+owner)"
-    r"(?:'s?\s+(?:audit|answer|report|list|plan|work|notes?|found|said|says|is|are|was|were|"
-    r"has|had|did|does|will|would|should|can|could|thinks?|decided|built|fixed|kept|lost|"
-    r"wrote|read|graded|flagged|warning|warned|keeps?|loses?|finds?|says)\b"
-    r"|\s+(?:is|are|was|were|has|had|did|does|will|would|should|can|could|said|says|found|"
-    r"kept|lost|wrote|read|graded|flagged|warned|built|fixed)\b)",
-    re.I,
-)
-
-# The project's own meta: lists, plans, rulebooks, weights.
-_METALIST_RE = re.compile(
-    r"\b(?:the\s+(?:missing|fix|sweep|master|build|old)\s+(?:list|rulebook|plan|spec)|"
-    r"what\s+to\s+work\s+on\s+after\s+this|my\s+(?:answer|report|audit|plan|recommendation\s+list|"
-    r"to-?do|suite|golden\s+set)|the\s+weighted\s+mean|the\s+chore\s+queues?|"
-    r"\bone\s+word\s+from\s+you\b)",
-    re.I,
-)
-
-# "19% of the total weight" - a number about the project, not a life fact.
-_PERCENT_RE = re.compile(r"\b\d+(?:\.\d+)?%\s+of\s+(?:the|a|its|their)\b", re.I)
-
-# The agent correcting its own output: "I must correct this clearly."
-_CORRECT_SELF_RE = re.compile(
-    r"\bi\s+(?:must|need\s+to|should|will|'?ll|am\s+going\s+to)\s+"
-    r"(?:correct|fix|change|update|revert|redo|rewrite|re-?read|re-?run)\s+"
-    r"(?:this|that|it|the\s+\w+)\b",
-    re.I,
-)
-
-# Instructions about the work itself: "mention what you changed", "what is still left".
-_WORK_INSTR_RE = re.compile(
-    r"\b(?:mention|tell|show|report|list|say|describe|explain)\b[^.!?\n]{0,40}"
-    r"\bwhat\s+(?:you|we)\s+(?:changed|did|have|have\s+done|are\s+doing)\b"
-    r"|\bwhat\s+is\s+still\s+left\b"
-    r"|\b(?:upload|commit|push|install|delete|remove)\s+what\s+(?:you|we)\s+did\b",
-    re.I,
-)
-
-# The project's own parts talked about as things: "vault speed", "model choice".
-_PROJECT_PART_RE = re.compile(
-    r"\b(?:vault|screen|screens|build|engine|search|meaning\s+search|model\s+choice|"
-    r"test\s+suite|test\s+kit|installer|release|plugin|provider)\s+"
-    r"(?:speed|load|loading|performance|choice|narrow|wide|heavy|slow|fast|redesign)\b"
-    r"|\bexternal\s+AI\s+service\b|\bneeds\s+Node\.js\b|\bbuilds?\s+from\s+a\s+Mac\b",
-    re.I,
-)
-
-# "It compares likely pairs", "Its notes check ...", "The check for private text ..."
-_ABOUT_CODE_RE = re.compile(
-    r"\b(?:it|its|the)\s+(?:check|filter|engine|code|librarian|extractor|splitter|audit|"
-    r"check-?up|search|reader|writer|second\s+opinion|grounding)\b[^.!?\n]{0,50}"
-    r"\b(?:compares?|checks?|shows?|uses?|keeps?|drops?|adds?|only|never|always|covers?|"
-    r"ignores?|treats?|files?|reads?|writes?|saves?|finds?|flags?|looks?|needs?)\b"
-    r"|\bthe\s+check\s+for\s+(?:private|text|notes|secret)\b"
-    r"|\bonly\s+covers\b"
-    r"|\bit\s+(?:compares?|checks?|shows?|uses?|keeps?|drops?|adds?|covers?|ignores?|"
-    r"treats?|files?|reads?|writes?|saves?|finds?|flags?)\b[^.!?\n]{0,50}"
-    r"\b(?:memories|notes?|records?|facts?|pairs?|words?|text|ids?|the\s+vault|embeddings?)\b"
-    r"|\bits\s+\w+\s+check\b",
-    re.I,
-)
-
-# UI/doc instructions that leaked from pasted readmes.
-_UI_INSTR_RE = re.compile(
-    r"\bclick\s+\**\w|\bmove\s+to\s+trash\b|\bdrag\s+\**\w.+\bonto\s+\**\w|"
-    r"\bopen\s+`?\w+\.(?:dmg|exe|zip)`?\s+and\s+drag\b",
-    re.I,
-)
-
-# "they want me to ..." - the agent describing its task.
-_TASK_REF_RE = re.compile(r"\b(?:they|he|she)\s+want\s+me\s+to\b", re.I)
-
-# A file name with a verb about it: "store.py lost ...", "extract.py ...".
-_FILEVERB_RE = re.compile(
-    r"\b\w+\.(?:py|md|json|js|ts|ps1|txt|yaml|yml|toml)\b"
-    r"[^.!?\n]{0,25}\b(?:lost|has|had|hasn't|dropped|added|ships?|includes?|contains?|"
-    r"changed|removed|gained|is|was)\b",
-    re.I,
-)
-
 # Review-example prose: two quoted strings pitted against each other
 # ('slip ("68 kg" vs "my weight is 72")') — that is a judge's example, not life.
 _QUOTED_VS_RE = re.compile('\"[^\"\\n]{1,60}\"\\s+vs\\.?\\s+\"[^\"\\n]{1,60}\"', re.I)
@@ -222,8 +105,129 @@ _NOTELINE_RE = re.compile('^\\s*[-*]\\s+\\d{4}-\\d{2}-\\d{2}\\s*[\u2014\u2013-]\
 _CODEID_RE = re.compile('\\b_[A-Z][A-Za-z0-9_]{2,}\\b')
 
 
+
+# --- Second look at the owner's real vault (2026-11-18): what still got through ---------------------
+
+# Check marks used in review notes.
+_MARK_RE = re.compile(r"[\u2705\u274c\u2610\u2611\U0001f504\u2713\u2714\u2717\u2718]")
+
+# Bold markdown (**Windows**), plain file names (conflicts.py), snake_case names (card_id).
+_BOLD_RE = re.compile(r"\*\*[^*\n]+\*\*")
+_ITALIC_RE = re.compile(r"(?<!\*)\*[^*\s][^*\n]*\*(?!\*)")
+_LISTBOLD_RE = re.compile(r"^\s*(?:[-*\u2022]|\d+\.)\s+\*\*")
+
+
+def _markup(s: str) -> bool:
+    """Document markup: a list item that starts in bold, or two emphasis marks in one line.
+
+    One bold word in a sentence ("I **really** love tea") is how people write notes, so it is life.
+    """
+    return bool(_LISTBOLD_RE.match(s) or len(_BOLD_RE.findall(s)) + len(_ITALIC_RE.findall(s)) >= 2)
+_BARE_FILE_RE = re.compile(r"\b[\w-]+\.(?:py|js|html|css|md|json|ps1|sh|toml|ya?ml|log)\b", re.I)
+_SNAKE_RE = re.compile(r"\b[a-z]{2,}(?:_[a-z0-9]+)+\b")
+
+# An AI agent narrating its own work: "Let me fetch...", "Now I'll run...". Not something the owner said
+# about their life. (A plain "I ..." is never matched here: "I ran 5 km" is life.)
+_NARRATION_RE = re.compile(
+    r"^\s*(?:let\s+me|let['\u2019]?s|i['\u2019]ll\s+now|now\s+i['\u2019]ll|next,?\s+i['\u2019]ll)\s+"
+    r"(?:just\s+|also\s+|first\s+|quickly\s+)?"
+    r"(?:fetch|re-?read|read|get|scan|run|check|do|grab|look|see|try|verify|write|add|fix|install|open|"
+    r"summari[sz]e|prioriti[sz]e|say|start|finish|continue|pull|list|compare|go\s+through|review)\b",
+    re.I,
+)
+
+# Words of the work process itself (audits, rounds, chunks, suites, build numbers). Product names such as
+# Hermes or Claude are NOT here: "I am building a Hermes plugin" is a real fact about the owner.
+_PROCESS_RE = re.compile(
+    r"\b(?:audit(?:s|ed|ing)?|rulebook|chunks?|suites?|update-?\d+|rounds?|flagged|grep|regressions?|"
+    r"the\s+build|the\s+spec|the\s+diff|the\s+commit|the\s+branch|the\s+repo|test\s+kit|stand-?ins?)\b", re.I)
+_WEAKDEV_RE = re.compile(
+    r"\b(?:files?|lines?|tests?|reports?|code|bugs?|builds?|servers?|specs?|zip|prompts?|api|json|schema|gaps?)\b", re.I)
+_CAPS_RE = re.compile(r"\b[A-Z]{4,}\b")
+# The owner talking about the thing they are making is life, however technical the words.
+_MAKING_RE = re.compile(
+    r"^\s*(?:i\s+am|i['\u2019]m|we\s+are|we['\u2019]re|i\s+want\s+to|my)\s+(?:\w+\s+){0,2}?"
+    r"(?:building|making|working\s+on|creating|developing|learning|project|app|plugin|startup)\b", re.I)
+
+
+def _dev_talk(s: str) -> bool:
+    """An agent's or developer's working notes: two or more process words, or three dev words, in one line."""
+    if _MAKING_RE.match(s):
+        return False
+    process = {m.group(0).lower() for m in _PROCESS_RE.finditer(s)}
+    weak = {m.group(0).lower() for m in _WEAKDEV_RE.finditer(s)}
+    if process and 2 * len(process) + len(weak) >= 3:
+        return True
+    if len(weak) >= 3:
+        return True
+    return bool(_CAPS_RE.search(s) and (process or weak))
+
+
+_sink = threading.local()
+
+
+@contextmanager
+def collecting():
+    """Within this block every line the filter drops is noted as ``(text, reason)``.
+
+    Used by the reader to show "left out: ... (why)" next to what it kept. It changes nothing
+    about what is dropped, and does nothing for a call made outside the block.
+    """
+    seen: list[tuple[str, str]] = []
+    before = getattr(_sink, "items", None)
+    _sink.items = seen
+    try:
+        yield seen
+    finally:
+        _sink.items = before
+
+
+def _noted(s: str, why: str) -> None:
+    items = getattr(_sink, "items", None)
+    if items is not None and why != "empty" and all(s != t for t, _ in items):
+        items.append((s, why))
+
+
 def is_not_life(text: str) -> str:
     """'' when the line reads like life; otherwise a short reason it is not."""
+    why = _why(text)
+    if why:
+        _noted((text or "").strip(), why)
+    return why
+
+
+_SENT_CUT_RE = re.compile(r"(?<=[.!?])\s+")
+
+
+def strip(text: str) -> str:
+    """*text* without what is clearly not life, so the AI is never asked to read it.
+
+    A line is dropped when :func:`is_not_life` says so. A line that is not itself flagged is also
+    dropped when it sits in a pile of flagged ones (three or more of the seven lines around it):
+    a pasted README or an agent's notes are mostly plain sentences with a few obvious marks, and the
+    plain ones are as much not-life as the marked ones. A short note of the owner's own, with nothing
+    around it, is never touched. Nothing is lost: the whole message stays in Sources.
+    """
+    units: list[str] = []
+    for line in (text or "").split("\n"):
+        units.extend([s for s in _SENT_CUT_RE.split(line) if s.strip()] if len(line) > 400 else [line])
+    idx = [i for i, u in enumerate(units) if u.strip()]
+    flagged = {i: bool(is_not_life(units[i])) for i in idx}
+    kept: list[str] = []
+    for pos, i in enumerate(idx):
+        if flagged[i]:
+            continue
+        before = any(flagged[idx[q]] for q in range(max(0, pos - 3), pos))
+        after = any(flagged[idx[q]] for q in range(pos + 1, min(len(idx), pos + 4)))
+        around = sum(flagged[idx[q]] for q in range(max(0, pos - 6), min(len(idx), pos + 7)))
+        if before and after and around >= 3:          # in the middle of a pasted pile, not at its edge
+            _noted(units[i].strip(), "pasted block")
+            continue
+        kept.append(units[i])
+    return "\n".join(kept)
+
+
+def _why(text: str) -> str:
     s = (text or "").strip()
     if not s:
         return "empty"
@@ -244,34 +248,16 @@ def is_not_life(text: str) -> str:
         return "agent instructions"
     if _MARK_RE.search(s) and not _LIFE_START_RE.match(s):
         return "review marker text"
-    if _WORKTALK_RE.search(s):
+    if _WORKTALK_RE.search(s) or _dev_talk(s):
         return "session work-talk"
-    if _NARRATE_WORK_RE.search(s):
+    if _NARRATION_RE.match(s):
         return "agent narration"
-    if _ARTEFACT_RE.search(s):
-        return "about the project's own files"
-    if _COUNT_RE.search(s):
-        return "count of tests or lines"
-    if _AGENTVOICE_RE.search(s):
-        return "about an AI, not the owner"
-    if _METALIST_RE.search(s):
-        return "project plan talk"
-    if _PERCENT_RE.search(s):
-        return "a percentage about the project"
-    if _CORRECT_SELF_RE.search(s):
-        return "the agent correcting itself"
-    if _WORK_INSTR_RE.search(s):
-        return "instructions about the work"
-    if _PROJECT_PART_RE.search(s):
-        return "about the project's own parts"
-    if _ABOUT_CODE_RE.search(s):
-        return "about how the code works"
-    if _UI_INSTR_RE.search(s):
-        return "a interface instruction"
-    if _TASK_REF_RE.search(s):
-        return "about the agent's task"
-    if _FILEVERB_RE.search(s):
-        return "about a file, not the owner"
+    if _markup(s):
+        return "markdown text"
+    if _BARE_FILE_RE.search(s):
+        return "file name"
+    if _SNAKE_RE.search(s):
+        return "code identifier"
     if _LINEID_RE.search(s):
         return "vault line id"
     if _QUOTED_VS_RE.search(s):

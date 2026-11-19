@@ -81,6 +81,24 @@ class SweepJunk(unittest.TestCase):
         rec = self.store.list_records(status="active")[0]
         self.assertIn("project/bakery", rec.tags or [])
 
+    def test_the_sweep_clears_the_lines_that_really_got_into_the_vault_and_spares_real_life(self) -> None:
+        from tests.test_notlife_agent import FROM_THE_REAL_VAULT, REAL_LIFE
+
+        for line in FROM_THE_REAL_VAULT + REAL_LIFE:
+            sign(self.store, make_record(line))
+        out = manager.sweep_junk(self.store, vault=self.vault, apply=True)
+        left = [r.body for r in self.store.list_records(status="active")]
+        self.assertEqual(sorted(left), sorted(REAL_LIFE), "only the owner's real life is left")
+        self.assertEqual(out["trashed"], len(FROM_THE_REAL_VAULT))
+
+    def test_everything_the_sweep_moved_can_be_put_back(self) -> None:
+        sign(self.store, make_record("Let me fetch 9-13 to complete the reading."))
+        out = manager.sweep_junk(self.store, vault=self.vault, apply=True)
+        self.assertEqual(out["trashed"], 1)
+        trashed = self.store.list_records(status="trash")
+        self.assertEqual(len(trashed), 1, "moved to the trash, not deleted")
+        self.assertEqual(trashed[0].body, "Let me fetch 9-13 to complete the reading.")
+
 
 if __name__ == "__main__":
     unittest.main()

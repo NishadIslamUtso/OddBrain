@@ -137,26 +137,53 @@ def relocate_from_temporary(project: Path) -> Path | None:
     return dest
 
 
-def _remove_empty_shell(path: Path, elsewhere: Path) -> None:
-    """Remove a folder that is empty.
+def _standing_inside(path: Path) -> bool:
+    """Is this process's working directory inside ``path``?
 
-    Windows will not remove a folder a process is standing in, and the installer
-    is usually run from inside the old engine folder. A helper that stands
-    somewhere else can.
+    Windows will not move or delete a folder a process is standing in, and the
+    installer is usually started from inside the old engine folder. The current
+    directory may be spelled with a short (8.3) name, so both sides are resolved.
+    """
+    try:
+        cwd = Path.cwd().resolve()
+        root = Path(path).resolve()
+        cwd.relative_to(root)
+        return True
+    except (OSError, ValueError):
+        return False
+
+
+def _retire_from_outside(project: Path, home: Path, *, reason: str) -> bool:
+    """Start a helper that stands somewhere else and moves the folder once we exit.
+
+    Windows will not move a folder this process is standing in, so the move has
+    to happen after the installer exits. The helper waits a moment, then moves.
     """
     import subprocess
+    import sys
 
+    helper = Path(__file__).with_name("retire_folder.py")
+    if not helper.is_file():
+        return False
+    try:
+        subprocess.Popen(
+            [sys.executable, str(helper), str(project), str(home), reason, "--wait"],
+            cwd=str(home),
+            creationflags=getattr(subprocess, "DETACHED_PROCESS", 0)
+            | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0),
+            close_fds=True,
+        )
+    except Exception:  # noqa: BLE001 - fall back to moving what we can
+        return False
+    print(f"  the old copy (was in {reason}) is being moved to {home / '_retired'} - never deleted")
+    return True
+
+
+def _remove_empty_shell(path: Path, elsewhere: Path) -> None:
+    """Best effort: remove a folder that is empty. Harmless if it stays."""
     try:
         path.rmdir()
-        return
     except OSError:
-        pass
-    try:
-        subprocess.run(
-            ["cmd", "/c", "rmdir", "/q", str(path)],
-            cwd=str(elsewhere), capture_output=True, timeout=30, check=False,
-        )
-    except Exception:  # noqa: BLE001 - best effort; an empty shell is harmless
         pass
 
 
@@ -164,8 +191,12 @@ def retire_old_home(project: Path, home: Path, *, reason: str) -> None:
     """Move the old copy out of harm's way - never deleted (owner list item A8)."""
     import time as _time
 
+    if _standing_inside(project) and _retire_from_outside(project, home, reason=reason):
+        return
     dest = home / "_retired" / f"{project.name}-{_time.strftime('%Y%m%d-%H%M%S')}"
     dest.parent.mkdir(parents=True, exist_ok=True)
+    # Moving the contents works even when the folder itself is locked; the empty
+    # shell is then removed by a helper that stands somewhere else.
     try:
         for child in sorted(project.iterdir()):
             shutil.move(str(child), str(dest / child.name))

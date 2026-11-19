@@ -67,6 +67,27 @@ const setAI = m => fs.writeFileSync(MODE, m);
       if (!noAi && /second look/.test(said)) throw new Error('says the AI could not look, but it did: ' + said);
       await page.evaluate(() => document.querySelectorAll('.toast').forEach(t => t.remove()));
     });
+    await step('Settings: "How is my memory doing?" opens a window that closes, with no script error', async () => {
+      await page.click('[data-tab=settings]'); await page.waitForSelector('[data-act=checkup]');
+      const before = errs.length;
+      await page.click('[data-act=checkup]'); await page.waitForSelector('.modal');
+      const said = await page.textContent('.modal');
+      if (!/How your memory is doing/.test(said)) throw new Error('wrong window: ' + said.slice(0, 80));
+      if (await page.$('.modal [data-no]')) throw new Error('it has a Cancel it should not have');
+      await page.click('.modal [data-yes]'); await page.waitForSelector('.modal', { state: 'detached' });
+      if (errs.length !== before) throw new Error('script error: ' + errs.slice(before).join('; '));
+    });
+    await step('Tidy now never says "All tidy" while messages still wait', async () => {
+      setAI('down');
+      await page.click('[data-tab=review]'); await page.fill('#tell', 'My cat likes the window seat all day.'); await page.click('[data-act=tell]');
+      await page.waitForFunction(() => /kept this safe/.test(document.querySelector('#tell-msg').textContent));
+      await page.click('[data-tab=settings]'); await page.waitForSelector('[data-act=tidy]');
+      await page.click('[data-act=tidy]');
+      await page.waitForFunction(() => /Tidied|All tidy|did not finish/.test(document.querySelector('#bk-msg').textContent), null, { timeout: 15000 });
+      const said = await page.textContent('#bk-msg');
+      if (/^All tidy/.test(said)) throw new Error('claims all tidy: ' + said);
+      if (!/still wait|waiting/.test(said)) throw new Error('does not say what waits: ' + said);
+    });
     await step('Settings: "Test the AI helper" says so when it does not answer, and when it does', async () => {
       await page.click('[data-tab=settings]'); await page.waitForSelector('[data-act=test-ai]');
       setAI('down'); await page.click('[data-act=test-ai]');

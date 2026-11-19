@@ -191,6 +191,8 @@ def _waiting(st: Store) -> dict[str, Any]:
         why = "reading"
     elif _helper() is None:
         why = "no_helper"
+    elif progress["stopped"]:
+        why = "stopped"
     elif progress["error"]:
         why = "not_answering"
     else:
@@ -388,6 +390,11 @@ def create_app() -> FastAPI:
             return {"started": False, "reason": "no_helper", "waiting": _waiting(st)}
         started = bool(reader.kick(settings))
         return {"started": started, "reason": "" if started else "busy", "waiting": _waiting(st)}
+
+    @app.post("/api/waiting/stop")
+    def waiting_stop(st: Store = Depends(get_store)) -> dict[str, Any]:
+        """"Stop": the reader finishes the message it is on, then stops. Nothing already saved is undone."""
+        return {"stopping": reader.stop(), "waiting": _waiting(st)}
 
     @app.post("/api/waiting/{conv_id}/skip")
     def waiting_skip(conv_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -1103,6 +1110,24 @@ def create_app() -> FastAPI:
         kind, found = models.server_models(address.strip())
         return {"address": shown, "reachable": bool(kind), "kind": kind, "models": found}
 
+    def _why_failed(exc: Exception) -> str:
+        """What a failed AI call usually means, and what to do, in plain words."""
+        status, text = getattr(exc, "status", None), str(exc).lower()
+        if status == 404:
+            return ("The AI server answered, but said it has no such model or address. I already tried the "
+                    "other models it lists. Check that `hermes proxy status` says you are signed in, or pick a model above.")
+        if status in (401, 403):
+            return "The AI server refused the sign-in. If you use Hermes, run `hermes portal` to sign in again."
+        if status == 429:
+            return "The AI server says too many requests. A free allowance can run out for a while; try again later."
+        if status and status >= 500:
+            return "The AI server had a problem on its own side. Try again in a moment."
+        if "timed out" in text or "timeout" in text or "did not answer within" in text:
+            return "The AI server is very slow or not answering. A free model can be busy; try again later."
+        if "refused" in text or "unreachable" in text or "no route" in text:
+            return "Nothing is listening at that address. Start Hermes (or `hermes proxy start`), or pick a model above."
+        return ""
+
     @app.post("/api/settings/ai/test")
     def test_ai(st: Store = Depends(get_store)) -> dict[str, Any]:
         """Ask the AI helper one tiny question, to see that it really answers (not just that it is "connected")."""
@@ -1112,7 +1137,8 @@ def create_app() -> FastAPI:
         try:
             said = models.without_thinking(call("Reply with the single word: OK"))
         except Exception as exc:  # noqa: BLE001 - whatever went wrong, the owner is told in words
-            return {"ok": False, "reason": "failed", "detail": str(exc)[:160]}
+            return {"ok": False, "reason": "failed", "detail": str(exc)[:300],
+                    "status": getattr(exc, "status", None), "hint": _why_failed(exc)}
         if not said:
             return {"ok": False, "reason": "empty"}
         if st.count_unprocessed_conversations():

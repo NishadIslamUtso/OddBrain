@@ -245,6 +245,24 @@ class ModelConfig:
 class ModelError(RuntimeError):
     """Raised when a model call fails."""
 
+    status: int | None = None       # the HTTP status, when the server answered with an error
+    body: str = ""                  # what the server said about it, in its own words
+
+
+def _error_body(exc: urllib.error.HTTPError) -> str:
+    """The server's own explanation of an HTTP error, short and plain."""
+    try:
+        raw = exc.read(2000).decode("utf-8", "replace").strip()
+    except Exception:  # noqa: BLE001 - the explanation is a bonus; the status is enough
+        return ""
+    try:
+        data = json.loads(raw)
+        err = data.get("error", data) if isinstance(data, dict) else data
+        raw = str(err.get("message") or err.get("detail") or err) if isinstance(err, dict) else str(err)
+    except (ValueError, AttributeError):
+        pass
+    return " ".join(raw.split())[:240]
+
 
 class ModelBackend(Protocol):
     """Something that can answer a chat or an embedding request."""
@@ -317,6 +335,11 @@ def _post_json(
     try:
         with _urlopen(req, timeout) as resp:
             return json.loads(resp.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        body = _error_body(exc)
+        err = ModelError(f"model call failed: {url}: HTTP {exc.code} {exc.reason}" + (f": {body}" if body else ""))
+        err.status, err.body = exc.code, body
+        raise err from exc
     except urllib.error.URLError as exc:
         raise ModelError(f"model call failed: {url}: {exc}") from exc
 
@@ -415,16 +438,39 @@ class HermesBackend:
     def _model(self, slot: ModelSlot) -> str:
         if slot.model:
             return slot.model
-        return hermes.main_slot().get("model") or "default"
+        return hermes.working_model() or hermes.main_slot().get("model") or "default"
+
+    def _via_proxy(self, model: str, messages: list[dict[str, str]]) -> str:
+        """The proxy, and when it says it has no such model, a model it does list."""
+        try:
+            return _openai_chat(hermes.proxy_base(), model, messages)
+        except ModelError as exc:
+            if exc.status not in (400, 404, 422):
+                raise
+            other = hermes.pick_proxy_model(avoid=model)       # the model name came from Hermes's main
+            if not other:                                       # settings, which the proxy may not know
+                raise
+            answer = _openai_chat(hermes.proxy_base(), other, messages)
+            hermes.remember_model(other)
+            return answer
 
     def chat(self, slot: ModelSlot, messages: list[dict[str, str]]) -> str:
         model = self._model(slot)
+        tried: list[ModelError] = []
         if hermes.proxy_available():
-            return _openai_chat(hermes.proxy_base(), model, messages)
+            try:
+                return self._via_proxy(model, messages)
+            except ModelError as exc:
+                tried.append(exc)            # the proxy's reason is the most useful one to show
         main = hermes.main_slot()
         if main.get("base_url"):
             key = os.environ.get("OPENROUTER_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-            return _openai_chat(main["base_url"], model, messages, api_key=key)
+            try:
+                return _openai_chat(main["base_url"], model, messages, api_key=key)
+            except ModelError as exc:
+                tried.append(exc)
+        if tried:
+            raise tried[0]
         raise ModelError(
             "no Hermes model route available — start one with `hermes proxy start`"
         )

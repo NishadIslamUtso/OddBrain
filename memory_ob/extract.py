@@ -8,6 +8,9 @@ truth without a Review card.
 
 from __future__ import annotations
 
+import threading
+from contextlib import contextmanager
+
 import re
 from dataclasses import dataclass, field
 from . import notlife
@@ -467,7 +470,31 @@ def _librarian_prompt(intro: str, rules: str, body: str, hint: str) -> str:
 
 
 _CHUNK_LIMIT = 12000
-_SENT_SPLIT_RE = re.compile(r"(?<=[.!?])\s+|\n\s*\n")
+_CONTEXT_LIMIT = 1500      # an assistant's turn is read as context only, so a long one is shortened
+_pieces = threading.local()
+
+
+@contextmanager
+def watching_pieces(fn):
+    """Within this block *fn(i, n)* is told "now reading piece i of n" for a long text."""
+    before = getattr(_pieces, "fn", None)
+    _pieces.fn = fn
+    try:
+        yield
+    finally:
+        _pieces.fn = before
+
+
+def _piece(i: int, n: int) -> None:
+    fn = getattr(_pieces, "fn", None)
+    if fn is not None:
+        try:
+            fn(i, n)
+        except Exception:  # noqa: BLE001 - a progress report must never stop the reading
+            pass
+
+
+_SENT_SPLIT_RE = re.compile(r"((?<=[.!?])\s+|\n\s*\n)")
 
 
 def _split_long(text: str, limit: int = _CHUNK_LIMIT) -> list[str]:
@@ -476,15 +503,19 @@ def _split_long(text: str, limit: int = _CHUNK_LIMIT) -> list[str]:
     A pasted report or a long chat can be tens of thousands of characters. One
     model call for all of it is slow enough to time out, and a timeout means the
     whole conversation is read as nothing. Cutting it keeps every piece answerable.
+    The spaces and line breaks between sentences stay with the sentence before them, so a
+    piece reads exactly as the owner wrote it ("...day off. I did..." and not "...day off.I did...").
     """
     if len(text) <= limit:
         return [text]
+    tokens = _SENT_SPLIT_RE.split(text)               # sentence, separator, sentence, separator...
+    sentences = ["".join(tokens[i:i + 2]) for i in range(0, len(tokens), 2)]
     out: list[str] = []
     current = ""
-    for piece in _SENT_SPLIT_RE.split(text):
+    for piece in sentences:
         if not piece:
             continue
-        if len(piece) > limit:                 # one huge sentence: cut it whole
+        if len(piece) > limit:                        # one huge sentence: cut it whole
             if current:
                 out.append(current)
                 current = ""
@@ -497,7 +528,7 @@ def _split_long(text: str, limit: int = _CHUNK_LIMIT) -> list[str]:
             current += piece
     if current:
         out.append(current)
-    return out or [text]
+    return [p.strip() for p in out if p.strip()] or [text]
 
 
 def _dedupe(cands: list[Candidate]) -> list[Candidate]:
@@ -561,8 +592,13 @@ def extract_with_model(
     read piece by piece; if any piece cannot be read, the whole text is kept for
     later, exactly as if the helper had not answered at all.
     """
+    text = notlife.strip(text)           # logs, docs and agent notes are never sent to the model
+    if not text.strip():
+        return []
     found: list[Candidate] = []
-    for piece in _split_long(text):
+    pieces = _split_long(text)
+    for n, piece in enumerate(pieces, 1):
+        _piece(n, len(pieces))
         got = _ask_model_once(piece, model_call=model_call, source=source, hint=hint)
         if got is None:
             return None          # one piece unread: keep the whole text whole
@@ -622,8 +658,15 @@ def extract_session(
     available. A long session is read in turn-sized pieces, so one huge
     conversation cannot time out and be read as nothing.
     """
-    turns = [(role, (text or "").strip()) for role, text in parts if (text or "").strip()]
-    if not turns:
+    turns = []
+    for role, text in parts:
+        body = (text or "").strip()
+        if role == "user":
+            body = notlife.strip(body).strip()      # logs, docs and agent notes are never sent to the model
+        elif len(body) > _CONTEXT_LIMIT:
+            body = body[:_CONTEXT_LIMIT] + " ..."   # what the assistant said is only context
+        turns.extend((role, piece) for piece in _split_long(body) if piece.strip())   # a huge pasted turn is cut too
+    if not any(role == "user" for role, _ in turns):
         return []
     chunks: list[str] = []
     current: list[str] = []
@@ -638,7 +681,8 @@ def extract_session(
     if current:
         chunks.append("\n".join(current))
     found = []
-    for chunk in chunks:
+    for n, chunk in enumerate(chunks, 1):
+        _piece(n, len(chunks))
         got = _ask_session_once(chunk, model_call=model_call, source=source, hint=hint)
         if got is None:
             return None          # one piece unread: keep the whole session whole
