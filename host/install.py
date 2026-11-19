@@ -137,27 +137,43 @@ def relocate_from_temporary(project: Path) -> Path | None:
     return dest
 
 
+def _remove_empty_shell(path: Path, elsewhere: Path) -> None:
+    """Remove a folder that is empty.
+
+    Windows will not remove a folder a process is standing in, and the installer
+    is usually run from inside the old engine folder. A helper that stands
+    somewhere else can.
+    """
+    import subprocess
+
+    try:
+        path.rmdir()
+        return
+    except OSError:
+        pass
+    try:
+        subprocess.run(
+            ["cmd", "/c", "rmdir", "/q", str(path)],
+            cwd=str(elsewhere), capture_output=True, timeout=30, check=False,
+        )
+    except Exception:  # noqa: BLE001 - best effort; an empty shell is harmless
+        pass
+
+
 def retire_old_home(project: Path, home: Path, *, reason: str) -> None:
     """Move the old copy out of harm's way - never deleted (owner list item A8)."""
     import time as _time
 
     dest = home / "_retired" / f"{project.name}-{_time.strftime('%Y%m%d-%H%M%S')}"
     dest.parent.mkdir(parents=True, exist_ok=True)
-    # Windows refuses to move (or delete) the folder a process is standing in, and
-    # the installer is usually run from inside the old engine folder. Step out
-    # first, then move.
-    prev = os.getcwd()
     try:
-        os.chdir(str(home))
-        shutil.move(str(project), str(dest))
-        print(f"  the old copy (was in {reason}) is retired at {dest} - never deleted")
+        for child in sorted(project.iterdir()):
+            shutil.move(str(child), str(dest / child.name))
     except OSError as exc:
         print(f"  could not move the old copy out of {reason}: {exc} (it is still there)")
-    finally:
-        try:
-            os.chdir(prev)
-        except OSError:
-            pass
+        return
+    _remove_empty_shell(project, home)
+    print(f"  the old copy (was in {reason}) is retired at {dest} - never deleted")
 
 
 def install(*, enable: bool = True, startup: bool = True,
