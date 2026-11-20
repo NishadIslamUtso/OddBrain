@@ -16,6 +16,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -47,6 +48,8 @@ def run_suite(pattern: str, verbosity: int) -> int:
         cmd.append("-v")
     print(f"\n=== {pattern} ===")
     proc = subprocess.run(cmd, cwd=str(ROOT))
+    if proc.returncode != 0:
+        print(f"FAILED SUITE: {pattern}")
     return proc.returncode
 
 
@@ -75,10 +78,13 @@ def main() -> int:
     # Point the settings layer at a throwaway vault and database for the whole
     # run. Individual tests set their own, but this is the belt to their braces:
     # a test that forgets to isolate can never reach the owner's real memory.
-    scratch = Path(os.environ.get("MEMORY_OB_TEST_HOME", "")) or (
-        Path(tempfile.gettempdir()) / "memory-ob-tests"
-    )
-    scratch.mkdir(parents=True, exist_ok=True)
+    scratch = Path(os.environ.get("MEMORY_OB_TEST_HOME", ""))
+    if scratch:
+        scratch.mkdir(parents=True, exist_ok=True)
+    else:
+        # A fresh scratch every run: leftovers from an earlier run can never
+        # change what this run sees (owner item E4).
+        scratch = Path(tempfile.mkdtemp(prefix="memory-ob-tests-"))
     os.environ["MEMORY_OB_VAULT"] = str(scratch / "vault")
     os.environ["MEMORY_OB_DB"] = str(scratch / "mob.db")
     os.environ["MEMORY_OB_NO_PROBE_CACHE"] = "1"   # tests flip "is an AI there?" on purpose
@@ -90,8 +96,18 @@ def main() -> int:
 
     failures = 0
     failures += lint()
+    # Every run leaves one plain line per suite in test-runs.log (next to this
+    # file), so when a suite fails once in a while, the log names which one
+    # (owner item E4).
+    log = ROOT / "test-runs.log"
     for name in modules:
-        failures += run_suite(name, args.verbose)
+        started = time.monotonic()
+        rc = run_suite(name, args.verbose)
+        seconds = time.monotonic() - started
+        with log.open("a", encoding="utf-8") as fh:
+            fh.write(f"{time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())} "
+                     f"{'ok  ' if rc == 0 else 'FAIL'} {seconds:6.1f}s {name}\n")
+        failures += rc
 
     print()
     print(f"{len(modules)} suite(s) run")

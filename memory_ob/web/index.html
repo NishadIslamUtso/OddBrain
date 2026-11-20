@@ -128,6 +128,11 @@ main { padding-top: 20px; }
 .card { background: var(--bg-2); border: 1px solid var(--stroke); border-radius: var(--radius); padding: 16px; }
 .card > * + * { margin-top: 10px; }
 .card.pad0 { padding: 0; }
+/* Nothing may push the page wider than the screen. A long vault path or model
+   name wraps instead of making the whole page scroll sideways on a phone. */
+#app { overflow-x: clip; }
+.screen, .card, .card > *, .row, .field, .switch .txt { min-width: 0; }
+.card, .card p, .card label, .hint, .faint, .muted { overflow-wrap: anywhere; }
 .eyebrow { font-size: .78rem; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; color: var(--accent-text); }
 .stack > * + * { margin-top: 10px; }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
@@ -1026,15 +1031,30 @@ function feedGroup(g) {
 function feedItem(f) {
   if (f.group) return feedGroup(f);
   const cat = f.category;
+  const fixes = f.can_fix ? `
+    <div class="row fixes" aria-label="Put this decision right">
+      <button class="btn sm" data-act="correct-not-important" data-id="${esc(f.entity_id)}">Not important</button>
+      <button class="btn sm" data-act="correct-shelf" data-id="${esc(f.entity_id)}" data-seq="${f.seq}" aria-expanded="false">Wrong shelf</button>
+      <button class="btn sm" data-act="correct-not-me" data-id="${esc(f.entity_id)}">Not me</button>
+    </div>
+    <div class="row shelf-pick" id="shelf-${f.seq}" hidden>
+      ${(state.categories || []).filter(c => c !== cat).map(c => `<button class="chip" data-act="correct-shelf-pick" data-id="${esc(f.entity_id)}" data-cat="${esc(c)}">${esc(c)}</button>`).join('')}
+    </div>` : '';
   return `<li class="feed-item${f.undone ? ' undone' : ''}">
     <div class="top"><span class="verb">${esc(f.verb)}</span>
       ${cat ? `<span class="chip" style="border-color:${catColor(cat)}">${esc(cat)}</span>` : ''}
       <span class="faint">${f.by === 'AI' ? 'by AI' : 'by you'}</span><span class="when">${esc(when(f.at))}</span></div>
     <div><p class="text">${esc(f.text)}</p>${f.was ? `<p class="was">Before: <s>${esc(f.was)}</s></p>` : ''}</div>
+    ${fixes}
     <div class="row">${f.undone ? '<span class="chip">Undone</span>' : f.can_undo ? `<button class="btn sm" data-act="undo" data-seq="${f.seq}">Undo</button>` : ''}<button class="btn sm" data-act="feed-got-it" data-seqs="${f.seq}">Got it</button></div></li>`;
 }
+/* What to tell the owner when the AI could not be reached and Hermes's AI connection could not be switched on. */
+function bridgeWords(b) {
+  if (b === 'failed') return 'Hermes is installed, but its AI connection is switched off and I could not switch it on. Your words stay safe. Ask Hermes to start it (it knows: "hermes proxy start"), or pick another AI in Settings.';
+  return '';
+}
 const WAIT_WHY = {
-  no_helper: 'I cannot reach an AI helper right now. Nothing is lost: your words are kept whole, and I will read them as soon as one is available.',
+  no_helper: 'I cannot reach an AI helper right now. Nothing is lost: your words are kept whole. If you use Hermes, press Read now and I will try to switch its AI connection on.',
   not_answering: 'The AI helper is connected but did not answer the last time I tried. Your words are kept whole, and I will try again tonight, or when you press Read now.',
   will_retry: 'Your words are kept whole. I will read them in a moment, or you can press Read now.',
   reading: '',
@@ -1935,17 +1955,18 @@ document.addEventListener('click', async (e) => {
       const m = $('#ai-test-msg'); m.className = 'msg'; m.textContent = 'Asking it a small question…';
       const r = await api('/api/settings/ai/test', { method: 'POST' });
       m.className = 'msg ' + (r.ok ? 'good' : 'err');
-      m.textContent = r.ok ? 'It answered. Anything that was waiting will be read now.'
-        : r.reason === 'no_helper' ? 'I cannot reach an AI helper. Check that Hermes is running, or pick a model above.'
+      const woke = r.bridge === 'started' ? ' (I switched on the connection to Hermes\'s AI first.)' : '';
+      m.textContent = r.ok ? 'It answered.' + woke + ' Anything that was waiting will be read now.'
+        : r.reason === 'no_helper' ? bridgeWords(r.bridge) || 'I cannot reach an AI helper. Check that Hermes is running, or pick a model above.'
         : r.reason === 'empty' ? 'It was reached but gave an empty answer. Try again in a moment.'
-        : 'It was reached but did not answer' + (r.detail ? ': ' + r.detail : '.') + (r.hint ? ' ' + r.hint : '');
+        : 'It was reached but did not answer' + (r.detail ? ': ' + r.detail : '.') + (r.hint ? ' ' + r.hint : '') + woke;
       await refreshStatus();
     });
     case 'waiting-read': return busy(el, async () => {
       const r = await api('/api/waiting/read', { method: 'POST' });
-      if (r.reason === 'no_helper') toast('I still cannot reach an AI helper. Your words stay safe until one is there.', true);
+      if (r.reason === 'no_helper') toast(bridgeWords(r.bridge) || 'I still cannot reach an AI helper. Your words stay safe until one is there.', true);
       else if (r.reason === 'nothing') toast('Nothing is waiting.');
-      else toast('Reading…');
+      else toast(r.bridge === 'started' ? 'I switched on the connection to Hermes\'s AI. Reading…' : 'Reading…');
       await refreshStatus(); if (state.tab === 'review') await SCREENS.review(true);
     });
     case 'waiting-stop': return busy(el, async () => {
@@ -1973,6 +1994,19 @@ document.addEventListener('click', async (e) => {
       const r = await api(`/api/audit/${enc(el.dataset.id)}/${enc(el.dataset.choice)}`, { method: 'POST' });
       toast(r.result === 'gone' ? 'That changed in the meantime, so I left it alone.' : ({ keep_new: 'Kept the newer one.', keep_old: 'Kept the older one.', keep_both: 'Kept both.', join: 'Kept just one.', done: 'Ticked off.', still: 'Okay, I will ask again later.', remove: 'Removed.', keep: 'Kept.', forget: 'Forgotten.' })[el.dataset.choice] || 'Done.');
       await SCREENS.review(true); });
+    case 'correct-not-important': return busy(el, async () => {
+      await api(`/api/records/${enc(id)}/not-important`, { method: 'POST' });
+      toast('Removed. Undo brings it back.'); await SCREENS.review(true); });
+    case 'correct-not-me': return busy(el, async () => {
+      await api(`/api/records/${enc(id)}/not-me`, { method: 'POST' });
+      toast('Noted: this is about someone else, not you.'); await SCREENS.review(true); });
+    case 'correct-shelf': {
+      const box = document.getElementById('shelf-' + el.dataset.seq);
+      if (box) { box.hidden = !box.hidden; el.setAttribute('aria-expanded', String(!box.hidden)); }
+      return; }
+    case 'correct-shelf-pick': return busy(el, async () => {
+      await api('/api/records/' + enc(id), { method: 'PUT', body: { category: el.dataset.cat } });
+      toast('Moved to ' + el.dataset.cat + '.'); await SCREENS.review(true); });
     case 'feed-got-it': return busy(el, async () => {
       const seqs = String(el.dataset.seqs || '').split(',').map(Number).filter(Boolean);
       await api('/api/feed/dismiss', { method: 'POST', body: { seqs } });

@@ -9,6 +9,7 @@ where it can be undone.
 from __future__ import annotations
 
 import ast
+import json
 import os
 import sys
 import tempfile
@@ -439,6 +440,55 @@ class HttpCase(unittest.TestCase):
         self.assertEqual(len(home["doubts"]), 1)
         self.assertEqual(len(home["unsure"]), 1)
         self.assertTrue(home["feed"])
+
+
+class AboutSomebodyElse(FilingCase):
+    """A fact about another person is not a fact about the owner.
+
+    "My sister Riya is a doctor and she lives in Sylhet" used to land as two
+    notes about the owner, and the second clause was lost.
+    """
+
+    @staticmethod
+    def helper(*claims):
+        def call(_prompt: str) -> str:
+            return json.dumps(list(claims))
+        return call
+
+    def test_a_fact_about_somebody_else_is_filed_as_theirs(self) -> None:
+        call = self.helper(
+            {"text": "My sister Riya is a doctor.", "about": "other", "people": ["Riya"], "category": "Life"},
+            {"text": "My sister Riya lives in Sylhet.", "about": "other", "people": ["Riya"], "category": "Life"},
+        )
+        out = manager.capture(self.store, text="My sister Riya is a doctor and she lives in Sylhet.",
+                              vault=self.vault, model_call=call)
+        self.assertEqual(out.saved, 2)
+        recs = self.active()
+        self.assertEqual(len(recs), 2)
+        for rec in recs:
+            self.assertEqual(rec.subject, "other", rec.body)
+            self.assertEqual(rec.kind, "profile", rec.body)
+            self.assertIn("Riya", rec.source.get("people", []), rec.body)
+        # and it is not counted as something true about the owner
+        me = [r for r in recs if r.subject == "self"]
+        self.assertEqual(me, [])
+
+    def test_the_owners_own_fact_is_still_filed_as_theirs(self) -> None:
+        call = self.helper({"text": "I live in Dhaka.", "about": "me", "category": "Life"})
+        manager.capture(self.store, text="I live in Dhaka.", vault=self.vault, model_call=call)
+        recs = self.active()
+        self.assertEqual(len(recs), 1)
+        self.assertEqual(recs[0].subject, "self")
+        self.assertEqual(recs[0].kind, "note")
+
+    def test_a_rule_filed_fact_is_still_the_owners(self) -> None:
+        # a helper that says nothing about who it is for: the owner's own fact stays theirs
+        out = manager.capture(self.store, text="I live in Dhaka.", vault=self.vault, model_call=reading())
+        recs = self.active()
+        self.assertTrue(recs)
+        for rec in recs:
+            self.assertEqual(rec.subject, "self")
+            self.assertEqual(rec.kind, "note")
 
 
 if __name__ == "__main__":

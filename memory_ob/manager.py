@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from . import conflicts, notlife, quotes, credentials, topics, vault as vault_mod
-from .records import ACTIVE, Record, importance_for
+from .records import ACTIVE, Record, importance_for, is_self_only_kind
 from .review import KEEP_BOTH, TAKE_NEW, TAKE_NONE, TAKE_OLD, CardStore
 
 logger = logging.getLogger(__name__)
@@ -369,14 +369,24 @@ def sign_new(
     actor: str = AI, reason: str = "remembered from what you said",
     card_id: str | None = None, tags: list[str] | None = None,
     people: list[str] | None = None, event_time: str | None = None,
-    log: bool = True, category: str | None = None,
+    log: bool = True, category: str | None = None, about_other: bool = False,
 ) -> Record:
     """Save one statement as a signed memory and log it to the feed.
 
     *category* is where the librarian filed it; without one, simple rules decide.
+
+    *about_other* is the librarian's word that this statement is about somebody
+    else. Then it is not the owner's own fact: it is filed as a profile fact
+    about that person, so it does not appear as something true about the owner.
     """
     card_id = card_id or (AI_CARD if actor == AI else OWNER)
     category = category if category in topics.CATEGORIES else topics.categorize(text)
+    if about_other:
+        subject = "other"
+        if is_self_only_kind(kind):
+            kind = "profile"
+    else:
+        subject = "self"
     src = dict(source or {})
     if people:
         src["people"] = list(dict.fromkeys([*src.get("people", []), *people]))
@@ -384,7 +394,7 @@ def sign_new(
     if revisit:
         src["revisit_at"] = revisit
     rec = Record.from_payload({
-        "kind": kind, "subject": "self", "speaker": "user",
+        "kind": kind, "subject": subject, "speaker": "user",
         "title": text[:120], "body": text,
         "tags": topics.with_category(tags, category),
         "importance": importance_for(text, kind),
@@ -516,37 +526,36 @@ def _owner_text(parts: list[dict[str, Any]] | None, conv_text: str) -> str:
     return owner_only(conv_text)
 
 
-_OWNER_SPEAKERS = ("user:", "you:", "me:", "owner:", "human:", "nishad:", "i said:")
-_AGENT_SPEAKERS = (
-    "assistant:", "claude:", "chatgpt:", "hermes:", "ai:", "bot:", "model:", "agent:",
-    "tool:", "system:", "memory_ob:",
+# A pasted chat transcript ("User: ... / Assistant: ...") is read for the owner's side only.
+# This is deliberately narrow, because getting it wrong loses the owner's own words:
+#   * only clear speaker names count (not "System:", "Tool:", "Model:", which are ordinary words in a note);
+#   * it is a transcript only when BOTH sides are there (an owner label and an AI label);
+#   * a line with no label belongs to whoever spoke last, so an AI's second paragraph is not the owner's.
+_OWNER_LABELS = ("user", "you", "me", "human", "owner")
+_AI_LABELS = ("assistant", "claude", "chatgpt", "hermes", "gemini", "copilot")
+_LABEL_RE = re.compile(
+    r"^[ \t]*[*_]{0,2}(" + "|".join(_OWNER_LABELS + _AI_LABELS) + r")[*_]{0,2}[ \t]*:[*_]{0,2}[ \t]*(.*)$",
+    re.IGNORECASE,
 )
 
 
 def owner_only(text: str) -> str:
-    """A pasted transcript keeps only the owner's lines.
-
-    When a paste carries speaker labels it is somebody's transcript, not the
-    owner's own words. Lines labelled as an assistant or a tool are dropped;
-    the owner's labelled lines are kept without the label. A paste with no
-    labels at all is left exactly as it was.
-    """
-    lines = str(text or "").splitlines()
-    labelled = any(
-        ln.lower().lstrip().startswith(_OWNER_SPEAKERS + _AGENT_SPEAKERS) for ln in lines
-    )
-    if not labelled:
-        return text
+    """The owner's side of a pasted transcript; any other text comes back exactly as it was."""
+    text = str(text or "")
+    lines = text.splitlines()
+    speakers = [(_LABEL_RE.match(ln) or [None, None, None])[1] for ln in lines]
+    sides = {("ai" if s.lower() in _AI_LABELS else "owner") for s in speakers if s}
+    if sides != {"owner", "ai"}:
+        return text                                   # not a two-sided transcript: leave it alone
     out: list[str] = []
-    for ln in lines:
-        low = ln.lower().lstrip()
-        if low.startswith(_AGENT_SPEAKERS):
-            continue
-        if low.startswith(_OWNER_SPEAKERS):
-            out.append(ln.split(":", 1)[1].strip() if ":" in ln else ln)
-            continue
-        out.append(ln)
-    return "\n".join(out)
+    side = "owner"
+    for ln, spoken in zip(lines, speakers):
+        if spoken:
+            side = "ai" if spoken.lower() in _AI_LABELS else "owner"
+            ln = _LABEL_RE.match(ln).group(2)
+        if side == "owner":
+            out.append(ln)
+    return "\n".join(out).strip()
 
 
 def _run_forget_commands(
@@ -745,7 +754,8 @@ def _settle_all(
         settle_fact(store, fid, c.text, kind=c.kind_hint or "note",
                     source={**c.source, "filed_by": "ai" if filing else "rules"}, out=out,
                     model_used=model_used, people=[n for n, _ in named], actor=actor, reason=reason,
-                    judge=judge, filing=filing, hedged=said_unsure)
+                    judge=judge, filing=filing, hedged=said_unsure,
+                    about_other=(c.about == "other" and model_used))
         if trace is not None:
             after = (out.saved, out.duplicates, out.asked, out.unsure, out.finished, out.secret)
             rid = out.record_ids[ids_before] if len(out.record_ids) > ids_before else ""
@@ -853,7 +863,7 @@ def settle_fact(
     model_used: bool, people: list[str], actor: str = AI,
     reason: str = "remembered from what you said", force: bool = False,
     log: bool = True, judge: Any | None = None, filing: dict[str, Any] | None = None,
-    hedged: bool = False,
+    hedged: bool = False, about_other: bool = False,
 ) -> str:
     """Decide what happens to one statement. Returns what was done.
 
@@ -940,7 +950,7 @@ def settle_fact(
     rec = sign_new(
         store, text, kind=kind, tags=extra, event_time=event_time,
         source={**source, "fact_id": fact_id}, people=people, actor=actor, reason=reason,
-        log=log, category=filing.get("category") or None,
+        log=log, category=filing.get("category") or None, about_other=about_other,
     )
     store.set_fact_status(fact_id, "promoted")
     out.saved += 1
@@ -1282,7 +1292,7 @@ def _find_by_card(store: Any, card_id: str) -> Record | None:
 
 def edit_record(
     store: Any, record_id: str, *, body: str | None = None, category: str | None = None,
-    note: str | None = None, vault: Path | None = None,
+    note: str | None = None, vault: Path | None = None, reason: str | None = None,
 ) -> Record | None:
     """The owner edits a memory's text, moves it to another category, or files it in another note."""
     rec = store.get_record(record_id)
@@ -1309,9 +1319,10 @@ def edit_record(
     revisit = topics.revisit_date(rec.body)
     if revisit:
         rec.source = {**rec.source, "revisit_at": revisit}
-    saved = store.sign_record(rec, card_id=OWNER, changed_by=OWNER, reason="you edited it")
+    why = reason or "you edited it"
+    saved = store.sign_record(rec, card_id=OWNER, changed_by=OWNER, reason=why)
     log_record_change(store, action="update", before=before, after=saved, actor=OWNER,
-                      reason="you edited it")
+                      reason=why)
     _tidy(store, vault, None, record_ids=[record_id])
     return saved
 
@@ -1422,6 +1433,32 @@ def forget_record(store: Any, record_id: str, *, vault: Path | None = None,
                       reason=reason)
     _tidy(store, vault, None, record_ids=[record_id])
     return trashed
+
+
+def not_about_me(store: Any, record_id: str, *, vault: Path | None = None) -> Record | None:
+    """The owner's one-click correction: this memory is about someone else, not me.
+
+    The memory is kept and stays filed where it is; it just stops counting as
+    the owner's own fact (their truth-checks and their People index only look
+    at facts about themselves). Undo puts it back. Clicking it twice changes
+    nothing the second time."""
+    rec = store.get_record(record_id)
+    if rec is None:
+        return None
+    before = Record.from_dict(rec.to_dict())
+    if before.subject == "other":
+        return before                      # already said: no second change row
+    rec.subject = "other"
+    if is_self_only_kind(rec.kind):
+        # The owner's own kinds (journal, story, note) hold facts about them
+        # only; a fact about someone else is a profile fact.
+        rec.kind = "profile"
+    saved = store.sign_record(rec, card_id=OWNER, changed_by=OWNER,
+                              reason="you said it is about someone else")
+    log_record_change(store, action="update", before=before, after=saved, actor=OWNER,
+                      reason="you said it is about someone else")
+    _tidy(store, vault, None, record_ids=[record_id])
+    return saved
 
 
 def add_journal_entry(

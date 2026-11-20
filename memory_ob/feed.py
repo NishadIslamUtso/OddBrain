@@ -93,6 +93,11 @@ def describe(change: dict[str, Any]) -> dict[str, Any]:
                 item.update(verb="Ticked off", text=_text_of(after))
             elif _text_of(before) == _text_of(after) and topics.TODO_TAG in now_tags and topics.DONE_TAG in was_tags:
                 item.update(verb="Put back on your list", text=_text_of(after))
+            elif before.get("subject") != after.get("subject"):
+                item.update(verb="Marked as about someone else" if after.get("subject") == "other"
+                            else "Marked as about you", text=_text_of(after))
+            elif _text_of(before) == _text_of(after) and _category_of(before) != _category_of(after):
+                item.update(verb="Moved", text=_text_of(after))     # the chip shows its new shelf
             else:
                 item.update(verb="Updated", text=_text_of(after), was=_text_of(before))
         elif action in ("remove", "retire", "retract"):
@@ -125,8 +130,9 @@ def describe(change: dict[str, Any]) -> dict[str, Any]:
                     text=str(after.get("text", "")), category="")
     else:
         item.update(verb=action.capitalize(), text=_text_of(after or before))
-    if change.get("reason") and item["by"] == "AI":
-        item["note"] = str(change["reason"])
+    reason = str(change.get("reason") or "")
+    if reason and (item["by"] == "AI" or reason.startswith("you said")):
+        item["note"] = reason
     return item
 
 
@@ -194,6 +200,9 @@ def build(store: Any, *, limit: int = 60, hide_undone: bool = False,
             and not (change["entity"] == "person" and change["action"] not in ("merge", "update", "remove", "create"))
             and not store.has_later_change(change["entity_id"], change["seq"])
         )
+        # the owner can put a decision of the AI's right only while it is still the latest word on that memory
+        item["can_fix"] = bool(item["can_undo"] and change["entity"] == "record" and item["by"] == "AI"
+                               and change["action"] in ("create", "update"))
         items.append(item)
         keys.append(_message_of(change))
     out: list[dict[str, Any]] = []

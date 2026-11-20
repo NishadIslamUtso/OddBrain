@@ -512,6 +512,7 @@ def _split_long(text: str, limit: int = _CHUNK_LIMIT) -> list[str]:
     sentences = ["".join(tokens[i:i + 2]) for i in range(0, len(tokens), 2)]
     out: list[str] = []
     current = ""
+    raw_tail = False            # the last piece ended inside one huge sentence
     for piece in sentences:
         if not piece:
             continue
@@ -520,8 +521,20 @@ def _split_long(text: str, limit: int = _CHUNK_LIMIT) -> list[str]:
                 out.append(current)
                 current = ""
             out.extend(piece[i:i + limit] for i in range(0, len(piece), limit))
+            raw_tail = True
             continue
+        # A sentence that only continues the one before it ("It started last
+        # week.") must never be read apart from it, or the same words become 3
+        # memories one time and 4 the next (owner item E3). One sentence of
+        # overhang is the price; pieces stay answerable.
+        if raw_tail and out and is_continuation(piece):
+            out[-1] += piece
+            continue
+        raw_tail = False
         if current and len(current) + len(piece) > limit:
+            if is_continuation(piece):
+                current += piece
+                continue
             out.append(current)
             current = piece
         else:

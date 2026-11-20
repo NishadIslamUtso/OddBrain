@@ -107,12 +107,28 @@ def start(*, wait: bool = True, timeout: float = 15.0) -> bool:
         return False
     if not wait:
         return True
+    from . import probe
+
     deadline = time.time() + timeout
     while time.time() < deadline:
+        probe.forget("hermes-proxy")            # a "no" remembered a moment ago must not hide that it is up now
         if running():
             return True
         time.sleep(0.5)
     return False
+
+
+def ensure(*, timeout: float = 20.0) -> str:
+    """For the owner's own click ("Read now", "Test the AI helper"): make Hermes's AI connection ready.
+
+    ``ready`` it was already on; ``started`` it was off and has just been switched on; ``no_hermes`` there is
+    no Hermes here to switch on; ``failed`` it was off and did not come up.
+    """
+    if running():
+        return "ready"
+    if not hermes.HERMES_EXE.exists():
+        return "no_hermes"
+    return "started" if start(timeout=timeout) else "failed"
 
 
 def stop() -> bool:

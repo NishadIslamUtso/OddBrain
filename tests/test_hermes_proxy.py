@@ -134,7 +134,21 @@ class WhenTheModelNameIsUnknown(Case):
         s = self.proxy()
         self.use(s)
         self.assertEqual(self.chat(), "OK")
+        self.assertEqual(s.asked, ["Hermes-4-70B"], "the proxy lists no such name, so no call that is sure to be refused")
+
+    def test_a_name_that_only_the_refusal_reveals_is_still_retried(self) -> None:
+        s = self.proxy()
+        s.models_status = 200
+        self.use(s)
+        with mock.patch.object(hermes, "proxy_models", side_effect=[None, ["Hermes-4-70B"]]):
+            self.assertEqual(self.chat(), "OK")             # the list was not available the first time
         self.assertEqual(s.asked, ["anthropic/claude-sonnet-4.6", "Hermes-4-70B"])
+
+    def test_a_free_model_is_preferred_when_the_proxy_lists_several(self) -> None:
+        s = self.proxy(known=("Hermes-4-405B", "meituan/longcat-2.5:free", "Hermes-4-70B"))
+        self.use(s)
+        self.assertEqual(self.chat(), "OK")
+        self.assertEqual(s.asked, ["meituan/longcat-2.5:free"])
 
     def test_the_working_name_is_remembered_so_it_is_not_guessed_again(self) -> None:
         s = self.proxy()

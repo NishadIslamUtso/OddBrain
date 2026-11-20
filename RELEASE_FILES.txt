@@ -3,6 +3,7 @@ README.md
 RELEASE_FILES.txt
 UPDATE-16-CHANGES.md
 UPDATE-17-CHANGES.md
+UPDATE-22-CHANGES.md
 host/README.md
 host/backup.py
 host/desktop-plugins/memory-ob/plugin.js
@@ -86,6 +87,7 @@ tests/browser/seed.py
 tests/browser/server.py
 tests/browser/ui_audit.js
 tests/browser/ui_checkup.js
+tests/browser/ui_corrections.js
 tests/browser/ui_flow.js
 tests/browser/ui_owner.js
 tests/browser/ui_phone.js
@@ -100,8 +102,10 @@ tests/test_anonymous.py
 tests/test_audit.py
 tests/test_auth.py
 tests/test_backup.py
+tests/test_bridge_wake.py
 tests/test_checkup.py
 tests/test_conflicts_more.py
+tests/test_corrections.py
 tests/test_credentials.py
 tests/test_daily_use.py
 tests/test_demo.py
@@ -149,6 +153,7 @@ tests/test_sweep.py
 tests/test_sync.py
 tests/test_theme_safety.py
 tests/test_thinking.py
+tests/test_transcript_paste.py
 tests/test_undo_answer.py
 tests/test_uninstall.py
 tests/test_wait_for_ai.py

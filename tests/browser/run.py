@@ -21,7 +21,7 @@ import urllib.request
 from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
-SCRIPTS = ["ui_flow", "ui_audit", "ui_race", "ui_vault", "ui_summary", "ui_checkup", "ui_owner", "ui_waiting", "ui_reading", "ui_phone"]
+SCRIPTS = ["ui_flow", "ui_audit", "ui_race", "ui_vault", "ui_summary", "ui_checkup", "ui_owner", "ui_waiting", "ui_reading", "ui_corrections", "ui_phone"]
 
 
 def free_port() -> int:

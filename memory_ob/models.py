@@ -442,6 +442,15 @@ class HermesBackend:
 
     def _via_proxy(self, model: str, messages: list[dict[str, str]]) -> str:
         """The proxy, and when it says it has no such model, a model it does list."""
+        listed = hermes.proxy_models()
+        if listed and model not in listed and not hermes.working_model():
+            # Hermes's own main model (say "meituan/longcat-2.5:free") is often not one the proxy offers:
+            # do not make a call that is certain to be refused.
+            first = hermes.pick_proxy_model(avoid=model)
+            if first:
+                answer = _openai_chat(hermes.proxy_base(), first, messages)
+                hermes.remember_model(first)
+                return answer
         try:
             return _openai_chat(hermes.proxy_base(), model, messages)
         except ModelError as exc:

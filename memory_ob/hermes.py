@@ -246,11 +246,13 @@ def remember_model(name: str) -> None:
 
 
 def pick_proxy_model(avoid: str = "") -> str:
-    """A chat model the proxy lists (not the one that just failed, not an embedding model), or ''."""
-    for name in proxy_models() or []:
-        if name != avoid and "embed" not in name.lower():
-            return name
-    return ""
+    """A chat model the proxy lists (not the one that just failed, not an embedding model), or ''.
+
+    The owner's allowance is free, so a model that says it is free is preferred; otherwise the first one listed.
+    """
+    names = [n for n in (proxy_models() or []) if n != avoid and "embed" not in n.lower()]
+    free = [n for n in names if "free" in n.lower()]
+    return (free or names or [""])[0]
 
 
 def proxy_base() -> str:

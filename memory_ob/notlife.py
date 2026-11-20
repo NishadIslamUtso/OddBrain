@@ -150,6 +150,53 @@ _MAKING_RE = re.compile(
     r"(?:building|making|working\s+on|creating|developing|learning|project|app|plugin|startup)\b", re.I)
 
 
+# --- the owner's own project talk, pasted chats and agent lines (2026-11-20) ---------------
+# These were all saved as memories. None is a fact about the owner's life: they are
+# commands to an AI, a chat partner's summary, or a line of code. Nothing here keys
+# on a first word alone, and _MAKING_RE above still protects "I am building
+# Memory_OB, a Hermes plugin for my thesis."
+
+# A local address, a port or a timing line is never a life fact.
+_LOCAL_ADDR_RE = re.compile(
+    r"\bhttps?://(?:127\.0\.0\.1|localhost)\b|\b\d{1,3}(?:\.\d{1,3}){3}:\d{2,5}\b|\belapsed=",
+    re.I,
+)
+_CODE_START_RE = re.compile(
+    r"^\s*(?:return|def\s|class\s|import\s|from\s+\S+\s+import|if\s+__name__|@app\.|async\s+def)\b"
+)
+_PS_RE = re.compile(r"\bInvoke-WebRequest\b|\bPowerShell\b|\bGet-Process\b|\bSelect-String\b")
+# An API route or a bare code call: "/v1/chat/completions", "gen()", "ask()".
+_API_ROUTE_RE = re.compile(r"\b/v1/(?:chat/)?completions\b|\b/v1/embeddings\b|\b\w+\(\)\s+(?:is|streams|returns?|already)\b")
+
+# The product's own name next to its own work: "Memory_OB update-5", "Memory_OB remembers".
+_PRODUCT_WORK_RE = re.compile(
+    r"\bMemory_OB\s+(?:update-\d+|remembers?|sweep|audit|check-?up|conflicts?|doubts?)\b"
+    r"|\b(?:standing\s+direction|direction)\s+for\s+Memory_OB\b"
+    r"|^\s*(?:for|in)\s+Memory_OB\b[,:\s]",
+    re.I,
+)
+
+# A command about the work itself, or a chat partner's note about it.
+_WORK_CMD_RE = re.compile(
+    r"^\s*(?:make|leave|bump|keep|fix|add|remove|change|use|when\s+giving|chatgpt\s+as)\b"
+    r"[^.!?\n]{0,60}\b(?:the\s+app|memory_ob|hermes|the\s+browser|the\s+addon|add-?on|"
+    r"the\s+plugin|html|\.md\b|docs?|sheet|pdf)\b"
+    r"|\bLeave\s+everything\s+else\b"
+    r"|\bchatgpt\s+as\s+default\b"
+    r"|^\s*if\s+it\s+doesn['\u2019]?t\s+work\b",
+    re.I,
+)
+
+# "Asked ...", "I ask whether ...", "Asks whether ...": notes about a conversation.
+_META_ASK_RE = re.compile(r"^\s*(?:asked|asks|i\s+ask)\b", re.I)
+
+# The owner talked about in the third person by whoever they were chatting with.
+_THIRD_PERSON_OWNER_RE = re.compile(
+    r"^\s*nishad\s+(?:wants?|needs?|likes?|prefers?|uses?|said|says|thinks?|will|would|should)\b",
+    re.I,
+)
+
+
 def _dev_talk(s: str) -> bool:
     """An agent's or developer's working notes: two or more process words, or three dev words, in one line."""
     if _MAKING_RE.match(s):
@@ -250,6 +297,16 @@ def _why(text: str) -> str:
         return "review marker text"
     if _WORKTALK_RE.search(s) or _dev_talk(s):
         return "session work-talk"
+    if _LOCAL_ADDR_RE.search(s) or _CODE_START_RE.match(s) or _PS_RE.search(s) or _API_ROUTE_RE.search(s):
+        return "a code or server line"
+    if _PRODUCT_WORK_RE.search(s):
+        return "about the product's own work"
+    if _WORK_CMD_RE.search(s):
+        return "a command about the work"
+    if _META_ASK_RE.match(s):
+        return "about a conversation"
+    if _THIRD_PERSON_OWNER_RE.match(s):
+        return "about the owner in the third person"
     if _NARRATION_RE.match(s):
         return "agent narration"
     if _markup(s):

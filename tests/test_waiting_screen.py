@@ -130,7 +130,9 @@ class TestingTheHelper(Case):
 
     def test_no_helper_is_said_plainly(self) -> None:
         self.with_helper(None)
-        self.assertEqual(self.client.post("/api/settings/ai/test").json(), {"ok": False, "reason": "no_helper"})
+        got = self.client.post("/api/settings/ai/test").json()
+        self.assertEqual((got["ok"], got["reason"]), (False, "no_helper"))
+        self.assertEqual(got["bridge"], "no_hermes", "no Hermes in the test machine, so nothing was started")
 
     def test_a_helper_that_answers_is_ok(self) -> None:
         self.with_helper(lambda p: "<think>easy</think>OK")

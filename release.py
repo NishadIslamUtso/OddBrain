@@ -21,7 +21,7 @@ def _skip(rel: Path) -> bool:
     """Build artefacts and private state never belong in a release."""
     return (
         any(part in SKIP_DIRS or part.endswith(".egg-info") for part in rel.parts)
-        or rel.name in ("token", ".token", MANIFEST)
+        or rel.name in ("token", ".token", MANIFEST, "test-runs.log")
     )
 
 

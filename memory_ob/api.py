@@ -134,6 +134,22 @@ def _helper() -> Any | None:
     return models.helper(ModelConfig.load(settings.models_path), "extract")
 
 
+def _wake_bridge() -> str:
+    """The owner just asked for the AI. If there is none, but Hermes is installed, switch its AI connection on.
+
+    Only ever called from the owner's own click ("Read now", "Test the AI helper"), never in the background.
+    Returns "" (nothing to do), "started", "failed" (it did not come up) or "no_hermes".
+    """
+    cfg = ModelConfig.load(settings.models_path)
+    if _helper() is not None or cfg.main.provider not in ("auto", "", "hermes") or models.local_only_active():
+        return ""
+    from . import probe, proxy as px
+
+    state = px.ensure()
+    probe.forget("hermes-proxy")
+    return "" if state == "ready" else state
+
+
 def _paused() -> bool:
     from . import anonymous
 
@@ -386,10 +402,11 @@ def create_app() -> FastAPI:
         """"Read now": try the AI helper on what is waiting. It reads in the background."""
         if st.count_unprocessed_conversations() == 0:
             return {"started": False, "reason": "nothing", "waiting": _waiting(st)}
+        bridge = _wake_bridge() if _helper() is None else ""
         if _helper() is None:
-            return {"started": False, "reason": "no_helper", "waiting": _waiting(st)}
+            return {"started": False, "reason": "no_helper", "bridge": bridge, "waiting": _waiting(st)}
         started = bool(reader.kick(settings))
-        return {"started": started, "reason": "" if started else "busy", "waiting": _waiting(st)}
+        return {"started": started, "reason": "" if started else "busy", "bridge": bridge, "waiting": _waiting(st)}
 
     @app.post("/api/waiting/stop")
     def waiting_stop(st: Store = Depends(get_store)) -> dict[str, Any]:
@@ -656,6 +673,27 @@ def create_app() -> FastAPI:
         manager.forget_record(st, record_id, vault=settings.vault)
         _after_change(st)
         return {"ok": True}
+
+    @app.post("/api/records/{record_id}/not-important")
+    def correct_not_important(record_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
+        """One-click correction: this was not worth keeping. Trash, never destroy; Undo brings it back."""
+        r = st.get_record(record_id)
+        if r is None or not exit.keep(r):
+            raise HTTPException(status_code=404, detail="That memory no longer exists.")
+        manager.forget_record(st, record_id, vault=settings.vault,
+                              reason="you said it was not important")
+        _after_change(st)
+        return {"ok": True}
+
+    @app.post("/api/records/{record_id}/not-me")
+    def correct_not_me(record_id: str, st: Store = Depends(get_store)) -> dict[str, Any]:
+        """One-click correction: this is about someone else, not the owner."""
+        r = st.get_record(record_id)
+        if r is None or not exit.keep(r):
+            raise HTTPException(status_code=404, detail="That memory no longer exists.")
+        saved = manager.not_about_me(st, record_id, vault=settings.vault)
+        _after_change(st)
+        return {"ok": True, "subject": saved.subject if saved else ""}
 
     # -- search ------------------------------------------------------------
 
@@ -1125,25 +1163,29 @@ def create_app() -> FastAPI:
         if "timed out" in text or "timeout" in text or "did not answer within" in text:
             return "The AI server is very slow or not answering. A free model can be busy; try again later."
         if "refused" in text or "unreachable" in text or "no route" in text:
-            return "Nothing is listening at that address. Start Hermes (or `hermes proxy start`), or pick a model above."
+            return "Nothing is answering at that address. If you use Hermes, its AI connection may be switched off; pick a model above if you use another AI."
         return ""
 
     @app.post("/api/settings/ai/test")
     def test_ai(st: Store = Depends(get_store)) -> dict[str, Any]:
         """Ask the AI helper one tiny question, to see that it really answers (not just that it is "connected")."""
         call = _helper()
+        bridge = ""
         if call is None:
-            return {"ok": False, "reason": "no_helper"}
+            bridge = _wake_bridge()          # the owner pressed the button: switch Hermes's AI connection on if it is off
+            call = _helper()
+        if call is None:
+            return {"ok": False, "reason": "no_helper", "bridge": bridge}
         try:
             said = models.without_thinking(call("Reply with the single word: OK"))
         except Exception as exc:  # noqa: BLE001 - whatever went wrong, the owner is told in words
-            return {"ok": False, "reason": "failed", "detail": str(exc)[:300],
+            return {"ok": False, "reason": "failed", "detail": str(exc)[:300], "bridge": bridge,
                     "status": getattr(exc, "status", None), "hint": _why_failed(exc)}
         if not said:
-            return {"ok": False, "reason": "empty"}
+            return {"ok": False, "reason": "empty", "bridge": bridge}
         if st.count_unprocessed_conversations():
             reader.kick(settings)            # it answers: read what has been waiting
-        return {"ok": True, "said": said[:60]}
+        return {"ok": True, "said": said[:60], "bridge": bridge}
 
     @app.post("/api/settings/ai")
     def save_ai(payload: dict[str, Any], st: Store = Depends(get_store)) -> dict[str, Any]:

@@ -129,6 +129,10 @@ class TestBackends(unittest.TestCase):
         ), mock.patch.object(
             hermes, "main_slot", return_value={"model": "main-model"}
         ), mock.patch.object(
+            hermes, "working_model", return_value=""
+        ), mock.patch.object(
+            hermes, "proxy_models", return_value=[]
+        ), mock.patch.object(
             models, "_openai_chat", return_value="hello"
         ) as chat:
             out = backend.chat(models.ModelSlot(), [{"role": "user", "content": "hi"}])
@@ -141,6 +145,10 @@ class TestBackends(unittest.TestCase):
         backend = models.HermesBackend()
         with mock.patch.object(hermes, "proxy_available", return_value=True), mock.patch.object(
             hermes, "main_slot", return_value={"model": "main-model"}
+        ), mock.patch.object(
+            hermes, "working_model", return_value=""
+        ), mock.patch.object(
+            hermes, "proxy_models", return_value=[]
         ), mock.patch.object(
             models, "_openai_chat", return_value="ok"
         ) as chat:
